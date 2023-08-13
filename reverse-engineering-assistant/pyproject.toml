@@ -1,0 +1,17 @@
+[project]
+name = "reverse-engineering-assistant
+version = "1.0.0"
+authors = [
+    {name="サイバーカイダ (cyberkaida)"},
+]
+description = "An AI assistant for reverse engineering tasks"
+required-python = ">=3.11.0"
+classifiers = [
+    "License :: OSI Approved :: Apache Software License",
+    "Natural Language :: English",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python",
+]
+dependencies = [
+    "llama-index",
+]

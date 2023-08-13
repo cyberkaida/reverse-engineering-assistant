@@ -2,6 +2,8 @@
 from __future__ import annotations
 import json
 from typing import Dict, Optional
+import logging
+logger = logging.getLogger('reverse_engineering_assistant')
 
 class AssistantDocument(object):
     name: str
@@ -22,6 +24,7 @@ class AssistantDocument(object):
         self.metadata["document_type"] = document_type
 
     def to_json(self) -> str:
+        logger.debug(f"Serialising document {self.name}")
         return json.dumps({
             'name': self.name,
             'content': self.content,
@@ -31,11 +34,12 @@ class AssistantDocument(object):
     @classmethod
     def from_json(cls, json_str: str) -> AssistantDocument:
         data = json.loads(json_str)
+        logger.debug(f"Loading document from json: {json_str}")
         return AssistantDocument(
-            data['name'],
-            data['content'],
-            data['metadata']['document_type'],
-            data['metadata'],
+            name=data['name'],
+            content=data['content'],
+            document_type=data['metadata']['document_type'],
+            metadata=data['metadata'],
         )
 
 
@@ -56,12 +60,11 @@ class DecompiledFunctionDocument(AssistantDocument):
         content = decompilation
         metadata = {
             'address': function_start_address,
-            'function_name': function_name,
-            'function_signature': function_signature,
+            'function': function_signature,
         }
-        if namespace:
-            metadata['namespace'] = namespace
-        if is_external:
-            metadata['is_external'] = is_external
-        super().__init__(name, self.document_type, content, metadata)
+        #if namespace:
+        #    metadata['namespace'] = namespace
+        #if is_external:
+        #    metadata['is_external'] = is_external
+        super().__init__(name=name, content=content, document_type=self.document_type, metadata=metadata)
 

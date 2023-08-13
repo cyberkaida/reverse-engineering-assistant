@@ -1,11 +1,15 @@
+[build-system]
+requires = ["setuptools", "setuptools-scm"]
+build-backend = "setuptools.build_meta"
+
 [project]
-name = "reverse-engineering-assistant
+name = "reverse_engineering_assistant"
 version = "1.0.0"
 authors = [
     {name="サイバーカイダ (cyberkaida)"},
 ]
 description = "An AI assistant for reverse engineering tasks"
-required-python = ">=3.11.0"
+#required-python = ">=3.11.0"
 classifiers = [
     "License :: OSI Approved :: Apache Software License",
     "Natural Language :: English",
@@ -15,3 +19,7 @@ classifiers = [
 dependencies = [
     "llama-index",
 ]
+
+[project.scripts]
+revassistant = "reverse_engineering_assistant.assistant:main"
+

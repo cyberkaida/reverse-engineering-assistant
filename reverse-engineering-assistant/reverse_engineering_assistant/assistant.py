@@ -8,6 +8,7 @@ It provides a number of APIs for
 """
 
 from __future__ import annotations
+import logging
 from pathlib import Path
 
 from typing import Any, List, Optional
@@ -18,9 +19,10 @@ from llama_index.indices.query.base import BaseQueryEngine
 from llama_index.readers.base import BaseReader
 from llama_index.schema import Document
 
-from tool import AssistantProject
-import model
-from model import ModelType
+from .tool import AssistantProject
+from .model import ModelType, get_model
+
+logger = logging.getLogger('reverse_engineering_assistant')
 
 class ReverseEngineeringAssistant(object):
     project: AssistantProject
@@ -34,7 +36,7 @@ class ReverseEngineeringAssistant(object):
         else:
             self.project = project
 
-        self.service_context = model.get_model(model_type)
+        self.service_context = get_model(model_type)
         
     def load_embeddings(self):
         raise NotImplementedError()
@@ -43,11 +45,17 @@ class ReverseEngineeringAssistant(object):
         assistant_documents = self.project.get_documents()
         embedding_documents: List[Document] = []
         for assistant_document in assistant_documents:
-            embedding_documents.append(Document(
+            logger.debug(f"Embedding document {assistant_document.name}\n{assistant_document.metadata}\n{assistant_document.content}")
+            if len(assistant_document.content) >= 5000:
+                logger.warning(f"Document {assistant_document.name} is too long, skipping")
+                continue
+            document = Document(
                 name=assistant_document.name,
-                content=assistant_document.content,
+                text=assistant_document.content,
                 metadata=assistant_document.metadata,
-            ))
+            )
+            embedding_documents.append(document)
+        logger.info(f"Embedding {len(embedding_documents)} documents")
         index = VectorStoreIndex(embedding_documents, service_context=self.service_context)
         # TODO: Save the index, use the storage_context
         # TODO: Investigate chat mode:
@@ -66,10 +74,20 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser(description="Reverse Engineering Assistant")
-    parser.add_argument("--project", type=str, help="Project name")
+    parser.add_argument('-v', '--verbose', action='store_true', help="Verbose output")
+    parser.add_argument("--project", required=True, type=str, help="Project name")
     # TODO: Model type from configuration
 
     args = parser.parse_args()
+    logging_level = logging.DEBUG if args.verbose else logging.INFO
+
+    try:
+        import rich
+        from rich.logging import RichHandler
+        logging.basicConfig(level=logging_level, handlers=[RichHandler()])
+    except ImportError:
+        logging.basicConfig(level=logging_level)
+
 
     assistant = ReverseEngineeringAssistant(args.project)
     print("Updating embeddings this might take a while...")
@@ -83,3 +101,6 @@ def main():
             print(assistant.query(query))
     except KeyboardInterrupt:
         print("Finished!")
+
+if __name__ == '__main__':
+    main()

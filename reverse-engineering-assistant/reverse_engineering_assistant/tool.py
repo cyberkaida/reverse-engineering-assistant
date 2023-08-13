@@ -3,11 +3,11 @@ from __future__ import annotations
 import shutil
 from typing import List
 
-from documents import AssistantDocument
+from .documents import AssistantDocument
 
 from pathlib import Path
 
-base_path = Path.home() / ".config" / "reverse-engineering-assistant"
+base_path = Path.home() / ".cache" / "reverse-engineering-assistant"
 base_path.mkdir(parents=True, exist_ok=True)
 
 projects_path = base_path / "projects"
@@ -25,7 +25,8 @@ class AssistantProject(object):
         self.documents_path = self.project_path / "documents"
 
     def reset_documents(self):
-        shutil.rmtree(self.documents_path)
+        if self.documents_path.exists():
+            shutil.rmtree(self.documents_path)
         self.documents_path.mkdir(parents=True, exist_ok=False)
 
     def add_document(self, name: str, document: AssistantDocument) -> Path:
@@ -62,4 +63,4 @@ class ToolIntegration(object):
             # Each document is named by its index as the "name" field
             # is not guaranteed to be path safe
             # TODO: Make the name field path safe
-            self.project.add_document(f"{index}.json", document)
+            self.project.add_document(f"{index}", document)

@@ -14,9 +14,10 @@ class ModelType(Enum):
     TextGenWebUI = "text_gen_web_ui"
 
 def get_llm_openai() -> ServiceContext:
-    return ServiceContext.from_defaults()
+    from llama_index.embeddings import OpenAIEmbedding
+    return ServiceContext.from_defaults(embed_model=OpenAIEmbedding())
 
-def get_model(model_type: ModelType = ModelType.OpenAI) -> ServiceContext
-    if model_type == ModelType.OpenAI:
-        return get_llm_openai()
+def get_model(model_type: ModelType = ModelType.OpenAI) -> ServiceContext:
+    #if model_type == ModelType.OpenAI:
+    return get_llm_openai()
 

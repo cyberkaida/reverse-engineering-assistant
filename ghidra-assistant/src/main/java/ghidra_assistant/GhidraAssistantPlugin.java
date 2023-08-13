@@ -21,6 +21,7 @@ import java.util.Collections;
 import java.util.List;
 
 import javax.swing.Icon;
+import resources.Icons;
 
 import com.dropbox.core.json.JsonReader.FileLoadException.IOError;
 
@@ -31,6 +32,7 @@ import ghidra.app.plugin.ProgramPlugin;
 import ghidra.framework.plugintool.util.PluginStatus;
 import ghidra.Ghidra;
 import ghidra.app.plugin.PluginCategoryNames;
+import docking.action.ToolBarData;
 
 import ghidra.app.script.GhidraScript;
 import ghidra.app.script.GhidraScriptProvider;
@@ -97,7 +99,6 @@ public class GhidraAssistantPlugin extends ProgramPlugin implements InterpreterC
 	}
 
 
-
         private InterpreterConsole console;
 	private PythonThread pythonThread = null;
 
@@ -106,6 +107,18 @@ public class GhidraAssistantPlugin extends ProgramPlugin implements InterpreterC
 
 	private String questionFifoPath;
 	private String answerFifoPath;
+
+	private Boolean shouldUpdateEmbeddingsFlag = false;
+
+	@Override
+	public Boolean shouldUpdateEmbeddings() {
+		return this.shouldUpdateEmbeddingsFlag;
+	}
+
+	@Override
+	public void embeddingsUpdated() {
+		this.shouldUpdateEmbeddingsFlag = false;
+	}
 
 	public void registerScript(GhidraAssistantScript assistantScript) {
 		Msg.info(this, "Registering script");
@@ -153,7 +166,31 @@ public class GhidraAssistantPlugin extends ProgramPlugin implements InterpreterC
 				);
 		this.console.setPrompt("assistant> ");
 		// https://github.com/NationalSecurityAgency/ghidra/blob/26d4bd9104809747c21f2528cab8aba9aef9acd5/Ghidra/Features/Python/src/main/java/ghidra/python/PythonPlugin.java#L156C1-L170C34
+		// Reset Assistant
+		DockingAction resetAction = new DockingAction("Reset Assistant", getName()) {
+			@Override
+			public void actionPerformed(ActionContext context) {
+				reset();
+			}
+		};
+		resetAction.setDescription("Reset Assistant");
+		resetAction.setToolBarData(
+			new ToolBarData(Icons.REFRESH_ICON, null));
+		resetAction.setEnabled(true);
+		console.addAction(resetAction);
         }
+
+	public void reset() {
+		this.pythonThread.interrupt();
+		try {
+			// Three seconds to tidy up
+			this.pythonThread.join(3000);
+			this.pythonThread = null;
+			this.startPython();
+		} catch (InterruptedException e) {
+			Msg.error(this, "Error joining python thread", e);
+		}
+	}
 
 
         @Override
@@ -180,24 +217,9 @@ public class GhidraAssistantPlugin extends ProgramPlugin implements InterpreterC
 		pythonThread.start();
         }
 
-	/*
 	@Override
 	protected void dispose() {
-		Msg.info(this, "Disposing of Ghidra Assistant plugin");
-		this.console.getOutWriter().println("Shutting down...");
-
-		Msg.info(this, "Interrupting console thread");
-		this.consoleThread.interrupt();
-		this.consoleThread = null;
-
-		Msg.info(this, "Shutting down assistant script");
-		this.assistantScriptInterface.shutdown();
-		this.assistantScript = null;
-
-		Msg.info(this, "Disposing of console");
-		this.console.dispose();
+		this.reset();
 		super.dispose();
-		Msg.info(this, "Ghidra Assistant plugin disposed");
 	}
-	*/
 }

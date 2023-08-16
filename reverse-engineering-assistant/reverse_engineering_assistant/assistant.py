@@ -30,7 +30,7 @@ class ReverseEngineeringAssistant(object):
 
     query_engine: Optional[BaseQueryEngine] = None
 
-    def __init__(self, project: str | AssistantProject, model_type: ModelType = ModelType.OpenAI) -> None:
+    def __init__(self, project: str | AssistantProject, model_type: Optional[ModelType] = None) -> None:
         if isinstance(project, str):
             self.project = AssistantProject(project)
         else:

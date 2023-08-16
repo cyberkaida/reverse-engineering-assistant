@@ -18,6 +18,8 @@ classifiers = [
 ]
 dependencies = [
     "llama-index",
+    "sentence_transformers",
+    "PyYAML",
 ]
 
 [project.scripts]

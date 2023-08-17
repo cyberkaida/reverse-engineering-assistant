@@ -24,7 +24,7 @@ class LlamaCPPConfiguration(TypedDict):
     # during inference
     number_gpu_layers: Optional[int]
 
-class TextGenConfiguration(TypedDict):
+class TextGenWebUIConfiguration(TypedDict):
     # Base URL of your text_gen_web_ui instance
     # e.g. http://localhost:5000
     text_gen_web_ui_url: str
@@ -38,7 +38,7 @@ class AssistantConfiguration(TypedDict):
     type: ModelType
     openai: Optional[OpenAIConfiguration]
     local_llama_cpp: Optional[LlamaCPPConfiguration]
-    text_gen_web_ui: Optional[TextGenConfiguration]
+    text_gen_web_ui: Optional[TextGenWebUIConfiguration]
 
 def save_configuration(configuration: AssistantConfiguration):
     with open(configuration_file, "w") as f:

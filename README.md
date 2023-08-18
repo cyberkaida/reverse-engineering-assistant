@@ -74,6 +74,7 @@ type: local_llama_cpp
 
 To install the particular extension for your disassembler see:
 - [Ghidra Support](#ghidra-support)
+- [Binary Ninja Support](#binary-ninja-support)
 
 To install the chat component you can do the following:
 
@@ -120,6 +121,10 @@ After installation, enable the [Ghidrathon extension](https://github.com/mandian
 and the Ghidra Assistant Extension.
 
 You can generate the knowledge base by running the Ghidra Assistant analysis from the Analysis menu in the Code Browser.
+
+# Binary Ninja Support
+
+Coming soon!
 
 # Support
 

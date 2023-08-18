@@ -62,7 +62,7 @@ openai:
 
 text_gen_web_ui:
   # Set this to the base URL of your text_gen_web_ui instance
-  text_gen_web_ui_url: http://text-get-web-ui.local:5000
+  text_gen_web_ui_url: http://text-gen-web-ui.local:5000
 
 # Set this to the model type you would like to use
 type: local_llama_cpp

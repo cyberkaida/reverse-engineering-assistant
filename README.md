@@ -36,37 +36,78 @@ Built in support is provided for:
 
 Adding additional models is easy if it is supported by llama-index or langchain (on which llama-index is based).
 
+See the configuration section for more information about setting the model.
+
+## Configuration
+
+Configuration for the reverse engineering assistant is stored at
+`~/.config/reverse-engineering-assistant/config.yaml`. If this
+is not present on first start, a default configuration using
+OpenAI for inference and the `OPENAI_API_TOKEN` environment
+variable will be used.
+
+```yaml
+local_llama_cpp:
+  # At least pone of `model_path` or `model_url` must be specified
+  # If you have the model locally, you can put the path here
+  model_path: null
+  # Otherwise if you have the URL here it will be cached on first launch
+  model_url: https://huggingface.co/TheBloke/Llama-2-13B-chat-GGML/resolve/main/llama-2-13b-chat.ggmlv3.q6_K.bin
+  number_gpu_layers: 1
+
+openai:
+  # If you have an API token you can put it here, or you can leave this as `null`
+  # and RevA will check the `OPENAI_API_TOKEN` environment variable.
+  openai_api_token: null
+
+text_gen_web_ui:
+  # Set this to the base URL of your text_gen_web_ui instance
+  text_gen_web_ui_url: http://text-get-web-ui.local:5000
+
+# Set this to the model type you would like to use
+type: local_llama_cpp
+# type: openai
+# type: text_gen_web_ui
+```
+
+## Installation
+
+To install the particular extension for your disassembler see:
+- [Ghidra Support](#ghidra-support)
+
+To install the chat component you can do the following:
+
+```sh
+python3 -m pip install ./reverse-engineering-assistant
+```
+
+The chat can be started with:
+
+```sh
+revassistant
+```
+
 ## Workflow
 
 RevA has a two step workflow.
 1. Generate knowledge base
 2. Perform inference
 
+To generate the knowledge base, use the plugin for your disassembler and run the Assistant script.
+See [Ghidra Support](#ghidra-support) below.
+
 First your disassembler extracts the information required for the knowledge base and embeddings.
 This involes extracting each function, it's decompilation and some metadata. These are written to a "project". This allows
 multiple programs and data sources to be combined into one set of knowledge for the assistant. For example multiple malware
 samples, or a program and its libraries could be included along with previous RE notes.
 
-The second step is to run the inference. The knowledge base is hashed and embeddings are generated and combined into a searchable
+To ask questions and run the inference a command line tool is provided. Run `revassistant` to begin the chat session.
+
+`revassistant` will hash the knowledge base and generate and combine the embeddings into a searchable
 index. Once this is complete the index is saved to disk and the chat session begins.
 
 Generating the knowledge base is the longest step and may take a few minutes on an Apple M1 laptop with 16GB of RAM. Once the
-emebedding and indexing is complete, this data is saved and can be reused.
-
-## Models
-
-```sh
-python3 -m pip install transformers accelerate
-python3 -m pip install --pre torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/nightly/cpu
-GIT_LFS_SKIP_SMUDGE=1 git clone https://huggingface.co/TheBloke/Llama-2-7B-GGML
-
-# Or with WizardLM
-GIT_LFS_SKIP_SMUDGE=1 git clone https://huggingface.co/TheBloke/TheBloke/WizardLM-13B-V1.2-GGML
-
-# Pull just the 4bit quantized version. If you have the compute and know what you're doing
-# you can use anything compatible with llama-cpp
-git lfs pull -I *.ggmlv3.q4_0.bin
-```
+embedding and indexing is complete, this data is saved and can be reused.
 
 # Ghidra Support
 

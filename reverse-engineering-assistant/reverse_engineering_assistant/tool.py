@@ -40,6 +40,9 @@ class AssistantProject(object):
             document_list.append(AssistantDocument.from_json(json_file.read_text()))
         return document_list
 
+    def get_index_directory(self):
+        return self.project_path / "index"
+
 
 
 class ToolIntegration(object):

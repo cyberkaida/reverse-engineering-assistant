@@ -17,7 +17,8 @@ class ModelType(Enum):
 
 def get_llm_openai() -> ServiceContext:
     from llama_index.embeddings import OpenAIEmbedding
-    return ServiceContext.from_defaults(embed_model=OpenAIEmbedding())
+    service_context = ServiceContext.from_defaults(embed_model=OpenAIEmbedding())
+    return service_context
 
 def get_llm_text_gen_web_ui() -> ServiceContext:
     from langchain import PromptTemplate, LLMChain
@@ -46,7 +47,6 @@ def get_llm_local_llama_cpp() -> ServiceContext:
     model_path = config["local_llama_cpp"]["model_path"]
     n_gpu_layers = config["local_llama_cpp"]["number_gpu_layers"]
     #"/Users/kaida/.cache/lm-studio/models/TheBloke/Llama-2-7B-Chat-GGML/llama-2-7b-chat.ggmlv3.q6_K.bin"
-
 
     llm = LlamaCPP(
             model_url=model_url,

@@ -26,6 +26,7 @@ def get_llm_text_gen_web_ui() -> ServiceContext:
     from langchain.embeddings import HuggingFaceEmbeddings
     from .configuration import load_configuration, AssistantConfiguration, TextGenWebUIConfiguration
 
+    # TODO: Use correct prompt template
     template = """{question}"""
     prompt = PromptTemplate(template=template, input_variables=["question"])
 
@@ -46,7 +47,6 @@ def get_llm_local_llama_cpp() -> ServiceContext:
     model_url = config["local_llama_cpp"]["model_url"]
     model_path = config["local_llama_cpp"]["model_path"]
     n_gpu_layers = config["local_llama_cpp"]["number_gpu_layers"]
-    #"/Users/kaida/.cache/lm-studio/models/TheBloke/Llama-2-7B-Chat-GGML/llama-2-7b-chat.ggmlv3.q6_K.bin"
 
     llm = LlamaCPP(
             model_url=model_url,

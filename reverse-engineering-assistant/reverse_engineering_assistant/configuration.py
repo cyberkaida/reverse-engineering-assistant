@@ -37,6 +37,38 @@ Given this information, perform the following instructions.
 [INST] {query_str}
 [/INST]"""
 
+
+step_decompose_query_prompt = """The original question is as follows: {query_str}
+   We have an opportunity to answer some, or all of the question from a 
+   knowledge source. 
+
+   We are analysing a program, and we have the following information:
+   {program_context}
+
+   Context information for the knowledge source is provided below.
+   Given the context, return a new question that can be answered from 
+   the context. The question can be the same as the original question, 
+   or a new question that represents a subcomponent of the overall question.
+   As an example: 
+
+   Question: How many Grand Slam titles does the winner of the 2020 Australian 
+   Open have?
+   Knowledge source context: Provides information about the winners of the 2020 
+   Australian Open
+   New question: Who was the winner of the 2020 Australian Open? 
+
+   Question: What is the current population of the city in which Paul Graham found 
+   his first company, Viaweb?
+   Knowledge source context: Provides information about Paul Graham's 
+   professional career, including the startups he's founded. 
+   New question: In which city did Paul Graham found his first company, Viaweb? 
+
+
+   Question: {query_str}
+   Knowledge source context: {context_str}
+   New question: 
+"""
+
 class QueryEngineType(Enum):
     simple_query_engine = "simple_query_engine"
     multi_step_query_engine = "multi_step_query_engine"
@@ -69,6 +101,7 @@ class AssistantConfiguration(TypedDict):
     local_llama_cpp: Optional[LlamaCPPConfiguration]
     text_gen_web_ui: Optional[TextGenWebUIConfiguration]
     prompt: Optional[str]
+    step_decompose_query_prompt: Optional[str]
     query_engine: Optional[QueryEngineType]
 
 def save_configuration(configuration: AssistantConfiguration):
@@ -104,6 +137,7 @@ def create_default_configuration():
                 "text_gen_web_ui_url": "http://localhost:5000",
             },
             "prompt": codellama_2_prompt,
+            "step_decompose_query_prompt": step_decompose_query_prompt,
             "query_engine": QueryEngineType.multi_step_query_engine,
     }
     save_configuration(assistant_config)

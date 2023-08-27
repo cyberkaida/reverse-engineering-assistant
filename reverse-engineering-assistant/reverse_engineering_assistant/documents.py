@@ -42,7 +42,6 @@ class AssistantDocument(object):
             metadata=data['metadata'],
         )
 
-
 class DecompiledFunctionDocument(AssistantDocument):
     document_type = 'decompiled_function'
     def __init__(self,
@@ -62,9 +61,7 @@ class DecompiledFunctionDocument(AssistantDocument):
             'address': function_start_address,
             'function': function_signature,
         }
-        #if namespace:
-        #    metadata['namespace'] = namespace
-        #if is_external:
-        #    metadata['is_external'] = is_external
         super().__init__(name=name, content=content, document_type=self.document_type, metadata=metadata)
 
+    def __repr__(self) -> str:
+        return f"DecompiledFunctionDocument(name={self.name}, metadata={self.metadata}, content_length={len(self.content)})"

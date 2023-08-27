@@ -31,6 +31,8 @@ class GhidraAssistant(ToolIntegration):
         documents: List[DecompiledFunctionDocument] = []
         for function in self.program.getListing().getFunctions(True):
             try:
+                # TODO: Check that the function entry is withing initialised memory to avoid
+                # attempting to decompile thunks
                 decompiled_function = self._decompile_function(function)
                 # Strip out the calling convention warning. This scares the model and it becomes very
                 # concerned about security when it sees this.

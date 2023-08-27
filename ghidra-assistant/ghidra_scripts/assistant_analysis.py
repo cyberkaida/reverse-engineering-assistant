@@ -35,6 +35,9 @@ class GhidraAssistant(ToolIntegration):
                 # Strip out the calling convention warning. This scares the model and it becomes very
                 # concerned about security when it sees this.
                 decompiled_function = decompiled_function.replace("/* WARNING: Unknown calling convention -- yet parameter storage is locked */", "")
+                if "/* WARNING: Control flow encountered bad instruction data */" in  decompiled_function:
+                    print(f"Skipping function {function.getName()} due to bad instruction data")
+                    continue
             except RuntimeError as e:
                 print(f"Error creating document for function: {function.getName()} - {e}")
                 continue

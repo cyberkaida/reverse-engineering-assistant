@@ -5,7 +5,7 @@ import ghidra
 from ghidra.program.model.listing import Program
 
 from reverse_engineering_assistant.tool import ToolIntegration
-from reverse_engineering_assistant.documents import AssistantDocument, DecompiledFunctionDocument
+from reverse_engineering_assistant.documents import AssistantDocument, DecompiledFunctionDocument, CrossReferenceDocument
 
 class GhidraAssistant(ToolIntegration):
     flat_api: ghidra.program.flatapi.FlatProgramAPI
@@ -51,15 +51,41 @@ class GhidraAssistant(ToolIntegration):
                 namespace=function.getParentNamespace().getName(),
                 is_external=function.isExternal(),
             )
+            print(f"Decompilation: {document}")
             documents.append(document)
         return documents
+
+    def get_function_cross_references(self) -> List[CrossReferenceDocument]:
+        """
+        Iterate through all defined functions and generate a CrossReferenceDocument for each
+        this will allow us to give the AI model access to cross reference data for each function
+        and aid in question formulation during the planning stage
+        """
+        cross_reference_list: List[CrossReferenceDocument] = []
+        for function in self.program.getListing().getFunctions(True):
+            # TODO: Use the ReferenceManager to get references including the function body
+            references_to = self.flat_api.getReferencesTo(function.getEntryPoint())
+            # This will be inaccurate
+            references_from = self.flat_api.getReferencesFrom(function.getEntryPoint())
+
+            reference_doc = CrossReferenceDocument(
+                    address=function.getEntryPoint().toString(),
+                    references_to=[ref.toString() for ref in references_to],
+                    references_from=[ref.toString() for ref in references_from],
+            )
+            print(f"Cross reference: {reference_doc}")
+            cross_reference_list.append(reference_doc)
+        return cross_reference_list
 
     def get_documents(self) -> List[AssistantDocument]:
         documents: List[AssistantDocument] = []
         for decompiled_function in self.get_decompiled_functions():
             documents.append(decompiled_function)
+        for cross_reference in self.get_function_cross_references():
+            documents.append(cross_reference)
         return documents
 
 if __name__ == '__main__':
+    print("Ghidra Assistant!")
     assistant = GhidraAssistant(currentProgram) 
     assistant.save_documents()

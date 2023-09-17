@@ -39,7 +39,7 @@ from llama_index.query_engine.router_query_engine import RouterQueryEngine
 from .tool import AssistantProject
 from .model import ModelType, get_model
 from .configuration import load_configuration, AssistantConfiguration, QueryEngineType
-from .documents import AssistantDocument, DecompiledFunctionDocument
+from .documents import AssistantDocument, CrossReferenceDocument, DecompiledFunctionDocument
 
 logger = logging.getLogger('reverse_engineering_assistant')
 
@@ -64,10 +64,59 @@ class RevaIndex(object):
     
     @cached_property
     def index(self) -> BaseIndex:
+        # TODO: Refactor to call load, then update, then persist
         return self.update_embeddings()
 
-    def update_embeddings(self) -> BaseIndex:
+    def get_documents(self) -> List[AssistantDocument]:
         raise NotImplementedError()
+
+    def update_embeddings(self) -> BaseIndex:
+        index = self.load_index()
+        if not index:
+            logger.info(f"No index on disk. Generating...")
+            documents = self.get_documents()
+            index = self.persist_index(documents)
+        return index
+
+    def load_index(self) -> Optional[BaseIndex]:
+        if self.index_directory.exists():
+            # Load the index from disk
+            logger.info(f"Loading index from {self.project.get_index_directory()}")
+            storage_context = StorageContext.from_defaults(
+                persist_dir=str(self.index_directory),
+            )
+            # load_index_from_storage passes its kwargs to the index constructor
+            # if we don't pass service_context, we get the default AI model (OpenAI)
+            index = load_index_from_storage(storage_context, service_context=self.service_context)
+            return index
+
+    def persist_index(self, documents: List[AssistantDocument]) -> BaseIndex:
+        """
+        Given a list of documents, create an index and persist it to disk,
+        return the index.
+        """
+        embedding_documents: List[Document] = []
+        for assistant_document in documents:
+            # Transform from an AssistantDocument (our type) to a Document (llama-index type)
+            document = Document(
+                name=assistant_document.name,
+                text=assistant_document.content,
+                metadata=assistant_document.metadata,
+            )
+            embedding_documents.append(document)
+        logger.info(f"Embedding {len(embedding_documents)} documents")
+        # TODO: Do we want to store things differently?
+        index = VectorStoreIndex(
+                embedding_documents,
+                service_context=self.service_context,
+                show_progress=False,
+        )
+        logger.info(f"Saving index to {self.project.get_index_directory()}")
+        self.index_directory.mkdir(parents=True, exist_ok=False)
+        index.storage_context.persist(str(self.index_directory))
+        return index
+
+
 
 
 class RevaDecompilationIndex(RevaIndex):
@@ -81,43 +130,36 @@ class RevaDecompilationIndex(RevaIndex):
         self.index_directory = self.project.get_index_directory() / "decompiled_functions"
         self.description = "Used for retrieveing decompiled functions"
 
-    def update_embeddings(self) -> BaseIndex:
-
-        # TODO: We can make this more generic
+    def get_documents(self) -> List[AssistantDocument]:
+        """
+        Filter documents in the project to just the DecompiledFunctionDocuments
+        """
         assistant_documents = self.project.get_documents()
-        embedding_documents: List[Document] = []
-        if self.index_directory.exists():
-            # Load the index from disk
-            logger.info(f"Loading index from {self.project.get_index_directory()}")
-            storage_context = StorageContext.from_defaults(
-                persist_dir=str(self.index_directory),
-            )
-            # load_index_from_storage passes its kwargs to the index constructor
-            # if we don't pass service_context, we get the default AI model (OpenAI)
-            index = load_index_from_storage(storage_context, service_context=self.service_context)
-        else:
-            for assistant_document in assistant_documents:
-                logger.debug(f"Embedding document {assistant_document.name}\n{assistant_document.metadata}\n{assistant_document.content}")
-                if len(assistant_document.content) >= 5000:
-                    logger.warning(f"Document {assistant_document.name} is too long, skipping")
-                    continue
-                document = Document(
-                    name=assistant_document.name,
-                    text=assistant_document.content,
-                    metadata=assistant_document.metadata,
-                )
-                embedding_documents.append(document)
-            logger.info(f"Embedding {len(embedding_documents)} documents")
-            index = VectorStoreIndex(
-                    embedding_documents,
-                    service_context=self.service_context,
-                    show_progress=False,
-            )
-            logger.info(f"Saving index to {self.project.get_index_directory()}")
-            self.index_directory.mkdir(parents=True, exist_ok=False)
-            index.storage_context.persist(str(self.index_directory))
+        decompiled_functions: List[AssistantDocument] = []
+        for document in assistant_documents:
+            logger.info(f"Checking {document}")
+            if document.type == DecompiledFunctionDocument:
+                decompiled_functions.append(document)
+        return decompiled_functions
 
-        return index
+class RevaCrossReferenceIndex(RevaIndex):
+    """
+    An index of cross references, to and from, addresses.
+    """
+    index_directory: Path
+    def __init__(self, project: AssistantProject, service_context: ServiceContext) -> None:
+        super().__init__(project, service_context)
+        self.index_directory = self.project.get_index_directory() / "cross_references"
+        self.description = "Used for retrieving cross references to and from addresses"
+
+    def get_documents(self) -> List[AssistantDocument]:
+        assistant_documents = self.project.get_documents()
+        cross_references: List[AssistantDocument] = []
+        for document in assistant_documents:
+            if isinstance(document, CrossReferenceDocument):
+                cross_references.append(document)
+        return cross_references
+
 
 class RevaSummaryIndex(RevaIndex):
     """
@@ -130,56 +172,24 @@ class RevaSummaryIndex(RevaIndex):
         self.index_directory = self.project.get_index_directory() / "summaries"
         self.description = "Used for retrieving summaries"
 
-    def update_embeddings(self) -> BaseIndex:
-        # TODO: Summarise each function, then summarise the summaries
-        # to hopefully generate a high level description of the program
+    def get_documents(self) -> List[AssistantDocument]:
+        # Summaries the document and embed the summary into the vector store
+        summeriser = TreeSummarize(
+            service_context=self.service_context,
+        ) 
 
-        assistant_documents = self.project.get_documents()
-        embedding_documents: List[Document] = []
-        if self.index_directory.exists():
-            # Load the index from disk
-            logger.info(f"Loading index from {self.project.get_index_directory()}")
-            storage_context = StorageContext.from_defaults(
-                persist_dir=str(self.index_directory),
-            )
-            # load_index_from_storage passes its kwargs to the index constructor
-            # if we don't pass service_context, we get the default AI model (OpenAI)
-            index = load_index_from_storage(storage_context, service_context=self.service_context)
-        else:
-            for assistant_document in assistant_documents:
-                logger.debug(f"Embedding document {assistant_document.name}\n{assistant_document.metadata}\n{assistant_document.content}")
-                if len(assistant_document.content) >= 5000:
-                    logger.warning(f"Document {assistant_document.name} is too long, skipping")
-                    continue
+        summarised_documents: List[AssistantDocument] = []
 
-                # Summaries the document and embed the summary into the vector store
-                summeriser = TreeSummarize(
-                    service_context=self.service_context,
-                ) 
-
+        for document in self.project.get_documents():
+            if document.type == DecompiledFunctionDocument:
                 summary = summeriser.get_response(
                         query_str="Summarise the following function",
                         text_chunks=[assistant_document.content],
                 )
                 logger.debug(f"Summary {assistant_document}: {summary}")
 
-                document = Document(
-                    name=assistant_document.name,
-                    text=str(summary),
-                    metadata=assistant_document.metadata,
-                )
-                embedding_documents.append(document)
-            logger.info(f"Embedding {len(embedding_documents)} documents")
-            index = VectorStoreIndex(
-                    embedding_documents,
-                    service_context=self.service_context,
-                    show_progress=False,
-            )
-            logger.info(f"Saving index to {self.project.get_index_directory()}")
-            self.index_directory.mkdir(parents=True, exist_ok=False)
-            index.storage_context.persist(str(self.index_directory))
-
-        return index
+                # TODO: Implement the SummaryDocument type?
+                raise NotImplementedError()
 
 
 class ReverseEngineeringAssistant(object):
@@ -200,6 +210,7 @@ class ReverseEngineeringAssistant(object):
 
         # Get the indexes
         decompilation_index = RevaDecompilationIndex(self.project, self.service_context).index
+        cross_reference_index = RevaCrossReferenceIndex(self.project, self.service_context).index
         #summary_index = RevaSummaryIndex(self.project, self.service_context).index
 
         # Summarise all summaries together, to try to derive a high level description of the program
@@ -250,6 +261,17 @@ class ReverseEngineeringAssistant(object):
                 description="Useful for retrieving decompilation",
         )
 
+        # Cross references!
+        cross_reference_query_engine = cross_reference_index.as_query_engine(
+                text_qa_template=prompt_template,
+                service_context=self.service_context,
+                verbose=False,
+        )
+        cross_reference_tool = QueryEngineTool.from_defaults(
+                query_engine=cross_reference_query_engine,
+                description="Useful for retrieving cross references to and from addresses",
+        )
+
         #summary_query_engine = summary_index.as_query_engine(
         #        text_qa_template=prompt_template,
         #        verbose=True,
@@ -276,6 +298,7 @@ class ReverseEngineeringAssistant(object):
         #    ],
         #    service_context=self.service_context,
         #)
+
         base_query_engine = decompilation_query_engine
 
 

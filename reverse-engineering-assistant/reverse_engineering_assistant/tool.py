@@ -23,6 +23,7 @@ class AssistantProject(object):
         self.project_path = projects_path / project
         self.project_path.mkdir(parents=True, exist_ok=True)
         self.documents_path = self.project_path / "documents"
+        self.documents_path.mkdir(parents=True, exist_ok=True)
 
     def reset_documents(self):
         if self.documents_path.exists():

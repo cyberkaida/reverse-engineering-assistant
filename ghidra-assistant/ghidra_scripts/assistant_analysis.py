@@ -43,6 +43,11 @@ class GhidraAssistant(ToolIntegration):
             except RuntimeError as e:
                 print(f"Error creating document for function: {function.getName()} - {e}")
                 continue
+
+            # Use the function reference to get callees and callers
+            references_to = function.getCallingFunctions(monitor)
+            references_from = function.getCalledFunctions(monitor)
+
             document = DecompiledFunctionDocument(
                 function_name=function.getName(),
                 decompilation=decompiled_function,
@@ -50,6 +55,8 @@ class GhidraAssistant(ToolIntegration):
                 function_signature=str(function),
                 namespace=function.getParentNamespace().getName(),
                 is_external=function.isExternal(),
+                inbound_calls=[ref.getName() for ref in references_to],
+                outbound_calls=[ref.getName() for ref in references_from],
             )
             print(f"Decompilation: {document}")
             documents.append(document)

@@ -9,6 +9,9 @@ from llama_index.llms import LangChainLLM, OpenAI
 
 from enum import Enum
 
+import logging
+logger = logging.getLogger("reverse_engineering_assistant.model")
+
 class ModelType(Enum):
     OpenAI = "openai"
     LocalLMStudio = "local_lmstudio"
@@ -26,12 +29,8 @@ def get_llm_text_gen_web_ui() -> ServiceContext:
     from langchain.embeddings import HuggingFaceEmbeddings
     from .configuration import load_configuration, AssistantConfiguration, TextGenWebUIConfiguration
 
-    # TODO: Use correct prompt template
-    template = """{question}"""
-    prompt = PromptTemplate(template=template, input_variables=["question"])
-
     config: AssistantConfiguration = load_configuration()
-    text_gen_web_ui_url = config["text_gen_web_ui"]["text_gen_web_ui_url"]
+    text_gen_web_ui_url = config.text_gen_web_ui.text_gen_web_ui_url
     llm = TextGen(model_url=text_gen_web_ui_url)
 
     return ServiceContext.from_defaults(embed_model='local', llm=llm)
@@ -44,9 +43,10 @@ def get_llm_local_llama_cpp() -> ServiceContext:
     config: AssistantConfiguration = load_configuration()
 
 
-    model_url = config["local_llama_cpp"]["model_url"]
-    model_path = config["local_llama_cpp"]["model_path"]
-    n_gpu_layers = config["local_llama_cpp"]["number_gpu_layers"]
+    model_url = config.local_llama_cpp.model_url
+    model_path = config.local_llama_cpp.model_path
+    n_gpu_layers = config.local_llama_cpp.number_gpu_layers
+
 
     llm = LlamaCPP(
             model_url=model_url,
@@ -59,7 +59,9 @@ def get_llm_local_llama_cpp() -> ServiceContext:
             generate_kwargs={},
             # kwargs to pass to __init__()
             # set to at least 1 to use GPU
-            model_kwargs={"n_gpu_layers": n_gpu_layers},
+            model_kwargs={
+                'n_gpu_layers': n_gpu_layers,
+                },
             # transform inputs into Llama2 format
             messages_to_prompt=messages_to_prompt,
             completion_to_prompt=completion_to_prompt,
@@ -71,7 +73,7 @@ def get_model(model_type: Optional[ModelType] = None) -> ServiceContext:
     if not model_type:
         from .configuration import load_configuration, AssistantConfiguration
         config: AssistantConfiguration = load_configuration()
-        model_type = config["type"]
+        model_type = config.type
 
     match model_type:
         case ModelType.OpenAI:

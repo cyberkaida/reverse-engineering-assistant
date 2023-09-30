@@ -62,12 +62,21 @@ class DecompiledFunctionDocument(AssistantDocument):
                  function_signature = str,
                  namespace: Optional[str] = None,
                  is_external: Optional[bool] = None,
+                 inbound_calls: Optional[List[str]] = None,
+                 outbound_calls: Optional[List[str]] = None,
                  ) -> None:
         if isinstance(function_start_address, int):
             function_start_address = hex(function_start_address)
 
         name = function_name
-        content = decompilation
+        references = json.dumps({
+            'inbound_calls': inbound_calls or [],
+            'outbound_calls': outbound_calls or [],
+        })
+        content = f"""{references}
+
+        {decompilation}
+        """
         metadata = {
             'address': function_start_address,
             'function': function_signature,

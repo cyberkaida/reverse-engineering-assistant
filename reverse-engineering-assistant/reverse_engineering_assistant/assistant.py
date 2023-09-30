@@ -8,13 +8,17 @@ It provides a number of APIs for
 """
 
 from __future__ import annotations
-from functools import cached_property
+from functools import cached_property, cache
+from abc import ABC, abstractmethod
 import logging
 from pathlib import Path
 
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Type
 
-from llama_index import LLMPredictor
+# TODO: This is terrible, we should delete llama-index :(
+# Really we just use the LLM, we are hacking our own prompts anyways
+# and the rest of this is just _complexity_ for no benefit.
+from llama_index import LLMPredictor, QueryBundle
 from llama_index import ServiceContext
 from llama_index import StorageContext, VectorStoreIndex
 from llama_index.indices.base import BaseIndex
@@ -29,10 +33,7 @@ from llama_index.readers.base import BaseReader
 from llama_index.response_synthesizers.tree_summarize import TreeSummarize
 from llama_index.schema import Document
 from llama_index.tools.query_engine import QueryEngineTool
-from llama_index.selectors.pydantic_selectors import (
-    PydanticMultiSelector,
-    PydanticSingleSelector,
-)
+from llama_index.selectors.llm_selectors import LLMMultiSelector, LLMSingleSelector
 from llama_index.query_engine.router_query_engine import RouterQueryEngine
 
 
@@ -43,8 +44,17 @@ from .documents import AssistantDocument, CrossReferenceDocument, DecompiledFunc
 
 logger = logging.getLogger('reverse_engineering_assistant')
 
+"""
+List of RevaIndex classes to be registered with the assistant.
+"""
+_reva_index_list: List[Type[RevaIndex]] = []
 
-class RevaIndex(object):
+def register_index(cls: Type[RevaIndex]) -> Type[RevaIndex]:
+    _reva_index_list.append(cls)
+    return cls
+
+
+class RevaIndex(ABC):
     """
     An index of documents available to the
     reverse engineering assistant.
@@ -54,21 +64,53 @@ class RevaIndex(object):
     # Service context for the index
     service_context: ServiceContext
 
+    index_name: str
     description: str
 
     index_directory: Path
+
+    def __str__(self) -> str:
+        return f"{self.index_name} @ {self.index_directory}"
 
     def __init__(self, project: AssistantProject, service_context: ServiceContext) -> None:
         self.project = project
         self.service_context = service_context
     
     @cached_property
+    @abstractmethod
     def index(self) -> BaseIndex:
         # TODO: Refactor to call load, then update, then persist
         return self.update_embeddings()
 
+    @abstractmethod
     def get_documents(self) -> List[AssistantDocument]:
         raise NotImplementedError()
+
+    @cache
+    def as_query_engine(self) -> BaseQueryEngine:
+        """
+        Return a query engine for this index
+        """
+        configuration = load_configuration()
+        prompt = configuration.index_configurations.get(self.index_name).prompt
+        query_engine = self.index.as_query_engine(
+                text_qa_template=prompt,
+                service_context=self.service_context,
+                verbose=False,
+        )
+
+        return query_engine
+
+    @cache
+    def as_tool(self) -> QueryEngineTool:
+        """
+        Return a query engine tool for this index
+        """
+        tool = QueryEngineTool.from_defaults(
+                query_engine=self.as_query_engine(),
+                description=self.description,
+        )
+        return tool
 
     def update_embeddings(self) -> BaseIndex:
         index = self.load_index()
@@ -119,11 +161,14 @@ class RevaIndex(object):
 
 
 
+@register_index
 class RevaDecompilationIndex(RevaIndex):
     """
     An index of decompiled functions available to the
     reverse engineering assistant.
     """
+    index_name = "decompilation"
+    description = "Used for retrieving decompiled functions"
     index_directory: Path
     def __init__(self, project: AssistantProject, service_context: ServiceContext) -> None:
         super().__init__(project, service_context)
@@ -198,6 +243,8 @@ class ReverseEngineeringAssistant(object):
 
     query_engine: Optional[BaseQueryEngine] = None
 
+    indexes: List[RevaIndex]
+
     def __init__(self, project: str | AssistantProject, model_type: Optional[ModelType] = None) -> None:
         if isinstance(project, str):
             self.project = AssistantProject(project)
@@ -205,104 +252,47 @@ class ReverseEngineeringAssistant(object):
             self.project = project
 
         self.service_context = get_model(model_type)
+
+        # We take the registered index types and construct concrete indexes from them
+        self.indexes = [ index_type(self.project, self.service_context) for index_type in _reva_index_list]
         
     def update_embeddings(self):
-
-        # Get the indexes
-        decompilation_index = RevaDecompilationIndex(self.project, self.service_context).index
-        cross_reference_index = RevaCrossReferenceIndex(self.project, self.service_context).index
-        #summary_index = RevaSummaryIndex(self.project, self.service_context).index
-
         # Summarise all summaries together, to try to derive a high level description of the program
         summeriser = TreeSummarize(
             service_context=self.service_context,
         ) 
 
-        #all_summaries = [x.get_content() for x in summary_index.docstore.docs.values()]
-        
-        # TODO: Move this to the project object
-
-        #summary_path = self.project.project_path / "summary.txt"
-        #if summary_path.exists():
-        #    with open(summary_path, "r") as f:
-        #        summary = f.read()
-        #else:
-        #    summary = summeriser.get_response(
-        #            query_str="What are the most important facts about this program?",
-        #            text_chunks=all_summaries
-        #            )
-        #    
-        #    with open(self.project.project_path / "summary.txt", "w") as f:
-        #        f.write(str(summary))
-
-        #logger.info(f"Summary: {summary}")
-
-        # TODO: Swap this to some index router
-        #index = summary_index
-        #index = decompilation_index
-
-
-        # TODO: Investigate chat mode:
-        # index.as_chat_engine()
+        # Here I pull our own prompt
 
         configuration: AssistantConfiguration = load_configuration()
-        prompt_template = configuration.get("prompt")
-        if prompt_template:
-            logger.debug(f"Using prompt template: {prompt_template}")
-            prompt_template = Prompt(prompt_template)
-
-        decompilation_query_engine = decompilation_index.as_query_engine(
-                text_qa_template=prompt_template,
-                service_context=self.service_context,
-                verbose=False,
-        )
-        decompilation_tool = QueryEngineTool.from_defaults(
-                query_engine=decompilation_query_engine,
-                description="Useful for retrieving decompilation",
-        )
-
-        # Cross references!
-        cross_reference_query_engine = cross_reference_index.as_query_engine(
-                text_qa_template=prompt_template,
-                service_context=self.service_context,
-                verbose=False,
-        )
-        cross_reference_tool = QueryEngineTool.from_defaults(
-                query_engine=cross_reference_query_engine,
-                description="Useful for retrieving cross references to and from addresses",
-        )
-
-        #summary_query_engine = summary_index.as_query_engine(
-        #        text_qa_template=prompt_template,
-        #        verbose=True,
-        #        service_context=self.service_context,
-        #)
-        #summary_tool = QueryEngineTool.from_defaults(
-        #        query_engine=summary_query_engine,
-        #        description="Useful for retrieving descriptions of functions",
-        #)
 
         # TODO: Add more tools
         # - Strings in the binary. This should use a high k of n value for the index search
         #   and return many results.
         # - Cross references. This should return a graph like view of the callers and callees of a function
         #   Similar to the function call tree in Ghidra
+        from .llama_index_overrides import RevaSelectionOutputParser, REVA_SELECTION_OUTPUT_PARSER
 
-        # TODO: This uses OpenAI, can we not do that??
-        #base_query_engine = RouterQueryEngine(
-        #    selector=PydanticSingleSelector.from_defaults(
-        #    ),
-        #    query_engine_tools=[
-        #        decompilation_tool,
-        #        #summary_tool,
-        #    ],
-        #    service_context=self.service_context,
-        #)
+        logger.debug("Building query engine")
+        for index in self.indexes:
+            logger.debug(f"Loading index: {index}")
 
-        base_query_engine = decompilation_query_engine
+        base_query_engine = RouterQueryEngine(
+            selector=LLMSingleSelector.from_defaults(
+                prompt_template_str=REVA_SELECTION_OUTPUT_PARSER,
+                service_context=self.service_context,
+                output_parser=RevaSelectionOutputParser(),
+            ),
+            query_engine_tools=[
+                index.as_tool() for index in self.indexes
+            ],
+            service_context=self.service_context,
+        )
 
+        logger.debug(f"Loaded query engine: {base_query_engine}")
 
-        if configuration.get("query_engine") == QueryEngineType.multi_step_query_engine:
+        # TODO: Use the configuration here
+        if configuration.query_engine == QueryEngineType.multi_step_query_engine:
             # The multi steap query engine decomposes the query into sub-questions
             # each sub question is then answered by the base query engine
 
@@ -323,13 +313,10 @@ class ReverseEngineeringAssistant(object):
                     service_context=self.service_context,
             )
 
-            step_decompose_query_prompt = configuration.get("step_decompose_query_prompt")
-            if step_decompose_query_prompt:
-                logger.info("Using step decompose query prompt from configuration")
-                step_decompose_query_prompt = StepDecomposeQueryTransformPrompt(
-                        step_decompose_query_prompt,
-                )
-                #step_decompose_query_prompt = step_decompose_query_prompt.partial_format(program_context=summary)
+            step_decompose_query_prompt = StepDecomposeQueryTransformPrompt(
+                    configuration.step_decompose_query_prompt,
+            )
+            #step_decompose_query_prompt = step_decompose_query_prompt.partial_format(program_context=summary)
             query_transformer = StepDecomposeQueryTransform(
                     llm_predictor=self.service_context.llm_predictor,
                     step_decompose_query_prompt=step_decompose_query_prompt,
@@ -350,8 +337,16 @@ class ReverseEngineeringAssistant(object):
             self.update_embeddings()
         if not self.query_engine:
             raise Exception("No query engine available")
-        answer = self.query_engine.query(query)
-        return str(answer)
+        import json
+        query_bundle = QueryBundle(
+            query_str=query,
+        )
+        try:
+            answer = self.query_engine.query(query_bundle)
+            return str(answer)
+        except json.JSONDecodeError as e:
+            logger.exception(f"Failed to parse JSON response from query engine: {e.doc}")
+            return "Failed to parse JSON response from query engine"
 
 def main():
     import argparse

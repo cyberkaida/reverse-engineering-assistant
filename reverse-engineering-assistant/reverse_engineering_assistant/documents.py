@@ -69,14 +69,11 @@ class DecompiledFunctionDocument(AssistantDocument):
             function_start_address = hex(function_start_address)
 
         name = function_name
-        references = json.dumps({
+        content = json.dumps({
             'inbound_calls': inbound_calls or [],
             'outbound_calls': outbound_calls or [],
-        })
-        content = f"""{references}
-
-        {decompilation}
-        """
+            'decompilation': decompilation,
+        }, indent=2, sort_keys=True)
         metadata = {
             'address': function_start_address,
             'function': function_signature,
@@ -89,6 +86,9 @@ class DecompiledFunctionDocument(AssistantDocument):
 @document_type
 class CrossReferenceDocument(AssistantDocument):
     document_type = 'cross_reference'
+    subject_address: str
+    references_to: List[str]
+    references_from: List[str]
     def __init__(self,
                  address: int | str,
                  references_to: List[int | str],
@@ -101,6 +101,10 @@ class CrossReferenceDocument(AssistantDocument):
         # First normalise the lists
         references_to = [hex(x) if isinstance(x, int) else x for x in references_to]
         references_from = [hex(x) if isinstance(x, int) else x for x in references_from]
+
+        self.subject_address = address
+        self.references_to = references_to
+        self.references_from = references_from
         
         # The content is a json document of references to and from the given address
         json_doc = json.dumps({

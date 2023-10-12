@@ -18,6 +18,7 @@ classifiers = [
 ]
 dependencies = [
     "llama-index",
+    "llama-cpp-python",
     "sentence_transformers",
     "PyYAML",
     "pydantic",

@@ -12,34 +12,31 @@ from functools import cached_property, cache
 from abc import ABC, abstractmethod
 import logging
 from pathlib import Path
+import json
 
 from typing import Any, List, Optional, Type
 
 # TODO: This is terrible, we should delete llama-index :(
 # Really we just use the LLM, we are hacking our own prompts anyways
 # and the rest of this is just _complexity_ for no benefit.
-from llama_index import LLMPredictor, QueryBundle
-from llama_index import ServiceContext
+from llama_index import PromptTemplate, ServiceContext
 from llama_index import StorageContext, VectorStoreIndex
 from llama_index.indices.base import BaseIndex
 from llama_index.indices.loading import load_index_from_storage
 from llama_index.indices.query.base import BaseQueryEngine
-from llama_index.indices.query.query_transform.base import StepDecomposeQueryTransform, HyDEQueryTransform
-from llama_index.indices.query.query_transform.prompts import StepDecomposeQueryTransformPrompt
-from llama_index.prompts import Prompt
-from llama_index.query_engine.multistep_query_engine import MultiStepQueryEngine
-from llama_index.query_engine.sub_question_query_engine import SubQuestionQueryEngine
-from llama_index.readers.base import BaseReader
+from llama_index.llms import ChatMessage
 from llama_index.response_synthesizers.tree_summarize import TreeSummarize
 from llama_index.schema import Document
+
+# Agent
+from llama_index.agent import ReActAgent
 from llama_index.tools.query_engine import QueryEngineTool
-from llama_index.selectors.llm_selectors import LLMMultiSelector, LLMSingleSelector
-from llama_index.query_engine.router_query_engine import RouterQueryEngine
+from llama_index.tools.function_tool import FunctionTool
 
 
 from .tool import AssistantProject
 from .model import ModelType, get_model
-from .configuration import load_configuration, AssistantConfiguration, QueryEngineType
+from .configuration import load_configuration, AssistantConfiguration
 from .documents import AssistantDocument, CrossReferenceDocument, DecompiledFunctionDocument
 
 logger = logging.getLogger('reverse_engineering_assistant')
@@ -92,10 +89,12 @@ class RevaIndex(ABC):
         Return a query engine for this index
         """
         configuration = load_configuration()
-        prompt = configuration.index_configurations.get(self.index_name).prompt
+        prompt = PromptTemplate(configuration.prompt_template.index_query_prompt)
         query_engine = self.index.as_query_engine(
                 text_qa_template=prompt,
                 service_context=self.service_context,
+                similarity_top_k=5,
+                show_progress=False,
                 verbose=False,
         )
 
@@ -190,6 +189,8 @@ class RevaDecompilationIndex(RevaIndex):
 class RevaCrossReferenceIndex(RevaIndex):
     """
     An index of cross references, to and from, addresses.
+
+    TODO: Make this a real tool the LLM can use
     """
     index_directory: Path
     def __init__(self, project: AssistantProject, service_context: ServiceContext) -> None:
@@ -277,72 +278,25 @@ class ReverseEngineeringAssistant(object):
         for index in self.indexes:
             logger.debug(f"Loading index: {index}")
 
-        base_query_engine = RouterQueryEngine(
-            selector=LLMSingleSelector.from_defaults(
-                prompt_template_str=REVA_SELECTION_OUTPUT_PARSER,
-                service_context=self.service_context,
-                output_parser=RevaSelectionOutputParser(),
-            ),
-            query_engine_tools=[
-                index.as_tool() for index in self.indexes
-            ],
+        chat_history: List[ChatMessage] = [
+             ChatMessage(role="system", content=configuration.prompt_template.system_prompt),
+        ]
+        import pdb; pdb.set_trace()
+
+        self.query_engine = ReActAgent.from_tools(
+            tools=[index.as_tool() for index in self.indexes],
             service_context=self.service_context,
-        )
-
-        logger.debug(f"Loaded query engine: {base_query_engine}")
-
-        # TODO: Use the configuration here
-        if configuration.query_engine == QueryEngineType.multi_step_query_engine:
-            # The multi steap query engine decomposes the query into sub-questions
-            # each sub question is then answered by the base query engine
-
-            # TODO: The first question does not get a context, this causes the AI to talk about tennis
-            # if the question is not _obviously_ about a program. When it is about a program, the AI
-            # talks about an arbitrary program, then the context is provided to the second question
-            # and it gets on track again.
-
-            # BUG: The MultiStepQueryEngine doe not get the correct LLM based on the query engine
-            # instead it defaults to OpenAI and then uses the default prompt, which in our case
-            # makes the AI talk about tennis...
-            # https://github.com/jerryjliu/llama_index/blob/0509763f179f841b7aea4e60a5bb5bcc4a38f660/llama_index/indices/query/query_transform/prompts.py#L35
-            # We avoid this by manually creating a the summarizer with a service context, and passing
-            # that to the query engine. This avoids the code path where the multi step engine discovers the summarizer
-            # from the base query engine, which yields an incorrect value and causes the multi step engine to use OpenAI
-
-            tree_summarizer = TreeSummarize(
-                    service_context=self.service_context,
+            llm=self.service_context.llm,
+            chat_history=chat_history,
             )
-
-            step_decompose_query_prompt = StepDecomposeQueryTransformPrompt(
-                    configuration.step_decompose_query_prompt,
-            )
-            #step_decompose_query_prompt = step_decompose_query_prompt.partial_format(program_context=summary)
-            query_transformer = StepDecomposeQueryTransform(
-                    llm_predictor=self.service_context.llm_predictor,
-                    step_decompose_query_prompt=step_decompose_query_prompt,
-                    verbose=False,
-            )
-
-            multi_step_engine = MultiStepQueryEngine(
-                    query_engine=base_query_engine,
-                    query_transform=query_transformer,
-                    response_synthesizer=tree_summarizer,
-            )
-            self.query_engine = multi_step_engine
-        else:
-            self.query_engine = base_query_engine
 
     def query(self, query: str) -> str:
         if not self.query_engine:
             self.update_embeddings()
         if not self.query_engine:
             raise Exception("No query engine available")
-        import json
-        query_bundle = QueryBundle(
-            query_str=query,
-        )
         try:
-            answer = self.query_engine.query(query_bundle)
+            answer = self.query_engine.query(query)
             return str(answer)
         except json.JSONDecodeError as e:
             logger.exception(f"Failed to parse JSON response from query engine: {e.doc}")

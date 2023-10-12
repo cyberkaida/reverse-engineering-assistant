@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from typing import Optional
+from pathlib import Path
 
 from langchain.llms import TextGen, LlamaCpp
 from llama_index import ServiceContext, load_index_from_storage
@@ -20,7 +21,9 @@ class ModelType(Enum):
 
 def get_llm_openai() -> ServiceContext:
     from llama_index.embeddings import OpenAIEmbedding
-    service_context = ServiceContext.from_defaults(embed_model=OpenAIEmbedding())
+    #service_context = ServiceContext.from_defaults(embed_model=OpenAIEmbedding())
+    service_context = ServiceContext.from_defaults(embed_model='local')
+
     return service_context
 
 def get_llm_text_gen_web_ui() -> ServiceContext:
@@ -47,6 +50,8 @@ def get_llm_local_llama_cpp() -> ServiceContext:
     model_path = config.local_llama_cpp.model_path
     n_gpu_layers = config.local_llama_cpp.number_gpu_layers
 
+    if not Path(model_path).exists():
+        model_path = None
 
     llm = LlamaCPP(
             model_url=model_url,

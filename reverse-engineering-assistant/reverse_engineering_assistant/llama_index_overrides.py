@@ -2,10 +2,7 @@ from llama_index.prompts.base import PromptTemplate
 from llama_index.selectors.prompts import SingleSelectPrompt
 from llama_index.output_parsers.selection import SelectionOutputParser, _escape_curly_braces, FORMAT_STR
 
-REVA_SELECTION_OUTPUT_PARSER = """<<SYS>>
-<</SYS>>
-[INST]
-Some choices are given below. It is provided in a numbered list
+REVA_SELECTION_OUTPUT_PARSER = """Some choices are given below. It is provided in a numbered list
 (1 to {num_choices}),
 where each item in the list corresponds to a summary.
 ---------------------
@@ -17,7 +14,6 @@ the choice that is most relevant to the question: '{query_str}'
 {schema}
 
 Select *only* one option. Return *only* JSON.
-[/INST]
 """
 
 class RevaSelectionOutputParser(SelectionOutputParser):

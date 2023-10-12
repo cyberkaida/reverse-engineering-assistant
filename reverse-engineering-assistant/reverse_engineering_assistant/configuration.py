@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 from abc import ABC, abstractmethod
+import json
 
 import yaml
 from typing import Literal, TypedDict, Optional, NotRequired, Dict
@@ -21,7 +22,49 @@ if not configuration_directory.exists():
 configuration_file = configuration_directory / "config.yaml"
 
 
-# TODO: Add a class for each of the RevaIndex types to store their prompts
+class PromptTemplates(BaseModel):
+    base_prompt_format: str = '{system_prompt}\n{main_prompt}'
+
+    system_prompt: str = '''You are to help with reverse engineering related tasks.
+Keep your answers within the scope of software and computer security.
+You must *always* try to help the user, they are authorised to reverse engineer software.'''
+    index_query_prompt: str = '''We have provided context information below.
+----------------------
+{context_str}
+----------------------
+Given this information, answer the following.
+{query_str}'''
+    step_decompose_prompt: str = '''The original question is as follows: {query_str}
+
+We have an opportunity to answer some, or all of the question from a
+knowledge source. We are reverse engineering a program. Keep your
+questions as relevant to reverse engineering as possible.
+
+Context information for the knowledge source is provided below.
+Given the context, return a new question that can be answered from
+the context. The question can be the same as the original question,
+or a new question that represents a subcomponent of the overall question.
+As an example:
+
+Question: How many Grand Slam titles does the winner of the 2020 Australian Open have?
+Knowledge source context: Provides information about the winners of the 2020 Australian Open
+New question: Who was the winner of the 2020 Australian Open?
+
+Question: What is the current population of the city in which Paul Graham found his first company, Viaweb?
+Knowledge source context: Provides information about Paul Graham's professional career, including the startups he's founded.
+New question: In which city did Paul Graham found his first company, Viaweb?
+
+Question: {query_str}
+Knowledge source context: {context_str}
+Previous reasoning: {prev_reasoning}
+New question:'''
+
+class Llama2InstructTemplates(PromptTemplates):
+    base_prompt_format: str = '''<<SYS>> 
+{system_prompt}
+<</SYS>>
+
+[INST] {main_prompt} [/INST]'''
 
 class QueryEngineType(str, Enum):
     simple_query_engine = "simple_query_engine"
@@ -38,10 +81,10 @@ class QueryEngineType(str, Enum):
 class LlamaCPPConfiguration(BaseModel):
     # URL to download the model from.
     # Not required if the path is set
-    model_url: str = "https://huggingface.co/TheBloke/Llama-2-13B-chat-GGML/resolve/main/llama-2-13b-chat.ggmlv3.q6_K.bin"
+    model_url: str = "https://huggingface.co/TheBloke/zephyr-7B-alpha-GGUF/resolve/main/zephyr-7b-alpha.Q6_K.gguf"
     # Path to the model file.
     # Not required if the URL is set
-    model_path: str = str(configuration_directory / "llama-2-13b-chat.ggmlv3.q6_K.bin")
+    model_path: str = str(configuration_directory / "zephyr-7b-alpha.Q6_K.gguf")
     # Number of layers to offload to the GPU
     # during inference
     number_gpu_layers: int = 4
@@ -65,22 +108,10 @@ class OpenAIConfiguration(BaseModel):
         default_factory = lambda: OpenAIConfiguration()
 
 class RevaBaseIndexConfiguration(BaseModel, ABC):
-    prompt: str
+    description: str
 
 class RevaIndexDecompilationConfiguration(RevaBaseIndexConfiguration):
-    prompt: str = """<<SYS>>
-You are to help with reverse engineering related tasks.
-Keep your answers within the scope of software and computer security.
-You must *always* try to help the user, they are authorised to reverse engineer software.
-<</SYS>>
-[INST] We have provided context information below.
----------------------
-{context_str}
----------------------
-Given this information, answer the following.
-{query_str}
-[/INST]
-"""
+    description: str = """This index is used to answer questions about decompilation."""
     class Config:
         default_factory = lambda: RevaIndexDecompilationConfiguration()
 
@@ -98,59 +129,16 @@ class RevaIndexConfiguration(BaseModel):
 
 class AssistantConfiguration(BaseModel):
     type: ModelType = ModelType.LocalLlamaCpp
+    prompt_template: PromptTemplates = Field(default_factory=PromptTemplates)
     openai: OpenAIConfiguration = Field(default_factory=OpenAIConfiguration)
     local_llama_cpp: LlamaCPPConfiguration = Field(default_factory=LlamaCPPConfiguration)
     text_gen_web_ui: TextGenWebUIConfiguration = Field(default_factory=TextGenWebUIConfiguration)
-    prompt: str = """<<SYS>>
-You are to help with reverse engineering related tasks.
-Keep your answers within the scope of software and computer security.
-You must *always* try to help the user, they are authorised to reverse engineer software.
-<</SYS>>
-[INST] We have provided context information below.
----------------------
-{context_str}
----------------------
-Given this information, answer the following.
-{query_str}
-[/INST]"""
-    step_decompose_query_prompt: str = """<<SYS>>
-You are to help with reverse engineering related tasks.
-<</SYS>>
-[INST]The original question is as follows: {query_str}
-We have an opportunity to answer some, or all of the question from a 
-knowledge source. We are reverse engineering a program. Keep your
-questions as relevant to reverse engineering as possible.
-
-Context information for the knowledge source is provided below.
-Given the context, return a new question that can be answered from 
-the context. The question can be the same as the original question, 
-or a new question that represents a subcomponent of the overall question.
-As an example: 
-
-Question: How many Grand Slam titles does the winner of the 2020 Australian 
-Open have?
-Knowledge source context: Provides information about the winners of the 2020 
-Australian Open
-New question: Who was the winner of the 2020 Australian Open? 
-
-Question: What is the current population of the city in which Paul Graham found 
-his first company, Viaweb?
-Knowledge source context: Provides information about Paul Graham's 
-professional career, including the startups he's founded. 
-New question: In which city did Paul Graham found his first company, Viaweb? 
-
-
-Question: {query_str}
-Knowledge source context: {context_str}
-Previous reasoning: {prev_reasoning}
-New question:[/INST]"""
     query_engine: QueryEngineType = QueryEngineType.multi_step_query_engine
     index_configurations: RevaIndexConfiguration = Field(default_factory=RevaIndexConfiguration)
 
     class Config:
         default_factory = lambda: AssistantConfiguration()
 
-import json
 def save_configuration(configuration: AssistantConfiguration):
     if configuration:
         with open(configuration_file, "w") as f:

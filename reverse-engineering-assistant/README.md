@@ -25,3 +25,24 @@ for greater integration (current selection, real time updates, etc).
 
 This allows for both an interactive experience during analysis and a
 post analysis option (for automated analysis pipelines).
+
+# Installation
+
+If you want to use local inference, you should build `llama-cpp-python` for
+your specific platform and hardware. See the
+[llama-cpp-python documentation](https://github.com/abetlen/llama-cpp-python/tree/main)
+for details.
+
+# Troubleshooting
+
+## Installation
+
+On macOS, if you get a bus error when launching, you can try rebuilding and re-installing
+llama-cpp-python like so:
+
+```shell
+# Rebuild and reinstall llama-cpp-python
+CMAKE_ARGS="-DLLAMA_METAL=on" python3 -m pip install --upgrade --force --no-cache llama-cpp-python
+# Reinstall ReVA
+python3 -m pip install .
+```

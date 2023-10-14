@@ -53,26 +53,27 @@ def get_llm_local_llama_cpp() -> ServiceContext:
     if not Path(model_path).exists():
         model_path = None
 
-    llm = LlamaCPP(
-            model_url=model_url,
-            model_path=model_path,
-            temperature=0.1,
-            max_new_tokens=256,
-            # llama2 has a context window of 4096 tokens, but we set it lower to allow for some wiggle room
-            context_window=3900,
-            # kwargs to pass to __call__()
-            generate_kwargs={},
-            # kwargs to pass to __init__()
-            # set to at least 1 to use GPU
-            model_kwargs={
-                'n_gpu_layers': n_gpu_layers,
-                },
-            # transform inputs into Llama2 format
-            messages_to_prompt=messages_to_prompt,
-            completion_to_prompt=completion_to_prompt,
-            verbose=False,
-            )
-    return ServiceContext.from_defaults(embed_model='local', llm=llm)
+    # TODO: Re-enable this feature
+    #llm = LlamaCPP(
+    #        model_url=model_url,
+    #        model_path=model_path,
+    #        temperature=0.1,
+    #        max_new_tokens=256,
+    #        # llama2 has a context window of 4096 tokens, but we set it lower to allow for some wiggle room
+    #        context_window=3900,
+    #        # kwargs to pass to __call__()
+    #        generate_kwargs={},
+    #        # kwargs to pass to __init__()
+    #        # set to at least 1 to use GPU
+    #        model_kwargs={
+    #            'n_gpu_layers': n_gpu_layers,
+    #            },
+    #        # transform inputs into Llama2 format
+    #        messages_to_prompt=messages_to_prompt,
+    #        completion_to_prompt=completion_to_prompt,
+    #        verbose=False,
+    #        )
+    return ServiceContext.from_defaults(embed_model='local', llm='local')
 
 def get_model(model_type: Optional[ModelType] = None) -> ServiceContext:
     if not model_type:

@@ -9,12 +9,12 @@ It provides a number of APIs for
 
 from __future__ import annotations
 from functools import cached_property, cache
-from abc import ABC, abstractmethod
+from abc import ABC, abstractmethod, abstractproperty
 import logging
 from pathlib import Path
 import json
 
-from typing import Any, List, Optional, Type
+from typing import Any, Callable, List, Optional, Type
 
 # TODO: This is terrible, we should delete llama-index :(
 # Really we just use the LLM, we are hacking our own prompts anyways
@@ -30,6 +30,7 @@ from llama_index.schema import Document
 
 # Agent
 from llama_index.agent import ReActAgent
+from llama_index.tools import BaseTool
 from llama_index.tools.query_engine import QueryEngineTool
 from llama_index.tools.function_tool import FunctionTool
 
@@ -49,6 +50,51 @@ _reva_index_list: List[Type[RevaIndex]] = []
 def register_index(cls: Type[RevaIndex]) -> Type[RevaIndex]:
     _reva_index_list.append(cls)
     return cls
+
+"""
+List of RevaTool classes to be registered with the assistant.
+"""
+_reva_tool_list: List[Type[RevaTool]] = []
+
+def register_tool(cls: Type[RevaTool]) -> Type[RevaTool]:
+    _reva_tool_list.append(cls)
+    return cls
+
+class RevaTool(ABC):
+    """
+    A tool for performing exact queries on
+    the data from the reverse engineering integration
+    output.
+    """
+    project: AssistantProject
+    service_context: ServiceContext
+
+    tool_name: str
+    description: str
+
+    tool_functions: List[Callable]
+
+    def __str__(self) -> str:
+        return f"{self.tool_name}"
+
+    def __init__(self, project: AssistantProject, service_context: ServiceContext) -> None:
+        self.project = project
+        self.service_context = service_context
+
+    @cache
+    def as_tools(self) -> List[FunctionTool]:
+        """
+        Returns a list of tools usable by the assistant
+        based on the value of self.tool_functions.
+        """
+        tools: List[FunctionTool] = []
+        for tool_function in self.tool_functions:
+            tool = FunctionTool.from_defaults(
+                fn=tool_function,
+            )
+            tools.append(tool)
+        return tools
+
 
 
 class RevaIndex(ABC):
@@ -89,6 +135,11 @@ class RevaIndex(ABC):
         Return a query engine for this index
         """
         configuration = load_configuration()
+
+        # Unfortunately some models thing reverse engineering is illegal and immoral
+        # so we need a custom prompt to tell them we are allowed to reverse engineer
+        # software... Without this the model sometimes decides to talk about tennis
+        # due to a prompt deep within llama-index...
         prompt = PromptTemplate(configuration.prompt_template.index_query_prompt)
         query_engine = self.index.as_query_engine(
                 text_qa_template=prompt,
@@ -135,10 +186,20 @@ class RevaIndex(ABC):
         """
         Given a list of documents, create an index and persist it to disk,
         return the index.
+
+        Note that this is embedding model specific on disk, if you change the
+        embedding model, these need to be updated to match. For now we set
+        the embedding model to 'local' in models.py for all configurations.
+
+        This is not fast, but it is consistent. In the future we can alter
+        the path to contain the embedding model name, so these will be stored
+        separately and managed appropriately.
         """
+
         embedding_documents: List[Document] = []
         for assistant_document in documents:
             # Transform from an AssistantDocument (our type) to a Document (llama-index type)
+
             document = Document(
                 name=assistant_document.name,
                 text=assistant_document.content,
@@ -146,7 +207,6 @@ class RevaIndex(ABC):
             )
             embedding_documents.append(document)
         logger.info(f"Embedding {len(embedding_documents)} documents")
-        # TODO: Do we want to store things differently?
         index = VectorStoreIndex(
                 embedding_documents,
                 service_context=self.service_context,
@@ -186,11 +246,10 @@ class RevaDecompilationIndex(RevaIndex):
                 decompiled_functions.append(document)
         return decompiled_functions
 
-class RevaCrossReferenceIndex(RevaIndex):
+@register_tool
+class RevaCrossReferenceTool(RevaTool):
     """
-    An index of cross references, to and from, addresses.
-
-    TODO: Make this a real tool the LLM can use
+    An tool to retrieve cross references, to and from, addresses.
     """
     index_directory: Path
     def __init__(self, project: AssistantProject, service_context: ServiceContext) -> None:
@@ -198,13 +257,37 @@ class RevaCrossReferenceIndex(RevaIndex):
         self.index_directory = self.project.get_index_directory() / "cross_references"
         self.description = "Used for retrieving cross references to and from addresses"
 
-    def get_documents(self) -> List[AssistantDocument]:
+        self.tool_functions = [
+            self.get_references_to_address,
+            self.get_references_from_address,
+        ]
+
+    def get_documents(self) -> List[CrossReferenceDocument]:
         assistant_documents = self.project.get_documents()
-        cross_references: List[AssistantDocument] = []
+        cross_references: List[CrossReferenceDocument] = []
         for document in assistant_documents:
-            if isinstance(document, CrossReferenceDocument):
+            if document.type == CrossReferenceDocument:
                 cross_references.append(document)
         return cross_references
+
+    def get_references_to_address(self, address: str) -> Optional[List[str]]:
+        """
+        Return a list of cross references to the given address from other locations
+        """
+        for document in self.get_documents():
+            if document.subject_address == address:
+                return document.references_to
+
+    def get_references_from_address(self, address: str) -> Optional[List[str]]:
+        """
+        Return a list of cross references from the given address to other locations
+        """
+        for document in self.get_documents():
+            if document.subject_address == address:
+                return document.references_from
+
+
+
 
 
 class RevaSummaryIndex(RevaIndex):
@@ -245,6 +328,7 @@ class ReverseEngineeringAssistant(object):
     query_engine: Optional[BaseQueryEngine] = None
 
     indexes: List[RevaIndex]
+    tools: List[RevaTool]
 
     def __init__(self, project: str | AssistantProject, model_type: Optional[ModelType] = None) -> None:
         if isinstance(project, str):
@@ -256,6 +340,8 @@ class ReverseEngineeringAssistant(object):
 
         # We take the registered index types and construct concrete indexes from them
         self.indexes = [ index_type(self.project, self.service_context) for index_type in _reva_index_list]
+        # and the same for tools
+        self.tools = [ tool_type(self.project, self.service_context) for tool_type in _reva_tool_list]
         
     def update_embeddings(self):
         # Summarise all summaries together, to try to derive a high level description of the program
@@ -281,10 +367,16 @@ class ReverseEngineeringAssistant(object):
         chat_history: List[ChatMessage] = [
              ChatMessage(role="system", content=configuration.prompt_template.system_prompt),
         ]
-        import pdb; pdb.set_trace()
+
+        base_tools: List[BaseTool] = []
+        for tool in self.tools:
+            for function in tool.as_tools():
+                base_tools.append(function)
+        for index in self.indexes:
+            base_tools.append(index.as_tool())
 
         self.query_engine = ReActAgent.from_tools(
-            tools=[index.as_tool() for index in self.indexes],
+            tools=base_tools,
             service_context=self.service_context,
             llm=self.service_context.llm,
             chat_history=chat_history,

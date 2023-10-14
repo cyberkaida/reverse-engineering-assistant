@@ -1,9 +1,31 @@
 #!/usr/bin/env python3
+
+"""
+This module defines the document types for both the tool integration
+and the assistant. This module must have minimal third party dependencies
+so we can easily load it into reverse engineering tools like Ghidra and
+BinaryNinja that may have a limited set of third party libraries or
+environments where it is hard to compile things like llama-cpp or
+langchain.
+
+This module acts as a bridge between the tool integration and the
+assistant. We serialise these documents to disk, then load them
+from the assistant side.
+
+At the moment, the only communication between the tool integration
+and the assitant is via the file system, though in the future an
+interactive component may be added (potentially file system based,
+like a push/pull model).
+"""
+
 from __future__ import annotations
 import json
 from typing import Dict, Optional, List, Type
 import logging
+from pathlib import Path
+
 logger = logging.getLogger('reverse_engineering_assistant')
+
 
 document_type_map: Dict[str, Type[AssistantDocument]] = {}
 
@@ -112,6 +134,8 @@ class CrossReferenceDocument(AssistantDocument):
             'to_this_address': references_to,
             'from_this_address': references_from,
         })
+        # TODO: This is presentation layer to the model, it belongs in
+        # assistant, not in document
         content = f"""
         Cross references for {address} in json format:
         {json_doc}

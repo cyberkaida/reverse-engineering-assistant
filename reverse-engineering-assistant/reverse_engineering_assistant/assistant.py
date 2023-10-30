@@ -289,7 +289,6 @@ class RevaCrossReferenceTool(RevaTool):
 
 
 
-
 class RevaSummaryIndex(RevaIndex):
     """
     An index of summaries available to the
@@ -302,7 +301,9 @@ class RevaSummaryIndex(RevaIndex):
         self.description = "Used for retrieving summaries"
 
     def get_documents(self) -> List[AssistantDocument]:
-        # Summaries the document and embed the summary into the vector store
+        """
+        Summarises the document and embeds the summary into the vector store.
+        """
         summeriser = TreeSummarize(
             service_context=self.service_context,
         ) 
@@ -322,6 +323,20 @@ class RevaSummaryIndex(RevaIndex):
 
 
 class ReverseEngineeringAssistant(object):
+    """
+    A class representing the Reverse Engineering Assistant.
+
+    This class provides functionality for querying a reverse engineering project, including loading indexes and tools,
+    updating embeddings, and querying the query engine.
+
+    Attributes:
+        project (AssistantProject): The reverse engineering project to query.
+        service_context (ServiceContext): The service context for the reverse engineering assistant.
+        query_engine (Optional[BaseQueryEngine]): The query engine for the reverse engineering assistant.
+        indexes (List[RevaIndex]): The indexes for the reverse engineering assistant.
+        tools (List[RevaTool]): The tools for the reverse engineering assistant.
+    """
+
     project: AssistantProject
     service_context: ServiceContext
 
@@ -331,6 +346,13 @@ class ReverseEngineeringAssistant(object):
     tools: List[RevaTool]
 
     def __init__(self, project: str | AssistantProject, model_type: Optional[ModelType] = None) -> None:
+        """
+        Initializes a new instance of the ReverseEngineeringAssistant class.
+
+        Args:
+            project (str | AssistantProject): The reverse engineering project to query.
+            model_type (Optional[ModelType], optional): The model type for the reverse engineering assistant. Defaults to None.
+        """
         if isinstance(project, str):
             self.project = AssistantProject(project)
         else:
@@ -344,6 +366,9 @@ class ReverseEngineeringAssistant(object):
         self.tools = [ tool_type(self.project, self.service_context) for tool_type in _reva_tool_list]
         
     def update_embeddings(self):
+        """
+        Updates the embeddings for the reverse engineering assistant.
+        """
         # Summarise all summaries together, to try to derive a high level description of the program
         summeriser = TreeSummarize(
             service_context=self.service_context,
@@ -383,6 +408,15 @@ class ReverseEngineeringAssistant(object):
             )
 
     def query(self, query: str) -> str:
+        """
+        Queries the reverse engineering assistant with the given query.
+
+        Args:
+            query (str): The query to execute.
+
+        Returns:
+            str: The result of the query.
+        """
         if not self.query_engine:
             self.update_embeddings()
         if not self.query_engine:

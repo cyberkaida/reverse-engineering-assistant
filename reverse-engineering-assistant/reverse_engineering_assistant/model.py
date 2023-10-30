@@ -18,6 +18,7 @@ class ModelType(Enum):
     LocalLMStudio = "local_lmstudio"
     LocalLlamaCpp = "local_llama_cpp"
     TextGenWebUI = "text_gen_web_ui"
+    Ollama = "ollama"
 
 def get_llm_openai() -> ServiceContext:
     from llama_index.embeddings import OpenAIEmbedding
@@ -25,6 +26,22 @@ def get_llm_openai() -> ServiceContext:
     service_context = ServiceContext.from_defaults(embed_model='local')
 
     return service_context
+
+def get_llm_ollama() -> ServiceContext:
+    from llama_index.llms import Ollama
+    from .configuration import load_configuration, AssistantConfiguration
+    config: AssistantConfiguration = load_configuration()
+    system_prompt = config.prompt_template.system_prompt
+    base_url = 'http://localhost:11434'
+    llm = Ollama(
+            model="dolphin2.1-mistral",
+            base_url=base_url,
+            additional_kwargs={
+                    'system': system_prompt,
+                }
+            )
+    return ServiceContext.from_defaults(embed_model='local', llm=llm)
+
 
 def get_llm_text_gen_web_ui() -> ServiceContext:
     from langchain import PromptTemplate, LLMChain
@@ -76,6 +93,18 @@ def get_llm_local_llama_cpp() -> ServiceContext:
     return ServiceContext.from_defaults(embed_model='local', llm='local')
 
 def get_model(model_type: Optional[ModelType] = None) -> ServiceContext:
+    """
+    Returns a ServiceContext object for the specified model type.
+
+    Args:
+        model_type (Optional[ModelType], optional): The type of model to use. If None, the model type is loaded from the configuration file. Defaults to None.
+
+    Raises:
+        ValueError: If an unknown model type is specified.
+
+    Returns:
+        ServiceContext: A ServiceContext object for the specified model type.
+    """
     if not model_type:
         from .configuration import load_configuration, AssistantConfiguration
         config: AssistantConfiguration = load_configuration()
@@ -84,6 +113,8 @@ def get_model(model_type: Optional[ModelType] = None) -> ServiceContext:
     match model_type:
         case ModelType.OpenAI:
             return get_llm_openai()
+        case ModelType.Ollama:
+            return get_llm_ollama()
         case ModelType.TextGenWebUI:
             return get_llm_text_gen_web_ui()
         case ModelType.LocalLlamaCpp:

@@ -111,8 +111,10 @@ class CrossReferenceDocument(AssistantDocument):
     subject_address: str
     references_to: List[str]
     references_from: List[str]
+    symbol: str
     def __init__(self,
                  address: int | str,
+                 symbol: str,
                  references_to: List[int | str],
                  references_from: List[int | str],
                  ):
@@ -127,10 +129,12 @@ class CrossReferenceDocument(AssistantDocument):
         self.subject_address = address
         self.references_to = references_to
         self.references_from = references_from
+        self.symbol = symbol
         
         # The content is a json document of references to and from the given address
         json_doc = json.dumps({
             'address': address,
+            'symbol': symbol,
             'to_this_address': references_to,
             'from_this_address': references_from,
         })

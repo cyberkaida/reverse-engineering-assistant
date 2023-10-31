@@ -7,6 +7,11 @@ from ghidra.program.model.listing import Program
 from reverse_engineering_assistant.tool import ToolIntegration
 from reverse_engineering_assistant.documents import AssistantDocument, DecompiledFunctionDocument, CrossReferenceDocument
 
+if not isinstance(currentProgram, ghidra.program.model.listing.Program):
+    currentProgram = currentProgram()
+if not isinstance(monitor, ghidra.util.task.TaskMonitor):
+    monitor = monitor()
+
 class GhidraAssistant(ToolIntegration):
     flat_api: ghidra.program.flatapi.FlatProgramAPI
     decompiler_api: ghidra.app.decompiler.flatapi.FlatDecompilerAPI
@@ -77,6 +82,7 @@ class GhidraAssistant(ToolIntegration):
 
             reference_doc = CrossReferenceDocument(
                     address=function.getEntryPoint().toString(),
+                    symbol=function.getName(),
                     references_to=[ref.toString() for ref in references_to],
                     references_from=[ref.toString() for ref in references_from],
             )
@@ -94,5 +100,6 @@ class GhidraAssistant(ToolIntegration):
 
 if __name__ == '__main__':
     print("Ghidra Assistant!")
+
     assistant = GhidraAssistant(currentProgram) 
     assistant.save_documents()

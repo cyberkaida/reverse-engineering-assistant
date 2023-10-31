@@ -272,18 +272,20 @@ class RevaCrossReferenceTool(RevaTool):
 
     def get_references_to_address(self, address: str) -> Optional[List[str]]:
         """
-        Return a list of cross references to the given address from other locations
+        Return a list of references to the given address from other locations.
+        These might be calls from other functions, or data references to this address.
         """
         for document in self.get_documents():
-            if document.subject_address == address:
+            if document.subject_address == address or document.symbol == address:
                 return document.references_to
 
     def get_references_from_address(self, address: str) -> Optional[List[str]]:
         """
-        Return a list of cross references from the given address to other locations
+        Return a list of references from the given address to other locations.
+        These might be calls to other functions, or data references from this address.
         """
         for document in self.get_documents():
-            if document.subject_address == address:
+            if document.subject_address == address or document.symbol == address:
                 return document.references_from
 
 
@@ -372,6 +374,7 @@ class ReverseEngineeringAssistant(object):
         # Summarise all summaries together, to try to derive a high level description of the program
         summeriser = TreeSummarize(
             service_context=self.service_context,
+            verbose=logger.level == logging.DEBUG,
         ) 
 
         # Here I pull our own prompt
@@ -405,6 +408,7 @@ class ReverseEngineeringAssistant(object):
             service_context=self.service_context,
             llm=self.service_context.llm,
             chat_history=chat_history,
+            verbose=logger.level == logging.DEBUG,
             )
 
     def query(self, query: str) -> str:
@@ -438,6 +442,7 @@ def main():
 
     args = parser.parse_args()
     logging_level = logging.DEBUG if args.verbose else logging.INFO
+    logger.level = logging_level
 
     try:
         import rich

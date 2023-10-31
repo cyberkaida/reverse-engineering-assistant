@@ -32,9 +32,9 @@ def get_llm_ollama() -> ServiceContext:
     from .configuration import load_configuration, AssistantConfiguration
     config: AssistantConfiguration = load_configuration()
     system_prompt = config.prompt_template.system_prompt
-    base_url = 'http://localhost:11434'
+    base_url = config.ollama.ollama_server_url
     llm = Ollama(
-            model="dolphin2.1-mistral",
+            model=config.ollama.model,
             base_url=base_url,
             additional_kwargs={
                     'system': system_prompt,

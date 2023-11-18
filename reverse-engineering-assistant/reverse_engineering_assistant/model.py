@@ -22,13 +22,13 @@ class ModelType(Enum):
 
 def get_llm_openai() -> ServiceContext:
     from llama_index.embeddings import OpenAIEmbedding
-    #service_context = ServiceContext.from_defaults(embed_model=OpenAIEmbedding())
-    service_context = ServiceContext.from_defaults(embed_model='local')
+    service_context = ServiceContext.from_defaults(embed_model=OpenAIEmbedding())
 
     return service_context
 
 def get_llm_ollama() -> ServiceContext:
     from llama_index.llms import Ollama
+    from langchain.embeddings import OllamaEmbeddings
     from .configuration import load_configuration, AssistantConfiguration
     config: AssistantConfiguration = load_configuration()
     system_prompt = config.prompt_template.system_prompt
@@ -40,7 +40,10 @@ def get_llm_ollama() -> ServiceContext:
                     'system': system_prompt,
                 }
             )
-    return ServiceContext.from_defaults(embed_model='local', llm=llm)
+    embeddings = OllamaEmbeddings(
+        model=config.ollama.model,
+    )
+    return ServiceContext.from_defaults(embed_model=embeddings, llm=llm)
 
 
 def get_llm_text_gen_web_ui() -> ServiceContext:

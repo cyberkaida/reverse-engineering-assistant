@@ -100,6 +100,10 @@ class DecompiledFunctionDocument(AssistantDocument):
     def outbound_calls(self) -> List[str]:
         return self.metadata['outbound_calls']
     
+    @property
+    def is_external(self) -> bool:
+        return self.metadata['is_external']
+    
     @classmethod
     def from_json(cls, json_str: str) -> DecompiledFunctionDocument:
         data = json.loads(json_str)
@@ -134,6 +138,7 @@ class DecompiledFunctionDocument(AssistantDocument):
             'function_signature': function_signature,
             'inbound_calls': inbound_calls or [],
             'outbound_calls': outbound_calls or [],
+            'is_external': is_external or False,
         }
         super().__init__(name=function_name, content=content, document_type=self.document_type, metadata=metadata)
 

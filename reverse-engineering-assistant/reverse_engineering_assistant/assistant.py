@@ -14,7 +14,7 @@ import logging
 from pathlib import Path
 import json
 
-from typing import Any, Callable, List, Optional, Type
+from typing import Any, Callable, List, Optional, Type, Dict
 
 # TODO: This is terrible, we should delete llama-index :(
 # Really we just use the LLM, we are hacking our own prompts anyways
@@ -220,8 +220,9 @@ class RevaIndex(ABC):
 
 
 
-@register_index
-class RevaDecompilationIndex(RevaIndex):
+#@register_index
+@register_tool
+class RevaDecompilationIndex(RevaIndex, RevaTool):
     """
     An index of decompiled functions available to the
     reverse engineering assistant.
@@ -233,18 +234,37 @@ class RevaDecompilationIndex(RevaIndex):
         super().__init__(project, service_context)
         self.index_directory = self.project.get_index_directory() / "decompiled_functions"
         self.description = "Used for retrieveing decompiled functions"
+        self.tool_functions = [
+            self.get_decompilation_for_function,
+            self.get_defined_function_list,
+        ]
 
-    def get_documents(self) -> List[AssistantDocument]:
+    @cache
+    def get_documents(self) -> List[DecompiledFunctionDocument]:
         """
         Filter documents in the project to just the DecompiledFunctionDocuments
         """
         assistant_documents = self.project.get_documents()
-        decompiled_functions: List[AssistantDocument] = []
+        decompiled_functions: List[DecompiledFunctionDocument] = []
         for document in assistant_documents:
             logger.info(f"Checking {document}")
             if document.type == DecompiledFunctionDocument:
                 decompiled_functions.append(document)
         return decompiled_functions
+    
+    def get_decompilation_for_function(self, function_name: str) -> Dict[str, str]:
+        """
+        Return the decompilation for the given function name.
+        """
+        for document in self.get_documents():
+            if document.name == function_name:
+                return document.to_json()
+            
+    def get_defined_function_list(self) -> List[str]:
+        """
+        Return a list of functions in the index.
+        """
+        return [document.name for document in self.get_documents() if document.is_external == False]
 
 @register_tool
 class RevaCrossReferenceTool(RevaTool):

@@ -41,6 +41,7 @@ def get_llm_ollama() -> ServiceContext:
                 }
             )
     embeddings = OllamaEmbeddings(
+        base_url=base_url,
         model=config.ollama.model,
     )
     return ServiceContext.from_defaults(embed_model=embeddings, llm=llm)

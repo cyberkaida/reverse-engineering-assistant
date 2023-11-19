@@ -16,9 +16,6 @@ import json
 
 from typing import Any, Callable, List, Optional, Type, Dict
 
-# TODO: This is terrible, we should delete llama-index :(
-# Really we just use the LLM, we are hacking our own prompts anyways
-# and the rest of this is just _complexity_ for no benefit.
 from llama_index import PromptTemplate, ServiceContext
 from llama_index import StorageContext, VectorStoreIndex
 from llama_index.indices.base import BaseIndex
@@ -33,7 +30,6 @@ from llama_index.agent import ReActAgent
 from llama_index.tools import BaseTool
 from llama_index.tools.query_engine import QueryEngineTool
 from llama_index.tools.function_tool import FunctionTool
-
 
 from .tool import AssistantProject
 from .model import ModelType, get_model
@@ -122,7 +118,6 @@ class RevaIndex(ABC):
     @cached_property
     @abstractmethod
     def index(self) -> BaseIndex:
-        # TODO: Refactor to call load, then update, then persist
         return self.update_embeddings()
 
     @abstractmethod
@@ -136,7 +131,7 @@ class RevaIndex(ABC):
         """
         configuration = load_configuration()
 
-        # Unfortunately some models thing reverse engineering is illegal and immoral
+        # Unfortunately some models think reverse engineering is illegal and immoral
         # so we need a custom prompt to tell them we are allowed to reverse engineer
         # software... Without this the model sometimes decides to talk about tennis
         # due to a prompt deep within llama-index...
@@ -146,7 +141,7 @@ class RevaIndex(ABC):
                 service_context=self.service_context,
                 similarity_top_k=5,
                 show_progress=False,
-                verbose=False,
+                verbose=logger.level == logging.DEBUG,
         )
 
         return query_engine
@@ -163,6 +158,9 @@ class RevaIndex(ABC):
         return tool
 
     def update_embeddings(self) -> BaseIndex:
+        """
+        Retrieve the index from disk, or generate it if it does not exist.
+        """
         index = self.load_index()
         if not index:
             logger.info(f"No index on disk. Generating...")
@@ -217,9 +215,6 @@ class RevaIndex(ABC):
         index.storage_context.persist(str(self.index_directory))
         return index
 
-
-
-
 #@register_index
 @register_tool
 class RevaDecompilationIndex(RevaIndex, RevaTool):
@@ -236,7 +231,7 @@ class RevaDecompilationIndex(RevaIndex, RevaTool):
         self.description = "Used for retrieveing decompiled functions"
         self.tool_functions = [
             self.get_decompilation_for_function,
-            self.get_defined_function_list,
+            self.get_defined_function_list_paginated,
         ]
 
     @cache
@@ -247,24 +242,43 @@ class RevaDecompilationIndex(RevaIndex, RevaTool):
         assistant_documents = self.project.get_documents()
         decompiled_functions: List[DecompiledFunctionDocument] = []
         for document in assistant_documents:
-            logger.info(f"Checking {document}")
+            #logger.info(f"Checking {document}")
             if document.type == DecompiledFunctionDocument:
                 decompiled_functions.append(document)
         return decompiled_functions
     
-    def get_decompilation_for_function(self, function_name: str) -> Dict[str, str]:
+    @cache
+    def get_decompilation_for_function(self, function_name_or_address: str) -> Dict[str, str]:
         """
         Return the decompilation for the given function name.
         """
         for document in self.get_documents():
-            if document.name == function_name:
+            if document.name == function_name_or_address:
                 return document.to_json()
-            
-    def get_defined_function_list(self) -> List[str]:
+            if function_name_or_address in document.function_signature:
+                return document.to_json()
+            try:
+                int(function_name_or_address, 16)
+            except ValueError:
+                continue
+            if int(function_name_or_address, 16) >= int(document.function_start_address, 16) and int(function_name_or_address, 16) <= int(document.function_end_address, 16):
+                return document.to_json()
+                
+    @cache
+    def get_defined_function_list_paginated(self, page: int, page_size: int = 20) -> List[str]:
         """
-        Return a list of functions in the index.
+        Return a paginated list of functions in the index. Use get_defined_function_count to get the total number of functions.
         """
-        return [document.name for document in self.get_documents() if document.is_external == False]
+        start = (page - 1) * page_size
+        end = start + page_size
+        return [document.function_signature for document in self.get_documents()[start:end] if document.is_external == False]
+    
+    @cache
+    def get_defined_function_count(self) -> int:
+        """
+        Return the total number of defined functions in the index.
+        """
+        return len([document for document in self.get_documents() if document.is_external == False])
 
 @register_tool
 class RevaCrossReferenceTool(RevaTool):
@@ -295,8 +309,10 @@ class RevaCrossReferenceTool(RevaTool):
         Return a list of references to the given address from other locations.
         These might be calls from other functions, or data references to this address.
         """
+        logger.debug(f"Searching for {address}")
         for document in self.get_documents():
             if document.subject_address == address or document.symbol == address:
+                logger.debug(f"Found document: {document}")
                 return document.references_to
 
     def get_references_from_address(self, address: str) -> Optional[List[str]]:
@@ -451,6 +467,12 @@ class ReverseEngineeringAssistant(object):
         except json.JSONDecodeError as e:
             logger.exception(f"Failed to parse JSON response from query engine: {e.doc}")
             return "Failed to parse JSON response from query engine"
+        except ValueError as e:
+            logger.exception(f"Failed to query engine: {e}")
+            return "Failed to query engine... Try again?"
+        except Exception as e:
+            logger.exception(f"Failed to query engine: {e}")
+            return "Failed to query engine... Try again?"
 
 def main():
     import argparse

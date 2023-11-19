@@ -66,11 +66,9 @@ class AssistantDocument(object):
     @classmethod
     def from_json(cls, json_str: str) -> AssistantDocument:
         data = json.loads(json_str)
-        logger.debug(f"Loading document from json: {json_str}")
 
         t = document_type_map[data['metadata']['document_type']]
         if t != AssistantDocument:
-            logger.info(f"Loading document of type {t}")
             return t.from_json(json_str)
 
         return AssistantDocument(
@@ -89,8 +87,12 @@ class DecompiledFunctionDocument(AssistantDocument):
         return self.metadata['function_start_address']
     
     @property
+    def function_end_address(self) -> str:
+        return self.metadata['function_end_address']
+    
+    @property
     def function_signature(self) -> str:
-        return self.metadata['function']
+        return self.metadata['function_signature']
     
     @property
     def inbound_calls(self) -> List[str]:
@@ -104,15 +106,19 @@ class DecompiledFunctionDocument(AssistantDocument):
     def is_external(self) -> bool:
         return self.metadata['is_external']
     
+    @property
+    def is_thunk(self) -> bool:
+        return self.metadata['is_thunk']
+    
     @classmethod
     def from_json(cls, json_str: str) -> DecompiledFunctionDocument:
         data = json.loads(json_str)
-        logger.debug(f"Loading decompiled function document from json: {json_str}")
 
         return DecompiledFunctionDocument(
             function_name=data['metadata']['function_name'],
             decompilation=data['content'],
             function_start_address=data['metadata']['function_start_address'],
+            function_end_address=data['metadata']['function_end_address'],
             function_signature=data['metadata']['function_signature'],
             inbound_calls=data['metadata']['inbound_calls'],
             outbound_calls=data['metadata']['outbound_calls'],
@@ -122,6 +128,7 @@ class DecompiledFunctionDocument(AssistantDocument):
                  function_name: str,
                  decompilation: str,
                  function_start_address: int | str,
+                 function_end_address: int | str,
                  function_signature = str,
                  namespace: Optional[str] = None,
                  is_external: Optional[bool] = None,
@@ -130,11 +137,14 @@ class DecompiledFunctionDocument(AssistantDocument):
                  ) -> None:
         if isinstance(function_start_address, int):
             function_start_address = hex(function_start_address)
+        if isinstance(function_end_address, int):
+            function_end_address = hex(function_end_address)
 
         content = json.dumps(decompilation, indent=2, sort_keys=True)
         metadata = {
             'function_name': function_name,
             'function_start_address': function_start_address,
+            'function_end_address': function_end_address,
             'function_signature': function_signature,
             'inbound_calls': inbound_calls or [],
             'outbound_calls': outbound_calls or [],
@@ -168,7 +178,6 @@ class CrossReferenceDocument(AssistantDocument):
     @classmethod
     def from_json(cls, json_str: str) -> CrossReferenceDocument:
         data = json.loads(json_str)
-        logger.debug(f"Loading cross reference document from json: {json_str}")
 
         return CrossReferenceDocument(
             address=data['metadata']['address'],

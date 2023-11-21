@@ -256,8 +256,10 @@ class RevaDecompilationIndex(RevaIndex, RevaTool):
         for document in self.get_documents():
             if document.name == function_name_or_address:
                 return document.to_json()
-            if function_name_or_address in document.function_signature:
-                return document.to_json()
+            # TODO: We want to surface an exact match first, but this is not working
+            # because we do an `in` here.
+            #if function_name_or_address in document.function_signature:
+            #    return document.to_json()
             try:
                 int(function_name_or_address, 16)
             except ValueError:

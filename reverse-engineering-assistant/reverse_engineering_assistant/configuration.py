@@ -100,10 +100,17 @@ class TextGenWebUIConfiguration(BaseModel):
     class Config:
         default_factory = lambda: TextGenWebUIConfiguration()
 
+class OllamaConfiguration(BaseModel):
+    ollama_server_url: str = "http://localhost:11434"
+    model: str = "dolphin2.1-mistral"
+    class Config:
+        default_factory = lambda: OllamaConfiguration()
+
 class OpenAIConfiguration(BaseModel):
     # If None, we'll pull from the environment
     # variable OPENAI_API_TOKEN
     openai_api_token: Optional[str] = None
+    model: Optional[str] = "gpt-4-1106-preview"
     class Config:
         default_factory = lambda: OpenAIConfiguration()
 
@@ -133,6 +140,7 @@ class AssistantConfiguration(BaseModel):
     openai: OpenAIConfiguration = Field(default_factory=OpenAIConfiguration)
     local_llama_cpp: LlamaCPPConfiguration = Field(default_factory=LlamaCPPConfiguration)
     text_gen_web_ui: TextGenWebUIConfiguration = Field(default_factory=TextGenWebUIConfiguration)
+    ollama: OllamaConfiguration = Field(default_factory=OllamaConfiguration)
     query_engine: QueryEngineType = QueryEngineType.multi_step_query_engine
     index_configurations: RevaIndexConfiguration = Field(default_factory=RevaIndexConfiguration)
 

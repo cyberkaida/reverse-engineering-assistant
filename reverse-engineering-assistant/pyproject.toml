@@ -17,7 +17,7 @@ classifiers = [
     "Programming Language :: Python",
 ]
 dependencies = [
-    "llama-index",
+    "llama-index==0.9.3",
     "llama-cpp-python",
     "sentence_transformers",
     "PyYAML",

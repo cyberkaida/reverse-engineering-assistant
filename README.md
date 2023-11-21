@@ -5,15 +5,12 @@ reverse engineering tasks. This includes both _offline_ and online inference and
 
 RevA is different to other efforts at building AI assistants for RE tasks because it uses a technique
 called [embedding](https://openai.com/blog/introducing-text-and-code-embeddings)
-to give the AI assistant a sort of "long term memory". This allows the model to reason about the whole
-program, rather than just a single function.
-
-This technique uses a kind of "semantic hash" to look up relevant information to your query and pass
-it to the large language model (LLM) when you ask a question. RevA provides a variety of information
-sources to the model and the model can look up information from these sources.
+to give the AI assistant a sort of "long term memory". The model also is given access to a number of tools
+that are tweaked to perform well with queries provided by the LLM. This allows the model to reason about the whole
+program, rather than just a single function. The tools are tweaked to lead the AI to examine deeper.
 
 Using this technique you can ask general questions and get relevant answers. The model prioritises
-information from the embeddings, but when there is no information it can still respond to generic
+information from the embeddings and tools, but when there is no information it can still respond to generic
 questions from its training.
 
 You can ask questions like:
@@ -30,11 +27,14 @@ RevA is based on [llama-index](https://github.com/jerryjliu/llama_index),
 which supports a number of models.
 
 Built in support is provided for:
+- [OpenAI](https://platform.openai.com/overview) for online inference and easy setup (Needs an OpenAI API key)
+- [Ollama](https://ollama.ai) and any model it supports for local on-device inference or connecting to a self hosted remote inference server.
+
+Limited support is provided for:
 - [llama-cpp](https://llama-cpp-python.readthedocs.io/en/latest/) and any model it supports for local on-device inference
 - [text-generation-webui](https://github.com/oobabooga/text-generation-webui) and any model it supports for self-hosted remote inference
-- [OpenAI](https://platform.openai.com/overview) for online inference and easy setup (Needs an OpenAI API key)
 
-Adding additional models is easy if it is supported by llama-index or langchain (on which llama-index is based).
+Adding additional inference servers is easy if it is supported by llama-index or langchain (on which llama-index is based).
 
 See the configuration section for more information about setting the model.
 
@@ -46,29 +46,43 @@ is not present on first start, a default configuration using
 OpenAI for inference and the `OPENAI_API_TOKEN` environment
 variable will be used.
 
-```yaml
-local_llama_cpp:
-  # At least pone of `model_path` or `model_url` must be specified
-  # If you have the model locally, you can put the path here
-  model_path: null
-  # Otherwise if you have the URL here it will be cached on first launch
-  model_url: https://huggingface.co/TheBloke/Llama-2-13B-chat-GGML/resolve/main/llama-2-13b-chat.ggmlv3.q6_K.bin
-  number_gpu_layers: 1
+The most important setting is the `type` top level setting.
+This controls what inference service you use. These are the
+same as the configuration keys, for example to use Ollama,
+set type to `ollama` and configure the settings in the `ollama:`
+section.
 
-openai:
-  # If you have an API token you can put it here, or you can leave this as `null`
-  # and RevA will check the `OPENAI_API_TOKEN` environment variable.
-  openai_api_token: null
+The configuration also contains the prompts used for the models.
+If you use Ollama or OpenAI these will be processed to fit the
+model specific prompt pattern (placing the system prompt in the
+correct tags, etc).
 
-text_gen_web_ui:
-  # Set this to the base URL of your text_gen_web_ui instance
-  text_gen_web_ui_url: http://text-gen-web-ui.local:5000
+For `llama-cpp` and `text-generation-webui` these may need to be
+configured for your specific model. For this reason Ollama is
+preferred for self hosting.
 
-# Set this to the model type you would like to use
-type: local_llama_cpp
-# type: openai
-# type: text_gen_web_ui
-```
+## Workflow
+
+RevA has a two step workflow.
+1. Generate knowledge base
+2. Perform inference
+
+To generate the knowledge base, use the plugin for your disassembler and run the Assistant script.
+See [Ghidra Support](#ghidra-support) below.
+
+First your disassembler extracts the information required for the knowledge base and embeddings.
+This involes extracting each function, it's decompilation and some metadata. These are written to a "project". This allows
+multiple programs and data sources to be combined into one set of knowledge for the assistant. For example multiple malware
+samples, or a program and its libraries could be included along with previous RE notes.
+
+Projects are stored in `~/.cache/reverse-engineering-assistant/projects`. If you make significant changes to your
+annotations or analysis in your disassembler, you should delete and regenerate your project directory. This cache
+is a _snapshot_ of the state of your disassembler.
+
+To ask questions and run the inference a command line tool is provided. Run `revassistant --project ${NAME_OF_YOUR_PROJECT}` to begin the chat session.
+
+`revassistant` will hash the knowledge base and generate and combine the embeddings into a searchable
+index. Once this is complete the index is saved to disk and the chat session begins.
 
 ## Installation
 
@@ -85,30 +99,9 @@ python3 -m pip install ./reverse-engineering-assistant
 The chat can be started with:
 
 ```sh
-revassistant
+revassistant --project ${NAME_OF_YOUR_PROJECT}
 ```
 
-## Workflow
-
-RevA has a two step workflow.
-1. Generate knowledge base
-2. Perform inference
-
-To generate the knowledge base, use the plugin for your disassembler and run the Assistant script.
-See [Ghidra Support](#ghidra-support) below.
-
-First your disassembler extracts the information required for the knowledge base and embeddings.
-This involes extracting each function, it's decompilation and some metadata. These are written to a "project". This allows
-multiple programs and data sources to be combined into one set of knowledge for the assistant. For example multiple malware
-samples, or a program and its libraries could be included along with previous RE notes.
-
-To ask questions and run the inference a command line tool is provided. Run `revassistant` to begin the chat session.
-
-`revassistant` will hash the knowledge base and generate and combine the embeddings into a searchable
-index. Once this is complete the index is saved to disk and the chat session begins.
-
-Generating the knowledge base is the longest step and may take a few minutes on an Apple M1 laptop with 16GB of RAM. Once the
-embedding and indexing is complete, this data is saved and can be reused.
 
 # Ghidra Support
 

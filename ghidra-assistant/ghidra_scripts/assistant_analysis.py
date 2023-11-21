@@ -7,6 +7,11 @@ from ghidra.program.model.listing import Program
 from reverse_engineering_assistant.tool import ToolIntegration
 from reverse_engineering_assistant.documents import AssistantDocument, DecompiledFunctionDocument, CrossReferenceDocument
 
+if not isinstance(currentProgram, ghidra.program.model.listing.Program):
+    currentProgram = currentProgram()
+if not isinstance(monitor, ghidra.util.task.TaskMonitor):
+    monitor = monitor()
+
 class GhidraAssistant(ToolIntegration):
     flat_api: ghidra.program.flatapi.FlatProgramAPI
     decompiler_api: ghidra.app.decompiler.flatapi.FlatDecompilerAPI
@@ -30,8 +35,13 @@ class GhidraAssistant(ToolIntegration):
     def get_decompiled_functions(self) -> List[DecompiledFunctionDocument]:
         documents: List[DecompiledFunctionDocument] = []
         for function in self.program.getListing().getFunctions(True):
+
+            if function.isThunk():
+                print(f"Skipping thunk function {function.getName()}")
+                continue
+
             try:
-                # TODO: Check that the function entry is withing initialised memory to avoid
+                # TODO: Check that the function entry is within initialised memory to avoid
                 # attempting to decompile thunks
                 decompiled_function = self._decompile_function(function)
                 # Strip out the calling convention warning. This scares the model and it becomes very
@@ -52,7 +62,8 @@ class GhidraAssistant(ToolIntegration):
                 function_name=function.getName(),
                 decompilation=decompiled_function,
                 function_start_address=function.getEntryPoint().toString(),
-                function_signature=str(function),
+                function_end_address=function.getBody().getMaxAddress().toString(),
+                function_signature=str(function.getSignature(True)),
                 namespace=function.getParentNamespace().getName(),
                 is_external=function.isExternal(),
                 inbound_calls=[ref.getName() for ref in references_to],
@@ -77,6 +88,7 @@ class GhidraAssistant(ToolIntegration):
 
             reference_doc = CrossReferenceDocument(
                     address=function.getEntryPoint().toString(),
+                    symbol=function.getName(),
                     references_to=[ref.toString() for ref in references_to],
                     references_from=[ref.toString() for ref in references_from],
             )
@@ -94,5 +106,6 @@ class GhidraAssistant(ToolIntegration):
 
 if __name__ == '__main__':
     print("Ghidra Assistant!")
+
     assistant = GhidraAssistant(currentProgram) 
     assistant.save_documents()

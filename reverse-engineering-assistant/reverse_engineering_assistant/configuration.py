@@ -110,6 +110,7 @@ class OpenAIConfiguration(BaseModel):
     # If None, we'll pull from the environment
     # variable OPENAI_API_TOKEN
     openai_api_token: Optional[str] = None
+    model: Optional[str] = "gpt-4-1106-preview"
     class Config:
         default_factory = lambda: OpenAIConfiguration()
 

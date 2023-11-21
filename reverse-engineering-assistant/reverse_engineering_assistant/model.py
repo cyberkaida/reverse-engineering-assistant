@@ -22,7 +22,22 @@ class ModelType(Enum):
 
 def get_llm_openai() -> ServiceContext:
     from llama_index.embeddings import OpenAIEmbedding
-    service_context = ServiceContext.from_defaults(embed_model=OpenAIEmbedding())
+    from llama_index.llms import OpenAI
+    from .configuration import load_configuration, AssistantConfiguration
+    import os
+    config: AssistantConfiguration = load_configuration()
+    model = config.openai.model
+    if not model:
+        model = "gpt-4-1106-preview"
+
+    api_key = config.openai.openai_api_token
+    if not api_key or api_key == 'null':
+        api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        raise ValueError("OpenAI API key not set. Please set the OPENAI_API_KEY environment variable or set your key in the ReVA config.")
+
+    llm = OpenAI(model=model, api_key=api_key)
+    service_context = ServiceContext.from_defaults(embed_model=OpenAIEmbedding(api_key=api_key), llm=llm)
 
     return service_context
 

@@ -490,6 +490,10 @@ def main():
     logging_level = logging.DEBUG if args.verbose else logging.INFO
     logger.level = logging_level
 
+    logging.getLogger('httpx').setLevel(logging.WARNING)
+    logging.getLogger('openai._base_client').setLevel(logging.WARNING)
+    logging.getLogger('httpcore').setLevel(logging.WARNING)
+
     try:
         import rich
         from rich.logging import RichHandler

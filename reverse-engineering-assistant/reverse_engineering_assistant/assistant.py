@@ -232,6 +232,7 @@ class RevaDecompilationIndex(RevaIndex, RevaTool):
         self.tool_functions = [
             self.get_decompilation_for_function,
             self.get_defined_function_list_paginated,
+            self.get_defined_function_count,
         ]
 
     @cache

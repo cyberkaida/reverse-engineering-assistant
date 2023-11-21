@@ -448,6 +448,7 @@ class ReverseEngineeringAssistant(object):
             llm=self.service_context.llm,
             chat_history=chat_history,
             verbose=logger.level == logging.DEBUG,
+            max_iterations=30,
             )
 
     def query(self, query: str) -> str:

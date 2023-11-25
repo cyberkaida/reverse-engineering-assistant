@@ -122,6 +122,8 @@ class DecompiledFunctionDocument(AssistantDocument):
             function_signature=data['metadata']['function_signature'],
             inbound_calls=data['metadata']['inbound_calls'],
             outbound_calls=data['metadata']['outbound_calls'],
+            is_external=data['metadata']['is_external'],
+            is_generated_name=data['metadata']['is_generated_name'],
         )
 
     def __init__(self,
@@ -129,12 +131,22 @@ class DecompiledFunctionDocument(AssistantDocument):
                  decompilation: str,
                  function_start_address: int | str,
                  function_end_address: int | str,
-                 function_signature = str,
+                 function_signature: str,
                  namespace: Optional[str] = None,
                  is_external: Optional[bool] = None,
                  inbound_calls: Optional[List[str]] = None,
                  outbound_calls: Optional[List[str]] = None,
+                 is_generated_name: Optional[bool] = None,
                  ) -> None:
+        assert isinstance(function_name, str)
+        assert isinstance(decompilation, str)
+        assert isinstance(function_start_address, int) or isinstance(function_start_address, str)
+        assert isinstance(function_end_address, int) or isinstance(function_end_address, str)
+        assert isinstance(function_signature, str)
+        assert isinstance(is_external, bool) or is_external is None
+        assert isinstance(inbound_calls, list) or inbound_calls is None
+        assert isinstance(outbound_calls, list) or outbound_calls is None
+
         if isinstance(function_start_address, int):
             function_start_address = hex(function_start_address)
         if isinstance(function_end_address, int):
@@ -149,6 +161,7 @@ class DecompiledFunctionDocument(AssistantDocument):
             'inbound_calls': inbound_calls or [],
             'outbound_calls': outbound_calls or [],
             'is_external': is_external or False,
+            'is_generated_name': is_generated_name,
         }
         super().__init__(name=function_name, content=content, document_type=self.document_type, metadata=metadata)
 

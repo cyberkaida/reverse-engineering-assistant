@@ -70,7 +70,7 @@ RevA has a two step workflow.
 2. Perform inference
 
 To generate the knowledge base, use the plugin for your disassembler and run the Assistant script.
-See [Ghidra Support](#ghidra-support) below.
+See [Ghidra Support](#ghidra-support) and [BinaryNinja Support](#binary-ninja-support) below.
 
 First your disassembler extracts the information required for the knowledge base and embeddings.
 This involes extracting each function, it's decompilation and some metadata. These are written to a "project". This allows
@@ -119,7 +119,13 @@ You can generate the knowledge base by running the Ghidra Assistant analysis fro
 
 # Binary Ninja Support
 
-Coming soon!
+Install the ReVA BinaryNinja plugin by opening your BinaryNinja plugin directory (Plugins -> Open Plugin Folder)
+and copying or symbolic linking the [binary-ninja-assistant](./binary-ninja-assistant) directory into the plugin
+directory.
+
+Restart Binary Ninja and "ReVA Push" will be available in the Plugin menu.
+Press this to push data from BinaryNinja to ReVA, then follow the instructions in the [Workflow section](#workflow).
+The project name will be the name of the current open file.
 
 # Support
 

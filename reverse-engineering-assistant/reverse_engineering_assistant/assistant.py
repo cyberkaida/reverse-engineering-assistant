@@ -251,10 +251,14 @@ class RevaDecompilationIndex(RevaIndex, RevaTool):
     @cache
     def get_decompilation_for_function(self, function_name_or_address: str) -> Dict[str, str]:
         """
-        Return the decompilation for the given function name.
+        Return the decompilation for the given function. The function can be specified by name or address.
         """
         for document in self.get_documents():
+            # In some cases the function name will be passed in
             if document.name == function_name_or_address:
+                return document.to_json()
+            # In some cases the function signature will be different to the name
+            if document.function_signature == function_name_or_address:
                 return document.to_json()
             # TODO: We want to surface an exact match first, but this is not working
             # because we do an `in` here.
@@ -274,7 +278,9 @@ class RevaDecompilationIndex(RevaIndex, RevaTool):
         """
         start = (page - 1) * page_size
         end = start + page_size
-        return [document.function_signature for document in self.get_documents()[start:end] if document.is_external == False]
+        if start > len(self.get_documents()):
+            return []
+        return [document.name for document in self.get_documents()[start:end] if document.is_external == False]
     
     @cache
     def get_defined_function_count(self) -> int:

@@ -117,21 +117,6 @@ class OpenAIConfiguration(BaseModel):
 class RevaBaseIndexConfiguration(BaseModel, ABC):
     description: str
 
-class RevaIndexDecompilationConfiguration(RevaBaseIndexConfiguration):
-    description: str = """This index is used to answer questions about decompilation."""
-    class Config:
-        default_factory = lambda: RevaIndexDecompilationConfiguration()
-
-
-class RevaIndexConfiguration(BaseModel):
-    decompilation: Optional[RevaIndexDecompilationConfiguration] = Field(default_factory=RevaIndexDecompilationConfiguration)
-
-    def get(self, index_name):
-        return getattr(self, index_name)
-
-    class Config:
-        default_factory = lambda: RevaIndexConfiguration()
-
 # Base configuration
 
 class AssistantConfiguration(BaseModel):
@@ -142,7 +127,6 @@ class AssistantConfiguration(BaseModel):
     text_gen_web_ui: TextGenWebUIConfiguration = Field(default_factory=TextGenWebUIConfiguration)
     ollama: OllamaConfiguration = Field(default_factory=OllamaConfiguration)
     query_engine: QueryEngineType = QueryEngineType.multi_step_query_engine
-    index_configurations: RevaIndexConfiguration = Field(default_factory=RevaIndexConfiguration)
 
     class Config:
         default_factory = lambda: AssistantConfiguration()
@@ -158,8 +142,6 @@ def load_configuration() -> AssistantConfiguration:
         create_default_configuration()
     with open(configuration_file, "r") as f:
         config = yaml.safe_load(f)
-        #config["type"] = ModelType(config["type"])
-        #config["query_engine"] = QueryEngineType(config.get("query_engine", "multi_step_query_engine"))
         assistant_configuration = AssistantConfiguration.parse_obj(config)
 
         return assistant_configuration

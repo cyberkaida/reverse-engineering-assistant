@@ -120,7 +120,7 @@ class RevaBaseIndexConfiguration(BaseModel, ABC):
 # Base configuration
 
 class AssistantConfiguration(BaseModel):
-    type: ModelType = ModelType.LocalLlamaCpp
+    type: ModelType = ModelType.OpenAI
     prompt_template: PromptTemplates = Field(default_factory=PromptTemplates)
     openai: OpenAIConfiguration = Field(default_factory=OpenAIConfiguration)
     local_llama_cpp: LlamaCPPConfiguration = Field(default_factory=LlamaCPPConfiguration)

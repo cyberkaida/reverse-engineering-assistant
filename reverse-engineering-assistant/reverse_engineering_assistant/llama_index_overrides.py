@@ -49,21 +49,22 @@ class RevaReActOutputParser(ReActOutputParser):
         original_output = output
         import re
 
-        thought = re.search(r'Thought: (.*?)(Action:|Answer:)', output, re.DOTALL).group(1).strip()
-        
-        assert thought
+        if 'Thought:' in output:
+            thought = re.search(r'Thought: (.*?)(Action:|Answer:)', output, re.DOTALL).group(1).strip()
+            
+            assert thought
 
-        if 'Action:' in output:
-            action = re.search(r'Action: ([a-zA-Z_0-9]+).*?Action Input:', output, re.DOTALL).group(1).strip()
-            action_input = re.search(r'Action Input: (\{.*?\})', output, re.DOTALL).group(1).strip()
+            if 'Action:' in output:
+                action = re.search(r'Action: ([a-zA-Z_0-9]+).*?Action Input:', output, re.DOTALL).group(1).strip()
+                action_input = re.search(r'Action Input: (\{.*?\})', output, re.DOTALL).group(1).strip()
 
-            # If the LLM chooses to take an action, we will clean it's output.
-            assert action_input.startswith('{') and action_input.endswith('}'), f"Action input is not a JSON object: {action_input}"    
-            output = f"Thought: {thought}\nAction: {action}\nAction Input: {action_input}\n"            
+                # If the LLM chooses to take an action, we will clean it's output.
+                assert action_input.startswith('{') and action_input.endswith('}'), f"Action input is not a JSON object: {action_input}"    
+                output = f"Thought: {thought}\nAction: {action}\nAction Input: {action_input}\n"            
 
-        # Now we have cleaned the output, we will pass it to the parser
-        if output != original_output:
-            logger.debug(f"Replaced output from LLM: {original_output} with {output}")
+            # Now we have cleaned the output, we will pass it to the parser
+            if output != original_output:
+                logger.debug(f"Replaced output from LLM: {original_output} with {output}")
         return super().parse(output, is_streaming)
 
 class RevaLLMLog(BaseCallbackHandler):

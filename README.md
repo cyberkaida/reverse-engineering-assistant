@@ -1,6 +1,6 @@
 # ReVA - Reverse Engineering Assistant
 
-[✨ A quick demo! ✨](https://asciinema.org/a/622155)
+[✨ A quick demo! ✨](https://asciinema.org/a/626197)
 
 The reverse engineering assistant (ReVA) is a project to build a disassembler agnostic AI assistant for
 reverse engineering tasks. This includes both _offline_ and online inference and a simple architecture.

@@ -17,11 +17,12 @@ classifiers = [
     "Programming Language :: Python",
 ]
 dependencies = [
-    "llama-index==0.9.3",
+    "llama-index==0.9.13",
     "llama-cpp-python",
     "sentence_transformers",
     "PyYAML",
     "pydantic",
+    "rich",
 ]
 
 [project.scripts]

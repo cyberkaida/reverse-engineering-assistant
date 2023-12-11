@@ -13,9 +13,17 @@ from abc import ABC, abstractmethod, abstractproperty
 import logging
 from pathlib import Path
 import json
+import tempfile
+import datetime
+import random
+
+from rich.prompt import Prompt
+from rich.logging import RichHandler
+
 
 from typing import Any, Callable, List, Optional, Type, Dict
 
+import llama_index
 from llama_index import PromptTemplate, ServiceContext
 from llama_index import StorageContext, VectorStoreIndex
 from llama_index.indices.base import BaseIndex
@@ -35,6 +43,9 @@ from .tool import AssistantProject
 from .model import ModelType, get_model
 from .configuration import load_configuration, AssistantConfiguration
 from .documents import AssistantDocument, CrossReferenceDocument, DecompiledFunctionDocument
+
+from .llama_index_overrides import RevaSelectionOutputParser, REVA_SELECTION_OUTPUT_PARSER, RevaReActOutputParser
+
 
 logger = logging.getLogger('reverse_engineering_assistant')
 
@@ -361,9 +372,9 @@ class RevaSummaryIndex(RevaIndex):
             if document.type == DecompiledFunctionDocument:
                 summary = summeriser.get_response(
                         query_str="Summarise the following function",
-                        text_chunks=[assistant_document.content],
+                        text_chunks=[document.content],
                 )
-                logger.debug(f"Summary {assistant_document}: {summary}")
+                logger.debug(f"Summary {document}: {summary}")
 
                 # TODO: Implement the SummaryDocument type?
                 raise NotImplementedError()
@@ -387,10 +398,20 @@ class ReverseEngineeringAssistant(object):
     project: AssistantProject
     service_context: ServiceContext
 
-    query_engine: Optional[BaseQueryEngine] = None
+    query_engine: Optional[ReActAgent] = None
 
     indexes: List[RevaIndex]
     tools: List[RevaTool]
+
+    @classmethod
+    def get_projects(cls) -> List[str]:
+        """
+        Gets the names of the projects.
+
+        Returns:
+            List[str]: A list of project names.
+        """
+        return AssistantProject.get_projects()
 
     def __init__(self, project: str | AssistantProject, model_type: Optional[ModelType] = None) -> None:
         """
@@ -411,6 +432,8 @@ class ReverseEngineeringAssistant(object):
         self.indexes = [ index_type(self.project, self.service_context) for index_type in _reva_index_list]
         # and the same for tools
         self.tools = [ tool_type(self.project, self.service_context) for tool_type in _reva_tool_list]
+        logger.debug(f"Loaded indexes: {self.indexes}")
+        logger.debug(f"Loaded tools: {self.tools}")
         
     def update_embeddings(self):
         """
@@ -419,7 +442,7 @@ class ReverseEngineeringAssistant(object):
         # Summarise all summaries together, to try to derive a high level description of the program
         summeriser = TreeSummarize(
             service_context=self.service_context,
-            verbose=logger.level == logging.DEBUG,
+            verbose=False,
         ) 
 
         # Here I pull our own prompt
@@ -431,15 +454,14 @@ class ReverseEngineeringAssistant(object):
         #   and return many results.
         # - Cross references. This should return a graph like view of the callers and callees of a function
         #   Similar to the function call tree in Ghidra
-        from .llama_index_overrides import RevaSelectionOutputParser, REVA_SELECTION_OUTPUT_PARSER
 
         logger.debug("Building query engine")
         for index in self.indexes:
             logger.debug(f"Loading index: {index}")
 
-        chat_history: List[ChatMessage] = [
-             ChatMessage(role="system", content=configuration.prompt_template.system_prompt),
-        ]
+        #chat_history: List[ChatMessage] = [
+        #     ChatMessage(role="system", content=configuration.prompt_template.system_prompt),
+        #]
 
         base_tools: List[BaseTool] = []
         for tool in self.tools:
@@ -452,9 +474,11 @@ class ReverseEngineeringAssistant(object):
             tools=base_tools,
             service_context=self.service_context,
             llm=self.service_context.llm,
-            chat_history=chat_history,
-            verbose=logger.level == logging.DEBUG,
+            #chat_history=chat_history,
+            verbose=False,
             max_iterations=30,
+            # We need to override the output parser to fix a bug in llama-index
+            output_parser=RevaReActOutputParser(),
             )
 
     def query(self, query: str) -> str:
@@ -472,7 +496,7 @@ class ReverseEngineeringAssistant(object):
         if not self.query_engine:
             raise Exception("No query engine available")
         try:
-            answer = self.query_engine.query(query)
+            answer = self.query_engine.chat(query)
             return str(answer)
         except json.JSONDecodeError as e:
             logger.exception(f"Failed to parse JSON response from query engine: {e.doc}")
@@ -484,41 +508,107 @@ class ReverseEngineeringAssistant(object):
             logger.exception(f"Failed to query engine: {e}")
             return "Failed to query engine... Try again?"
 
+def get_thinking_emoji() -> str:
+    """
+    Returns a random thinking emoji.
+    """
+    return random.choice([
+        "🤔",
+        "🧐",
+        "🤨",
+        "👩‍💻",
+        "😖",
+        "✨",
+        "🔮",
+        "🔍",
+        "🧙‍♀️",
+    ])
+    
+
 def main():
     import argparse
-
+    default_log_filename = f"ReVa-{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}.reva.log"
+    default_log_path = Path(tempfile.gettempdir()) / Path(default_log_filename)
     parser = argparse.ArgumentParser(description="Reverse Engineering Assistant")
     parser.add_argument('-v', '--verbose', action='store_true', help="Verbose output")
-    parser.add_argument("--project", required=True, type=str, help="Project name")
-    # TODO: Model type from configuration
+    parser.add_argument('--debug', action='store_true', help="Debug output, useful during development")
+    parser.add_argument("--project", required=False, type=str, help="Project name")
+    parser.add_argument("-i", "--interactive", action="store_true", help="Enter interactive mode after processing queries")
+
+    parser.add_argument('-f', '--file', default=default_log_path, type=Path, help=f"Save output to file. Defaults to {default_log_path}")
+
+    parser.add_argument("QUERY", nargs="*", help="Queries to run, if not specified, enter interactive mode")
 
     args = parser.parse_args()
-    logging_level = logging.DEBUG if args.verbose else logging.INFO
-    logger.level = logging_level
-
-    logging.getLogger('httpx').setLevel(logging.WARNING)
-    logging.getLogger('openai._base_client').setLevel(logging.WARNING)
-    logging.getLogger('httpcore').setLevel(logging.WARNING)
-
-    try:
-        import rich
-        from rich.logging import RichHandler
-        logging.basicConfig(level=logging_level, handlers=[RichHandler()])
-    except ImportError:
-        logging.basicConfig(level=logging_level)
 
 
+    from rich.console import Console
+    console = Console(record=True)
+    console.print(f"Welcome to ReVa! The Reverse Engineering Assistant", style="bold green")
+    console.print(f"Logging to {args.file}")
+
+    logging_level = logging.DEBUG if args.debug else logging.INFO
+    logger.level = logging.DEBUG
+
+    rich_handler = RichHandler(
+        console=console,
+        level=logging_level,
+    )
+    logger.addHandler(rich_handler)
+
+    # Create a logger for logging to a file. We'll log everything to the file.
+    file_handler = logging.FileHandler(args.file)
+    file_handler.setLevel(logging.DEBUG)
+    file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+    logging.root.setLevel(logging.DEBUG)
+    logging.root.addHandler(file_handler)
+
+    # Turn off some annoyingly verbose loggers
+    logging.getLogger('httpx').handlers = [file_handler]
+    logging.getLogger('openai._base_client').handlers = [file_handler]
+    logging.getLogger('httpcore').handlers = [file_handler]
+
+    # If the debug flag is enabled we turn these on.
+    from . import llama_index_overrides
+    llama_index.global_handler = llama_index_overrides.RevaLLMLog()
+    
+    if args.debug:
+        logging.getLogger('httpx').addHandler(rich_handler)
+        logging.getLogger('openai._base_client').addHandler(rich_handler)
+        logging.getLogger('httpcore').addHandler(rich_handler)
+
+    
+
+    if not args.project:
+        args.project = Prompt.ask("No project specified, please select from the following:", choices=ReverseEngineeringAssistant.get_projects())
+
+    logger.info(f"Loading project {args.project}")
     assistant = ReverseEngineeringAssistant(args.project)
-    logger.info("Updating embeddings... this might take a while...")
     assistant.update_embeddings()
+    logger.info(f"Project loaded!")
 
     # Enter into a loop answering questions
-    try:
-        while True:
-            query = input("> ")
-            print(assistant.query(query))
-    except KeyboardInterrupt:
-        print("Finished!")
 
+
+    for query in args.QUERY:
+        logger.debug(query)
+        with console.status(f"Thinking..."):
+            result = assistant.query(query)
+            console.print(result)
+
+    if args.interactive or not args.QUERY:
+        try:
+            while True:
+                query = Prompt.ask("> ")
+                logger.debug(query)
+                with console.status(f"{get_thinking_emoji()} Thinking..."):
+                    result = assistant.query(query)
+                    console.print(result)
+        except KeyboardInterrupt:
+            console.print("Finished!")
+
+    if args.file:
+        logger.info(f"Output saved to {args.file}")
+    
 if __name__ == '__main__':
     main()

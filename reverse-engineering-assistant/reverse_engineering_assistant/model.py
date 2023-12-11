@@ -45,9 +45,13 @@ def get_llm_ollama() -> ServiceContext:
     from llama_index.llms import Ollama
     from langchain.embeddings import OllamaEmbeddings
     from .configuration import load_configuration, AssistantConfiguration
+
     config: AssistantConfiguration = load_configuration()
     system_prompt = config.prompt_template.system_prompt
     base_url = config.ollama.ollama_server_url
+
+    logger.info("Loading Ollama - {config.ollama.model} from {base_url}")
+
     llm = Ollama(
             model=config.ollama.model,
             base_url=base_url,
@@ -59,6 +63,11 @@ def get_llm_ollama() -> ServiceContext:
         base_url=base_url,
         model=config.ollama.model,
     )
+
+    logger.debug(f"Ollama system prompt: {system_prompt}")
+    logger.debug(f"Ollama base URL: {base_url}")
+    logger.debug(f"Ollama model: {config.ollama.model}")
+
     return ServiceContext.from_defaults(embed_model=embeddings, llm=llm)
 
 

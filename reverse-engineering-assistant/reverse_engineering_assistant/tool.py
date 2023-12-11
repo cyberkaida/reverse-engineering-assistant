@@ -22,6 +22,16 @@ class AssistantProject(object):
     project_path: Path
     documents_path: Path
 
+    @classmethod
+    def get_projects(cls) -> List[str]:
+        """
+        Gets the names of the projects.
+
+        Returns:
+        - A list of project names.
+        """
+        return [project.name for project in projects_path.iterdir() if project.is_dir()]
+
     def __init__(self, project: str) -> None:
         """
         Initializes a new AssistantProject object.

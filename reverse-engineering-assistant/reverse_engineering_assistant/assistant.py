@@ -32,6 +32,7 @@ from llama_index.indices.query.base import BaseQueryEngine
 from llama_index.llms import ChatMessage
 from llama_index.response_synthesizers.tree_summarize import TreeSummarize
 from llama_index.schema import Document
+from llama_index.memory import ChatMemoryBuffer, BaseMemory
 
 # Agent
 from llama_index.agent import ReActAgent
@@ -403,6 +404,9 @@ class ReverseEngineeringAssistant(object):
     indexes: List[RevaIndex]
     tools: List[RevaTool]
 
+    model_memory: BaseMemory
+
+
     @classmethod
     def get_projects(cls) -> List[str]:
         """
@@ -426,8 +430,13 @@ class ReverseEngineeringAssistant(object):
         else:
             self.project = project
 
+
+
         self.service_context = get_model(model_type)
 
+        self.model_memory = ChatMemoryBuffer.from_defaults(
+            llm=self.service_context.llm,
+        )
         # We take the registered index types and construct concrete indexes from them
         self.indexes = [ index_type(self.project, self.service_context) for index_type in _reva_index_list]
         # and the same for tools
@@ -479,6 +488,7 @@ class ReverseEngineeringAssistant(object):
             max_iterations=30,
             # We need to override the output parser to fix a bug in llama-index
             output_parser=RevaReActOutputParser(),
+            memory=self.model_memory,
             )
 
     def query(self, query: str) -> str:
@@ -571,7 +581,7 @@ def main():
     # If the debug flag is enabled we turn these on.
     from . import llama_index_overrides
     llama_index.global_handler = llama_index_overrides.RevaLLMLog()
-    
+
     if args.debug:
         logging.getLogger('httpx').addHandler(rich_handler)
         logging.getLogger('openai._base_client').addHandler(rich_handler)
@@ -592,6 +602,7 @@ def main():
 
     for query in args.QUERY:
         logger.debug(query)
+        console.print(f"> {query}")
         with console.status(f"Thinking..."):
             result = assistant.query(query)
             console.print(result)

@@ -537,8 +537,10 @@ def get_thinking_emoji() -> str:
 
 def main():
     import argparse
-    default_log_filename = f"ReVa-{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}.reva.log"
-    default_log_path = Path(tempfile.gettempdir()) / Path(default_log_filename)
+    default_log_filename = f"ReVa-{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}.reva"
+    default_log_path = Path(tempfile.gettempdir()) / Path(default_log_filename+".log")
+    default_chat_path = Path(tempfile.gettempdir()) / Path(default_log_filename+".chat.txt")
+    default_html_path = Path(tempfile.gettempdir()) / Path(default_log_filename+".html")
     parser = argparse.ArgumentParser(description="Reverse Engineering Assistant")
     parser.add_argument('-v', '--verbose', action='store_true', help="Verbose output")
     parser.add_argument('--debug', action='store_true', help="Debug output, useful during development")
@@ -572,11 +574,6 @@ def main():
     file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
     logging.root.setLevel(logging.DEBUG)
     logging.root.addHandler(file_handler)
-
-    # Turn off some annoyingly verbose loggers
-    logging.getLogger('httpx').handlers = [file_handler]
-    logging.getLogger('openai._base_client').handlers = [file_handler]
-    logging.getLogger('httpcore').handlers = [file_handler]
 
     # If the debug flag is enabled we turn these on.
     from . import llama_index_overrides
@@ -612,14 +609,21 @@ def main():
             while True:
                 query = Prompt.ask("> ")
                 logger.debug(query)
+                console.print(f"[green]{query}[/green]")
                 with console.status(f"{get_thinking_emoji()} Thinking..."):
                     result = assistant.query(query)
                     console.print(result)
         except KeyboardInterrupt:
             console.print("Finished!")
+        except EOFError:
+            console.print("Finished")
 
     if args.file:
         logger.info(f"Output saved to {args.file}")
+        logger.info(f"Chat saved to {default_chat_path}")
+        console.save_text(default_chat_path)
+        logger.info(f"HTML saved to {default_html_path}")
+        console.save_html(default_html_path)
     
 if __name__ == '__main__':
     main()

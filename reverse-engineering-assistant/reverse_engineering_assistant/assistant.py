@@ -621,9 +621,9 @@ def main():
     if args.file:
         logger.info(f"Output saved to {args.file}")
         logger.info(f"Chat saved to {default_chat_path}")
-        console.save_text(default_chat_path)
+        console.save_text(default_chat_path, clear=False)
         logger.info(f"HTML saved to {default_html_path}")
-        console.save_html(default_html_path)
+        console.save_html(default_html_path, clear=False)
     
 if __name__ == '__main__':
     main()

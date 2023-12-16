@@ -50,7 +50,7 @@ def get_llm_ollama() -> ServiceContext:
     system_prompt = config.prompt_template.system_prompt
     base_url = config.ollama.ollama_server_url
 
-    logger.info("Loading Ollama - {config.ollama.model} from {base_url}")
+    logger.info(f"Loading Ollama - {config.ollama.model} from {base_url}")
 
     llm = Ollama(
             model=config.ollama.model,

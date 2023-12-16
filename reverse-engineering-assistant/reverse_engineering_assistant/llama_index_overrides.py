@@ -92,8 +92,7 @@ class RevaLLMLog(BaseCallbackHandler):
     
     def _log_llm_event(self, payload: Dict) -> None:
         from llama_index.llms import ChatMessage
-        #self.logger.debug(f"{payload}")
-        pass
+        self.logger.debug(f"LLM payload: {payload}")
 
     def on_event_start(
         self,

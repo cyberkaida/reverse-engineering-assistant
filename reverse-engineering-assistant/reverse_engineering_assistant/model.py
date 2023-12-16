@@ -56,7 +56,6 @@ def get_llm_ollama() -> ServiceContext:
             model=config.ollama.model,
             base_url=base_url,
             additional_kwargs={
-                    'system': system_prompt,
                 }
             )
     embeddings = OllamaEmbeddings(

@@ -45,7 +45,7 @@ from .model import ModelType, get_model
 from .configuration import load_configuration, AssistantConfiguration
 from .documents import AssistantDocument, CrossReferenceDocument, DecompiledFunctionDocument
 
-from .llama_index_overrides import RevaSelectionOutputParser, REVA_SELECTION_OUTPUT_PARSER, RevaReActOutputParser
+from .llama_index_overrides import RevaSelectionOutputParser, REVA_SELECTION_OUTPUT_PARSER, RevaReActOutputParser, RevaReActChatFormatter
 
 
 logger = logging.getLogger('reverse_engineering_assistant')
@@ -487,6 +487,7 @@ class ReverseEngineeringAssistant(object):
             verbose=False,
             max_iterations=30,
             # We need to override the output parser to fix a bug in llama-index
+            react_chat_formatter=RevaReActChatFormatter(),
             output_parser=RevaReActOutputParser(),
             memory=self.model_memory,
             )

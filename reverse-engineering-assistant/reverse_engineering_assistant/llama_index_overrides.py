@@ -4,6 +4,7 @@ from llama_index.selectors.prompts import SingleSelectPrompt
 from llama_index.output_parsers.selection import SelectionOutputParser, _escape_curly_braces, FORMAT_STR
 from llama_index.agent.react.output_parser import ReActOutputParser
 from llama_index.agent.react.types import BaseReasoningStep
+from llama_index.agent.react.formatter import ReActChatFormatter
 
 from llama_index.callbacks.base_handler import BaseCallbackHandler
 from llama_index.callbacks.schema import CBEventType, EventPayload
@@ -37,6 +38,10 @@ class RevaSelectionOutputParser(SelectionOutputParser):
         template = prompt_template.replace('{schema}', _escape_curly_braces(FORMAT_STR))
         return template
     
+class RevaReActChatFormatter(ReActChatFormatter):
+    pass
+
+
 class RevaReActOutputParser(ReActOutputParser):
     def parse(self, output: str, is_streaming: bool = False) -> BaseReasoningStep:
         """ We need to fix the output from the LLM to match the expected outout from the parser.

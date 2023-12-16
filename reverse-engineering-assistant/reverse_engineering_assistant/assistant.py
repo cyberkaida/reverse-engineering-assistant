@@ -537,10 +537,12 @@ def get_thinking_emoji() -> str:
 
 def main():
     import argparse
+
     default_log_filename = f"ReVa-{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}.reva"
     default_log_path = Path(tempfile.gettempdir()) / Path(default_log_filename+".log")
     default_chat_path = Path(tempfile.gettempdir()) / Path(default_log_filename+".chat.txt")
     default_html_path = Path(tempfile.gettempdir()) / Path(default_log_filename+".html")
+
     parser = argparse.ArgumentParser(description="Reverse Engineering Assistant")
     parser.add_argument('-v', '--verbose', action='store_true', help="Verbose output")
     parser.add_argument('--debug', action='store_true', help="Debug output, useful during development")
@@ -549,10 +551,13 @@ def main():
 
     parser.add_argument('-f', '--file', default=default_log_path, type=Path, help=f"Save output to file. Defaults to {default_log_path}")
 
+    parser.add_argument("-p", "--provider", required=False, choices=ModelType._member_names_, help="The model provider to use, defaults to the value of `model_type` in the config file.")
+
     parser.add_argument("QUERY", nargs="*", help="Queries to run, if not specified, enter interactive mode")
 
     args = parser.parse_args()
 
+    model_type = ModelType._member_map_[args.provider] if args.provider else None
 
     from rich.console import Console
     console = Console(record=True)
@@ -590,7 +595,7 @@ def main():
         args.project = Prompt.ask("No project specified, please select from the following:", choices=ReverseEngineeringAssistant.get_projects())
 
     logger.info(f"Loading project {args.project}")
-    assistant = ReverseEngineeringAssistant(args.project)
+    assistant = ReverseEngineeringAssistant(args.project, model_type)
     assistant.update_embeddings()
     logger.info(f"Project loaded!")
 

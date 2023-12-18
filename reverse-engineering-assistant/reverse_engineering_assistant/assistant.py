@@ -469,7 +469,7 @@ class ReverseEngineeringAssistant(object):
             system_message=configuration.prompt_template.system_prompt,
             verbose=True,
             handle_parsing_errors=True,
-            stop_words=["\nObservation"],
+            stop_words=["\nObservation", "\nThought"],
         )
 
         executor = AgentExecutor.from_agent_and_tools(

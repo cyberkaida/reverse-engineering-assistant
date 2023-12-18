@@ -4,9 +4,7 @@ from __future__ import annotations
 from typing import Optional
 from pathlib import Path
 
-from langchain.llms import TextGen, LlamaCpp
-from llama_index import ServiceContext, load_index_from_storage
-from llama_index.llms import LangChainLLM, OpenAI
+from langchain.llms.base import BaseLLM
 
 from enum import Enum
 
@@ -20,9 +18,8 @@ class ModelType(Enum):
     TextGenWebUI = "text_gen_web_ui"
     Ollama = "ollama"
 
-def get_llm_openai() -> ServiceContext:
-    from llama_index.embeddings import OpenAIEmbedding
-    from llama_index.llms import OpenAI
+def get_llm_openai() -> BaseLLM:
+    from langchain.chat_models import ChatOpenAI
     from .configuration import load_configuration, AssistantConfiguration
     import os
     config: AssistantConfiguration = load_configuration()
@@ -36,13 +33,11 @@ def get_llm_openai() -> ServiceContext:
     if not api_key:
         raise ValueError("OpenAI API key not set. Please set the OPENAI_API_KEY environment variable or set your key in the ReVA config.")
 
-    llm = OpenAI(model=model, api_key=api_key)
-    service_context = ServiceContext.from_defaults(embed_model=OpenAIEmbedding(api_key=api_key), llm=llm)
+    llm = ChatOpenAI(model=model, api_key=api_key)
+    return llm
 
-    return service_context
-
-def get_llm_ollama() -> ServiceContext:
-    from llama_index.llms import Ollama
+def get_llm_ollama() -> BaseLLM:
+    from langchain.llms.ollama import Ollama
     from langchain.embeddings import OllamaEmbeddings
     from .configuration import load_configuration, AssistantConfiguration
 
@@ -55,10 +50,7 @@ def get_llm_ollama() -> ServiceContext:
     llm = Ollama(
             model=config.ollama.model,
             base_url=base_url,
-            additional_kwargs={
-                    'system': system_prompt,
-                }
-            )
+    )
     embeddings = OllamaEmbeddings(
         base_url=base_url,
         model=config.ollama.model,
@@ -68,10 +60,10 @@ def get_llm_ollama() -> ServiceContext:
     logger.debug(f"Ollama base URL: {base_url}")
     logger.debug(f"Ollama model: {config.ollama.model}")
 
-    return ServiceContext.from_defaults(embed_model=embeddings, llm=llm)
+    return llm
 
 
-def get_llm_text_gen_web_ui() -> ServiceContext:
+def get_llm_text_gen_web_ui() -> BaseLLM:
     from langchain import PromptTemplate, LLMChain
     from langchain.llms import TextGen
     from langchain.embeddings import HuggingFaceEmbeddings
@@ -81,12 +73,11 @@ def get_llm_text_gen_web_ui() -> ServiceContext:
     text_gen_web_ui_url = config.text_gen_web_ui.text_gen_web_ui_url
     llm = TextGen(model_url=text_gen_web_ui_url)
 
-    return ServiceContext.from_defaults(embed_model='local', llm=llm)
+    return llm
 
 def get_llm_local_llama_cpp() -> ServiceContext:
-    from llama_index.llms import LlamaCPP
-    from llama_index.llms.llama_utils import messages_to_prompt, completion_to_prompt
-    from .configuration import load_configuration, AssistantConfiguration, LlamaCPPConfiguration
+    from langchain.llms.llamacpp import LlamaCPP
+    from .configuration import load_configuration, AssistantConfiguration
 
     config: AssistantConfiguration = load_configuration()
 
@@ -118,9 +109,9 @@ def get_llm_local_llama_cpp() -> ServiceContext:
     #        completion_to_prompt=completion_to_prompt,
     #        verbose=False,
     #        )
-    return ServiceContext.from_defaults(embed_model='local', llm='local')
+    raise NotImplementedError("Local Llama CPP is not yet implemented.")
 
-def get_model(model_type: Optional[ModelType] = None) -> ServiceContext:
+def get_model(model_type: Optional[ModelType] = None) -> BaseLLM:
     """
     Returns a ServiceContext object for the specified model type.
 

@@ -9,7 +9,7 @@ It provides a number of APIs for
 
 from __future__ import annotations
 from functools import cached_property, cache
-from abc import ABC, abstractmethod, abstractproperty
+from abc import ABC, abstractmethod
 import logging
 from pathlib import Path
 import json
@@ -20,26 +20,14 @@ import random
 from rich.prompt import Prompt
 from rich.logging import RichHandler
 
-
 from typing import Any, Callable, List, Optional, Type, Dict
 
-import llama_index
-from llama_index import PromptTemplate, ServiceContext
-from llama_index import StorageContext, VectorStoreIndex
-from llama_index.indices.base import BaseIndex
-from llama_index.indices.loading import load_index_from_storage
-from llama_index.indices.query.base import BaseQueryEngine
-from llama_index.llms import ChatMessage
-from llama_index.response_synthesizers.tree_summarize import TreeSummarize
-from llama_index.schema import Document
-from llama_index.memory import ChatMemoryBuffer, BaseMemory
-
-# Agent
-from llama_index.agent import ReActAgent
-from llama_index.tools import BaseTool
-from llama_index.tools.query_engine import QueryEngineTool
-from llama_index.tools.function_tool import FunctionTool
-
+from langchain.llms.base import BaseLLM
+from langchain.memory.chat_memory import BaseMemory
+from langchain.tools.base import BaseTool, Tool, StructuredTool
+from langchain.agents.conversational_chat.base import ConversationalChatAgent
+from langchain.agents.structured_chat.base import StructuredChatAgent
+from langchain.agents.agent import Agent, AgentExecutor
 from .tool import AssistantProject
 from .model import ModelType, get_model
 from .configuration import load_configuration, AssistantConfiguration
@@ -75,7 +63,8 @@ class RevaTool(ABC):
     output.
     """
     project: AssistantProject
-    service_context: ServiceContext
+
+    llm: BaseLLM
 
     tool_name: str
     description: str
@@ -85,24 +74,25 @@ class RevaTool(ABC):
     def __str__(self) -> str:
         return f"{self.tool_name}"
 
-    def __init__(self, project: AssistantProject, service_context: ServiceContext) -> None:
+    def __init__(self, project: AssistantProject, llm: BaseLLM) -> None:
         self.project = project
-        self.service_context = service_context
+        self.llm = llm
 
     @cache
-    def as_tools(self) -> List[FunctionTool]:
+    def as_tools(self) -> List[Tool]:
         """
         Returns a list of tools usable by the assistant
         based on the value of self.tool_functions.
         """
-        tools: List[FunctionTool] = []
+        tools: List[Tool] = []
         for tool_function in self.tool_functions:
-            tool = FunctionTool.from_defaults(
-                fn=tool_function,
+            tool = StructuredTool.from_function(
+                tool_function,
+                name=tool_function.__name__,
+                description=tool_function.__doc__,
             )
             tools.append(tool)
         return tools
-
 
 
 class RevaIndex(ABC):
@@ -113,7 +103,7 @@ class RevaIndex(ABC):
     # The project we will operate on
     project: AssistantProject
     # Service context for the index
-    service_context: ServiceContext
+    llm: BaseLLM
 
     index_name: str
     description: str
@@ -123,9 +113,9 @@ class RevaIndex(ABC):
     def __str__(self) -> str:
         return f"{self.index_name} @ {self.index_directory}"
 
-    def __init__(self, project: AssistantProject, service_context: ServiceContext) -> None:
+    def __init__(self, project: AssistantProject, llm: BaseLLM) -> None:
         self.project = project
-        self.service_context = service_context
+        self.llm = llm
     
     @cached_property
     @abstractmethod
@@ -227,7 +217,6 @@ class RevaIndex(ABC):
         index.storage_context.persist(str(self.index_directory))
         return index
 
-#@register_index
 @register_tool
 class RevaDecompilationIndex(RevaIndex, RevaTool):
     """
@@ -237,8 +226,8 @@ class RevaDecompilationIndex(RevaIndex, RevaTool):
     index_name = "decompilation"
     description = "Used for retrieving decompiled functions"
     index_directory: Path
-    def __init__(self, project: AssistantProject, service_context: ServiceContext) -> None:
-        super().__init__(project, service_context)
+    def __init__(self, project: AssistantProject, llm: BaseLLM) -> None:
+        super().__init__(project, llm)
         self.index_directory = self.project.get_index_directory() / "decompiled_functions"
         self.description = "Used for retrieveing decompiled functions"
         self.tool_functions = [
@@ -247,7 +236,6 @@ class RevaDecompilationIndex(RevaIndex, RevaTool):
             self.get_defined_function_count,
         ]
 
-    @cache
     def get_documents(self) -> List[DecompiledFunctionDocument]:
         """
         Filter documents in the project to just the DecompiledFunctionDocuments
@@ -260,10 +248,11 @@ class RevaDecompilationIndex(RevaIndex, RevaTool):
                 decompiled_functions.append(document)
         return decompiled_functions
     
-    @cache
     def get_decompilation_for_function(self, function_name_or_address: str) -> Dict[str, str]:
         """
         Return the decompilation for the given function. The function can be specified by name or address.
+        Hint: It is too slow to decompile _all_ functions, so use get_defined_function_list_paginated to get a list of functions
+        and be sure to specify the function name or address exactly.
         """
         for document in self.get_documents():
             # In some cases the function name will be passed in
@@ -283,18 +272,23 @@ class RevaDecompilationIndex(RevaIndex, RevaTool):
             if int(function_name_or_address, 16) >= int(document.function_start_address, 16) and int(function_name_or_address, 16) <= int(document.function_end_address, 16):
                 return document.to_json()
                 
-    @cache
     def get_defined_function_list_paginated(self, page: int, page_size: int = 20) -> List[str]:
         """
         Return a paginated list of functions in the index. Use get_defined_function_count to get the total number of functions.
+        page is 1 indexed. To get the first page, set page to 1. Do not set page to 0.
         """
+        if isinstance(page, str):
+            page = int(page)
+        if isinstance(page_size, str):
+            page_size = int(page_size)
+        if page == 0:
+            raise ValueError("`page` is 1 indexed, page cannot be 0")
         start = (page - 1) * page_size
         end = start + page_size
         if start > len(self.get_documents()):
-            return []
+            raise ValueError("Page is greater than maximum page count.")
         return [document.name for document in self.get_documents()[start:end] if document.is_external == False]
     
-    @cache
     def get_defined_function_count(self) -> int:
         """
         Return the total number of defined functions in the index.
@@ -307,8 +301,8 @@ class RevaCrossReferenceTool(RevaTool):
     An tool to retrieve cross references, to and from, addresses.
     """
     index_directory: Path
-    def __init__(self, project: AssistantProject, service_context: ServiceContext) -> None:
-        super().__init__(project, service_context)
+    def __init__(self, project: AssistantProject, llm: BaseLLM) -> None:
+        super().__init__(project, llm)
         self.index_directory = self.project.get_index_directory() / "cross_references"
         self.description = "Used for retrieving cross references to and from addresses"
 
@@ -354,8 +348,8 @@ class RevaSummaryIndex(RevaIndex):
     reverse engineering assistant.
     """
     index_directory: Path
-    def __init__(self, project: AssistantProject, service_context: ServiceContext) -> None:
-        super().__init__(project, service_context)
+    def __init__(self, project: AssistantProject, llm: BaseLLM) -> None:
+        super().__init__(project, llm)
         self.index_directory = self.project.get_index_directory() / "summaries"
         self.description = "Used for retrieving summaries"
 
@@ -397,15 +391,15 @@ class ReverseEngineeringAssistant(object):
     """
 
     project: AssistantProject
-    service_context: ServiceContext
 
-    query_engine: Optional[ReActAgent] = None
+    query_engine: Optional[AgentExecutor] = None
 
     indexes: List[RevaIndex]
     tools: List[RevaTool]
 
-    model_memory: BaseMemory
+    llm: BaseLLM
 
+    model_memory: BaseMemory
 
     @classmethod
     def get_projects(cls) -> List[str]:
@@ -430,29 +424,19 @@ class ReverseEngineeringAssistant(object):
         else:
             self.project = project
 
+        self.llm = get_model(model_type)
 
-
-        self.service_context = get_model(model_type)
-
-        self.model_memory = ChatMemoryBuffer.from_defaults(
-            llm=self.service_context.llm,
-        )
         # We take the registered index types and construct concrete indexes from them
-        self.indexes = [ index_type(self.project, self.service_context) for index_type in _reva_index_list]
+        self.indexes = [ index_type(self.project, self.llm) for index_type in _reva_index_list]
         # and the same for tools
-        self.tools = [ tool_type(self.project, self.service_context) for tool_type in _reva_tool_list]
+        self.tools = [ tool_type(self.project, self.llm) for tool_type in _reva_tool_list]
         logger.debug(f"Loaded indexes: {self.indexes}")
         logger.debug(f"Loaded tools: {self.tools}")
         
-    def update_embeddings(self):
+    def update_embeddings(self) -> Agent:
         """
         Updates the embeddings for the reverse engineering assistant.
         """
-        # Summarise all summaries together, to try to derive a high level description of the program
-        summeriser = TreeSummarize(
-            service_context=self.service_context,
-            verbose=False,
-        ) 
 
         # Here I pull our own prompt
 
@@ -472,25 +456,31 @@ class ReverseEngineeringAssistant(object):
         #     ChatMessage(role="system", content=configuration.prompt_template.system_prompt),
         #]
 
-        base_tools: List[BaseTool] = []
+        base_tools: List[Tool] = []
         for tool in self.tools:
             for function in tool.as_tools():
                 base_tools.append(function)
         for index in self.indexes:
             base_tools.append(index.as_tool())
 
-        self.query_engine = ReActAgent.from_tools(
+        agent =  StructuredChatAgent.from_llm_and_tools(
+            llm=self.llm,
             tools=base_tools,
-            service_context=self.service_context,
-            llm=self.service_context.llm,
-            #chat_history=chat_history,
-            verbose=False,
-            max_iterations=30,
-            # We need to override the output parser to fix a bug in llama-index
-            react_chat_formatter=RevaReActChatFormatter(),
-            output_parser=RevaReActOutputParser(),
-            memory=self.model_memory,
-            )
+            system_message=configuration.prompt_template.system_prompt,
+            verbose=True,
+            handle_parsing_errors=True,
+        )
+
+        executor = AgentExecutor.from_agent_and_tools(
+            agent=agent,
+            tools=base_tools,
+            verbose=True,
+            handle_parsing_errors=True,
+        )
+
+        self.query_engine = executor
+
+        return self.query_engine
 
     def query(self, query: str) -> str:
         """
@@ -507,7 +497,12 @@ class ReverseEngineeringAssistant(object):
         if not self.query_engine:
             raise Exception("No query engine available")
         try:
-            answer = self.query_engine.chat(query)
+            answer = self.query_engine.invoke(
+                {
+                    "chat_history": [],
+                    "input": query,
+                }
+            )
             return str(answer)
         except json.JSONDecodeError as e:
             logger.exception(f"Failed to parse JSON response from query engine: {e.doc}")
@@ -583,7 +578,6 @@ def main():
 
     # If the debug flag is enabled we turn these on.
     from . import llama_index_overrides
-    llama_index.global_handler = llama_index_overrides.RevaLLMLog()
 
     if args.debug:
         logging.getLogger('httpx').addHandler(rich_handler)

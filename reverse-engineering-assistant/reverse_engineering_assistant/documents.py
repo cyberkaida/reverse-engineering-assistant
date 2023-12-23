@@ -158,8 +158,8 @@ class DecompiledFunctionDocument(AssistantDocument):
             'function_start_address': function_start_address,
             'function_end_address': function_end_address,
             'function_signature': function_signature,
-            'inbound_calls': inbound_calls or [],
-            'outbound_calls': outbound_calls or [],
+            'inbound_calls': list(set(inbound_calls or [])), # Only list unique calls
+            'outbound_calls': list(set(outbound_calls or [])),
             'is_external': is_external or False,
             'is_generated_name': is_generated_name,
         }

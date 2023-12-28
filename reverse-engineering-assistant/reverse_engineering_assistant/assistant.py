@@ -38,19 +38,21 @@ from .llama_index_overrides import RevaSelectionOutputParser, REVA_SELECTION_OUT
 
 logger = logging.getLogger('reverse_engineering_assistant')
 
+
+_reva_index_list: List[Type[RevaIndex]] = []
 """
 List of RevaIndex classes to be registered with the assistant.
 """
-_reva_index_list: List[Type[RevaIndex]] = []
 
 def register_index(cls: Type[RevaIndex]) -> Type[RevaIndex]:
     _reva_index_list.append(cls)
     return cls
 
+
+_reva_tool_list: List[Type[RevaTool]] = []
 """
 List of RevaTool classes to be registered with the assistant.
 """
-_reva_tool_list: List[Type[RevaTool]] = []
 
 def register_tool(cls: Type[RevaTool]) -> Type[RevaTool]:
     _reva_tool_list.append(cls)

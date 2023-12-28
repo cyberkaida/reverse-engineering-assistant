@@ -23,8 +23,11 @@ dependencies = [
     "PyYAML",
     "pydantic",
     "rich",
+    "Flask",
 ]
 
 [project.scripts]
 revassistant = "reverse_engineering_assistant.assistant:main"
+reva-serve = "reverse_engineering_assistant.assistant_api_server:main"
+reva-server = "reverse_engineering_assistant.assistant_api_server:main"
 

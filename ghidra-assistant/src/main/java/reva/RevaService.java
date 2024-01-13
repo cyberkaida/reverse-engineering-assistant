@@ -2,6 +2,7 @@ package reva;
 
 import org.apache.commons.lang.NotImplementedException;
 
+import ghidra.util.Msg;
 import ghidra.util.task.Task;
 import ghidra.util.task.TaskMonitor;
 import reva.RevaProtocol.RevaMessage;
@@ -51,6 +52,7 @@ public class RevaService extends Task {
      * @param message the message to send
      */
     public void sendMessage(RevaMessage message) {
+        Msg.info(this, message.toJson());
         this.toRevaQueue.add(message);
     }
 
@@ -61,7 +63,8 @@ public class RevaService extends Task {
     public RevaService(Program program) {
         super("RevaService");
         this.currentProgram = program;
-        this.revaProjectPath = REVA_CACHE_DIR.resolve("projects").resolve(program.getName());
+        // Note, Program can be null here.
+        //this.revaProjectPath = REVA_CACHE_DIR.resolve("projects").resolve(program.getName());
 
     }
 
@@ -72,7 +75,7 @@ public class RevaService extends Task {
         // Monitor the to-tool directory for messages from ReVa.
 
        // TODO: Loop and run the communications function
-       throw new NotImplementedException();
+       Msg.trace(this, "ReVa communications thread starting");
     }
 
 

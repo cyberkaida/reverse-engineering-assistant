@@ -134,6 +134,7 @@ class RevaHeartbeat(RevaMessageToReva):
     """
     message_type: str = "RevaHeartbeat"
 
+@register_message
 class RevaHeartbeatResponse(RevaMessageToTool):
     """
     A heartbeat response is sent in response to a heartbeat message.

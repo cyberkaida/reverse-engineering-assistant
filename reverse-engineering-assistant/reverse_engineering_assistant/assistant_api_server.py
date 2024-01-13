@@ -82,8 +82,11 @@ def run_task(project_name: str) -> Optional[RevaMessage]:
     """
     Run a task on the given project
     """
-    project = get_assistant_for_project(project_name)
     task = request.json
+    logger.debug(f"Received task {task} on project {project_name}")
+
+    project = get_assistant_for_project(project_name)
+
 
     reva_message = RevaMessage.to_specific_message(task)
 

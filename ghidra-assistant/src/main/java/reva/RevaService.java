@@ -17,6 +17,9 @@ import java.util.List;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 
+import java.net.http.HttpClient;
+import java.net.URI;
+
 /**
  * This class provides services to the ReVa tool
  * (that runs outside of Ghidra). It will run a background
@@ -26,11 +29,24 @@ import java.util.concurrent.LinkedBlockingQueue;
  */
 public class RevaService extends Task {
 
+    class RevaServerException extends Exception {
+        public RevaServerException(String message) {
+            super(message);
+        }
+
+        public RevaServerException(String message, Throwable cause) {
+            super(message, cause);
+        }
+    }
+
     private Program currentProgram;
     /**
      * The path to the ReVa project directory for the program represented by {@link currentProgram}.
      */
     private Path revaProjectPath;
+
+    private HttpClient revaClient;
+    private URI revaServerBase;;
 
 
     // At first we will implement a simple directory based thing.
@@ -53,7 +69,37 @@ public class RevaService extends Task {
      */
     public void sendMessage(RevaMessage message) {
         Msg.info(this, message.toJson());
-        this.toRevaQueue.add(message);
+        //this.toRevaQueue.add(message);
+        try {
+            RevaMessage response = communicate(message);
+            Msg.info(this, "Got response: " + response.toJson());
+        } catch (RevaServerException e) {
+            Msg.error(this, "Exception while communicating with ReVa", e);
+        }
+    }
+
+    private RevaMessage communicate(RevaMessage message) throws RevaServerException{
+        // Use a HTTP request to talk to the reva-server
+        // on localhost:44916.
+        // We want to send the JSON message to the endpoint
+        // /project/<project_name>/task
+        // We'll hardcode the project to "wide" for now
+        
+        URI endpoint = revaServerBase.resolve("/project/wide/task");
+        Msg.info(this, "Sending message to " + endpoint.toString());
+        try {
+            var request = java.net.http.HttpRequest.newBuilder()
+                .uri(endpoint)
+                .header("Content-Type", "application/json")
+                .POST(java.net.http.HttpRequest.BodyPublishers.ofString(message.toJson()))
+                .build();
+            var response = revaClient.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
+            Msg.info(this, "Got response: " + response.body());
+            return RevaMessage.fromJson(response.body());
+        } catch (Exception e) {
+            Msg.error(this, "Exception while comminucating with ReVa", e);
+            throw new RevaServerException("Exception while communicating with ReVa", e);
+        }
     }
 
     /**
@@ -66,6 +112,12 @@ public class RevaService extends Task {
         // Note, Program can be null here.
         //this.revaProjectPath = REVA_CACHE_DIR.resolve("projects").resolve(program.getName());
 
+        this.revaClient = HttpClient.newHttpClient();
+        try {
+            this.revaServerBase = new URI("http://localhost:44916");
+        } catch (Exception e) {
+            throw new RuntimeException("Malformed URI", e);
+        }
     }
 
     /**

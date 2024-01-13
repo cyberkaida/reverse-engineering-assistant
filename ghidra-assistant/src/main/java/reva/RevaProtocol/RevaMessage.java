@@ -2,6 +2,8 @@ package reva.RevaProtocol;
 import java.util.UUID;
 import com.google.gson.Gson;
 
+import ghidra.util.Msg;
+
 import java.util.ArrayList;
 import java.util.List;
 
@@ -14,7 +16,22 @@ import java.util.List;
  * to and from JSON, see {@link fromJson} and {@link toJson}.
  */
 public class RevaMessage {
-    public String messageType = "RevaMessage";
+
+    /**
+     * Thrown when there is a problem parsing a RevaMessage from JSON.
+     */
+    public static class RevaMessageParseException extends Exception {
+        public RevaMessageParseException(String message) {
+            super(message);
+        }
+
+        public RevaMessageParseException(String message, Throwable cause) {
+            super(message, cause);
+        }
+    }
+
+    public String message_type = "RevaMessage";
+    UUID messageId = UUID.randomUUID();
 
     /**
      * A list of all the ReVa message types we know about.
@@ -27,9 +44,10 @@ public class RevaMessage {
         messageTypes = new ArrayList<Class<? extends RevaMessage>>();
         // Add all the message types we know about here
         messageTypes.add(RevaHeartbeat.class);
+        messageTypes.add(RevaHeartbeatResponse.class);
     }
 
-    UUID messageId;
+
 
     /**
      * Given a JSON string, deserialize it into a specific subclass of RevaMessage.
@@ -40,21 +58,26 @@ public class RevaMessage {
      * @param json the JSON string to deserialize
      * @return the deserialized message, as a subclass of RevaMessage
      */
-    public static RevaMessage fromJson(String json) {
+    public static RevaMessage fromJson(String json) throws RevaMessageParseException {
         Gson gson = new Gson();
         // Here we must dispatch to the correct subclass
 
         // First we'll turn it into a generic message
         RevaMessage generic = gson.fromJson(json, RevaMessage.class);
+        Msg.trace(RevaMessage.class, "Parsing message type: " + generic.message_type + " from JSON: " + json);
         // Then we'll find the correct subclass
         for (Class<? extends RevaMessage> type : messageTypes) {
-            if (type.getName().equals(generic.messageType)) {
+
+            // TODO: Is there a better way to get this now that
+            // the message_type field is not static?
+            if (type.getSimpleName().equals(generic.message_type)) {
+                Msg.trace(RevaMessage.class, "Found message class: " + type.getName());
                 // And then we'll turn it into the correct subclass
                 return gson.fromJson(json, type);
             }
         }
 
-        throw new RuntimeException("Unknown message type: " + generic.messageType);
+        throw new RevaMessageParseException("Unknown message type: " + generic.message_type);
     }
 
     public String toJson() {

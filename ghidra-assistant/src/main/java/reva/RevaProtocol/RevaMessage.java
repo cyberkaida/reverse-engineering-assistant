@@ -31,7 +31,7 @@ public class RevaMessage {
     }
 
     public String message_type = "RevaMessage";
-    UUID messageId = UUID.randomUUID();
+    public UUID message_id = UUID.randomUUID();
 
     /**
      * A list of all the ReVa message types we know about.
@@ -45,6 +45,7 @@ public class RevaMessage {
         // Add all the message types we know about here
         messageTypes.add(RevaHeartbeat.class);
         messageTypes.add(RevaHeartbeatResponse.class);
+        messageTypes.add(RevaGetDataAtAddress.class);
     }
 
 

@@ -70,6 +70,8 @@ class RevaMessage(BaseModel, ABC):
     """
     @validator("message_type")
     def validate_message_type(cls, value: str) -> str:
+
+        
         assert value in _reva_message_types, f"Unknown message type {value}"
         return value
 
@@ -87,7 +89,10 @@ class RevaMessage(BaseModel, ABC):
         # First validate it is a ReVa message
         RevaMessage.parse_obj(thing)
         try:
-            return _reva_message_types[thing["message_type"]].parse_obj(thing)
+            print(f"Converting message to specific type {thing['message_type']}")
+            message_class = _reva_message_types[thing["message_type"]]
+            print(f"Message class is {message_class}")
+            return message_class.parse_obj(thing)
         except KeyError:
             raise ValueError(f"No message type in message, is this a ReVa message?")
 
@@ -96,6 +101,14 @@ class RevaMessage(BaseModel, ABC):
         Send this message
         """
         raise NotImplementedError()
+
+class RevaMessageResponse(RevaMessage, ABC):
+    """
+    Base class for all messages sent in response to a RevaMessage
+    """
+    response_to: UUID = Field()
+    error_message: Optional[str] = Field()
+
     
 class RevaMessageToTool(RevaMessage):
     """
@@ -108,8 +121,6 @@ class RevaMessageToTool(RevaMessage):
         """
         raise NotImplementedError()
 
-        
-        
 
 class RevaMessageToReva(RevaMessage):
     """
@@ -124,8 +135,6 @@ class RevaMessageToReva(RevaMessage):
 
 # MARK: - Heartbeats
 
-
-
 @register_message
 class RevaHeartbeat(RevaMessageToReva):
     """
@@ -135,7 +144,7 @@ class RevaHeartbeat(RevaMessageToReva):
     message_type: str = "RevaHeartbeat"
 
 @register_message
-class RevaHeartbeatResponse(RevaMessageToTool):
+class RevaHeartbeatResponse(RevaMessageToTool, RevaMessageResponse):
     """
     A heartbeat response is sent in response to a heartbeat message.
     """
@@ -169,10 +178,13 @@ class RevaGetCursorResponse(RevaMessageToReva):
 
 # MARK: Memory related messages
 
+@register_message
 class RevaGetDataAtAddress(RevaMessageToTool):
     """
     Request the data at a given address
     """
+    message_type: str = "RevaGetDataAtAddress"
+
     address: int = Field()
     """
     The address to retrieve data from
@@ -182,10 +194,13 @@ class RevaGetDataAtAddress(RevaMessageToTool):
     The number of bytes to retrieve
     """
 
-class RevaGetDataAtAddressResponse(RevaMessageToReva):
+@register_message
+class RevaGetDataAtAddressResponse(RevaMessageToReva, RevaMessageResponse):
     """
     Response to a RevaGetDataAtAddress message
     """
+    message_type: str = "RevaGetDataAtAddressResponse"
+
     address: int = Field()
     """
     The address this data is at

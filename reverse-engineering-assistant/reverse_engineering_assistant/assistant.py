@@ -24,6 +24,7 @@ from typing import Any, Callable, List, Optional, Type, Dict
 
 from langchain.llms.base import BaseLLM
 from langchain.memory.chat_memory import BaseMemory
+from langchain.memory import ConversationTokenBufferMemory
 from langchain.tools.base import BaseTool, Tool, StructuredTool
 from langchain.agents.conversational_chat.base import ConversationalChatAgent
 from langchain.agents.structured_chat.base import StructuredChatAgent
@@ -342,8 +343,6 @@ class RevaCrossReferenceTool(RevaTool):
                 return document.references_from
 
 
-
-
 class RevaSummaryIndex(RevaIndex):
     """
     An index of summaries available to the
@@ -403,6 +402,8 @@ class ReverseEngineeringAssistant(object):
 
     model_memory: BaseMemory
 
+    chat_history: List[str]
+
     @classmethod
     def get_projects(cls) -> List[str]:
         """
@@ -421,6 +422,7 @@ class ReverseEngineeringAssistant(object):
             project (str | AssistantProject): The reverse engineering project to query.
             model_type (Optional[ModelType], optional): The model type for the reverse engineering assistant. Defaults to None.
         """
+        self.chat_history = []
         if isinstance(project, str):
             self.project = AssistantProject(project)
         else:
@@ -465,6 +467,10 @@ class ReverseEngineeringAssistant(object):
         for index in self.indexes:
             base_tools.append(index.as_tool())
 
+        self.model_memory = ConversationTokenBufferMemory(
+            llm=self.llm
+        )
+
         agent =  StructuredChatAgent.from_llm_and_tools(
             llm=self.llm,
             tools=base_tools,
@@ -479,11 +485,11 @@ class ReverseEngineeringAssistant(object):
             tools=base_tools,
             verbose=True,
             handle_parsing_errors=True,
+            memory=self.model_memory,
         )
 
         self.query_engine = executor
-
-        return self.query_engine
+        return executor
 
     def query(self, query: str) -> str:
         """
@@ -496,16 +502,21 @@ class ReverseEngineeringAssistant(object):
             str: The result of the query.
         """
         if not self.query_engine:
-            self.update_embeddings()
+            self.query_engine = self.update_embeddings()
         if not self.query_engine:
             raise Exception("No query engine available")
         try:
-            answer = self.query_engine.invoke(
+
+            answer = self.query_engine.run(
                 {
-                    "chat_history": [],
                     "input": query,
                 }
             )
+
+            #self.chat_history.append(answer["input"])
+            #self.chat_history.append(answer["output"])
+            #import pdb; pdb.set_trace()
+
             return str(answer)
         except json.JSONDecodeError as e:
             logger.exception(f"Failed to parse JSON response from query engine: {e.doc}")
@@ -592,10 +603,20 @@ def main():
     if not args.project:
         args.project = Prompt.ask("No project specified, please select from the following:", choices=ReverseEngineeringAssistant.get_projects())
 
+    # Start up the API server
+    from .assistant_api_server import run_server
+    from threading import Thread
+    server_thread = Thread(target=run_server, args=())
+    server_thread.start()
+    console.print("API server started", style="bold green")
+
+
     logger.info(f"Loading project {args.project}")
     assistant = ReverseEngineeringAssistant(args.project, model_type)
     assistant.update_embeddings()
     logger.info(f"Project loaded!")
+
+
 
     # Enter into a loop answering questions
 

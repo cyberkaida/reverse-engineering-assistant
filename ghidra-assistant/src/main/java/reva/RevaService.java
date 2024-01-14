@@ -5,7 +5,10 @@ import org.apache.commons.lang.NotImplementedException;
 import ghidra.util.Msg;
 import ghidra.util.task.Task;
 import ghidra.util.task.TaskMonitor;
+import reva.RevaMessageHandlers.RevaMessageHandler;
 import reva.RevaProtocol.RevaMessage;
+import reva.RevaProtocol.RevaMessageResponse;
+
 import ghidra.program.model.address.Address;
 import ghidra.program.model.correlate.Block;
 import ghidra.program.model.listing.Program;
@@ -19,6 +22,7 @@ import java.util.concurrent.LinkedBlockingQueue;
 
 import java.net.http.HttpClient;
 import java.net.URI;
+import java.util.ArrayList;
 
 /**
  * This class provides services to the ReVa tool
@@ -39,18 +43,19 @@ public class RevaService extends Task {
         }
     }
 
-    private Program currentProgram;
+    public Program currentProgram;
     /**
-     * The path to the ReVa project directory for the program represented by {@link currentProgram}.
+     * The path to the ReVa project directory for the program represented by
+     * {@link currentProgram}.
      */
     private Path revaProjectPath;
 
     private HttpClient revaClient;
     private URI revaServerBase;;
 
-
     // At first we will implement a simple directory based thing.
-    public static final Path REVA_CACHE_DIR = Paths.get(System.getProperty("user.home"), ".cache", "reverse-engineering-assistant");
+    public static final Path REVA_CACHE_DIR = Paths.get(System.getProperty("user.home"), ".cache",
+            "reverse-engineering-assistant");
 
     /**
      * A queue of messages to send to ReVa.
@@ -61,41 +66,79 @@ public class RevaService extends Task {
      */
     private BlockingQueue<RevaMessage> toToolQueue = new LinkedBlockingQueue<RevaMessage>();
 
-
+    private List<RevaCallbackHandler> waitingForResponse = new ArrayList<RevaCallbackHandler>();
 
     /**
-     * Send a message to ReVa
-     * @param message the message to send
+     * Communicate synchronously with ReVa.
+     * 
+     * @apiNote If no response is received, we will wait _forever_.
+     * @param message The message to send
+     * @return RevaMessage The response from ReVa
      */
-    public void sendMessage(RevaMessage message) {
-        Msg.info(this, message.toJson());
-        //this.toRevaQueue.add(message);
+    public RevaMessage communicate(RevaMessage message) {
+        RevaCallbackHandler handler = new RevaCallbackHandler(message);
+        toRevaQueue.add(message);
+        waitingForResponse.add(handler);
+        return handler.waitForResponse();
+    }
+
+    /**
+     * Get the next message from ReVa.
+     * 
+     * @return the next message from ReVa, or null if there are no messages
+     * @throws RevaServerException if there is a problem communicating with ReVa
+     */
+    private RevaMessage getMessageFromServer() throws RevaServerException {
+        URI endpoint = revaServerBase.resolve("/project/" + currentProgram.getName() + "/message");
+        Msg.trace(this, "Getting message from " + endpoint.toString());
         try {
-            RevaMessage response = communicate(message);
-            Msg.info(this, "Got response: " + response.toJson());
-        } catch (RevaServerException e) {
-            Msg.error(this, "Exception while communicating with ReVa", e);
+            var request = java.net.http.HttpRequest.newBuilder()
+                    .uri(endpoint)
+                    .header("Content-Type", "application/json")
+                    .GET()
+                    .build();
+            var response = revaClient.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() == 204) {
+                Msg.trace(this, "No message from ReVa");
+                return null;
+            } else if (response.statusCode() != 200) {
+                throw new RevaServerException("ReVa server returned status code " + response.statusCode());
+            }
+            var message = RevaMessage.fromJson(response.body());
+            Msg.info(this, "Got message: " + message.toJson());
+            return message;
+        } catch (Exception e) {
+            Msg.error(this, "Exception while comminucating with ReVa", e);
+            throw new RevaServerException("Exception while communicating with ReVa", e);
         }
     }
 
-    private RevaMessage communicate(RevaMessage message) throws RevaServerException{
+    /**
+     * Send a message to ReVa.
+     * 
+     * @param message the message to send
+     * @throws RevaServerException if there is a problem communicating with ReVa
+     */
+    private void sendMessageToServer(RevaMessage message) throws RevaServerException {
         // Use a HTTP request to talk to the reva-server
         // on localhost:44916.
         // We want to send the JSON message to the endpoint
         // /project/<project_name>/task
         // We'll hardcode the project to "wide" for now
+
+        URI endpoint = revaServerBase.resolve("/project/" + currentProgram.getName() + "/message");
         
-        URI endpoint = revaServerBase.resolve("/project/wide/task");
         Msg.info(this, "Sending message to " + endpoint.toString());
         try {
             var request = java.net.http.HttpRequest.newBuilder()
-                .uri(endpoint)
-                .header("Content-Type", "application/json")
-                .POST(java.net.http.HttpRequest.BodyPublishers.ofString(message.toJson()))
-                .build();
+                    .uri(endpoint)
+                    .header("Content-Type", "application/json")
+                    .POST(java.net.http.HttpRequest.BodyPublishers.ofString(message.toJson()))
+                    .build();
             var response = revaClient.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
-            Msg.info(this, "Got response: " + response.body());
-            return RevaMessage.fromJson(response.body());
+            if (response.statusCode() != 200) {
+                throw new RevaServerException("ReVa server returned status code " + response.statusCode());
+            }
         } catch (Exception e) {
             Msg.error(this, "Exception while comminucating with ReVa", e);
             throw new RevaServerException("Exception while communicating with ReVa", e);
@@ -104,13 +147,15 @@ public class RevaService extends Task {
 
     /**
      * Create a new RevaService.
+     * 
      * @param program the program to provide services for
      */
     public RevaService(Program program) {
         super("RevaService");
         this.currentProgram = program;
         // Note, Program can be null here.
-        //this.revaProjectPath = REVA_CACHE_DIR.resolve("projects").resolve(program.getName());
+        // this.revaProjectPath =
+        // REVA_CACHE_DIR.resolve("projects").resolve(program.getName());
 
         this.revaClient = HttpClient.newHttpClient();
         try {
@@ -121,19 +166,67 @@ public class RevaService extends Task {
     }
 
     /**
-     * Run the main communications thread. This will make HTTP requests to the ReVa tool.
+     * Run the main communications thread. This will make HTTP requests to the ReVa
+     * tool.
      */
     public void run(TaskMonitor monitor) {
         // Monitor the to-tool directory for messages from ReVa.
 
-       // TODO: Loop and run the communications function
-       Msg.trace(this, "ReVa communications thread starting");
-    }
+        Msg.trace(this, "ReVa communications thread starting");
+        while (!monitor.isCancelled()) {
+            try {
+                // First see if there is a message waiting for us
+                RevaMessage message = getMessageFromServer();
+                if (message != null) {
+                    if (message instanceof RevaMessageResponse) {
+                        for (RevaCallbackHandler handler : waitingForResponse) {
+                            if (handler.isResponseForMessage((RevaMessageResponse) message)) {
+                                handler.submitResponse((RevaMessageResponse) message);
+                                waitingForResponse.remove(handler);
+                                break;
+                            }
+                        }
+                    } else {
+                        // TODO: Dispatch to a module?
+                        RevaMessageHandler handler = RevaMessageHandler.getHandler(message.message_type, this);
+                        Msg.trace(this, "Dispatching message to " + handler.getClass().getSimpleName());
+                        var response = handler.handleMessage(message);
+                        if (response != null) {
+                             Msg.trace(this, "Got response: " + response.toJson());
+                            toRevaQueue.add(response);
+                        }
+                        // TODO: Run in another thread?
+                        // toToolQueue.add(message);
+                    }
+                } else {
+                    Thread.sleep(1000);
+                }
 
+                // Then send any messages we have
+                message = toRevaQueue.poll();
+                if (message != null) {
+                    sendMessageToServer(message);
+                } else {
+                    Thread.sleep(1000);
+                }
+            } catch (RevaServerException e) {
+                Msg.error(this, "Exception while communicating with ReVa. Sleeping 5 seconds and trying again", e);
+                try {
+                    Thread.sleep(5000);
+                } catch (InterruptedException e1) {
+                    Msg.error(this, "Interrupted while waiting to retry", e1);
+                    monitor.cancel();
+                }
+            } catch (InterruptedException e) {
+                Msg.error(this, "Interrupted while waiting for message", e);
+            }
+        }
+    }
 
     /**
      * Get the bytes at the given address.
-     * @param addr the address to get bytes from
+     * 
+     * @param addr     the address to get bytes from
      * @param numBytes the number of bytes to get
      * @return the bytes at the given address
      * @throws NotImplementedException if the method is not implemented

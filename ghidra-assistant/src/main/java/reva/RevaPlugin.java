@@ -80,6 +80,7 @@ public class RevaPlugin extends ProgramPlugin {
 		serviceMonitor = new TaskMonitorAdapter(true);
 
 		Msg.info(this, "ReVa plugin loaded!");
+		setupConnectionMonitor(tool);
 		setupActionRename(tool);
 		setupActionDescribeFunction(tool);
 		
@@ -95,6 +96,50 @@ public class RevaPlugin extends ProgramPlugin {
 	}
 
 	// MARK: - Actions
+
+	private void setupConnectionMonitor(PluginTool tool) {
+		DockingAction ab = new ActionBuilder("ReVa Connection Monitor", getName())
+		.description("Monitor the connection to the ReVa service")
+		.toolBarIcon(Icons.REFRESH_ICON)
+		.enabledWhen(context -> {
+			// Get the current program, look up the RevaService
+			// and check the `connected` property
+			if (context instanceof ProgramActionContext) {
+				ProgramActionContext programContext = (ProgramActionContext) context;
+				Program program = programContext.getProgram();
+				if (program != null) {
+					RevaService service = services.get(program);
+					if (service != null) {
+						return true;
+					}
+				}
+			}
+			return false;
+		})
+		.onAction(context -> {
+			// Get the current program, look up the RevaService
+			// and check the `connected` property
+			if (context instanceof ProgramActionContext) {
+				ProgramActionContext programContext = (ProgramActionContext) context;
+				Program program = programContext.getProgram();
+				if (program != null) {
+					RevaService service = services.get(program);
+					if (service != null) {
+						Msg.info(this, "Sending heartbeat");
+						RevaHeartbeatResponse response = (RevaHeartbeatResponse)service.communicateToReva(new RevaHeartbeat());
+						if (response != null) {
+							Msg.info(this, "Got heartbeat response: " + response.toJson());
+							Msg.showInfo(this, context.getSourceComponent(), "ReVa", "Connected to ReVa service");
+						} else {
+							Msg.error(this, "No heartbeat response");
+							Msg.showError(this, context.getSourceComponent(), "ReVa", "Not connected to ReVa service");
+						}
+					}
+				}
+			}
+		})
+		.buildAndInstall(tool);
+	}
 
 	/**
 	 * Right click menu action to rename the selected variable.

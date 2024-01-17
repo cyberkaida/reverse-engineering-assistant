@@ -221,84 +221,6 @@ class RevaIndex(ABC):
         return index
 
 @register_tool
-class RevaDecompilationIndex(RevaIndex, RevaTool):
-    """
-    An index of decompiled functions available to the
-    reverse engineering assistant.
-    """
-    index_name = "decompilation"
-    description = "Used for retrieving decompiled functions"
-    index_directory: Path
-    def __init__(self, project: AssistantProject, llm: BaseLLM) -> None:
-        super().__init__(project, llm)
-        self.index_directory = self.project.get_index_directory() / "decompiled_functions"
-        self.description = "Used for retrieveing decompiled functions"
-        self.tool_functions = [
-            self.get_decompilation_for_function,
-            self.get_defined_function_list_paginated,
-            self.get_defined_function_count,
-        ]
-
-    def get_documents(self) -> List[DecompiledFunctionDocument]:
-        """
-        Filter documents in the project to just the DecompiledFunctionDocuments
-        """
-        assistant_documents = self.project.get_documents()
-        decompiled_functions: List[DecompiledFunctionDocument] = []
-        for document in assistant_documents:
-            #logger.info(f"Checking {document}")
-            if document.type == DecompiledFunctionDocument:
-                decompiled_functions.append(document)
-        return decompiled_functions
-    
-    def get_decompilation_for_function(self, function_name_or_address: str) -> Dict[str, str]:
-        """
-        Return the decompilation for the given function. The function can be specified by name or address.
-        Hint: It is too slow to decompile _all_ functions, so use get_defined_function_list_paginated to get a list of functions
-        and be sure to specify the function name or address exactly.
-        """
-        for document in self.get_documents():
-            # In some cases the function name will be passed in
-            if document.name == function_name_or_address:
-                return document.to_json()
-            # In some cases the function signature will be different to the name
-            if document.function_signature == function_name_or_address:
-                return document.to_json()
-            # TODO: We want to surface an exact match first, but this is not working
-            # because we do an `in` here.
-            #if function_name_or_address in document.function_signature:
-            #    return document.to_json()
-            try:
-                int(function_name_or_address, 16)
-            except ValueError:
-                continue
-            if int(function_name_or_address, 16) >= int(document.function_start_address, 16) and int(function_name_or_address, 16) <= int(document.function_end_address, 16):
-                return document.to_json()
-                
-    def get_defined_function_list_paginated(self, page: int, page_size: int = 20) -> List[str]:
-        """
-        Return a paginated list of functions in the index. Use get_defined_function_count to get the total number of functions.
-        page is 1 indexed. To get the first page, set page to 1. Do not set page to 0.
-        """
-        if isinstance(page, str):
-            page = int(page)
-        if isinstance(page_size, str):
-            page_size = int(page_size)
-        if page == 0:
-            raise ValueError("`page` is 1 indexed, page cannot be 0")
-        start = (page - 1) * page_size
-        end = start + page_size
-        if start > len(self.get_documents()):
-            raise ValueError("Page is greater than maximum page count.")
-        return [document.name for document in self.get_documents()[start:end] if document.is_external == False]
-    
-    def get_defined_function_count(self) -> int:
-        """
-        Return the total number of defined functions in the index.
-        """
-        return len([document for document in self.get_documents() if document.is_external == False])
-
-@register_tool
 class RevaCrossReferenceTool(RevaTool):
     """
     An tool to retrieve cross references, to and from, addresses.
@@ -403,6 +325,9 @@ class ReverseEngineeringAssistant(object):
     model_memory: BaseMemory
 
     chat_history: List[str]
+
+    def __repr__(self) -> str:
+        return f"<ReverseEngineeringAssistant for {self.project}>"
 
     @classmethod
     def get_projects(cls) -> List[str]:

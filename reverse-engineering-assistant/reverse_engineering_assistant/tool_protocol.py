@@ -34,6 +34,7 @@ from pathlib import Path
 import logging
 
 from pydantic import BaseModel, Field
+import pydantic
 
 try:
     from pydantic import validator
@@ -55,6 +56,7 @@ def register_message(cls: Type[RevaMessage]) -> Type[RevaMessage]:
     return cls
 
 
+logger = logging.getLogger("reverse_engineering_assistant.tool_protocol")
 class RevaMessage(BaseModel, ABC):
     """
     Base class for all messages sent between the inference side and the
@@ -68,6 +70,7 @@ class RevaMessage(BaseModel, ABC):
 
     Must be one of the subclasses of RevaMessage.
     """
+
     @validator("message_type")
     def validate_message_type(cls, value: str) -> str:
 
@@ -89,10 +92,16 @@ class RevaMessage(BaseModel, ABC):
         # First validate it is a ReVa message
         RevaMessage.parse_obj(thing)
         try:
-            print(f"Converting message to specific type {thing['message_type']}")
+            logger.debug(f"Converting message to specific type {thing['message_type']}")
             message_class = _reva_message_types[thing["message_type"]]
-            print(f"Message class is {message_class}")
-            return message_class.parse_obj(thing)
+            logger.debug(f"Message class is {message_class}")
+            try:
+                return message_class.parse_obj(thing)
+            except pydantic.error_wrappers.ValidationError:
+                logger.exception(f"Failed to parse {thing} as {message_class}")
+                if issubclass(message_class, RevaMessageResponse):
+                    return RevaMessageResponse.parse_obj(thing)
+                return RevaMessage.parse_obj(thing)
         except KeyError:
             raise ValueError(f"No message type in message, is this a ReVa message?")
 
@@ -216,11 +225,13 @@ class RevaGetDataAtAddressResponse(RevaMessageToReva, RevaMessageResponse):
 
 # MARK: Decompilation and functions
 
+@register_message
 class RevaGetDecompilation(RevaMessageToTool):
     """
     Request the decompilation of a given address
     """
-    address: int = Field()
+    message_type = "RevaGetDecompilation"
+    address: Optional[int] = Field()
     """
     The address to decompile
     """
@@ -230,10 +241,12 @@ class RevaGetDecompilation(RevaMessageToTool):
     address will be decompiled.
     """
 
-class RevaGetDecompilationResponse(RevaMessageToReva):
+@register_message
+class RevaGetDecompilationResponse(RevaMessageToReva, RevaMessageResponse):
     """
     Response to a RevaGetDecompilation message
     """
+    message_type = "RevaGetDecompilationResponse"
     address: int = Field()
     """
     The address this decompilation is at
@@ -250,6 +263,56 @@ class RevaGetDecompilationResponse(RevaMessageToReva):
     """
     The signature of the function
     """
+    incoming_calls: List[str] = Field()
+    """
+    The functions that call this function
+    """
+    outgoing_calls: List[str] = Field()
+    """
+    The functions that this function calls
+    """
 
+@register_message
+class RevaGetFunctionCount(RevaMessageToTool):
+    """
+    Request the number of functions in the program
+    """
+    message_type = "RevaGetFunctionCount"
+    pass
 
+@register_message
+class RevaGetFunctionCountResponse(RevaMessageToReva, RevaMessageResponse):
+    """
+    Response to a RevaGetFunctionCount message
+    """
+    message_type = "RevaGetFunctionCountResponse"
+    function_count: int = Field()
+    """
+    The number of functions in the program
+    """
 
+@register_message
+class RevaGetDefinedFunctionList(RevaMessageToTool):
+    """
+    Request a list of defined functions
+    """
+    message_type = "RevaGetDefinedFunctionList"
+    page: int = Field()
+    """
+    The page number to retrieve. 1 indexed.
+    """
+    page_size: int = Field()
+    """
+    The number of functions to retrieve per page
+    """
+
+@register_message
+class RevaGetDefinedFunctionListResponse(RevaMessageToReva, RevaMessageResponse):
+    """
+    Response to a RevaGetDefinedFunctionList message
+    """
+    message_type = "RevaGetDefinedFunctionListResponse"
+    function_list: List[str] = Field()
+    """
+    A list of defined functions
+    """

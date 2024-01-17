@@ -22,6 +22,9 @@ class AssistantProject(object):
     project_path: Path
     documents_path: Path
 
+    def __repr__(self) -> str:
+        return f"<AssistantProject: {self.project}>"
+
     @classmethod
     def get_projects(cls) -> List[str]:
         """

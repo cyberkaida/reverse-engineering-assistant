@@ -24,6 +24,9 @@ public abstract class RevaMessageHandler {
         messageHandlers = new ArrayList<Class<? extends RevaMessageHandler>>();
         // Add all the message types we know about here
         messageHandlers.add(RevaGetDataAtAddressHandler.class);
+        messageHandlers.add(RevaGetDecompilationHandler.class);
+        messageHandlers.add(RevaGetFunctionCountHandler.class);
+        messageHandlers.add(RevaGetDefinedFunctionListHandler.class);
     }
 
     public static Class<? extends RevaMessageHandler> getHandlerClass(String messageType) {

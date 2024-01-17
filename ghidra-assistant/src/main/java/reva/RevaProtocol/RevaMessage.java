@@ -46,6 +46,13 @@ public class RevaMessage {
         messageTypes.add(RevaHeartbeat.class);
         messageTypes.add(RevaHeartbeatResponse.class);
         messageTypes.add(RevaGetDataAtAddress.class);
+        messageTypes.add(RevaGetDataAtAddressResponse.class);
+        messageTypes.add(RevaGetDecompilation.class);
+        messageTypes.add(RevaGetDecompilationResponse.class);
+        messageTypes.add(RevaGetFunctionCount.class);
+        messageTypes.add(RevaGetFunctionCountResponse.class);
+        messageTypes.add(RevaGetDefinedFunctionList.class);
+        messageTypes.add(RevaGetDefinedFunctionListResponse.class);
     }
 
 

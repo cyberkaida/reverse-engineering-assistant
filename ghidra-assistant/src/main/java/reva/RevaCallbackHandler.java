@@ -1,31 +1,45 @@
 package reva;
 
-import ghidra.util.Lock;
 import reva.RevaProtocol.RevaMessage;
 import reva.RevaProtocol.RevaMessageResponse;
+import java.util.concurrent.Semaphore;
 
 public class RevaCallbackHandler {
     RevaMessage message;
     RevaMessageResponse response;
-    Lock responseLock;
 
     public RevaCallbackHandler(RevaMessage message) {
         this.message = message;
-        responseLock = new Lock(this.message.message_id.toString());
-        responseLock.acquire();
     }
 
     public Boolean isResponseForMessage(RevaMessageResponse response) {
         return response.response_to.equals(message.message_id);
     }
 
+    public Boolean hasResponse() {
+        return response != null;
+    }
+
     public void submitResponse(RevaMessageResponse response) {
+        if (this.response != null) {
+            throw new RuntimeException("Response already submitted");
+        }
         this.response = response;
-        responseLock.release();
+    }
+
+    public RevaMessageResponse getResponse() {
+        return response;
     }
 
     public RevaMessageResponse waitForResponse() {
-        responseLock.acquire();
+        // TODO: Go back to using semaphore
+        while (response == null) {
+            try {
+                Thread.sleep(100);
+            } catch (InterruptedException e) {
+                throw new RuntimeException(e);
+            }
+        }
         return response;
     }
 }

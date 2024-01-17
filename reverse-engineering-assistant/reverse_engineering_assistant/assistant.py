@@ -16,6 +16,7 @@ import json
 import tempfile
 import datetime
 import random
+from uuid import UUID
 
 from rich.prompt import Prompt
 from rich.logging import RichHandler
@@ -36,6 +37,8 @@ from .documents import AssistantDocument, CrossReferenceDocument, DecompiledFunc
 
 from .llama_index_overrides import RevaSelectionOutputParser, REVA_SELECTION_OUTPUT_PARSER, RevaReActOutputParser, RevaReActChatFormatter
 
+from rich.console import Console
+console = Console(record=True)
 
 logger = logging.getLogger('reverse_engineering_assistant')
 
@@ -297,6 +300,20 @@ class RevaSummaryIndex(RevaIndex):
                 # TODO: Implement the SummaryDocument type?
                 raise NotImplementedError()
 
+from langchain_core.callbacks.base import BaseCallbackHandler, BaseCallbackManager
+from langchain_core.agents import AgentAction, AgentFinish
+
+class RevaActionLoggerManager(BaseCallbackManager):
+    pass
+    
+class RevaActionLogger(BaseCallbackHandler):
+    logger = logging.getLogger("reverse_engineering_assistant.RevaActionLogger")
+    """
+    https://python.langchain.com/docs/modules/callbacks/
+    """
+    def on_agent_action(self, action: AgentAction, **kwargs) -> None:
+        logger.debug(f"Agent action: {action} {kwargs}")
+        console.print(f"{get_thinking_emoji()} [bold][green]{action.log}[/green][/bold]")
 
 class ReverseEngineeringAssistant(object):
     """
@@ -395,22 +412,26 @@ class ReverseEngineeringAssistant(object):
         self.model_memory = ConversationTokenBufferMemory(
             llm=self.llm
         )
+        callbacks = [RevaActionLogger()]
+        callback_manager = RevaActionLoggerManager(handlers=callbacks, inheritable_handlers=callbacks)
 
         agent =  StructuredChatAgent.from_llm_and_tools(
             llm=self.llm,
             tools=base_tools,
             system_message=configuration.prompt_template.system_prompt,
-            verbose=True,
+            verbose=False,
             handle_parsing_errors=True,
             stop_words=["\nObservation", "\nThought"],
+            callback_manager=callback_manager,
         )
 
         executor = AgentExecutor.from_agent_and_tools(
             agent=agent,
             tools=base_tools,
-            verbose=True,
+            verbose=False,
             handle_parsing_errors=True,
             memory=self.model_memory,
+            callbacks=callbacks,
         )
 
         self.query_engine = executor
@@ -494,8 +515,6 @@ def main():
 
     model_type = ModelType._member_map_[args.provider] if args.provider else None
 
-    from rich.console import Console
-    console = Console(record=True)
     console.print(f"Welcome to ReVa! The Reverse Engineering Assistant", style="bold green")
     console.print(f"Logging to {args.file}")
 

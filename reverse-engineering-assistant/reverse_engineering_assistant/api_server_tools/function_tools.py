@@ -4,7 +4,10 @@ from typing import Dict, List, Optional
 from ..assistant import AssistantProject, RevaTool, BaseLLM, register_tool
 from ..tool_protocol import RevaGetDecompilation, RevaGetDecompilationResponse, RevaGetFunctionCount, RevaGetFunctionCountResponse, RevaGetDefinedFunctionList, RevaGetDefinedFunctionListResponse
 
+from ..reva_exceptions import RevaToolException
+
 import logging
+
 
 @register_tool
 class RevaDecompilationIndex(RevaTool):
@@ -40,12 +43,12 @@ class RevaDecompilationIndex(RevaTool):
         try:
             address = int(function_name_or_address, 16)
             if address <= 0:
-                raise ValueError("Address must be > 0 and in hex format")
+                raise RevaToolException("Address must be > 0 and in hex format", send_to_llm=True)
         except ValueError:
             name = function_name_or_address
         
         if address is None and name is None:
-            raise ValueError("function_name_or_address must be an address or function name")
+            raise RevaToolException("function_name_or_address must be an address or function name", send_to_llm=True)
 
         # Now we can ask the tool
         get_decompilation_message = RevaGetDecompilation(address=address, function=name)
@@ -55,12 +58,10 @@ class RevaDecompilationIndex(RevaTool):
         response: RevaGetDecompilationResponse = callback_handler.wait()
 
         if response.error_message:
-            raise ValueError(response.error_message)
+            raise RevaToolException(response.error_message, send_to_llm=True)
 
         if not isinstance(response, RevaGetDecompilationResponse):
             raise ValueError(f"Expected a RevaGetDecompilationResponse, got {response}")
-        if response.error_message:
-            raise ValueError(response.error_message)
         
         # Finally we can return the response
         return {
@@ -92,12 +93,11 @@ class RevaDecompilationIndex(RevaTool):
         self.logger.debug(f"Waiting for response to {get_function_list_message.json()}")
         response = callback_handler.wait()
         if response.error_message:
-            raise ValueError(response.error_message)
+            raise RevaToolException(response.error_message, send_to_llm=True)
 
         if not isinstance(response, RevaGetDefinedFunctionListResponse):
-            raise ValueError(f"Expected a RevaGetDefinedFunctionListResponse, got {response}")
-        if response.error_message:
-            raise ValueError(response.error_message)
+            raise RevaToolException(f"Expected a RevaGetDefinedFunctionListResponse, got {response}")
+
         return response.function_list
     
     def get_defined_function_count(self) -> int:
@@ -113,10 +113,9 @@ class RevaDecompilationIndex(RevaTool):
         response = callback_handler.wait()
 
         if response.error_message:
-            raise ValueError(response.error_message)
+            raise RevaToolException(response.error_message, send_to_llm=True)
 
         if not isinstance(response, RevaGetFunctionCountResponse):
             raise ValueError(f"Expected a RevaGetFunctionCountResponse, got {response}")
-        if response.error_message:
-            raise ValueError(response.error_message)
+
         return response.function_count

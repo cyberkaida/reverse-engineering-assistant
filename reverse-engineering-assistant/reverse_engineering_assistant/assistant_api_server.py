@@ -30,7 +30,7 @@ from functools import cache
 import threading
 
 from .api_server_tools.function_tools import RevaDecompilationIndex
-
+from .reva_exceptions import RevaToolException
 from abc import ABC, abstractmethod
 REVA_PORT=44916
 """The default port for the ReVa server"""
@@ -172,12 +172,15 @@ class RevaData(RevaTool):
         """
         Get length bytes at the given address. size must be > 0
         """
-        if isinstance(address, str):
-            address = int(address, 16)
-        if isinstance(size, str):
-            size = int(size)
+        try:
+            if isinstance(address, str):
+                address = int(address, 16)
+            if isinstance(size, str):
+                size = int(size)
+        except ValueError as e:
+            raise RevaToolException(f"address should be an address. {e}", send_to_llm=True)
         if size <= 0:
-            raise ValueError("length must be > 0")
+            raise RevaToolException("length must be > 0", send_to_llm=True)
         
         get_bytes_message = RevaGetDataAtAddress(address=address, size=size)
         callback_handler = RevaCallbackHandler(self.project, get_bytes_message)
@@ -185,12 +188,10 @@ class RevaData(RevaTool):
         response = callback_handler.wait()
 
         if response.error_message:
-            raise ValueError(response.error_message)
+            raise RevaToolException(response.error_message, send_to_llm=True)
 
         if not isinstance(response, RevaGetDataAtAddressResponse):
             raise ValueError(f"Expected a RevaGetDataAtAddressResponse, got {response}")
-        if response.error_message:
-            raise ValueError(response.error_message)
 
         return {
             "bytes_in_hex": response.data,

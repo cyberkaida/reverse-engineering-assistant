@@ -214,6 +214,7 @@ def get_message_response(project_name: str, message_id: str) -> Optional[RevaMes
     Return a response to a task the tool asked the assistant to perform.
     This uses the waiting_on_reva queue.
     """
+    message_id = uuid.UUID(message_id)
 
     trace_logger.debug(f"Getting message response from service -> tool for {project_name} - {message_id}")
     handler = None
@@ -230,7 +231,7 @@ def get_message_response(project_name: str, message_id: str) -> Optional[RevaMes
             else:
                 waiting_on_reva.put(handler)
                 return make_response('No responses', 204)
-    return make_response(f'Unknown message ID {message_id}', 404)
+    return make_response(f'Unknown message', 404)
 
 @app.route('/project/<project_name>/message', methods=['GET'])
 def get_message(project_name: str) -> Optional[RevaMessage]:

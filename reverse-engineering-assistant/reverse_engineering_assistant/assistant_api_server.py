@@ -291,6 +291,7 @@ def submit_response_from_tool(project_name: str, message_id: str):
     Submit a response to a message we asked the tool to perform.
     This uses the waiting_on_tool queue.
     """
+    message_id = uuid.UUID(message_id)
 
     trace_logger.debug(f"Received message response from tool -> service for {project_name} - {message_id}")
 
@@ -316,12 +317,13 @@ def submit_response_from_tool(project_name: str, message_id: str):
         else:
             waiting_on_tool.put(handler)
             return make_response("Not the message we are waiting for", 204)
-    return make_response(f'Unknown message ID {message_id}', 404)
+    return make_response(f'Unknown message ID', 404)
 
 def run_server(port: int = REVA_PORT) -> None:
     """
     Run the server on the given port
     """
+    logging.getLogger("werkzeug").setLevel(logging.WARNING)
     app.run(host='localhost', port=port, debug=False)
 
 def main():

@@ -1,9 +1,13 @@
 package reva.RevaMessageHandlers;
 
+import ghidra.app.decompiler.DecompInterface;
+import ghidra.app.decompiler.DecompileResults;
 import ghidra.app.decompiler.flatapi.FlatDecompilerAPI;
 import ghidra.program.flatapi.FlatProgramAPI;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.listing.Function;
+import ghidra.program.model.pcode.HighSymbol;
+import ghidra.program.model.pcode.LocalSymbolMap;
 import ghidra.program.model.symbol.Symbol;
 import ghidra.util.Msg;
 import ghidra.util.task.TaskMonitor;
@@ -13,8 +17,10 @@ import reva.RevaProtocol.RevaGetDecompilation;
 import reva.RevaProtocol.RevaGetDecompilationResponse;
 import reva.RevaProtocol.RevaMessage;
 import reva.RevaProtocol.RevaMessageResponse;
+import reva.RevaProtocol.RevaGetDecompilationResponse.RevaVariable;
 
 import java.util.ArrayList;
+import java.util.Iterator;
 
 public class RevaGetDecompilationHandler extends RevaMessageHandler {
     FlatProgramAPI api;
@@ -87,15 +93,46 @@ public class RevaGetDecompilationHandler extends RevaMessageHandler {
         response.address = function.getEntryPoint().getUnsignedOffset();
         response.function = function.getName();
         response.function_signature = function.getPrototypeString(true, true);
-
-        // Get the decompilation
+ 
         try {
-
-            response.decompilation = decompiler.decompile(function);
+            decompiler.initialize();
         } catch (Exception e) {
-            response.error_message = "Failed to decompile function " + function.getName();
-            Msg.error(this, "Failed to decompile function " + function.getName(), e);
+            // Not a problem
         }
+
+        DecompInterface decompilerInterface =  decompiler.getDecompiler();
+        if (decompilerInterface != null) {
+            Msg.info(this, "Using decompiler interface");
+            DecompileResults decompiled = decompilerInterface.decompileFunction(function, 60, monitor);
+            response.decompilation = decompiled.getDecompiledFunction().getC();
+            LocalSymbolMap symbolMap = decompiled.getHighFunction().getLocalSymbolMap();
+            Iterator<HighSymbol> symbolIterator = symbolMap.getSymbols();
+            while (symbolIterator.hasNext()) {
+                HighSymbol symbol = symbolIterator.next();
+                String name = symbol.getName();
+                String data_type = symbol.getDataType().toString();
+                String storage = symbol.getStorage().toString();
+                int size = symbol.getSize();
+                Msg.info(this, "Symbol: " + name + " " + data_type + " " + storage + " " + size);
+                RevaGetDecompilationResponse.RevaVariable variable = response.new RevaVariable();
+                variable.name = name;
+                variable.data_type = data_type;
+                variable.storage = storage;
+                variable.size = size;
+                response.variables.add(variable);
+            }
+        } else {
+            // Get the decompilation
+            Msg.info(this, "Using flat decompiler");
+            try {
+                response.decompilation = decompiler.decompile(function);
+            } catch (Exception e) {
+                response.error_message = "Failed to decompile function " + function.getName();
+                Msg.error(this, "Failed to decompile function " + function.getName(), e);
+            }
+        }
+
+
 
         return response;
     }

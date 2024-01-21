@@ -241,6 +241,12 @@ class RevaGetDecompilation(RevaMessageToTool):
     address will be decompiled.
     """
 
+class RevaVariable(BaseModel):
+    name: str = Field()
+    storage: str = Field()
+    data_type: str = Field()
+    size: int = Field()
+
 @register_message
 class RevaGetDecompilationResponse(RevaMessageToReva, RevaMessageResponse):
     """
@@ -271,7 +277,11 @@ class RevaGetDecompilationResponse(RevaMessageToReva, RevaMessageResponse):
     """
     The functions that this function calls
     """
-
+    variables: List[RevaVariable] = Field()
+    """
+    The variables in this function
+    """
+    
 @register_message
 class RevaGetFunctionCount(RevaMessageToTool):
     """
@@ -315,4 +325,41 @@ class RevaGetDefinedFunctionListResponse(RevaMessageToReva, RevaMessageResponse)
     function_list: List[str] = Field()
     """
     A list of defined functions
+    """
+
+@register_message
+class RevaGetReferences(RevaMessageToTool):
+    """
+    Request a list of references to a given address
+    """
+    message_type = "RevaGetReferences"
+    address: int = Field()
+    """
+    The address to retrieve references to
+    """
+
+@register_message
+class RevaGetReferencesResponse(RevaMessageToReva, RevaMessageResponse):
+    """
+    Response to a RevaGetReferences message
+    """
+    message_type = "RevaGetReferencesResponse"
+    references: List[str] = Field()
+    """
+    A list of references to the given address
+    """
+
+@register_message
+class RevaGetSymbols(RevaMessageToTool):
+    """
+    Request a list of symbols
+    """
+    message_type = "RevaGetSymbols"
+    page: int = Field()
+    """
+    The page number to retrieve. 1 indexed.
+    """
+    page_size: int = Field()
+    """
+    The number of symbols to retrieve per page
     """

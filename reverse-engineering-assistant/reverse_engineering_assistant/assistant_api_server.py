@@ -14,7 +14,6 @@ from typing import List, Optional, Union, Dict, Any, Type
 import json
 import binascii
 
-
 import logging
 import uuid
 logger = logging.getLogger("reverse_engineering_assistant.assistant_api_server.RevaServer")

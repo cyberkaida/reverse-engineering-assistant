@@ -43,12 +43,12 @@ class RevaDecompilationIndex(RevaTool):
         try:
             address = int(function_name_or_address, 16)
             if address <= 0:
-                raise RevaToolException("Address must be > 0 and in hex format", send_to_llm=True)
+                raise RevaToolException("Address must be > 0 and in hex format")
         except ValueError:
             name = function_name_or_address
         
         if address is None and name is None:
-            raise RevaToolException("function_name_or_address must be an address or function name", send_to_llm=True)
+            raise RevaToolException("function_name_or_address must be an address or function name")
 
         # Now we can ask the tool
         get_decompilation_message = RevaGetDecompilation(address=address, function=name)
@@ -69,6 +69,7 @@ class RevaDecompilationIndex(RevaTool):
             "function_signature": response.function_signature,
             "address": hex(response.address),
             "decompilation": response.decompilation,
+            "variables": response.variables,
         }
 
                 

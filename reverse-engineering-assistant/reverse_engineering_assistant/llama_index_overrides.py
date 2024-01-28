@@ -10,7 +10,7 @@ from llama_index.callbacks.base_handler import BaseCallbackHandler
 from llama_index.callbacks.schema import CBEventType, EventPayload
 
 from llama_index.agent.react.types import BaseReasoningStep, ObservationReasoningStep
-from llama_index.llms.base import ChatMessage, MessageRole
+from llama_index.llms import ChatMessage, MessageRole
 from llama_index.tools import BaseTool
 
 

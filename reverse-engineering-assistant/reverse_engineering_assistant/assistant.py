@@ -16,6 +16,7 @@ import json
 import tempfile
 import datetime
 import random
+from uuid import UUID
 
 from rich.prompt import Prompt
 from rich.logging import RichHandler
@@ -24,6 +25,7 @@ from typing import Any, Callable, List, Optional, Type, Dict
 
 from langchain.llms.base import BaseLLM
 from langchain.memory.chat_memory import BaseMemory
+from langchain.memory import ConversationTokenBufferMemory
 from langchain.tools.base import BaseTool, Tool, StructuredTool
 from langchain.agents.conversational_chat.base import ConversationalChatAgent
 from langchain.agents.structured_chat.base import StructuredChatAgent
@@ -35,22 +37,26 @@ from .documents import AssistantDocument, CrossReferenceDocument, DecompiledFunc
 
 from .llama_index_overrides import RevaSelectionOutputParser, REVA_SELECTION_OUTPUT_PARSER, RevaReActOutputParser, RevaReActChatFormatter
 
+from rich.console import Console
+console = Console(record=True)
 
 logger = logging.getLogger('reverse_engineering_assistant')
 
+
+_reva_index_list: List[Type[RevaIndex]] = []
 """
 List of RevaIndex classes to be registered with the assistant.
 """
-_reva_index_list: List[Type[RevaIndex]] = []
 
 def register_index(cls: Type[RevaIndex]) -> Type[RevaIndex]:
     _reva_index_list.append(cls)
     return cls
 
+
+_reva_tool_list: List[Type[RevaTool]] = []
 """
 List of RevaTool classes to be registered with the assistant.
 """
-_reva_tool_list: List[Type[RevaTool]] = []
 
 def register_tool(cls: Type[RevaTool]) -> Type[RevaTool]:
     _reva_tool_list.append(cls)
@@ -218,84 +224,6 @@ class RevaIndex(ABC):
         return index
 
 @register_tool
-class RevaDecompilationIndex(RevaIndex, RevaTool):
-    """
-    An index of decompiled functions available to the
-    reverse engineering assistant.
-    """
-    index_name = "decompilation"
-    description = "Used for retrieving decompiled functions"
-    index_directory: Path
-    def __init__(self, project: AssistantProject, llm: BaseLLM) -> None:
-        super().__init__(project, llm)
-        self.index_directory = self.project.get_index_directory() / "decompiled_functions"
-        self.description = "Used for retrieveing decompiled functions"
-        self.tool_functions = [
-            self.get_decompilation_for_function,
-            self.get_defined_function_list_paginated,
-            self.get_defined_function_count,
-        ]
-
-    def get_documents(self) -> List[DecompiledFunctionDocument]:
-        """
-        Filter documents in the project to just the DecompiledFunctionDocuments
-        """
-        assistant_documents = self.project.get_documents()
-        decompiled_functions: List[DecompiledFunctionDocument] = []
-        for document in assistant_documents:
-            #logger.info(f"Checking {document}")
-            if document.type == DecompiledFunctionDocument:
-                decompiled_functions.append(document)
-        return decompiled_functions
-    
-    def get_decompilation_for_function(self, function_name_or_address: str) -> Dict[str, str]:
-        """
-        Return the decompilation for the given function. The function can be specified by name or address.
-        Hint: It is too slow to decompile _all_ functions, so use get_defined_function_list_paginated to get a list of functions
-        and be sure to specify the function name or address exactly.
-        """
-        for document in self.get_documents():
-            # In some cases the function name will be passed in
-            if document.name == function_name_or_address:
-                return document.to_json()
-            # In some cases the function signature will be different to the name
-            if document.function_signature == function_name_or_address:
-                return document.to_json()
-            # TODO: We want to surface an exact match first, but this is not working
-            # because we do an `in` here.
-            #if function_name_or_address in document.function_signature:
-            #    return document.to_json()
-            try:
-                int(function_name_or_address, 16)
-            except ValueError:
-                continue
-            if int(function_name_or_address, 16) >= int(document.function_start_address, 16) and int(function_name_or_address, 16) <= int(document.function_end_address, 16):
-                return document.to_json()
-                
-    def get_defined_function_list_paginated(self, page: int, page_size: int = 20) -> List[str]:
-        """
-        Return a paginated list of functions in the index. Use get_defined_function_count to get the total number of functions.
-        page is 1 indexed. To get the first page, set page to 1. Do not set page to 0.
-        """
-        if isinstance(page, str):
-            page = int(page)
-        if isinstance(page_size, str):
-            page_size = int(page_size)
-        if page == 0:
-            raise ValueError("`page` is 1 indexed, page cannot be 0")
-        start = (page - 1) * page_size
-        end = start + page_size
-        if start > len(self.get_documents()):
-            raise ValueError("Page is greater than maximum page count.")
-        return [document.name for document in self.get_documents()[start:end] if document.is_external == False]
-    
-    def get_defined_function_count(self) -> int:
-        """
-        Return the total number of defined functions in the index.
-        """
-        return len([document for document in self.get_documents() if document.is_external == False])
-
-@register_tool
 class RevaCrossReferenceTool(RevaTool):
     """
     An tool to retrieve cross references, to and from, addresses.
@@ -340,8 +268,6 @@ class RevaCrossReferenceTool(RevaTool):
                 return document.references_from
 
 
-
-
 class RevaSummaryIndex(RevaIndex):
     """
     An index of summaries available to the
@@ -374,6 +300,20 @@ class RevaSummaryIndex(RevaIndex):
                 # TODO: Implement the SummaryDocument type?
                 raise NotImplementedError()
 
+from langchain_core.callbacks.base import BaseCallbackHandler, BaseCallbackManager
+from langchain_core.agents import AgentAction, AgentFinish
+
+class RevaActionLoggerManager(BaseCallbackManager):
+    pass
+    
+class RevaActionLogger(BaseCallbackHandler):
+    logger = logging.getLogger("reverse_engineering_assistant.RevaActionLogger")
+    """
+    https://python.langchain.com/docs/modules/callbacks/
+    """
+    def on_agent_action(self, action: AgentAction, **kwargs) -> None:
+        logger.debug(f"Agent action: {action} {kwargs}")
+        console.print(f"{get_thinking_emoji()} [bold][green]{action.log}[/green][/bold]")
 
 class ReverseEngineeringAssistant(object):
     """
@@ -401,6 +341,11 @@ class ReverseEngineeringAssistant(object):
 
     model_memory: BaseMemory
 
+    chat_history: List[str]
+
+    def __repr__(self) -> str:
+        return f"<ReverseEngineeringAssistant for {self.project}>"
+
     @classmethod
     def get_projects(cls) -> List[str]:
         """
@@ -419,6 +364,7 @@ class ReverseEngineeringAssistant(object):
             project (str | AssistantProject): The reverse engineering project to query.
             model_type (Optional[ModelType], optional): The model type for the reverse engineering assistant. Defaults to None.
         """
+        self.chat_history = []
         if isinstance(project, str):
             self.project = AssistantProject(project)
         else:
@@ -463,25 +409,33 @@ class ReverseEngineeringAssistant(object):
         for index in self.indexes:
             base_tools.append(index.as_tool())
 
+        self.model_memory = ConversationTokenBufferMemory(
+            llm=self.llm
+        )
+        callbacks = [RevaActionLogger()]
+        callback_manager = RevaActionLoggerManager(handlers=callbacks, inheritable_handlers=callbacks)
+
         agent =  StructuredChatAgent.from_llm_and_tools(
             llm=self.llm,
             tools=base_tools,
             system_message=configuration.prompt_template.system_prompt,
-            verbose=True,
+            verbose=False,
             handle_parsing_errors=True,
             stop_words=["\nObservation", "\nThought"],
+            callback_manager=callback_manager,
         )
 
         executor = AgentExecutor.from_agent_and_tools(
             agent=agent,
             tools=base_tools,
-            verbose=True,
+            verbose=False,
             handle_parsing_errors=True,
+            memory=self.model_memory,
+            callbacks=callbacks,
         )
 
         self.query_engine = executor
-
-        return self.query_engine
+        return executor
 
     def query(self, query: str) -> str:
         """
@@ -494,16 +448,21 @@ class ReverseEngineeringAssistant(object):
             str: The result of the query.
         """
         if not self.query_engine:
-            self.update_embeddings()
+            self.query_engine = self.update_embeddings()
         if not self.query_engine:
             raise Exception("No query engine available")
         try:
-            answer = self.query_engine.invoke(
+
+            answer = self.query_engine.run(
                 {
-                    "chat_history": [],
                     "input": query,
                 }
             )
+
+            #self.chat_history.append(answer["input"])
+            #self.chat_history.append(answer["output"])
+            #import pdb; pdb.set_trace()
+
             return str(answer)
         except json.JSONDecodeError as e:
             logger.exception(f"Failed to parse JSON response from query engine: {e.doc}")
@@ -556,8 +515,6 @@ def main():
 
     model_type = ModelType._member_map_[args.provider] if args.provider else None
 
-    from rich.console import Console
-    console = Console(record=True)
     console.print(f"Welcome to ReVa! The Reverse Engineering Assistant", style="bold green")
     console.print(f"Logging to {args.file}")
 
@@ -590,10 +547,20 @@ def main():
     if not args.project:
         args.project = Prompt.ask("No project specified, please select from the following:", choices=ReverseEngineeringAssistant.get_projects())
 
+    # Start up the API server
+    from .assistant_api_server import run_server
+    from threading import Thread
+    server_thread = Thread(target=run_server, args=())
+    server_thread.start()
+    console.print("API server started", style="bold green")
+
+
     logger.info(f"Loading project {args.project}")
     assistant = ReverseEngineeringAssistant(args.project, model_type)
     assistant.update_embeddings()
     logger.info(f"Project loaded!")
+
+
 
     # Enter into a loop answering questions
 

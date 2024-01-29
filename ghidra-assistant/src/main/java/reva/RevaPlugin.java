@@ -10,6 +10,7 @@ import ghidra.program.model.listing.CodeUnit;
 import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.Listing;
 import ghidra.program.model.listing.Program;
+import ghidra.program.model.pcode.HighVariable;
 import ghidra.program.util.ProgramLocation;
 import ghidra.app.context.ListingActionContext;
 import ghidra.app.context.ProgramActionContext;
@@ -23,8 +24,11 @@ import ghidra.util.task.TaskLauncher;
 import ghidra.util.task.TaskListener;
 import ghidra.util.task.TaskMonitor;
 import resources.Icons;
+import reva.RevaProtocol.RevaGetNewVariableName;
 import reva.RevaProtocol.RevaHeartbeat;
 import reva.RevaProtocol.RevaHeartbeatResponse;
+import reva.RevaProtocol.RevaMessageResponse;
+import reva.RevaProtocol.RevaVariable;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
@@ -158,6 +162,20 @@ public class RevaPlugin extends ProgramPlugin {
 			var token = panel.getTokenAtCursor();
 			
 			Msg.info(this, "Renaming " + token.getText());
+			HighVariable highVariable = token.getHighVariable();
+
+			RevaGetNewVariableName message = new RevaGetNewVariableName();
+			RevaVariable messageVariable = new RevaVariable();
+			messageVariable.name = highVariable.getName();
+			messageVariable.data_type = highVariable.getDataType().getName();
+			messageVariable.storage = highVariable.getSymbol().getStorage().toString();
+			message.variable = messageVariable;
+			message.function_name = highVariable.getHighFunction().getFunction().getName(true);
+
+			// Send the message to ReVa
+			RevaService service = services.get(decompilerContext.getProgram());
+			// TODO: connect this up
+			RevaMessageResponse response = service.communicateToReva(message);
 		})
 		.enabledWhen(context -> { return context instanceof DecompilerActionContext; })
 		.buildAndInstall(tool);

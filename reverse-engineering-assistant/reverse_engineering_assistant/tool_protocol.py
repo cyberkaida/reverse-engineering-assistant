@@ -363,3 +363,53 @@ class RevaGetSymbols(RevaMessageToTool):
     """
     The number of symbols to retrieve per page
     """
+
+@register_message
+class RevaGetNewVariableName(RevaMessageToReva):
+    """
+    Ask the model for a better name
+    """
+    message_type = "RevaGetNewVariableName"
+    variable: RevaVariable = Field()
+    """
+    The variable to rename
+    """
+    function_name: str = Field()
+    """
+    The function this variable is in
+    """
+
+@register_message
+class RevaGetNewVariableNameResponse(RevaMessageToTool, RevaMessageResponse):
+    """
+    Response to a RevaGetNewVariableName message.
+    """
+    message_type = "RevaGetNewVariableNameResponse"
+
+@register_message
+class RevaRenameVariable(RevaMessageToTool):
+    """
+    Tell the tool to rename a variable
+    """
+    message_type = "RevaRenameVariable"
+    variable: RevaVariable = Field()
+    """
+    The variable to rename
+    """
+    new_name: str = Field()
+    """
+    The new name to give the variable
+    """
+    function_name: str = Field()
+    """
+    The function this variable is in
+    """
+
+@register_message
+class RevaRenameVariableResponse(RevaMessageToReva, RevaMessageResponse):
+    """
+    Response to a RevaRenameVariable message.
+
+    A simple yes/no, not much to respond with.
+    """
+    message_type = "RevaRenameVariableResponse"

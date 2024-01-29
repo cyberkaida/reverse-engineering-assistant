@@ -20,7 +20,7 @@ logger = logging.getLogger("reverse_engineering_assistant.assistant_api_server.R
 
 from flask import Flask, request, make_response
 
-from .tool_protocol import RevaGetDataAtAddress, RevaGetDataAtAddressResponse, RevaHeartbeat, RevaHeartbeatResponse, RevaMessageResponse, RevaMessageToReva, RevaMessageToTool, RevaMessage
+from .tool_protocol import RevaGetDataAtAddress, RevaGetDataAtAddressResponse, RevaGetNewVariableName, RevaGetNewVariableNameResponse, RevaHeartbeat, RevaHeartbeatResponse, RevaMessageResponse, RevaMessageToReva, RevaMessageToTool, RevaMessage
 from .assistant import ReverseEngineeringAssistant, register_tool, RevaTool
 
 from .tool import AssistantProject
@@ -153,6 +153,22 @@ class HandleHeartbeat(RevaMessageHandler):
         message = callback_handler.message
         response = RevaHeartbeatResponse(response_to=message.message_id)
         callback_handler.submit_response(response)
+        return response
+
+@register_message_handler
+class HandleGetNewVariableName(RevaMessageHandler):
+    handles_type = RevaGetNewVariableName
+    def run(self, callback_handler: RevaCallbackHandler) -> RevaGetNewVariableNameResponse:
+        message = callback_handler.message
+        # Extract the content and ask the LLM what it thinks...
+        message: RevaGetNewVariableName = callback_handler.message
+        question = f"""
+        Examine the function {message.function_name} in detail and rename the following variable:
+        {message.variable}
+        """
+        # Block until ReVa finishes analysis.
+        _ = self.assistant.query(question)
+        response = RevaGetNewVariableNameResponse(response_to=message.message_id)
         return response
 
 @register_tool

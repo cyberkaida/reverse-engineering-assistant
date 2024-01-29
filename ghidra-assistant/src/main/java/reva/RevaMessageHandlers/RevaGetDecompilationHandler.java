@@ -132,8 +132,6 @@ public class RevaGetDecompilationHandler extends RevaMessageHandler {
             }
         }
 
-
-
         return response;
     }
 }

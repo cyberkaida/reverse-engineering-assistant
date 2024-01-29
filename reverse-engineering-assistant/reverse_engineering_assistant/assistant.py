@@ -21,6 +21,9 @@ from langchain.llms.base import BaseLLM
 from langchain.memory import ConversationTokenBufferMemory
 from langchain.memory.chat_memory import BaseMemory
 from langchain.tools.base import BaseTool, StructuredTool, Tool
+from prompt_toolkit import PromptSession
+from prompt_toolkit.history import FileHistory
+from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
 from rich.console import Console
 from rich.logging import RichHandler
 from rich.prompt import Prompt
@@ -388,10 +391,16 @@ def main():
 
     # Enter into a loop answering questions
 
+    history_file = FileHistory(assistant.project.project_path / "chat-questions.txt")
+    prompt_session = PromptSession(history=history_file)
 
     for query in args.QUERY:
         logger.debug(query)
         console.print(f"> {query}")
+        # Add the query to the history file
+        # so the user can autocomplete this later
+        history_file.append_string(query)
+
         with console.status(f"Thinking..."):
             result = assistant.query(query)
             console.print(Markdown(result))
@@ -401,13 +410,16 @@ def main():
     if args.interactive or not args.QUERY:
         try:
             while True:
-                query = Prompt.ask("> ")
-                logger.debug(query)
-                console.print(f"[green]{query}[/green]")
-                with console.status(f"{get_thinking_emoji()} Thinking..."):
-                    result = assistant.query(query)
-                    console.print(Markdown(result))
-                    console.print(Markdown('---'))
+                query = prompt_session.prompt("> ", auto_suggest=AutoSuggestFromHistory())
+                try:
+                    logger.debug(query)
+                    console.print(f"[green]{query}[/green]")
+                    with console.status(f"{get_thinking_emoji()} Thinking..."):
+                        result = assistant.query(query)
+                        console.print(Markdown(result))
+                        console.print(Markdown('---'))
+                except KeyboardInterrupt:
+                    console.print("[bold][yellow]Cancelled. Press Ctrl-C again to exit.[/yellow][/bold]")
 
         except KeyboardInterrupt:
             console.print("Finished!")

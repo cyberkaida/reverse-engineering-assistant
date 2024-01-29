@@ -45,7 +45,7 @@ jobs:
         uses: actions/download-artifact@v3
         with:
           name: python-package-distributions
-          path: reverse-engineering-assistant/dist/
+          path: dist/
           if-no-files-found: error
       - name: Publish distribution 📦 to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
@@ -64,7 +64,7 @@ jobs:
       uses: actions/download-artifact@v3
       with:
         name: python-package-distributions
-        path: reverse-engineering-assistant/dist/
+        path: dist/
         if-no-files-found: error
     - name: Sign the dists with Sigstore
       uses: sigstore/gh-action-sigstore-python@v1.2.3

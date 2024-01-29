@@ -4,6 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "reverse-engineering-assistant"
+readme = "README.md"
 version = "1.0.0"
 authors = [
     {name="サイバーカイダ (cyberkaida)"},

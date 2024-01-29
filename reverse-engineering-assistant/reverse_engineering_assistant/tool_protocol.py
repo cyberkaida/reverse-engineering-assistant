@@ -39,8 +39,8 @@ import pydantic
 try:
     from pydantic import validator
 except ImportError:
-    # TODO: I don't like this
-    from pydantic.functional_validators import function_validator as validator
+    # Depending on the version we might have validator in another place
+    from pydantic.functional_validators import function_validator as validator # type: ignore
 
 from pydantic.dataclasses import dataclass
 
@@ -116,7 +116,7 @@ class RevaMessageResponse(RevaMessage, ABC):
     Base class for all messages sent in response to a RevaMessage
     """
     response_to: UUID = Field()
-    error_message: Optional[str] = Field()
+    error_message: Optional[str] = Field(default=None)
 
     
 class RevaMessageToTool(RevaMessage):

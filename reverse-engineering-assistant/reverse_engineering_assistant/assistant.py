@@ -9,15 +9,17 @@ from abc import ABC, abstractmethod
 from functools import cache, cached_property
 from pathlib import Path
 import tempfile
-from typing import Any, Callable, Dict, List, Optional, Type
+from typing import Any, Callable, Dict, List, Optional, Sequence, Type
 from uuid import UUID
 
+from langchain.chains.base import Chain
 from langchain.agents.agent import Agent, AgentExecutor
 from langchain.agents.conversational_chat.base import ConversationalChatAgent
 from langchain.agents.structured_chat.base import StructuredChatAgent
 from langchain_core.agents import AgentAction, AgentFinish
 from langchain_core.callbacks.base import BaseCallbackHandler, BaseCallbackManager
 from langchain.llms.base import BaseLLM
+from langchain.chat_models.base import BaseChatModel
 from langchain.memory import ConversationTokenBufferMemory
 from langchain.memory.chat_memory import BaseMemory
 from langchain.tools.base import BaseTool, StructuredTool, Tool
@@ -54,7 +56,7 @@ class RevaTool(ABC):
     """
     project: AssistantProject
 
-    llm: BaseLLM
+    llm: BaseLLM | BaseChatModel
 
     tool_name: str
     description: str
@@ -64,17 +66,17 @@ class RevaTool(ABC):
     def __str__(self) -> str:
         return f"{self.tool_name}"
 
-    def __init__(self, project: AssistantProject, llm: BaseLLM) -> None:
+    def __init__(self, project: AssistantProject, llm: BaseLLM | BaseChatModel) -> None:
         self.project = project
         self.llm = llm
 
     @cache
-    def as_tools(self) -> List[Tool]:
+    def as_tools(self) -> List[BaseTool]:
         """
         Returns a list of tools usable by the assistant
         based on the value of self.tool_functions.
         """
-        tools: List[Tool] = []
+        tools: List[BaseTool] = []
         for tool_function in self.tool_functions:
             tool = StructuredTool.from_function(
                 tool_function,
@@ -105,7 +107,7 @@ class RevaCrossReferenceTool(RevaTool):
         cross_references: List[CrossReferenceDocument] = []
         for document in assistant_documents:
             if document.type == CrossReferenceDocument:
-                cross_references.append(document)
+                cross_references.append(document) # type: ignore # We know the type, but mypy does not
         return cross_references
 
     def get_references_to_address(self, address: str) -> Optional[List[str]]:
@@ -118,6 +120,7 @@ class RevaCrossReferenceTool(RevaTool):
             if document.subject_address == address or document.symbol == address:
                 logger.debug(f"Found document: {document}")
                 return document.references_to
+        return None
 
     def get_references_from_address(self, address: str) -> Optional[List[str]]:
         """
@@ -127,6 +130,7 @@ class RevaCrossReferenceTool(RevaTool):
         for document in self.get_documents():
             if document.subject_address == address or document.symbol == address:
                 return document.references_from
+        return None
 
 class RevaActionLoggerManager(BaseCallbackManager):
     """
@@ -180,11 +184,11 @@ class ReverseEngineeringAssistant(object):
 
     project: AssistantProject
 
-    query_engine: Optional[AgentExecutor] = None
+    query_engine: Optional[Chain] = None
 
     tools: List[RevaTool]
 
-    llm: BaseLLM
+    llm: BaseLLM | BaseChatModel
 
     model_memory: BaseMemory
 
@@ -224,7 +228,7 @@ class ReverseEngineeringAssistant(object):
         self.tools = [ tool_type(self.project, self.llm) for tool_type in _reva_tool_list]
         logger.debug(f"Loaded tools: {[ x for x in self.tools]}")
         
-    def create_query_engine(self) -> Agent:
+    def create_query_engine(self) -> Chain:
         """
         Updates the embeddings for the reverse engineering assistant.
         """
@@ -233,7 +237,7 @@ class ReverseEngineeringAssistant(object):
 
         configuration: AssistantConfiguration = load_configuration()
 
-        base_tools: List[Tool] = []
+        base_tools: List[BaseTool] = []
         for tool in self.tools:
             for function in tool.as_tools():
                 base_tools.append(function)
@@ -241,7 +245,7 @@ class ReverseEngineeringAssistant(object):
         self.model_memory = ConversationTokenBufferMemory(
             llm=self.llm
         )
-        callbacks = [RevaActionLogger()]
+        callbacks: List[BaseCallbackHandler] = [RevaActionLogger()]
         callback_manager = RevaActionLoggerManager(handlers=callbacks, inheritable_handlers=callbacks)
 
         agent =  StructuredChatAgent.from_llm_and_tools(

@@ -14,6 +14,8 @@ from typing import List, Optional, Union, Dict, Any, Type
 import json
 import binascii
 
+from langchain.llms.base import BaseLLM
+
 import logging
 import uuid
 logger = logging.getLogger("reverse_engineering_assistant.assistant_api_server.RevaServer")
@@ -126,14 +128,16 @@ class RevaCallbackHandler:
         self.logger.debug(f"Waiting for response...")
         self._response_lock.acquire()
         self.logger.debug(f"Releasing response {self.response}")
+        if not self.response:
+            raise ValueError("No response")
         return self.response
     
     def __repr__(self) -> str:
         return f"<RevaCallbackHandler for {self.project}: {self.message.message_id}>"
 
 
-_reva_message_handlers: Dict[Type[RevaMessage], RevaMessageHandler] = {}
-def register_message_handler(cls: Type[RevaMessageHandler]) -> RevaMessageHandler:
+_reva_message_handlers: Dict[Type[RevaMessage], Type[RevaMessageHandler]] = {}
+def register_message_handler(cls: Type[RevaMessageHandler]) ->Type[RevaMessageHandler]:
     logger = logging.getLogger("reverse_engineering_assistant.tool_protocol.register_message_handler")
     message_type = cls.handles_type
     _reva_message_handlers[message_type] = cls
@@ -159,8 +163,8 @@ class HandleHeartbeat(RevaMessageHandler):
 class HandleGetNewVariableName(RevaMessageHandler):
     handles_type = RevaGetNewVariableName
     def run(self, callback_handler: RevaCallbackHandler) -> RevaGetNewVariableNameResponse:
-        message = callback_handler.message
         # Extract the content and ask the LLM what it thinks...
+        assert isinstance(callback_handler.message, RevaGetNewVariableName)
         message: RevaGetNewVariableName = callback_handler.message
         question = f"""
         Examine the function {message.function_name} in detail and rename the following variable:
@@ -183,7 +187,7 @@ class RevaData(RevaTool):
             self.get_bytes_at_address,
         ]
 
-    def get_bytes_at_address(self, address: int | str, size: int | str) -> Dict[str, str]:
+    def get_bytes_at_address(self, address: int | str, size: int | str) -> Dict[str, str | int | bytes | None]:
         """
         Get length bytes at the given address. size must be > 0
         """
@@ -201,6 +205,9 @@ class RevaData(RevaTool):
         callback_handler = RevaCallbackHandler(self.project, get_bytes_message)
         to_send_to_tool.put(callback_handler)
         response = callback_handler.wait()
+        assert isinstance(response, RevaGetDataAtAddressResponse)
+        
+
 
         if response.error_message:
             raise RevaToolException(response.error_message, send_to_llm=True)
@@ -224,12 +231,12 @@ def get_projects() -> List[str]:
     return ReverseEngineeringAssistant.get_projects()
 
 @app.route('/project/<project_name>/message/<message_id>', methods=['GET'])
-def get_message_response(project_name: str, message_id: str) -> Optional[RevaMessage]:
+def get_message_response(project_name: str, message_id: str):
     """
     Return a response to a task the tool asked the assistant to perform.
     This uses the waiting_on_reva queue.
     """
-    message_id = uuid.UUID(message_id)
+    message_id: uuid.UUID = uuid.UUID(message_id) # type: ignore
 
     trace_logger.debug(f"Getting message response from service -> tool for {project_name} - {message_id}")
     handler = None
@@ -249,7 +256,7 @@ def get_message_response(project_name: str, message_id: str) -> Optional[RevaMes
     return make_response(f'Unknown message', 404)
 
 @app.route('/project/<project_name>/message', methods=['GET'])
-def get_message(project_name: str) -> Optional[RevaMessage]:
+def get_message(project_name: str):
     """
     Return a response we would like the tool to perform.
     This uses the to_send_to_tool queue.
@@ -276,7 +283,7 @@ def get_message(project_name: str) -> Optional[RevaMessage]:
     return make_response('No messages', 204)
 
 @app.route('/project/<project_name>/message', methods=['POST'])
-def run_task(project_name: str) -> Optional[RevaMessage]:
+def run_task(project_name: str):
     """
     Get a message from the tool that it would like us to perform.
     This uses the waiting_on_reva queue.
@@ -289,7 +296,8 @@ def run_task(project_name: str) -> Optional[RevaMessage]:
 
     project = get_assistant_for_project(project_name)
 
-    reva_message = RevaMessage.to_specific_message(message)
+    reva_message = RevaMessage.to_specific_message(message) # type: ignore
+    assert isinstance(reva_message, RevaMessageToReva)
 
     logger.debug(f"Processing message {reva_message}")
 
@@ -308,7 +316,7 @@ def submit_response_from_tool(project_name: str, message_id: str):
     Submit a response to a message we asked the tool to perform.
     This uses the waiting_on_tool queue.
     """
-    message_id = uuid.UUID(message_id)
+    message_id: uuid.UUID = uuid.UUID(message_id) # type: ignore
 
     trace_logger.debug(f"Received message response from tool -> service for {project_name} - {message_id}")
 
@@ -317,7 +325,8 @@ def submit_response_from_tool(project_name: str, message_id: str):
 
     project = get_assistant_for_project(project_name)
 
-    reva_message = RevaMessage.to_specific_message(message)
+    reva_message: RevaMessageResponse = RevaMessage.to_specific_message(message) # type: ignore
+    assert isinstance(reva_message, RevaMessageResponse)
 
     logger.debug(f"Processing message {reva_message}")
 

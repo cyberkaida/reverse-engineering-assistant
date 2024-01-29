@@ -5,6 +5,10 @@ from typing import Optional
 from pathlib import Path
 
 from langchain.llms.base import BaseLLM
+from langchain.chat_models import ChatOpenAI
+from langchain.chat_models.base import BaseChatModel
+from .configuration import load_configuration, AssistantConfiguration
+import os
 
 from enum import Enum
 
@@ -18,10 +22,9 @@ class ModelType(Enum):
     TextGenWebUI = "text_gen_web_ui"
     Ollama = "ollama"
 
-def get_llm_openai() -> BaseLLM:
-    from langchain.chat_models import ChatOpenAI
-    from .configuration import load_configuration, AssistantConfiguration
-    import os
+
+
+def get_llm_openai() -> BaseChatModel:
     config: AssistantConfiguration = load_configuration()
     model = config.openai.model
     if not model:
@@ -75,43 +78,7 @@ def get_llm_text_gen_web_ui() -> BaseLLM:
 
     return llm
 
-def get_llm_local_llama_cpp() -> ServiceContext:
-    from langchain.llms.llamacpp import LlamaCPP
-    from .configuration import load_configuration, AssistantConfiguration
-
-    config: AssistantConfiguration = load_configuration()
-
-
-    model_url = config.local_llama_cpp.model_url
-    model_path = config.local_llama_cpp.model_path
-    n_gpu_layers = config.local_llama_cpp.number_gpu_layers
-
-    if not Path(model_path).exists():
-        model_path = None
-
-    # TODO: Re-enable this feature
-    #llm = LlamaCPP(
-    #        model_url=model_url,
-    #        model_path=model_path,
-    #        temperature=0.1,
-    #        max_new_tokens=256,
-    #        # llama2 has a context window of 4096 tokens, but we set it lower to allow for some wiggle room
-    #        context_window=3900,
-    #        # kwargs to pass to __call__()
-    #        generate_kwargs={},
-    #        # kwargs to pass to __init__()
-    #        # set to at least 1 to use GPU
-    #        model_kwargs={
-    #            'n_gpu_layers': n_gpu_layers,
-    #            },
-    #        # transform inputs into Llama2 format
-    #        messages_to_prompt=messages_to_prompt,
-    #        completion_to_prompt=completion_to_prompt,
-    #        verbose=False,
-    #        )
-    raise NotImplementedError("Local Llama CPP is not yet implemented.")
-
-def get_model(model_type: Optional[ModelType] = None) -> BaseLLM:
+def get_model(model_type: Optional[ModelType] = None) -> BaseChatModel | BaseLLM:
     """
     Returns a ServiceContext object for the specified model type.
 
@@ -137,6 +104,6 @@ def get_model(model_type: Optional[ModelType] = None) -> BaseLLM:
         case ModelType.TextGenWebUI:
             return get_llm_text_gen_web_ui()
         case ModelType.LocalLlamaCpp:
-            return get_llm_local_llama_cpp()
+            raise NotImplementedError("llama-cpp is not yet implemented")
     raise ValueError(f"Unknown model type: {model_type}")
 

@@ -7,7 +7,6 @@ from pathlib import Path
 from langchain.llms.base import BaseLLM
 from langchain.chat_models import ChatOpenAI
 from langchain.chat_models.base import BaseChatModel
-from .configuration import load_configuration, AssistantConfiguration
 import os
 
 from enum import Enum
@@ -25,6 +24,7 @@ class ModelType(Enum):
 
 
 def get_llm_openai() -> BaseChatModel:
+    from .configuration import load_configuration, AssistantConfiguration
     config: AssistantConfiguration = load_configuration()
     model = config.openai.model
     if not model:

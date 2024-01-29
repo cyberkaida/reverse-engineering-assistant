@@ -172,10 +172,9 @@ public class RevaPlugin extends ProgramPlugin {
 			message.variable = messageVariable;
 			message.function_name = highVariable.getHighFunction().getFunction().getName(true);
 
-			// Send the message to ReVa
+			// Send the message to ReVa, we don't expect a response
 			RevaService service = services.get(decompilerContext.getProgram());
-			// TODO: connect this up
-			RevaMessageResponse response = service.communicateToReva(message);
+			service.sendToReva(message);
 		})
 		.enabledWhen(context -> { return context instanceof DecompilerActionContext; })
 		.buildAndInstall(tool);

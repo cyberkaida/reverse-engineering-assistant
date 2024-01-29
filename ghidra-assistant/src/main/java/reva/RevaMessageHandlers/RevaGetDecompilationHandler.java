@@ -55,24 +55,7 @@ public class RevaGetDecompilationHandler extends RevaMessageHandler {
 
         } else if (decompilationMessage.function != null) {
 
-            for (Function f : service.currentProgram.getFunctionManager().getFunctions(true)) {
-                if (f.getName(true).equals(decompilationMessage.function)) {
-                    function = f;
-                    break;
-                }
-            }
-
-            if (function == null) {
-                // Let's find the function by symbol
-                for (Symbol symbol : service.currentProgram.getSymbolTable().getAllSymbols(true)) {
-                    if (symbol.getName().equals(decompilationMessage.function)) {
-                        function = service.currentProgram.getFunctionManager().getFunctionAt(symbol.getAddress());
-                        if (function != null) {
-                            break;
-                        }
-                    }
-                }
-            }
+            function = this.findFunction(decompilationMessage.function);
 
             if (function == null) {
                 // There was nothing there...

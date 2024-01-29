@@ -53,9 +53,10 @@ public class RevaMessage {
         messageTypes.add(RevaGetFunctionCountResponse.class);
         messageTypes.add(RevaGetDefinedFunctionList.class);
         messageTypes.add(RevaGetDefinedFunctionListResponse.class);
+        messageTypes.add(RevaGetNewVariableName.class);
+        messageTypes.add(RevaRenameVariable.class);
+        messageTypes.add(RevaRenameVariableResponse.class);
     }
-
-
 
     /**
      * Given a JSON string, deserialize it into a specific subclass of RevaMessage.

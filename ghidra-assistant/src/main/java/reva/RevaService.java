@@ -86,6 +86,16 @@ public class RevaService extends Task {
     }
 
     /**
+     * Send a message to ReVa. Don't expect a response.
+     * 
+     * @param message the message to send
+     */
+    public void sendToReva(RevaMessage message) {
+        RevaCallbackHandler handler = new RevaCallbackHandler(message);
+        toRevaQueue.add(handler);
+    }
+
+    /**
      * Get the next message from ReVa.
      * 
      * @return the next message from ReVa, or null if there are no messages
@@ -276,6 +286,7 @@ public class RevaService extends Task {
                     // Pop something off the waitingForTool queue and do some work
                     RevaCallbackHandler callbackHandler = toToolQueue.poll();
                     if (callbackHandler != null) {
+                        int transaction = currentProgram.startTransaction("ReVa: " + callbackHandler.message.message_type);
                         Msg.info(this, "Got work to do! " + callbackHandler.message.toJson());
                         // TODO: Move this to a Task
                         RevaMessageHandler handler = RevaMessageHandler.getHandler(message.message_type, this);
@@ -285,6 +296,7 @@ public class RevaService extends Task {
                         // We took this off the queue, so put it back on now it's done
                         // TODO: Need another queue?
                         waitingForResponseFromTool.add(callbackHandler);
+                        currentProgram.endTransaction(transaction, true);
                     } else {
                         Thread.sleep(100);
                     }

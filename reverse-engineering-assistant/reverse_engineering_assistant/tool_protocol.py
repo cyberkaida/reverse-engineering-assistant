@@ -243,9 +243,9 @@ class RevaGetDecompilation(RevaMessageToTool):
 
 class RevaVariable(BaseModel):
     name: str = Field()
-    storage: str = Field()
-    data_type: str = Field()
-    size: int = Field()
+    storage: Optional[str] = Field()
+    data_type: Optional[str] = Field()
+    size: Optional[int] = Field()
 
 @register_message
 class RevaGetDecompilationResponse(RevaMessageToReva, RevaMessageResponse):

@@ -1,6 +1,11 @@
 
 from pathlib import Path
 from typing import Dict, List, Optional
+
+from langchain.chat_models.base import BaseChatModel
+from langchain.llms.base import BaseLLM
+
+from ..tool import AssistantProject
 from ..assistant import AssistantProject, RevaTool, BaseLLM, register_tool
 from ..tool_protocol import RevaGetDecompilation, RevaGetDecompilationResponse, RevaGetFunctionCount, RevaGetFunctionCountResponse, RevaGetDefinedFunctionList, RevaGetDefinedFunctionListResponse
 
@@ -120,3 +125,41 @@ class RevaDecompilationIndex(RevaTool):
             raise ValueError(f"Expected a RevaGetFunctionCountResponse, got {response}")
 
         return response.function_count
+
+@register_tool
+class RevaRenameFunctionVariable(RevaTool):
+    """
+    A tool for renaming variables used in functions
+    """
+
+    description = "Used for renaming variables used in functions"
+    logger = logging.getLogger("reverse_engineering_assistant.RevaRenameFunctionVariable")
+
+    def __init__(self, project: AssistantProject, llm: BaseLLM | BaseChatModel) -> None:
+        super().__init__(project, llm)
+        self.description = "Used for renaming variables used in functions"
+        self.tool_functions = [
+            self.rename_variable_in_function
+        ]
+
+    def rename_variable_in_function(self, new_name: str, old_name: str, containing_function: str):
+        """
+        Change the name of the variable with the name `old_name` in `containing_function` to `new_name`.
+        """
+        from ..tool_protocol import RevaRenameVariable, RevaRenameVariableResponse, RevaVariable
+        rename_variable_message = RevaRenameVariable(
+            variable=RevaVariable(name=old_name),
+              new_name=new_name,
+              function_name=containing_function)
+
+        from ..assistant_api_server import RevaCallbackHandler, to_send_to_tool
+
+        callback_handler = RevaCallbackHandler(self.project, rename_variable_message)
+        to_send_to_tool.put(callback_handler)
+        self.logger.debug(f"Waiting for response to {rename_variable_message.json()}")
+        response: RevaRenameVariableResponse = callback_handler.wait()
+        assert isinstance(response, RevaRenameVariableResponse)
+        if response.error_message:
+            raise RevaToolException(response.error_message, send_to_llm=True)
+        
+        return f"Renamed {old_name} to {new_name} in {containing_function}"

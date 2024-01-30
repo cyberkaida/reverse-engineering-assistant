@@ -18,6 +18,7 @@ import ghidra.app.decompiler.ClangToken;
 import ghidra.app.decompiler.component.DecompilerPanel;
 import ghidra.app.plugin.PluginCategoryNames;
 import ghidra.util.Msg;
+import ghidra.util.task.MonitoredRunnable;
 import ghidra.util.task.Task;
 import ghidra.util.task.TaskBuilder;
 import ghidra.util.task.TaskLauncher;
@@ -25,6 +26,7 @@ import ghidra.util.task.TaskListener;
 import ghidra.util.task.TaskMonitor;
 import resources.Icons;
 import reva.RevaProtocol.RevaGetNewVariableName;
+import reva.RevaProtocol.RevaGetNewVariableNameResponse;
 import reva.RevaProtocol.RevaHeartbeat;
 import reva.RevaProtocol.RevaHeartbeatResponse;
 import reva.RevaProtocol.RevaMessageResponse;
@@ -130,7 +132,7 @@ public class RevaPlugin extends ProgramPlugin {
 					RevaService service = services.get(program);
 					if (service != null) {
 						Msg.info(this, "Sending heartbeat");
-						RevaHeartbeatResponse response = (RevaHeartbeatResponse)service.communicateToReva(new RevaHeartbeat());
+						RevaHeartbeatResponse response = (RevaHeartbeatResponse)service.communicateToReva(new RevaHeartbeat(), new TaskMonitorAdapter());
 						if (response != null) {
 							Msg.info(this, "Got heartbeat response: " + response.toJson());
 							Msg.showInfo(this, context.getSourceComponent(), "ReVa", "Connected to ReVa service");
@@ -174,7 +176,13 @@ public class RevaPlugin extends ProgramPlugin {
 
 			// Send the message to ReVa, we don't expect a response
 			RevaService service = services.get(decompilerContext.getProgram());
-			service.sendToReva(message);
+			Task renameTask = new Task("Rename " + token.getText(), true, false, false) {
+				@Override
+				public void run(TaskMonitor monitor) {
+					RevaGetNewVariableNameResponse response = (RevaGetNewVariableNameResponse)service.communicateToReva(message, monitor);
+				}
+			};
+			new TaskLauncher(renameTask, panel, 1000);
 		})
 		.enabledWhen(context -> { return context instanceof DecompilerActionContext; })
 		.buildAndInstall(tool);

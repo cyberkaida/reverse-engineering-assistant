@@ -166,12 +166,10 @@ class HandleGetNewVariableName(RevaMessageHandler):
         # Extract the content and ask the LLM what it thinks...
         assert isinstance(callback_handler.message, RevaGetNewVariableName)
         message: RevaGetNewVariableName = callback_handler.message
-        question = f"""
-        Examine the function {message.function_name} in detail and rename the following variable:
-        {message.variable}
-        """
+        question = f"""Examine the function {message.function_name} in detail and rename the variable `{message.variable.name}` to something more meaningful."""
         # Block until ReVa finishes analysis.
-        _ = self.assistant.query(question)
+        reva_response = self.assistant.query(question)
+        logger.info(f"Got response {reva_response}")
         response = RevaGetNewVariableNameResponse(response_to=message.message_id)
         return response
 
@@ -306,7 +304,8 @@ def run_task(project_name: str):
     callback = RevaCallbackHandler(get_assistant_for_project(project_name).project, reva_message)
     handler = handler_class(project)
     # Kick off a thread to handle this message
-    handler.run(callback)
+    threading.Thread(target=handler.run, args=(callback,)).start()
+    #handler.run(callback)
     waiting_on_reva.put(callback)
     return make_response('OK', 200)
     

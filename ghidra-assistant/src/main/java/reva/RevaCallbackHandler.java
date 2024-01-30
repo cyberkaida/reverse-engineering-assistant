@@ -4,6 +4,8 @@ import reva.RevaProtocol.RevaMessage;
 import reva.RevaProtocol.RevaMessageResponse;
 import java.util.concurrent.Semaphore;
 
+import ghidra.util.Msg;
+
 public class RevaCallbackHandler {
     RevaMessage message;
     RevaMessageResponse response;

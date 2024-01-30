@@ -4,6 +4,8 @@ import org.apache.commons.lang.NotImplementedException;
 
 import ghidra.util.Msg;
 import ghidra.util.task.Task;
+import ghidra.util.task.TaskBuilder;
+import ghidra.util.task.TaskLauncher;
 import ghidra.util.task.TaskMonitor;
 import reva.RevaMessageHandlers.RevaMessageHandler;
 import reva.RevaProtocol.RevaMessage;
@@ -77,12 +79,22 @@ public class RevaService extends Task {
      * @param message The message to send
      * @return RevaMessage The response from ReVa
      */
-    public RevaMessageResponse communicateToReva(RevaMessage message) {
+    public RevaMessageResponse communicateToReva(RevaMessage message, TaskMonitor monitor) {
         RevaCallbackHandler handler = new RevaCallbackHandler(message);
-        toRevaQueue.add(handler);
-        RevaMessageResponse response = handler.waitForResponse();
-        waitingForResponseFromReva.remove(handler);
-        return response;
+
+        Task commTask = new Task("Communicating with ReVa", true, false, false) {
+
+            @Override
+            public void run(TaskMonitor monitor) {
+                toRevaQueue.add(handler);
+                handler.waitForResponse();
+                waitingForResponseFromReva.remove(handler);
+            }
+        };
+
+        commTask.monitoredRun(monitor);
+        
+        return handler.waitForResponse();
     }
 
     /**

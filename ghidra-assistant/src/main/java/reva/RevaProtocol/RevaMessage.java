@@ -56,6 +56,7 @@ public class RevaMessage {
         messageTypes.add(RevaGetNewVariableName.class);
         messageTypes.add(RevaRenameVariable.class);
         messageTypes.add(RevaRenameVariableResponse.class);
+        messageTypes.add(RevaGetNewVariableNameResponse.class);
     }
 
     /**

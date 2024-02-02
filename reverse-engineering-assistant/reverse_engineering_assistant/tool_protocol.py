@@ -287,7 +287,7 @@ class RevaGetFunctionCount(RevaMessageToTool):
     """
     Request the number of functions in the program
     """
-    message_type = "RevaGetFunctionCount"
+    message_type: str  = "RevaGetFunctionCount"
     pass
 
 @register_message
@@ -295,7 +295,7 @@ class RevaGetFunctionCountResponse(RevaMessageToReva, RevaMessageResponse):
     """
     Response to a RevaGetFunctionCount message
     """
-    message_type = "RevaGetFunctionCountResponse"
+    message_type: str  = "RevaGetFunctionCountResponse"
     function_count: int = Field()
     """
     The number of functions in the program
@@ -306,7 +306,7 @@ class RevaGetDefinedFunctionList(RevaMessageToTool):
     """
     Request a list of defined functions
     """
-    message_type = "RevaGetDefinedFunctionList"
+    message_type: str  = "RevaGetDefinedFunctionList"
     page: int = Field()
     """
     The page number to retrieve. 1 indexed.
@@ -321,7 +321,7 @@ class RevaGetDefinedFunctionListResponse(RevaMessageToReva, RevaMessageResponse)
     """
     Response to a RevaGetDefinedFunctionList message
     """
-    message_type = "RevaGetDefinedFunctionListResponse"
+    message_type: str  = "RevaGetDefinedFunctionListResponse"
     function_list: List[str] = Field()
     """
     A list of defined functions
@@ -332,7 +332,7 @@ class RevaGetReferences(RevaMessageToTool):
     """
     Request a list of references to a given address
     """
-    message_type = "RevaGetReferences"
+    message_type: str  = "RevaGetReferences"
     address: int = Field()
     """
     The address to retrieve references to
@@ -343,7 +343,7 @@ class RevaGetReferencesResponse(RevaMessageToReva, RevaMessageResponse):
     """
     Response to a RevaGetReferences message
     """
-    message_type = "RevaGetReferencesResponse"
+    message_type: str  = "RevaGetReferencesResponse"
     references: List[str] = Field()
     """
     A list of references to the given address
@@ -354,7 +354,7 @@ class RevaGetSymbols(RevaMessageToTool):
     """
     Request a list of symbols
     """
-    message_type = "RevaGetSymbols"
+    message_type: str  = "RevaGetSymbols"
     page: int = Field()
     """
     The page number to retrieve. 1 indexed.
@@ -369,7 +369,7 @@ class RevaGetNewVariableName(RevaMessageToReva):
     """
     Ask the model for a better name
     """
-    message_type = "RevaGetNewVariableName"
+    message_type: str= "RevaGetNewVariableName"
     variable: RevaVariable = Field()
     """
     The variable to rename
@@ -384,14 +384,14 @@ class RevaGetNewVariableNameResponse(RevaMessageToTool, RevaMessageResponse):
     """
     Response to a RevaGetNewVariableName message.
     """
-    message_type = "RevaGetNewVariableNameResponse"
+    message_type: str = "RevaGetNewVariableNameResponse"
 
 @register_message
 class RevaRenameVariable(RevaMessageToTool):
     """
     Tell the tool to rename a variable
     """
-    message_type = "RevaRenameVariable"
+    message_type: str = "RevaRenameVariable"
     variable: RevaVariable = Field()
     """
     The variable to rename
@@ -412,4 +412,4 @@ class RevaRenameVariableResponse(RevaMessageToReva, RevaMessageResponse):
 
     A simple yes/no, not much to respond with.
     """
-    message_type = "RevaRenameVariableResponse"
+    message_type: str = "RevaRenameVariableResponse"

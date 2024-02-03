@@ -230,7 +230,7 @@ class RevaGetDecompilation(RevaMessageToTool):
     """
     Request the decompilation of a given address
     """
-    message_type = "RevaGetDecompilation"
+    message_type: str = "RevaGetDecompilation"
     address: Optional[int] = Field()
     """
     The address to decompile
@@ -252,7 +252,7 @@ class RevaGetDecompilationResponse(RevaMessageToReva, RevaMessageResponse):
     """
     Response to a RevaGetDecompilation message
     """
-    message_type = "RevaGetDecompilationResponse"
+    message_type: str = "RevaGetDecompilationResponse"
     address: int = Field()
     """
     The address this decompilation is at

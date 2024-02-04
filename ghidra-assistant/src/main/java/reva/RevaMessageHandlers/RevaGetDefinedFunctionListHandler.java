@@ -32,7 +32,7 @@ public class RevaGetDefinedFunctionListHandler extends RevaMessageHandler {
         int index = 0;
         for (Function function : service.currentProgram.getFunctionManager().getFunctions(true)) {
             if (index >= start && index < end) {
-                function_list.add(function.getName());
+                function_list.add(function.getName(true));
             }
 
             if (index >= end) {

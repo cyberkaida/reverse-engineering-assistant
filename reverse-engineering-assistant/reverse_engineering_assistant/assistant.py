@@ -35,6 +35,7 @@ from .configuration import AssistantConfiguration, load_configuration
 from .documents import AssistantDocument, CrossReferenceDocument, DecompiledFunctionDocument
 from .model import ModelType, get_model
 from .tool import AssistantProject
+from .reva_exceptions import RevaToolException
 console = Console(record=True)
 
 logger = logging.getLogger('reverse_engineering_assistant')
@@ -47,6 +48,18 @@ List of RevaTool classes to be registered with the assistant.
 def register_tool(cls: Type[RevaTool]) -> Type[RevaTool]:
     _reva_tool_list.append(cls)
     return cls
+
+class RevaToolFunctionWrapper:
+    function: Callable
+
+    def __init__(self, function: Callable) -> None:
+        self.function = function
+
+    def wrapped(self, *args, **kwargs) -> Any:
+        try:
+            return self.function(*args, **kwargs)
+        except RevaToolException as e:
+            return f"RevaToolException: {e}"
 
 class RevaTool(ABC):
     """
@@ -78,59 +91,42 @@ class RevaTool(ABC):
         """
         tools: List[BaseTool] = []
         for tool_function in self.tool_functions:
+            wrapper = RevaToolFunctionWrapper(tool_function)
+            from langchain.tools.base import create_schema_from_function
+            schema = create_schema_from_function(f"{tool_function.__name__}Schema", tool_function)
             tool = StructuredTool.from_function(
-                tool_function,
+                wrapper.wrapped,
                 name=tool_function.__name__,
                 description=tool_function.__doc__,
+                args_schema=schema,
             )
             tools.append(tool)
         return tools
 
-@register_tool
-class RevaCrossReferenceTool(RevaTool):
-    """
-    An tool to retrieve cross references, to and from, addresses.
-    """
-    index_directory: Path
-    def __init__(self, project: AssistantProject, llm: BaseLLM) -> None:
-        super().__init__(project, llm)
-        self.index_directory = self.project.get_index_directory() / "cross_references"
-        self.description = "Used for retrieving cross references to and from addresses"
 
+@register_tool
+class AskUserTool(RevaTool):
+    """
+    A tool that asks the user for input.
+    """
+    tool_name = "AskUser"
+    description = "Ask the user for input."
+
+    def __init__(self, project: AssistantProject, llm: BaseLLM | BaseChatModel) -> None:
+        super().__init__(project, llm)
         self.tool_functions = [
-            self.get_references_to_address,
-            self.get_references_from_address,
+            self.ask_user
         ]
 
-    def get_documents(self) -> List[CrossReferenceDocument]:
-        assistant_documents = self.project.get_documents()
-        cross_references: List[CrossReferenceDocument] = []
-        for document in assistant_documents:
-            if document.type == CrossReferenceDocument:
-                cross_references.append(document) # type: ignore # We know the type, but mypy does not
-        return cross_references
+    def ask_user(self, question: str) -> str:
+        """
+        Asks the user a question and returns the response.
+        """
+        console.print("ReVa would like to ask you a question:")
+        console.print(f"🙋‍♀️ [bold]{question}[/bold]")
+        console.bell()
+        return PromptSession().prompt("> ")
 
-    def get_references_to_address(self, address: str) -> Optional[List[str]]:
-        """
-        Return a list of references to the given address from other locations.
-        These might be calls from other functions, or data references to this address.
-        """
-        logger.debug(f"Searching for {address}")
-        for document in self.get_documents():
-            if document.subject_address == address or document.symbol == address:
-                logger.debug(f"Found document: {document}")
-                return document.references_to
-        return None
-
-    def get_references_from_address(self, address: str) -> Optional[List[str]]:
-        """
-        Return a list of references from the given address to other locations.
-        These might be calls to other functions, or data references from this address.
-        """
-        for document in self.get_documents():
-            if document.subject_address == address or document.symbol == address:
-                return document.references_from
-        return None
 
 class RevaActionLoggerManager(BaseCallbackManager):
     """
@@ -138,7 +134,7 @@ class RevaActionLoggerManager(BaseCallbackManager):
     hook into the agent and tool actions. This class is responsible for managing the callbacks.
     """
     pass
-    
+
 class RevaActionLogger(BaseCallbackHandler):
     """
     A callback handler for logging agent actions in the reverse engineering assistant.
@@ -207,6 +203,16 @@ class ReverseEngineeringAssistant(object):
         """
         return AssistantProject.get_projects()
 
+
+    def handle_reva_tool_error(self, e: RevaToolException) -> str:
+        """
+        This method is passed to the LLM as a callback when the LLM encounters an exception
+        from one of the Reva tools. We then return output to the LLM to help it fix its problem.
+        """
+        if isinstance(e, RevaToolException):
+            return f"RevaToolException: {e}"
+        raise e
+
     def __init__(self, project: str | AssistantProject, model_type: Optional[ModelType] = None) -> None:
         """
         Initializes a new instance of the ReverseEngineeringAssistant class.
@@ -227,7 +233,7 @@ class ReverseEngineeringAssistant(object):
         # tools the LLM can use.
         self.tools = [ tool_type(self.project, self.llm) for tool_type in _reva_tool_list]
         logger.debug(f"Loaded tools: {[ x for x in self.tools]}")
-        
+
     def create_query_engine(self) -> Chain:
         """
         Updates the embeddings for the reverse engineering assistant.
@@ -253,7 +259,7 @@ class ReverseEngineeringAssistant(object):
             tools=base_tools,
             system_message=configuration.prompt_template.system_prompt,
             verbose=False,
-            handle_parsing_errors=True,
+            handle_parsing_errors=self.handle_reva_tool_error,
             stop_words=["\nObservation", "\nThought"],
             callback_manager=callback_manager,
         )
@@ -262,7 +268,7 @@ class ReverseEngineeringAssistant(object):
             agent=agent,
             tools=base_tools,
             verbose=False,
-            handle_parsing_errors=True,
+            handle_parsing_errors=self.handle_reva_tool_error,
             memory=self.model_memory,
             callbacks=callbacks,
         )
@@ -322,7 +328,7 @@ def get_thinking_emoji() -> str:
         "🔍",
         "🧙‍♀️",
     ])
-    
+
 
 def main():
     import argparse
@@ -372,8 +378,6 @@ def main():
         logging.getLogger('httpx').addHandler(rich_handler)
         logging.getLogger('openai._base_client').addHandler(rich_handler)
         logging.getLogger('httpcore').addHandler(rich_handler)
-
-    
 
     if not args.project:
         args.project = Prompt.ask("No project specified, please select from the following:", choices=ReverseEngineeringAssistant.get_projects())
@@ -436,6 +440,6 @@ def main():
         console.save_text(default_chat_path, clear=False)
         logger.info(f"HTML saved to {default_html_path}")
         console.save_html(default_html_path, clear=False)
-    
+
 if __name__ == '__main__':
     main()

@@ -187,30 +187,26 @@ class RevaData(RevaTool):
             self.get_bytes_at_address,
         ]
 
-    def get_bytes_at_address(self, address: int | str, size: int | str) -> Dict[str, str | int | bytes | None]:
+    def get_bytes_at_address(self, address_or_symbol: int | str, size: int | str) -> Dict[str, str | int | bytes | None]:
         """
         Get length bytes at the given address. size must be > 0
         """
-        try:
-            if isinstance(address, str):
-                address = int(address, 16)
-            if isinstance(size, str):
-                size = int(size)
-        except ValueError as e:
-            raise RevaToolException(f"address should be an address. {e}", send_to_llm=True)
+        if isinstance(address_or_symbol, int):
+            address_or_symbol = hex(address_or_symbol)
+        if isinstance(size, str):
+            size = int(size)
+
         if size <= 0:
-            raise RevaToolException("length must be > 0", send_to_llm=True)
+            raise RevaToolException("length must be > 0. You asked for {size}.")
         
-        get_bytes_message = RevaGetDataAtAddress(address=address, size=size)
+        get_bytes_message = RevaGetDataAtAddress(address_or_symbol=address_or_symbol, size=size)
         callback_handler = RevaCallbackHandler(self.project, get_bytes_message)
         to_send_to_tool.put(callback_handler)
         response = callback_handler.wait()
-        assert isinstance(response, RevaGetDataAtAddressResponse)
-        
-
+        assert isinstance(response, RevaMessageResponse), "Incorrect type returned from callback handler."
 
         if response.error_message:
-            raise RevaToolException(response.error_message, send_to_llm=True)
+            raise RevaToolException(response.error_message)
 
         if not isinstance(response, RevaGetDataAtAddressResponse):
             raise ValueError(f"Expected a RevaGetDataAtAddressResponse, got {response}")

@@ -2,6 +2,8 @@ package reva.RevaMessageHandlers;
 
 import java.util.List;
 
+import ghidra.program.model.address.Address;
+import ghidra.program.model.address.AddressFormatException;
 import ghidra.program.model.listing.Function;
 import ghidra.program.model.symbol.Symbol;
 import ghidra.util.Msg;
@@ -29,6 +31,7 @@ public abstract class RevaMessageHandler {
         messageHandlers.add(RevaGetFunctionCountHandler.class);
         messageHandlers.add(RevaGetDefinedFunctionListHandler.class);
         messageHandlers.add(RevaRenameVariableHandler.class);
+        messageHandlers.add(RevaGetReferencesHandler.class);
     }
 
     public static Class<? extends RevaMessageHandler> getHandlerClass(String messageType) {
@@ -85,5 +88,20 @@ public abstract class RevaMessageHandler {
             }
         }
         return function;
+    }
+
+    Address addressFromAddressOrSymbol(String addressOrSymbol) {
+        Address address = service.currentProgram.getAddressFactory().getAddress(addressOrSymbol);
+        if (address == null) {
+            // OK, it's not an address, let's try a symbol
+            List<Symbol> symbols = service.currentProgram.getSymbolTable().getGlobalSymbols(addressOrSymbol);
+            if (symbols.size() > 0) {
+                Symbol symbol = symbols.get(0);
+                if (symbol != null) {
+                    address = symbol.getAddress();
+                }
+            }
+        }
+        return address;
     }
 }

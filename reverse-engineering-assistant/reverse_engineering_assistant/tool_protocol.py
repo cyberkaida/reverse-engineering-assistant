@@ -74,7 +74,7 @@ class RevaMessage(BaseModel, ABC):
     @validator("message_type")
     def validate_message_type(cls, value: str) -> str:
 
-        
+
         assert value in _reva_message_types, f"Unknown message type {value}"
         return value
 
@@ -98,9 +98,10 @@ class RevaMessage(BaseModel, ABC):
             try:
                 return message_class.parse_obj(thing)
             except pydantic.error_wrappers.ValidationError:
-                logger.exception(f"Failed to parse {thing} as {message_class}")
                 if issubclass(message_class, RevaMessageResponse):
                     return RevaMessageResponse.parse_obj(thing)
+                else:
+                    logger.exception(f"Failed to parse {thing} as {message_class}")
                 return RevaMessage.parse_obj(thing)
         except KeyError:
             raise ValueError(f"No message type in message, is this a ReVa message?")
@@ -118,12 +119,12 @@ class RevaMessageResponse(RevaMessage, ABC):
     response_to: UUID = Field()
     error_message: Optional[str] = Field(default=None)
 
-    
+
 class RevaMessageToTool(RevaMessage):
     """
     Base class for messages sent to the tool
     """
-    
+
     def send(self) -> None:
         """
         Send this message
@@ -194,7 +195,7 @@ class RevaGetDataAtAddress(RevaMessageToTool):
     """
     message_type: str = "RevaGetDataAtAddress"
 
-    address: int = Field()
+    address_or_symbol: str = Field()
     """
     The address to retrieve data from
     """
@@ -281,7 +282,7 @@ class RevaGetDecompilationResponse(RevaMessageToReva, RevaMessageResponse):
     """
     The variables in this function
     """
-    
+
 @register_message
 class RevaGetFunctionCount(RevaMessageToTool):
     """
@@ -333,7 +334,7 @@ class RevaGetReferences(RevaMessageToTool):
     Request a list of references to a given address
     """
     message_type: str  = "RevaGetReferences"
-    address: int = Field()
+    address_or_symbol: str = Field()
     """
     The address to retrieve references to
     """
@@ -344,9 +345,13 @@ class RevaGetReferencesResponse(RevaMessageToReva, RevaMessageResponse):
     Response to a RevaGetReferences message
     """
     message_type: str  = "RevaGetReferencesResponse"
-    references: List[str] = Field()
+    references_to: List[str] = Field()
     """
     A list of references to the given address
+    """
+    references_from: List[str] = Field()
+    """
+    A list of references from the given address
     """
 
 @register_message

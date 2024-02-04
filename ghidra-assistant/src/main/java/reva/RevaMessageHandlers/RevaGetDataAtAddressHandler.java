@@ -21,10 +21,16 @@ public class RevaGetDataAtAddressHandler extends RevaMessageHandler {
         RevaGetDataAtAddress getDataAtAddress = (RevaGetDataAtAddress) message;
         RevaGetDataAtAddressResponse response = new RevaGetDataAtAddressResponse(getDataAtAddress);
 
+        Address address = this.addressFromAddressOrSymbol(getDataAtAddress.address_or_symbol);
+        if (address == null) {
+            response.error_message = "Failed to find address or symbol " + getDataAtAddress.address_or_symbol;
+            Msg.error(this, "Failed to find address or symbol " + getDataAtAddress.address_or_symbol);
+            return response;
+        }
 
-        Address address = service.currentProgram.getAddressFactory().getAddress(getDataAtAddress.address);
         int length = getDataAtAddress.size;
         byte[] data = new byte[length];
+
         Symbol symbol = service.currentProgram.getSymbolTable().getPrimarySymbol(address);
         String symbol_name = symbol != null ? symbol.getName() : null;
         try {

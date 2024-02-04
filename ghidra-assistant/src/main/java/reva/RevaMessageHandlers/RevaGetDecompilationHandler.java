@@ -2,6 +2,7 @@ package reva.RevaMessageHandlers;
 
 import ghidra.app.decompiler.DecompInterface;
 import ghidra.app.decompiler.DecompileResults;
+import ghidra.app.decompiler.DecompiledFunction;
 import ghidra.app.decompiler.flatapi.FlatDecompilerAPI;
 import ghidra.program.flatapi.FlatProgramAPI;
 import ghidra.program.model.address.Address;
@@ -76,7 +77,7 @@ public class RevaGetDecompilationHandler extends RevaMessageHandler {
         response.address = function.getEntryPoint().getUnsignedOffset();
         response.function = function.getName();
         response.function_signature = function.getPrototypeString(true, true);
- 
+
         try {
             decompiler.initialize();
         } catch (Exception e) {
@@ -87,7 +88,28 @@ public class RevaGetDecompilationHandler extends RevaMessageHandler {
         if (decompilerInterface != null) {
             Msg.info(this, "Using decompiler interface");
             DecompileResults decompiled = decompilerInterface.decompileFunction(function, 60, monitor);
-            response.decompilation = decompiled.getDecompiledFunction().getC();
+            if (decompiled == null) {
+                Boolean isThunk = function.isThunk();
+                response.error_message = "Failed to decompile function " + function.getName();
+                if (isThunk) {
+                    // If the thing is a thunk, we cannot decompile it (no implementation)
+                    // and we need to tell the LLM about it so it does not try again.
+                    response.error_message += " is a thunk";
+                }
+                return response;
+            }
+            DecompiledFunction decompiledFunction = decompiled.getDecompiledFunction();
+            if (decompiledFunction == null) {
+                Boolean isThunk = function.isThunk();
+                response.error_message = "Failed to decompile function " + function.getName();
+                if (isThunk) {
+                    // If the thing is a thunk, we cannot decompile it (no implementation)
+                    // and we need to tell the LLM about it so it does not try again.
+                    response.error_message += " is a thunk";
+                }
+                return response;
+            }
+            response.decompilation = decompiledFunction.getC();
             LocalSymbolMap symbolMap = decompiled.getHighFunction().getLocalSymbolMap();
             Iterator<HighSymbol> symbolIterator = symbolMap.getSymbols();
             while (symbolIterator.hasNext()) {

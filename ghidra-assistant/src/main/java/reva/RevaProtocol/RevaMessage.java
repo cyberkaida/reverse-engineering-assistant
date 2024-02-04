@@ -11,7 +11,7 @@ import java.util.List;
  * Base class for all messages sent between the inference side and
  * the reverse engineering tool. When dealing with a message, you
  * should always use the subclass, not this base class.
- * 
+ *
  * This class provides a way to serialize and deserialize messages
  * to and from JSON, see {@link fromJson} and {@link toJson}.
  */
@@ -36,7 +36,7 @@ public class RevaMessage {
     /**
      * A list of all the ReVa message types we know about.
      * This is used to dispatch to the correct subclass in {@link fromJson}.
-     * 
+     *
      * If your message type is not in this list, it will not be deserialized correctly.
      */
     static final List<Class<? extends RevaMessage>> messageTypes;
@@ -56,14 +56,16 @@ public class RevaMessage {
         messageTypes.add(RevaGetNewVariableName.class);
         messageTypes.add(RevaRenameVariable.class);
         messageTypes.add(RevaRenameVariableResponse.class);
+        messageTypes.add(RevaGetReferences.class);
+        messageTypes.add(RevaGetReferencesResponse.class);
     }
 
     /**
      * Given a JSON string, deserialize it into a specific subclass of RevaMessage.
-     * 
+     *
      * This uses the {@link messageType} field of the JSON to determine which subclass to deserialize into
      * (see {@link messageTypes}).
-     * 
+     *
      * @param json the JSON string to deserialize
      * @return the deserialized message, as a subclass of RevaMessage
      */

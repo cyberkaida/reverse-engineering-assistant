@@ -20,7 +20,7 @@ from langchain_core.agents import AgentAction, AgentFinish
 from langchain_core.callbacks.base import BaseCallbackHandler, BaseCallbackManager
 from langchain.llms.base import BaseLLM
 from langchain.chat_models.base import BaseChatModel
-from langchain.memory import ConversationTokenBufferMemory
+from langchain.memory import ConversationTokenBufferMemory, ChatMessageHistory, ConversationBufferMemory
 from langchain.memory.chat_memory import BaseMemory
 from langchain.tools.base import BaseTool, StructuredTool, Tool
 from prompt_toolkit import PromptSession
@@ -248,9 +248,10 @@ class ReverseEngineeringAssistant(object):
             for function in tool.as_tools():
                 base_tools.append(function)
 
-        self.model_memory = ConversationTokenBufferMemory(
-            llm=self.llm
-        )
+        #self.model_memory = ConversationTokenBufferMemory(
+        #    llm=self.llm
+        #)
+        self.model_memory = ConversationBufferMemory()
         callbacks: List[BaseCallbackHandler] = [RevaActionLogger()]
         callback_manager = RevaActionLoggerManager(handlers=callbacks, inheritable_handlers=callbacks)
 
@@ -263,7 +264,7 @@ class ReverseEngineeringAssistant(object):
             stop_words=["\nObservation", "\nThought"],
             callback_manager=callback_manager,
         )
-
+        # TODO: Switch to this thing https://python.langchain.com/docs/expression_language/get_started
         executor = AgentExecutor.from_agent_and_tools(
             agent=agent,
             tools=base_tools,
@@ -292,17 +293,17 @@ class ReverseEngineeringAssistant(object):
             raise Exception("No query engine available")
         try:
 
-            answer = self.query_engine.run(
-                {
+            query_engine_input =  {
                     "input": query,
                 }
+
+            answer = self.query_engine.invoke(
+               input=query_engine_input,
             )
 
-            #self.chat_history.append(answer["input"])
-            #self.chat_history.append(answer["output"])
             #import pdb; pdb.set_trace()
 
-            return str(answer)
+            return str(answer["output"])
         except json.JSONDecodeError as e:
             logger.exception(f"Failed to parse JSON response from query engine: {e.doc}")
             return "Failed to parse JSON response from query engine"

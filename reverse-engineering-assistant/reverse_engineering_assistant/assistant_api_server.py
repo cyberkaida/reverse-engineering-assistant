@@ -281,7 +281,7 @@ def run_task(project_name: str):
 
     reva_message = RevaMessage.to_specific_message(message) # type: ignore
     assert isinstance(reva_message, RevaMessageToReva)
-    reva_message: RevaMessageToReva = reva_message
+    reva_message: RevaMessageToReva = reva_message # type: ignore
 
     logger.debug(f"Processing message {reva_message}")
 
@@ -338,7 +338,7 @@ def run_server(port: int = REVA_PORT) -> None:
     logging.getLogger("werkzeug").setLevel(logging.WARNING)
     # Import these down here to avoid a circular import
     # We need to have all the handlers registered before we start
-    from .api_server_tools import function_tools, llm_tools
+    from .api_server_tools import re_tools, llm_tools
     app.run(host='localhost', port=port, debug=False)
 
 def main():

@@ -12,6 +12,7 @@ import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.Listing;
 import ghidra.program.model.listing.Program;
 import ghidra.program.model.pcode.HighVariable;
+import ghidra.program.model.symbol.Symbol;
 import ghidra.program.util.ProgramLocation;
 import ghidra.app.context.ListingActionContext;
 import ghidra.app.context.ProgramActionContext;
@@ -165,6 +166,10 @@ public class RevaPlugin extends ProgramPlugin {
 
 			Msg.info(this, "Renaming " + token.getText());
 			HighVariable highVariable = token.getHighVariable();
+			if (highVariable == null) {
+				Msg.error(this, "No high variable found, we can't rename this yet.");
+				return;
+			}
 
 			RevaGetNewVariableName message = new RevaGetNewVariableName();
 			RevaVariable messageVariable = new RevaVariable();
@@ -191,10 +196,14 @@ public class RevaPlugin extends ProgramPlugin {
 			ListingActionContext listingContext = (ListingActionContext) context;
 
 			ProgramLocation location = listingContext.getLocation();
+			Symbol symbol = listingContext.getProgram().getSymbolTable().getPrimarySymbol(location.getAddress());
+			if (symbol == null) {
+				Msg.error(this, "No symbol found, we can't rename this yet.");
+				return;
+			}
 
 			RevaGetNewSymbolName message = new RevaGetNewSymbolName();
-			message.symbol_name = listingContext.getProgram().getSymbolTable().getPrimarySymbol(location.getAddress()).getName();
-
+			message.symbol_name = symbol.getName();
 			// Send the message to ReVa, we don't expect a response
 			RevaService service = services.get(listingContext.getProgram());
 			service.sendToReva(message);
@@ -202,8 +211,6 @@ public class RevaPlugin extends ProgramPlugin {
 		.enabledWhen(context -> { return context instanceof ListingActionContext; })
 		.buildAndInstall(tool);
 	}
-
-
 
 	/**
 	 * Right click menu action to describe the selected function

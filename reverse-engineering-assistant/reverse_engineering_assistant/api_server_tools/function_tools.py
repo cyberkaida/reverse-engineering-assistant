@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -7,15 +9,45 @@ from langchain.llms.base import BaseLLM
 
 from ..tool import AssistantProject
 from ..assistant import AssistantProject, RevaTool, BaseLLM, register_tool
-from ..tool_protocol import RevaGetDecompilation, RevaGetDecompilationResponse, RevaGetFunctionCount, RevaGetFunctionCountResponse, RevaGetDefinedFunctionList, RevaGetDefinedFunctionListResponse, RevaMessageResponse
+from ..tool_protocol import RevaMessageToTool, RevaMessageToReva, RevaGetDecompilation, RevaGetDecompilationResponse, RevaGetFunctionCount, RevaGetFunctionCountResponse, RevaGetDefinedFunctionList, RevaGetDefinedFunctionListResponse, RevaMessageResponse
 
 from ..reva_exceptions import RevaToolException
 
 import logging
 
+# TODO: I think the word tool is used too much in the project... It's a bit confusing...
+class RevaRemoteTool(RevaTool):
+    """
+    Tool that performs its work in the RE tool.
+    """
+    def submit_to_tool(self, message: RevaMessageToTool) -> RevaMessageResponse:
+        """
+        Submit a message to the tool and wait for a response.
+        """
+        from ..assistant_api_server import RevaCallbackHandler, to_send_to_tool
+
+        logger = logging.getLogger("reverse_engineering_assistant.RevaRemoteTool")
+        logger.debug(f"Submitting message to tool: {message}")
+        if isinstance(message, RevaMessageToReva):
+            raise ValueError("You cannot send a RevaMessageToReva to the tool. You are likely sending the wrong direction.")
+        assert isinstance(message, RevaMessageToTool), f"Incorrect type for message: {type(message)}. Should be a RevaMessageToTool"
+        callback_handler = RevaCallbackHandler(self.project, message)
+
+        # Here we queue the message to be sent to the tool
+        logger.debug(f"Putting message in queue: {message}. {to_send_to_tool.qsize()} messages in queue.")
+        to_send_to_tool.put(callback_handler)
+        # Wait for the response to come back
+        logger.debug(f"Waiting for response to {message}")
+        response = callback_handler.wait()
+        logger.debug(f"Got response to {message}: {response}")
+        # Make sure it is a response type. If it is not, we might have a bug in the API queue
+        # logic. If this happens check the code in assistant_api_server.py
+        assert isinstance(response, RevaMessageResponse), "Incorrect type returned from callback handler."
+        return response
+
 
 @register_tool
-class RevaDecompilationIndex(RevaTool):
+class RevaDecompilationIndex(RevaRemoteTool):
     """
     An index of decompiled functions available to the
     reverse engineering assistant.
@@ -45,22 +77,20 @@ class RevaDecompilationIndex(RevaTool):
         # First normalise the argument
         address: Optional[int] = None
         name: Optional[str] = None
-        try:
-            address = int(function_name_or_address, 16)
-            if address <= 0:
-                raise RevaToolException("Address must be > 0 and in hex format")
-        except ValueError:
+        if isinstance(function_name_or_address, int):
+                address = function_name_or_address
+        elif isinstance(function_name_or_address, str):
             name = function_name_or_address
 
         if address is None and name is None:
             raise RevaToolException("function_name_or_address must be an address or function name")
 
+        if address and address <= 0:
+            raise RevaToolException("function_name_or_address must be a positive integer or a function name")
+
         # Now we can ask the tool
         get_decompilation_message = RevaGetDecompilation(address=address, function=name)
-        callback_handler = RevaCallbackHandler(self.project, get_decompilation_message)
-        to_send_to_tool.put(callback_handler)
-        self.logger.debug(f"Waiting for response to {get_decompilation_message.json()}")
-        response: RevaGetDecompilationResponse = callback_handler.wait()
+        response = self.submit_to_tool(get_decompilation_message)
         assert isinstance(response, RevaMessageResponse), "Incorrect type returned from callback handler."
 
         if response.error_message:
@@ -69,13 +99,15 @@ class RevaDecompilationIndex(RevaTool):
         if not isinstance(response, RevaGetDecompilationResponse):
             raise ValueError(f"Expected a RevaGetDecompilationResponse, got {response}")
 
+        respose: RevaGetDecompilationResponse = response
+
         # Finally we can return the response
         return {
             "function": response.function,
             "function_signature": response.function_signature,
             "address": hex(response.address),
             "decompilation": response.decompilation,
-            "variables": response.variables,
+            "variables": response.variables, #type: ignore # We can ignore this because it can be serialised to a dict
         }
 
 
@@ -112,13 +144,8 @@ class RevaDecompilationIndex(RevaTool):
         """
         Return the total number of defined functions in the program.
         """
-        from ..assistant_api_server import RevaCallbackHandler, to_send_to_tool
 
-        get_function_count_message = RevaGetFunctionCount()
-        callback_handler = RevaCallbackHandler(self.project, get_function_count_message)
-        to_send_to_tool.put(callback_handler)
-        self.logger.debug(f"Waiting for response to {get_function_count_message.json()}")
-        response = callback_handler.wait()
+        response = self.submit_to_tool(RevaGetFunctionCount())
         assert isinstance(response, RevaMessageResponse), "Incorrect type returned from callback handler."
 
         if response.error_message:
@@ -130,7 +157,7 @@ class RevaDecompilationIndex(RevaTool):
         return response.function_count
 
 @register_tool
-class RevaRenameFunctionVariable(RevaTool):
+class RevaRenameFunctionVariable(RevaRemoteTool):
     """
     A tool for renaming variables used in functions
     """
@@ -163,6 +190,7 @@ class RevaRenameFunctionVariable(RevaTool):
     def rename_variable_in_function(self, new_name: str, old_name: str, containing_function: str):
         """
         Change the name of the variable with the name `old_name` in `containing_function` to `new_name`.
+        If the thing you want to rename is not in a function, you should use rename symbol instead,
         """
         from ..tool_protocol import RevaRenameVariable, RevaRenameVariableResponse, RevaVariable
         rename_variable_message = RevaRenameVariable(
@@ -170,12 +198,7 @@ class RevaRenameFunctionVariable(RevaTool):
               new_name=new_name,
               function_name=containing_function)
 
-        from ..assistant_api_server import RevaCallbackHandler, to_send_to_tool
-
-        callback_handler = RevaCallbackHandler(self.project, rename_variable_message)
-        to_send_to_tool.put(callback_handler)
-        self.logger.debug(f"Waiting for response to {rename_variable_message.json()}")
-        response = callback_handler.wait()
+        response = self.submit_to_tool(rename_variable_message)
         assert isinstance(response, RevaMessageResponse), "Incorrect type returned from callback handler."
         if response.error_message:
             raise RevaToolException(response.error_message)
@@ -184,7 +207,7 @@ class RevaRenameFunctionVariable(RevaTool):
 
 
 @register_tool
-class RevaCrossReferenceTool(RevaTool):
+class RevaCrossReferenceTool(RevaRemoteTool):
     """
     An tool to retrieve cross references, to and from, addresses.
     """
@@ -205,11 +228,7 @@ class RevaCrossReferenceTool(RevaTool):
         from ..tool_protocol import RevaGetReferences, RevaGetReferencesResponse
 
         get_references_message = RevaGetReferences(address_or_symbol=address_or_symbol)
-        from ..assistant_api_server import RevaCallbackHandler, to_send_to_tool
-
-        callback_handler = RevaCallbackHandler(self.project, get_references_message)
-        to_send_to_tool.put(callback_handler)
-        response = callback_handler.wait()
+        response = self.submit_to_tool(get_references_message)
         assert isinstance(response, RevaMessageResponse), "Incorrect type returned from callback handler."
         if response.error_message:
             raise RevaToolException(response.error_message)
@@ -220,4 +239,39 @@ class RevaCrossReferenceTool(RevaTool):
         return {
             "references_to": response.references_to,
             "references_from": response.references_from,
+        }
+
+@register_tool
+class RevaSetSymbolName(RevaRemoteTool):
+    """
+    A tool for creating or changing the name for a global symbol.
+    This could be a function name, or a global variable name.
+    """
+
+    def __init__(self, project: AssistantProject, llm: BaseLLM) -> None:
+        super().__init__(project, llm)
+        self.description = "Used for retrieving cross references to and from addresses"
+
+        self.tool_functions = [
+            self.set_symbol_name,
+        ]
+
+    def set_symbol_name(self, new_name: str, old_name_or_address: str) -> Dict[str, str]:
+        """
+        Set the name of the symbol at the given address to `new_name`. If an old name is
+        provided, rename the symbol to `new_name`.
+        """
+        from ..tool_protocol import RevaSetSymbolName, RevaSetSymbolNameResponse
+        if isinstance(old_name_or_address, int):
+            old_name_or_address = hex(old_name_or_address)
+
+        set_symbol_name_message = RevaSetSymbolName(new_name=new_name, old_name_or_address=old_name_or_address)
+
+        response = self.submit_to_tool(set_symbol_name_message)
+        assert isinstance(response, RevaSetSymbolNameResponse), f"Expected a RevaSetSymbolNameResponse, got {response}"
+        response: RevaSetSymbolNameResponse = response # type: ignore
+
+        return {
+            "old_name": old_name_or_address,
+            "new_name": new_name,
         }

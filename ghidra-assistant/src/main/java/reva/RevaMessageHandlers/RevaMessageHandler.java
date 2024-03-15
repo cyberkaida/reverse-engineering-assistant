@@ -18,7 +18,7 @@ public abstract class RevaMessageHandler {
 
     /**
      * A list of all the ReVa handler types we know about.
-     * 
+     *
      * If your message handler type is not in this list, it will not be dispatched
      * correctly.
      */
@@ -32,6 +32,7 @@ public abstract class RevaMessageHandler {
         messageHandlers.add(RevaGetDefinedFunctionListHandler.class);
         messageHandlers.add(RevaRenameVariableHandler.class);
         messageHandlers.add(RevaGetReferencesHandler.class);
+        messageHandlers.add(RevaSetSymbolNameHandler.class);
     }
 
     public static Class<? extends RevaMessageHandler> getHandlerClass(String messageType) {

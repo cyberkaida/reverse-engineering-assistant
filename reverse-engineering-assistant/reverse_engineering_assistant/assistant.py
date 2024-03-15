@@ -46,6 +46,7 @@ List of RevaTool classes to be registered with the assistant.
 """
 
 def register_tool(cls: Type[RevaTool]) -> Type[RevaTool]:
+    logger.debug(f"Registering tool {cls}")
     _reva_tool_list.append(cls)
     return cls
 
@@ -104,7 +105,8 @@ class RevaTool(ABC):
         return tools
 
 
-@register_tool
+# TODO: Re-enable this when the AI is not so lazy
+#@register_tool
 class AskUserTool(RevaTool):
     """
     A tool that asks the user for input.
@@ -120,7 +122,7 @@ class AskUserTool(RevaTool):
 
     def ask_user(self, question: str) -> str:
         """
-        Asks the user a question and returns the response.
+        Asks the user a question and returns the response. This should be used only if you cannot answer a question any other way.
         """
         console.print("ReVa would like to ask you a question:")
         console.print(f"🙋‍♀️ [bold]{question}[/bold]")

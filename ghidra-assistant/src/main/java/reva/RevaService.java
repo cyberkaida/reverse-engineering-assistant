@@ -28,7 +28,7 @@ import java.util.ArrayList;
  * This class provides services to the ReVa tool
  * (that runs outside of Ghidra). It will run a background
  * thread that will communicate with the ReVa tool.
- * 
+ *
  * TODO: Should this be a GTask or something else?
  */
 public class RevaService extends Task {
@@ -72,7 +72,7 @@ public class RevaService extends Task {
 
     /**
      * Communicate synchronously with ReVa.
-     * 
+     *
      * @apiNote If no response is received, we will wait _forever_.
      * @param message The message to send
      * @return RevaMessage The response from ReVa
@@ -87,17 +87,18 @@ public class RevaService extends Task {
 
     /**
      * Send a message to ReVa. Don't expect a response.
-     * 
+     *
      * @param message the message to send
      */
     public void sendToReva(RevaMessage message) {
         RevaCallbackHandler handler = new RevaCallbackHandler(message);
+        Msg.debug(this, "Queuing message for ReVa: " + message.toJson());
         toRevaQueue.add(handler);
     }
 
     /**
      * Get the next message from ReVa.
-     * 
+     *
      * @return the next message from ReVa, or null if there are no messages
      * @throws RevaServerException if there is a problem communicating with ReVa
      */
@@ -151,7 +152,7 @@ public class RevaService extends Task {
 
     /**
      * Send a message to ReVa.
-     * 
+     *
      * @param message the message to send
      * @throws RevaServerException if there is a problem communicating with ReVa
      */
@@ -163,7 +164,7 @@ public class RevaService extends Task {
         // We'll hardcode the project to "wide" for now
 
         URI endpoint = revaServerBase.resolve("/project/" + currentProgram.getName() + "/message");
-        
+
         Msg.info(this, "Sending message to " + endpoint.toString() + ": " + message.toJson());
         try {
             var request = java.net.http.HttpRequest.newBuilder()
@@ -188,7 +189,7 @@ public class RevaService extends Task {
         // /project/<project_name>/message/<message_id>
 
         URI endpoint = revaServerBase.resolve("/project/" + currentProgram.getName() + "/message/" + response.message_id);
-        
+
         Msg.info(this, "Sending response to " + endpoint.toString() + ": " + response.toJson());
         try {
             var request = java.net.http.HttpRequest.newBuilder()
@@ -208,7 +209,7 @@ public class RevaService extends Task {
 
     /**
      * Create a new RevaService.
-     * 
+     *
      * @param program the program to provide services for
      */
     public RevaService(Program program) {
@@ -234,8 +235,10 @@ public class RevaService extends Task {
         // Monitor the to-tool directory for messages from ReVa.
 
         connected = false;
-        Msg.trace(this, "ReVa communications thread starting");
+        Msg.info(this, "ReVa communications thread starting");
         while (!monitor.isCancelled()) {
+            // This is super verbose, but useful for debugging deadlocks
+            // Msg.info(this, "Communicating!");
             try {
 
                 {
@@ -281,7 +284,7 @@ public class RevaService extends Task {
                     sendMessageToServer(toReva.message);
                     waitingForResponseFromReva.add(toReva);
                 }
-                
+
                 {
                     // Pop something off the waitingForTool queue and do some work
                     RevaCallbackHandler callbackHandler = toToolQueue.poll();
@@ -301,7 +304,7 @@ public class RevaService extends Task {
                         Thread.sleep(100);
                     }
                 }
-                
+
             } catch (RevaServerException e) {
                 try {
                     if (connected) {
@@ -317,19 +320,5 @@ public class RevaService extends Task {
                 Msg.error(this, "Interrupted while waiting for message", e);
             }
         }
-    }
-
-    /**
-     * Get the bytes at the given address.
-     * 
-     * @param addr     the address to get bytes from
-     * @param numBytes the number of bytes to get
-     * @return the bytes at the given address
-     * @throws NotImplementedException if the method is not implemented
-     */
-    public byte[] getBytes(Address addr, int numBytes) throws MemoryAccessException {
-        byte[] bytes = new byte[numBytes];
-        currentProgram.getMemory().getBytes(addr, bytes);
-        return bytes;
     }
 }

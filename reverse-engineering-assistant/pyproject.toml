@@ -19,6 +19,7 @@ classifiers = [
 dependencies = [
     "langchain",
     "langchain-core",
+    "langchain-openai",
     "llama-cpp-python",
     "prompt_toolkit",
     "sentence_transformers",

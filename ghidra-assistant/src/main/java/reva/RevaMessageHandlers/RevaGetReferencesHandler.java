@@ -1,7 +1,5 @@
 package reva.RevaMessageHandlers;
 
-import org.python.indexer.Ref;
-
 import ghidra.program.model.listing.Data;
 import ghidra.program.model.listing.Function;
 import ghidra.program.model.address.Address;
@@ -14,7 +12,7 @@ import reva.RevaProtocol.RevaGetReferencesResponse;
 import reva.RevaProtocol.RevaMessageResponse;
 
 public class RevaGetReferencesHandler extends RevaMessageHandler {
-    
+
     public RevaGetReferencesHandler(RevaService service) {
         super(service);
     }

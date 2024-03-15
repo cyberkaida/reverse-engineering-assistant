@@ -4,6 +4,7 @@ import ghidra.framework.plugintool.PluginInfo;
 import ghidra.framework.plugintool.PluginTool;
 import ghidra.app.plugin.ProgramPlugin;
 import ghidra.app.plugin.core.decompile.DecompilerActionContext;
+import ghidra.app.util.viewer.listingpanel.ListingPanel;
 import ghidra.framework.plugintool.util.PluginStatus;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.listing.CodeUnit;
@@ -24,6 +25,7 @@ import ghidra.util.task.TaskLauncher;
 import ghidra.util.task.TaskListener;
 import ghidra.util.task.TaskMonitor;
 import resources.Icons;
+import reva.RevaProtocol.RevaGetNewSymbolName;
 import reva.RevaProtocol.RevaGetNewVariableName;
 import reva.RevaProtocol.RevaHeartbeat;
 import reva.RevaProtocol.RevaHeartbeatResponse;
@@ -85,9 +87,9 @@ public class RevaPlugin extends ProgramPlugin {
 
 		Msg.info(this, "ReVa plugin loaded!");
 		setupConnectionMonitor(tool);
-		setupActionRename(tool);
+		setupActionRenameFunctionVariable(tool);
 		setupActionDescribeFunction(tool);
-		
+		setupActionRenameSymbol(tool);
 	}
 
 	@Override
@@ -149,7 +151,7 @@ public class RevaPlugin extends ProgramPlugin {
 	 * Right click menu action to rename the selected variable.
 	 * @param tool
 	 */
-	private void setupActionRename(PluginTool tool) {
+	private void setupActionRenameFunctionVariable(PluginTool tool) {
 		new ActionBuilder("ReVa Rename", getName())
 		.description("Rename the selection")
 		.popupMenuPath("ReVa", "Rename")
@@ -160,7 +162,7 @@ public class RevaPlugin extends ProgramPlugin {
 
 			ProgramLocation location = panel.getCurrentLocation();
 			var token = panel.getTokenAtCursor();
-			
+
 			Msg.info(this, "Renaming " + token.getText());
 			HighVariable highVariable = token.getHighVariable();
 
@@ -179,6 +181,29 @@ public class RevaPlugin extends ProgramPlugin {
 		.enabledWhen(context -> { return context instanceof DecompilerActionContext; })
 		.buildAndInstall(tool);
 	}
+
+	private void setupActionRenameSymbol(PluginTool tool) {
+		new ActionBuilder("ReVa Rename", getName())
+		.description("Rename the selection")
+		.popupMenuPath("ReVa", "Rename")
+		.popupMenuGroup("ReVa")
+		.onAction(context -> {
+			ListingActionContext listingContext = (ListingActionContext) context;
+
+			ProgramLocation location = listingContext.getLocation();
+
+			RevaGetNewSymbolName message = new RevaGetNewSymbolName();
+			message.symbol_name = listingContext.getProgram().getSymbolTable().getPrimarySymbol(location.getAddress()).getName();
+
+			// Send the message to ReVa, we don't expect a response
+			RevaService service = services.get(listingContext.getProgram());
+			service.sendToReva(message);
+		})
+		.enabledWhen(context -> { return context instanceof ListingActionContext; })
+		.buildAndInstall(tool);
+	}
+
+
 
 	/**
 	 * Right click menu action to describe the selected function
@@ -220,7 +245,7 @@ public class RevaPlugin extends ProgramPlugin {
 			Msg.info(this, "Describing function " + currentFunction.getName());
 			//currentFunction.setComment("This is a function");
 		})
-		.enabledWhen(context -> { 
+		.enabledWhen(context -> {
 			return (context instanceof DecompilerActionContext || context instanceof ListingActionContext);
 		})
 		.buildAndInstall(tool);

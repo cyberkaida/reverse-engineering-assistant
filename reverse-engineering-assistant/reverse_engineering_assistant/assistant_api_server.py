@@ -30,7 +30,6 @@ from .tool import AssistantProject
 from functools import cache
 import threading
 
-from .api_server_tools.function_tools import RevaDecompilationIndex
 from .reva_exceptions import RevaToolException
 from abc import ABC, abstractmethod
 REVA_PORT=44916
@@ -64,7 +63,7 @@ class RevaMessageHandler(ABC):
     @abstractmethod
     def run(self, callback_handler: RevaCallbackHandler) -> RevaMessageToTool:
         raise NotImplementedError()
-    
+
 # Things to be sent to the tool
 from queue import Queue
 from queue import Empty
@@ -117,13 +116,13 @@ class RevaCallbackHandler:
         if isinstance(message, uuid.UUID):
             return self.message.message_id == message
         raise ValueError(f"message must be a RevaMessageResponse, str or UUID, got {type(message)}")
-    
+
     def submit_response(self, response: RevaMessageResponse) -> None:
         assert self.message.message_id == response.response_to, f"Responding to the wrong message {response.response_to} != {self.message.message_id}"
         self.response = response
         self.logger.debug(f"Got response {response}. Unlocking.")
         self._response_lock.release()
-    
+
     def wait(self) -> RevaMessage:
         self.logger.debug(f"Waiting for response...")
         self._response_lock.acquire()
@@ -131,7 +130,7 @@ class RevaCallbackHandler:
         if not self.response:
             raise ValueError("No response")
         return self.response
-    
+
     def __repr__(self) -> str:
         return f"<RevaCallbackHandler for {self.project}: {self.message.message_id}>"
 
@@ -147,8 +146,11 @@ def register_message_handler(cls: Type[RevaMessageHandler]) ->Type[RevaMessageHa
 def get_handler_for_message(message: RevaMessageToReva) -> Type[RevaMessageHandler]:
     logger = logging.getLogger("reverse_engineering_assistant.tool_protocol.get_handler_for_message")
     logger.debug(f"Getting handler for message {message}")
-    handler_cls = _reva_message_handlers[type(message)]
-    return handler_cls
+    try:
+        handler_cls = _reva_message_handlers[type(message)]
+        return handler_cls
+    except KeyError as e:
+        raise ValueError(f"No handler for message {message}. Registered handlers are {_reva_message_handlers}") from e
 
 @register_message_handler
 class HandleHeartbeat(RevaMessageHandler):
@@ -159,21 +161,6 @@ class HandleHeartbeat(RevaMessageHandler):
         callback_handler.submit_response(response)
         return response
 
-@register_message_handler
-class HandleGetNewVariableName(RevaMessageHandler):
-    handles_type = RevaGetNewVariableName
-    def run(self, callback_handler: RevaCallbackHandler) -> RevaGetNewVariableNameResponse:
-        # Extract the content and ask the LLM what it thinks...
-        assert isinstance(callback_handler.message, RevaGetNewVariableName)
-        message: RevaGetNewVariableName = callback_handler.message
-        question = f"""
-        Examine the function {message.function_name} in detail and rename the following variable:
-        {message.variable}
-        """
-        # Block until ReVa finishes analysis.
-        _ = self.assistant.query(question)
-        response = RevaGetNewVariableNameResponse(response_to=message.message_id)
-        return response
 
 @register_tool
 class RevaData(RevaTool):
@@ -198,7 +185,7 @@ class RevaData(RevaTool):
 
         if size <= 0:
             raise RevaToolException("length must be > 0. You asked for {size}.")
-        
+
         get_bytes_message = RevaGetDataAtAddress(address_or_symbol=address_or_symbol, size=size)
         callback_handler = RevaCallbackHandler(self.project, get_bytes_message)
         to_send_to_tool.put(callback_handler)
@@ -217,7 +204,7 @@ class RevaData(RevaTool):
             "address": hex(response.address),
             "symbol": response.symbol,
         }
-    
+
 
 
 @app.route('/project', methods=['GET'])
@@ -294,18 +281,20 @@ def run_task(project_name: str):
 
     reva_message = RevaMessage.to_specific_message(message) # type: ignore
     assert isinstance(reva_message, RevaMessageToReva)
+    reva_message: RevaMessageToReva = reva_message
 
     logger.debug(f"Processing message {reva_message}")
-
 
     handler_class = get_handler_for_message(reva_message)
     callback = RevaCallbackHandler(get_assistant_for_project(project_name).project, reva_message)
     handler = handler_class(project)
     # Kick off a thread to handle this message
-    handler.run(callback)
+    logger.info(f"Starting handler thread for {reva_message}")
+    threading.Thread(target=handler.run, args=(callback,), daemon=True).start()
+    # handler.run(callback)
     waiting_on_reva.put(callback)
     return make_response('OK', 200)
-    
+
 @app.route('/project/<project_name>/message/<message_id>', methods=['POST'])
 def submit_response_from_tool(project_name: str, message_id: str):
     """
@@ -345,7 +334,11 @@ def run_server(port: int = REVA_PORT) -> None:
     """
     Run the server on the given port
     """
+    # This thing is annoying, so we'll disable its verbose logging
     logging.getLogger("werkzeug").setLevel(logging.WARNING)
+    # Import these down here to avoid a circular import
+    # We need to have all the handlers registered before we start
+    from .api_server_tools import function_tools, llm_tools
     app.run(host='localhost', port=port, debug=False)
 
 def main():
@@ -356,7 +349,7 @@ def main():
 
     args = parser.parse_args()
     logging.basicConfig(level=logging.DEBUG)
-    app.run(host='localhost', port=args.port, debug=False)
+    run_server(args.port)
 
 if __name__ == "__main__":
     main()

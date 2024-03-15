@@ -52,6 +52,7 @@ def register_message(cls: Type[RevaMessage]) -> Type[RevaMessage]:
     """
     Register a message type
     """
+    logging.getLogger("reverse_engineering_assistant.tool_protocol.register_message").debug(f"Registering message type {cls.__name__}")
     _reva_message_types[cls.__name__] = cls
     return cls
 
@@ -75,7 +76,7 @@ class RevaMessage(BaseModel, ABC):
     def validate_message_type(cls, value: str) -> str:
 
 
-        assert value in _reva_message_types, f"Unknown message type {value}"
+        assert value in _reva_message_types, f"Unknown message type {value}, check the logs to make sure the `register_message` was called for this message type. Registered message types are {_reva_message_types.keys()}"
         return value
 
 
@@ -90,19 +91,20 @@ class RevaMessage(BaseModel, ABC):
         Convert this message to the specific message type
         """
         # First validate it is a ReVa message
-        RevaMessage.parse_obj(thing)
+        RevaMessage.model_validate(thing)
         try:
             logger.debug(f"Converting message to specific type {thing['message_type']}")
+            logger.debug(f"Checking for message type {thing['message_type']} in {_reva_message_types}")
             message_class = _reva_message_types[thing["message_type"]]
             logger.debug(f"Message class is {message_class}")
             try:
-                return message_class.parse_obj(thing)
+                return message_class.model_validate(thing)
             except pydantic.error_wrappers.ValidationError:
                 if issubclass(message_class, RevaMessageResponse):
                     return RevaMessageResponse.parse_obj(thing)
                 else:
                     logger.exception(f"Failed to parse {thing} as {message_class}")
-                return RevaMessage.parse_obj(thing)
+                return RevaMessage.model_validate(thing)
         except KeyError:
             raise ValueError(f"No message type in message, is this a ReVa message?")
 
@@ -368,6 +370,44 @@ class RevaGetSymbols(RevaMessageToTool):
     """
     The number of symbols to retrieve per page
     """
+
+@register_message
+class RevaSetSymbolName(RevaMessageToTool):
+    """
+    Set the name for a function or symbol,
+    or create a label for an address.
+
+    When setting the name for a variable in a functions
+    please use RevaRenameVariable.
+    """
+    message_type: str = "RevaSetSymbolName"
+    old_name_or_address: str = Field()
+    new_name: str = Field()
+
+@register_message
+class RevaGetNewSymbolName(RevaMessageToReva):
+    """
+    Ask the modek for a better name
+    """
+    message_type: str = "RevaGetNewSymbolName"
+    symbol_name: str = Field()
+    """
+    The symbol to rename
+    """
+
+@register_message
+class RevaGetNewSymbolNameResponse(RevaMessageToTool, RevaMessageResponse):
+    """
+    Response to a RevaGetNewSymbolName message.
+    """
+    message_type: str = "RevaGetNewSymbolNameResponse"
+
+@register_message
+class RevaSetSymbolNameResponse(RevaMessageToTool, RevaMessageResponse):
+    """
+    Response to a RevaSetSymbolName message
+    """
+    message_type: str = "RevaSetSymbolNameResponse"
 
 @register_message
 class RevaGetNewVariableName(RevaMessageToReva):

@@ -5,7 +5,7 @@ from typing import Optional
 from pathlib import Path
 
 from langchain.llms.base import BaseLLM
-from langchain.chat_models import ChatOpenAI
+from langchain_openai import ChatOpenAI
 from langchain.chat_models.base import BaseChatModel
 import os
 

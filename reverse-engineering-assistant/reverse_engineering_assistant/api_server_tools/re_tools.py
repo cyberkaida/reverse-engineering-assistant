@@ -226,7 +226,10 @@ class RevaCrossReferenceTool(RevaRemoteTool):
         These might be calls from/to other functions, or data references from/to this address.
         """
         from ..tool_protocol import RevaGetReferences, RevaGetReferencesResponse
-
+        if isinstance(address_or_symbol, int):
+            address_or_symbol = hex(address_or_symbol)
+        if not isinstance(address_or_symbol, str):
+            raise RevaToolException(f"address_or_symbol must be a string. Provided type was {type(address_or_symbol)}")
         get_references_message = RevaGetReferences(address_or_symbol=address_or_symbol)
         response = self.submit_to_tool(get_references_message)
         assert isinstance(response, RevaMessageResponse), "Incorrect type returned from callback handler."

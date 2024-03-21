@@ -124,6 +124,8 @@ revassistant --project ${NAME_OF_YOUR_PROJECT}
 
 ## Usage
 
+The [ghidra-assistant](ghidra-assistant/README.md) plugin must be installed first. 
+
 After installation, enable the `ReVaPlugin` extension in the CodeBrowser tool (Open a file and click: File -> Configure -> Miscellaneous).
 
 If you want ReVa enabled by default, click File -> Save Tool to save the configuration.

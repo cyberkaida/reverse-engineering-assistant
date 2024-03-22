@@ -103,7 +103,7 @@ public class RevaService extends Task {
      * @throws RevaServerException if there is a problem communicating with ReVa
      */
     private RevaMessage getMessageFromServer() throws RevaServerException {
-        URI endpoint = revaServerBase.resolve("/project/" + currentProgram.getName() + "/message");
+        URI endpoint = revaServerBase.resolve("/project/" + currentProgram.getDomainFile().getName() + "/message");
         Msg.trace(this, "Getting message from " + endpoint.toString());
         try {
             var request = java.net.http.HttpRequest.newBuilder()
@@ -127,7 +127,7 @@ public class RevaService extends Task {
     }
 
     private RevaMessageResponse getResponseFromServer(String messageId) {
-        URI endpoint = revaServerBase.resolve("/project/" + currentProgram.getName() + "/message/" + messageId);
+        URI endpoint = revaServerBase.resolve("/project/" + currentProgram.getDomainFile().getName() + "/message/" + messageId);
         Msg.trace(this, "Getting response from " + endpoint.toString());
         try {
             var request = java.net.http.HttpRequest.newBuilder()
@@ -163,9 +163,8 @@ public class RevaService extends Task {
         // /project/<project_name>/task
         // We'll hardcode the project to "wide" for now
 
-        URI endpoint = revaServerBase.resolve("/project/" + currentProgram.getName() + "/message");
-
-        Msg.info(this, "Sending message to " + endpoint.toString() + ": " + message.toJson());
+        URI endpoint = revaServerBase.resolve("/project/" + currentProgram.getDomainFile().getName() + "/message");
+        Msg.trace(this, "Sending message to " + endpoint.toString() + ": " + message.toJson());
         try {
             var request = java.net.http.HttpRequest.newBuilder()
                     .uri(endpoint)
@@ -188,9 +187,8 @@ public class RevaService extends Task {
         // We want to send the JSON message to the endpoint
         // /project/<project_name>/message/<message_id>
 
-        URI endpoint = revaServerBase.resolve("/project/" + currentProgram.getName() + "/message/" + response.message_id);
-
-        Msg.info(this, "Sending response to " + endpoint.toString() + ": " + response.toJson());
+        URI endpoint = revaServerBase.resolve("/project/" + currentProgram.getDomainFile().getName() + "/message/" + response.message_id);
+        Msg.trace(this, "Sending response to " + endpoint.toString() + ": " + response.toJson());
         try {
             var request = java.net.http.HttpRequest.newBuilder()
                     .uri(endpoint)

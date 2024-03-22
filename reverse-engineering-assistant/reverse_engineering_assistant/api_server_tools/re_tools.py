@@ -371,5 +371,5 @@ class RevaLibraryImportIndex(RevaRemoteTool):
         if not isinstance(response, RevaGetImportedLibrariesCountResponse):
             raise ValueError(f"Expected a RevaGetImportedLibrariesCountResponse, got {response}")
 
-        return response.function_count
+        return response.count
 

@@ -1,7 +1,5 @@
 package reva;
 
-//import org.apache.commons.lang.NotImplementedException;
-
 import ghidra.util.Msg;
 import ghidra.util.task.Task;
 import ghidra.util.task.TaskMonitor;
@@ -164,7 +162,8 @@ public class RevaService extends Task {
         // We'll hardcode the project to "wide" for now
 
         URI endpoint = revaServerBase.resolve("/project/" + currentProgram.getDomainFile().getName() + "/message");
-        Msg.trace(this, "Sending message to " + endpoint.toString() + ": " + message.toJson());
+
+        Msg.info(this, "Sending message to " + endpoint.toString() + ": " + message.toJson());
         try {
             var request = java.net.http.HttpRequest.newBuilder()
                     .uri(endpoint)
@@ -188,7 +187,8 @@ public class RevaService extends Task {
         // /project/<project_name>/message/<message_id>
 
         URI endpoint = revaServerBase.resolve("/project/" + currentProgram.getDomainFile().getName() + "/message/" + response.message_id);
-        Msg.trace(this, "Sending response to " + endpoint.toString() + ": " + response.toJson());
+
+        Msg.info(this, "Sending response to " + endpoint.toString() + ": " + response.toJson());
         try {
             var request = java.net.http.HttpRequest.newBuilder()
                     .uri(endpoint)

@@ -106,7 +106,7 @@ class RevaMessage(BaseModel, ABC):
                     logger.exception(f"Failed to parse {thing} as {message_class}")
                 return RevaMessage.model_validate(thing)
         except KeyError:
-            raise ValueError(f"No message type in message, is this a ReVa message?")
+            raise ValueError("No message type in message, is this a ReVa message?")
 
     def send(self) -> None:
         """
@@ -290,7 +290,7 @@ class RevaGetFunctionCount(RevaMessageToTool):
     """
     Request the number of functions in the program
     """
-    message_type: str  = "RevaGetFunctionCount"
+    message_type: str = "RevaGetFunctionCount"
     pass
 
 @register_message
@@ -298,7 +298,7 @@ class RevaGetFunctionCountResponse(RevaMessageToReva, RevaMessageResponse):
     """
     Response to a RevaGetFunctionCount message
     """
-    message_type: str  = "RevaGetFunctionCountResponse"
+    message_type: str = "RevaGetFunctionCountResponse"
     function_count: int = Field()
     """
     The number of functions in the program
@@ -309,7 +309,7 @@ class RevaGetDefinedFunctionList(RevaMessageToTool):
     """
     Request a list of defined functions
     """
-    message_type: str  = "RevaGetDefinedFunctionList"
+    message_type: str = "RevaGetDefinedFunctionList"
     page: int = Field()
     """
     The page number to retrieve. 1 indexed.
@@ -324,7 +324,7 @@ class RevaGetDefinedFunctionListResponse(RevaMessageToReva, RevaMessageResponse)
     """
     Response to a RevaGetDefinedFunctionList message
     """
-    message_type: str  = "RevaGetDefinedFunctionListResponse"
+    message_type: str = "RevaGetDefinedFunctionListResponse"
     function_list: List[str] = Field()
     """
     A list of defined functions
@@ -335,7 +335,7 @@ class RevaGetReferences(RevaMessageToTool):
     """
     Request a list of references to a given address
     """
-    message_type: str  = "RevaGetReferences"
+    message_type: str = "RevaGetReferences"
     address_or_symbol: str = Field()
     """
     The address to retrieve references to
@@ -346,7 +346,7 @@ class RevaGetReferencesResponse(RevaMessageToReva, RevaMessageResponse):
     """
     Response to a RevaGetReferences message
     """
-    message_type: str  = "RevaGetReferencesResponse"
+    message_type: str = "RevaGetReferencesResponse"
     references_to: List[str] = Field()
     """
     A list of references to the given address
@@ -361,7 +361,7 @@ class RevaGetSymbols(RevaMessageToTool):
     """
     Request a list of symbols
     """
-    message_type: str  = "RevaGetSymbols"
+    message_type: str = "RevaGetSymbols"
     page: int = Field()
     """
     The page number to retrieve. 1 indexed.
@@ -387,7 +387,7 @@ class RevaSetSymbolName(RevaMessageToTool):
 @register_message
 class RevaGetNewSymbolName(RevaMessageToReva):
     """
-    Ask the modek for a better name
+    Ask the model for a better name
     """
     message_type: str = "RevaGetNewSymbolName"
     symbol_name: str = Field()
@@ -414,7 +414,7 @@ class RevaGetNewVariableName(RevaMessageToReva):
     """
     Ask the model for a better name
     """
-    message_type: str= "RevaGetNewVariableName"
+    message_type: str = "RevaGetNewVariableName"
     variable: RevaVariable = Field()
     """
     The variable to rename
@@ -458,3 +458,50 @@ class RevaRenameVariableResponse(RevaMessageToReva, RevaMessageResponse):
     A simple yes/no, not much to respond with.
     """
     message_type: str = "RevaRenameVariableResponse"
+
+@register_message
+class RevaGetImportedLibrariesList(RevaMessageToTool):
+    """
+    Request a list of imported libraries
+    """
+    message_type: str = "RevaGetImportedLibrariesList"
+    page: int = Field()
+    """
+    The page number to retrieve. 1 indexed.
+    """
+    page_size: int = Field()
+    """
+    The number of symbols to retrieve per page
+    """
+
+@register_message
+class RevaGetImportedLibrariesListResponse(RevaMessageToReva, RevaMessageResponse):
+    """
+    Response to a RevaGetImportedLibrariesList message.
+
+    A list of imported libraries
+    """
+    message_type: str = "RevaGetImportedLibrariesListResponse"
+    list: List[str] = Field()
+    """
+    A list of declared imports
+    """
+
+@register_message
+class RevaGetImportedLibrariesCount(RevaMessageToTool):
+    """
+    Request the number of functions in the program
+    """
+    message_type: str = "RevaGetImportedLibrariesCount"
+    pass
+
+@register_message
+class RevaGetImportedLibrariesCountResponse(RevaMessageToReva, RevaMessageResponse):
+    """
+    Response to a RevaGetImportedLibrariesCount message
+    """
+    message_type: str = "RevaGetImportedLibrariesCountResponse"
+    count: int = Field()
+    """
+    The number of imported librariess in the program
+    """

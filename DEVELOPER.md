@@ -70,7 +70,17 @@ tools that perform actions on the RE tool side are defined. In other words, thes
 ReVa -> RE Tools. These classes subclass `RevaRemoteTool` and are registered with the `@register_tool`
 decorator.
 
-In the [llm_tools module](./reverse-engineering-assistant/reverse_engineering_assistant/api_server_tools/re_tools.py)
+In the [llm_tools module](./reverse-engineering-assistant/reverse_engineering_assistant/api_server_tools/llm_tools.py)
 tools that make requests of the LLM are defined. In other words, these are the
 RE -> ReVa Tools. These classes subclass `RevaMessageHandler` and are registered with the
 `@register_message_handler` decorator.
+
+## Reinstall
+
+Once that's done, you will need to reinstall `reverse-engineering-assistant` for your changes to take effect.
+
+```sh
+python3 -m pip install ./reverse-engineering-assistant
+```
+
+Assuming you've made changes to [ghidra-assistant](./ghidra-assistant/README.md), you will also need to follow the instructions there to rebuild and reinstall it.

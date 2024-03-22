@@ -3,7 +3,6 @@ package reva.RevaMessageHandlers;
 import java.util.List;
 
 import ghidra.program.model.address.Address;
-import ghidra.program.model.address.AddressFormatException;
 import ghidra.program.model.listing.Function;
 import ghidra.program.model.symbol.Symbol;
 import ghidra.util.Msg;
@@ -30,6 +29,8 @@ public abstract class RevaMessageHandler {
         messageHandlers.add(RevaGetDecompilationHandler.class);
         messageHandlers.add(RevaGetFunctionCountHandler.class);
         messageHandlers.add(RevaGetDefinedFunctionListHandler.class);
+        messageHandlers.add(RevaGetImportedLibrariesCountHandler.class);
+        messageHandlers.add(RevaGetImportedLibrariesListHandler.class);
         messageHandlers.add(RevaRenameVariableHandler.class);
         messageHandlers.add(RevaGetReferencesHandler.class);
         messageHandlers.add(RevaSetSymbolNameHandler.class);

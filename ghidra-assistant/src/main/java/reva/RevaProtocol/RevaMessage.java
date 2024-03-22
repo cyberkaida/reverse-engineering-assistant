@@ -53,6 +53,10 @@ public class RevaMessage {
         messageTypes.add(RevaGetFunctionCountResponse.class);
         messageTypes.add(RevaGetDefinedFunctionList.class);
         messageTypes.add(RevaGetDefinedFunctionListResponse.class);
+        messageTypes.add(RevaGetImportedLibrariesCount.class);
+        messageTypes.add(RevaGetImportedLibrariesCountResponse.class);
+        messageTypes.add(RevaGetImportedLibrariesList.class);
+        messageTypes.add(RevaGetImportedLibrariesListResponse.class);
         messageTypes.add(RevaGetNewVariableName.class);
         messageTypes.add(RevaRenameVariable.class);
         messageTypes.add(RevaRenameVariableResponse.class);

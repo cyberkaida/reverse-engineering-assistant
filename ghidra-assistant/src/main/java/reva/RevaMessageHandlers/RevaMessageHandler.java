@@ -29,6 +29,8 @@ public abstract class RevaMessageHandler {
         messageHandlers.add(RevaGetDecompilationHandler.class);
         messageHandlers.add(RevaGetFunctionCountHandler.class);
         messageHandlers.add(RevaGetDefinedFunctionListHandler.class);
+        messageHandlers.add(RevaGetImportedLibrariesCountHandler.class);
+        messageHandlers.add(RevaGetImportedLibrariesListHandler.class);
         messageHandlers.add(RevaRenameVariableHandler.class);
         messageHandlers.add(RevaGetReferencesHandler.class);
         messageHandlers.add(RevaSetSymbolNameHandler.class);

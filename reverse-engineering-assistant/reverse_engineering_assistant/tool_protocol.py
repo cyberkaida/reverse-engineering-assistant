@@ -507,3 +507,50 @@ class RevaSetCommentResponse(RevaMessageToReva, RevaMessageResponse):
     Response to a RevaSetComment message
     """
     message_type: str = "RevaSetCommentResponse"
+
+@register_message
+class RevaGetImportedLibrariesList(RevaMessageToTool):
+    """
+    Request a list of imported libraries
+    """
+    message_type: str = "RevaGetImportedLibrariesList"
+    page: int = Field()
+    """
+    The page number to retrieve. 1 indexed.
+    """
+    page_size: int = Field()
+    """
+    The number of symbols to retrieve per page
+    """
+
+@register_message
+class RevaGetImportedLibrariesListResponse(RevaMessageToReva, RevaMessageResponse):
+    """
+    Response to a RevaGetImportedLibrariesList message.
+
+    A list of imported libraries
+    """
+    message_type: str = "RevaGetImportedLibrariesListResponse"
+    list: List[str] = Field()
+    """
+    A list of declared imports
+    """
+
+@register_message
+class RevaGetImportedLibrariesCount(RevaMessageToTool):
+    """
+    Request the number of functions in the program
+    """
+    message_type: str = "RevaGetImportedLibrariesCount"
+    pass
+
+@register_message
+class RevaGetImportedLibrariesCountResponse(RevaMessageToReva, RevaMessageResponse):
+    """
+    Response to a RevaGetImportedLibrariesCount message
+    """
+    message_type: str = "RevaGetImportedLibrariesCountResponse"
+    count: int = Field()
+    """
+    The number of imported librariess in the program
+    """

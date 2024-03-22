@@ -9,7 +9,7 @@ from langchain.llms.base import BaseLLM
 
 from ..tool import AssistantProject
 from ..assistant import AssistantProject, RevaTool, BaseLLM, register_tool
-from ..tool_protocol import RevaMessageToTool, RevaMessageToReva, RevaGetDecompilation, RevaGetDecompilationResponse, RevaGetFunctionCount, RevaGetFunctionCountResponse, RevaGetDefinedFunctionList, RevaGetDefinedFunctionListResponse, RevaMessageResponse
+from ..tool_protocol import RevaMessageToTool, RevaMessageToReva, RevaGetDecompilation, RevaGetDecompilationResponse, RevaGetFunctionCount, RevaGetFunctionCountResponse, RevaGetDefinedFunctionList, RevaGetDefinedFunctionListResponse, RevaMessageResponse, RevaGetImportedLibrariesCount, RevaGetImportedLibrariesCountResponse, RevaGetImportedLibrariesList, RevaGetReferencesResponse, RevaGetReferencesResponse,RevaGetImportedLibrariesListResponse
 
 from ..reva_exceptions import RevaToolException
 
@@ -100,7 +100,7 @@ class RevaDecompilationIndex(RevaRemoteTool):
         if not isinstance(response, RevaGetDecompilationResponse):
             raise RevaToolException(f"Expected a RevaGetDecompilationResponse, got {response}")
 
-        respose: RevaGetDecompilationResponse = response
+        response: RevaGetDecompilationResponse = response
 
         # Finally we can return the response
         return {
@@ -309,3 +309,67 @@ class RevaSetComment(RevaRemoteTool):
         response: RevaSetCommentResponse = response
 
         return response.model_dump()
+
+@register_tool
+class RevaLibraryImportIndex(RevaRemoteTool):
+    """
+    An index of imported libraries available to the
+    reverse engineering assistant.
+    """
+    index_name = "imported_libraries"
+    description = "Used for retrieving imported libraries"
+    logger = logging.getLogger("reverse_engineering_assistant.RevaLibraryImportIndex")
+
+    def __init__(self, project: AssistantProject, llm: BaseLLM) -> None:
+        super().__init__(project, llm)
+        self.description = "Used for retrieving imported libraries"
+        self.tool_functions = [
+            self.get_imported_libraries_list_paginated,
+            self.get_imported_libraries_count,
+        ]
+
+    def get_imported_libraries_list_paginated(self, page: int, page_size: int = 20) -> List[str]:
+        """
+        Return a paginated list of imported libraries in the index. Use get_imported_libraries_count to get the total number of imported libraries.
+        page is 1 indexed. To get the first page, set page to 1. Do not set page to 0.
+        """
+        from ..assistant_api_server import RevaCallbackHandler, to_send_to_tool
+
+        if isinstance(page, str):
+            page = int(page)
+        if isinstance(page_size, str):
+            page_size = int(page_size)
+        if page == 0:
+            raise ValueError("`page` is 1 indexed, page cannot be 0")
+
+        get_imported_libraries_list_message = RevaGetImportedLibrariesList(page=page, page_size=page_size)
+        callback_handler = RevaCallbackHandler(self.project, get_imported_libraries_list_message)
+        to_send_to_tool.put(callback_handler)
+
+        self.logger.debug(f"Waiting for response to {get_imported_libraries_list_message.model_dump_json()}")
+        response = callback_handler.wait()
+        assert isinstance(response, RevaMessageResponse), "Incorrect type returned from callback handler."
+        if response.error_message:
+            raise RevaToolException(response.error_message)
+
+        if not isinstance(response, RevaGetImportedLibrariesListResponse):
+            raise RevaToolException(f"Expected a RevaGetImportedLibrariesListResponse, got {response}")
+
+        return response.list
+
+    def get_imported_libraries_count(self) -> int:
+        """
+        Return the total number of imported libraries in the program.
+        """
+
+        response = self.submit_to_tool(RevaGetImportedLibrariesCount())
+        assert isinstance(response, RevaMessageResponse), "Incorrect type returned from callback handler."
+
+        if response.error_message:
+            raise RevaToolException(response.error_message)
+
+        if not isinstance(response, RevaGetImportedLibrariesCountResponse):
+            raise ValueError(f"Expected a RevaGetImportedLibrariesCountResponse, got {response}")
+
+        return response.function_count
+

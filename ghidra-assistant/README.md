@@ -24,3 +24,6 @@ Start Ghidra. In the Project Management window that opens first, select `File` -
 
 To test, choose and open a file. Find a function and open its Decompile window. Right click on a variable name and you should see a "ReVa" option in the menu.
 
+# Development
+
+Once you've completed a set of changes, you will need to rebuild `ghidra-assistant.zip`. Then, uninstall the existing version in Ghidra (follow the installation steps above, but _un_-check the entry) and then install the zip again. 

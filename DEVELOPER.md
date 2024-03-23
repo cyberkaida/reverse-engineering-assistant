@@ -4,6 +4,20 @@ These are some notes documenting annoying or complex parts of developing for ReV
 the general architecture of ReVa. It is assumed you read the [README.md](/README.md) before
 reading this.
 
+## Building the Ghidra extension
+
+You will need:
+- Ghidra installed, with the `GHIDRA_INSTALL_DIR` environment variable set to the path to your install
+- The [gradle and JDK required by Ghidra](https://github.com/NationalSecurityAgency/ghidra/blob/master/README.md#build)
+
+The [Ghidra extension](./ghidra-assistant) is built like any other
+Ghidra extension. Running `gradle` will generate a `dist/` directory
+and you can install the extension from there.
+
+If you are running a UNIX system, there is a helper script
+[gext-build](./ghidra-assistant/gext-build) that will build
+and install the extestion (replacing older versions) in one step.
+
 ## ReVa -> RE Tool
 
 These tools allow ReVa to interact with an RE tool and the binary/project

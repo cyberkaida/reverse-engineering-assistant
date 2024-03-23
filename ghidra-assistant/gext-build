@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# This script builds the Ghidra Extension and copies it
+# to the Ghidra Extensions directory for the current version of Ghidra
+# set in your environment (GHIDRA_INSTALL_DIR).
+set -ex
+
+NAME=$(basename $(pwd))
+rm -f dist/*
+gradle
+LATEST_BUILD=$(ls dist/*.zip | tail -n 1)
+GHIDRA_BUILD=$(basename ${GHIDRA_INSTALL_DIR})
+rm -rf "${HOME}/.ghidra/.${GHIDRA_BUILD}/Extensions/${NAME}"
+unzip "${LATEST_BUILD}" -d "${HOME}/.ghidra/.${GHIDRA_BUILD}/Extensions/"
+
+ls -la "${HOME}/.ghidra/.${GHIDRA_BUILD}/Extensions"

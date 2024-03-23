@@ -458,3 +458,52 @@ class RevaRenameVariableResponse(RevaMessageToReva, RevaMessageResponse):
     A simple yes/no, not much to respond with.
     """
     message_type: str = "RevaRenameVariableResponse"
+
+class Script(BaseModel):
+    name: str = Field()
+    description: Optional[str] = Field(default=None)
+    path: Optional[str] = Field(default=None)
+
+@register_message
+class RevaGetScripts(RevaMessageToTool):
+    """
+    Request a list of available scripts from the RE Tool.
+    """
+    message_type: str = "RevaGetScripts"
+
+@register_message
+class RevaGetScriptsResponse(RevaMessageToReva, RevaMessageResponse):
+    """
+    Response to a RevaGetScripts message
+    """
+    message_type: str = "RevaGetScriptsResponse"
+    scripts: List[Script] = Field()
+    """
+    A list of available scripts
+    """
+
+@register_message
+class RevaRunScript(RevaMessageToTool):
+    """
+    Run a python script
+    """
+    message_type: str = "RevaRunScript"
+    needs_write: bool = Field(default=False)
+    """
+    True if the script needs to write to the database
+    """
+    script_name: str = Field()
+    """
+    The script to run
+    """
+
+@register_message
+class RevaRunScriptResponse(RevaMessageToReva, RevaMessageResponse):
+    """
+    Response to a RevaRunScript message
+    """
+    message_type: str = "RevaRunScriptResponse"
+    output: str = Field()
+    """
+    The output of the script
+    """

@@ -60,6 +60,8 @@ public class RevaMessage {
         messageTypes.add(RevaGetReferencesResponse.class);
         messageTypes.add(RevaSetSymbolName.class);
         messageTypes.add(RevaSetSymbolNameResponse.class);
+        messageTypes.add(RevaRunScript.class);
+        messageTypes.add(RevaRunScriptResponse.class);
     }
 
     /**

@@ -1,15 +1,19 @@
 package reva.RevaMessageHandlers;
 
+import ghidra.app.decompiler.ClangToken;
+import ghidra.app.decompiler.ClangTokenGroup;
 import ghidra.app.decompiler.DecompInterface;
 import ghidra.app.decompiler.DecompileResults;
 import ghidra.app.decompiler.DecompiledFunction;
 import ghidra.app.decompiler.flatapi.FlatDecompilerAPI;
 import ghidra.program.flatapi.FlatProgramAPI;
 import ghidra.program.model.address.Address;
+import ghidra.program.model.listing.CodeUnit;
+import ghidra.program.model.listing.CodeUnitIterator;
 import ghidra.program.model.listing.Function;
+import ghidra.program.model.listing.Program;
 import ghidra.program.model.pcode.HighSymbol;
 import ghidra.program.model.pcode.LocalSymbolMap;
-import ghidra.program.model.symbol.Symbol;
 import ghidra.util.Msg;
 import ghidra.util.task.TaskMonitor;
 import ghidra.util.task.TaskMonitorAdapter;
@@ -18,19 +22,19 @@ import reva.RevaProtocol.RevaGetDecompilation;
 import reva.RevaProtocol.RevaGetDecompilationResponse;
 import reva.RevaProtocol.RevaMessage;
 import reva.RevaProtocol.RevaMessageResponse;
-import reva.RevaProtocol.RevaGetDecompilationResponse.RevaVariable;
-
 import java.util.ArrayList;
 import java.util.Iterator;
 
 public class RevaGetDecompilationHandler extends RevaMessageHandler {
     FlatProgramAPI api;
     FlatDecompilerAPI decompiler;
+    Program program;
 
 
     public RevaGetDecompilationHandler(RevaService service) {
         super(service);
 
+        program = service.currentProgram;
         api = new FlatProgramAPI(service.currentProgram);
         decompiler = new FlatDecompilerAPI(api);
     }
@@ -78,6 +82,7 @@ public class RevaGetDecompilationHandler extends RevaMessageHandler {
         response.function = function.getName();
         response.function_signature = function.getPrototypeString(true, true);
 
+        // And then let's try the decompiler
         try {
             decompiler.initialize();
         } catch (Exception e) {
@@ -99,17 +104,23 @@ public class RevaGetDecompilationHandler extends RevaMessageHandler {
                 return response;
             }
             DecompiledFunction decompiledFunction = decompiled.getDecompiledFunction();
-            if (decompiledFunction == null) {
-                Boolean isThunk = function.isThunk();
-                response.error_message = "Failed to decompile function " + function.getName();
-                if (isThunk) {
-                    // If the thing is a thunk, we cannot decompile it (no implementation)
-                    // and we need to tell the LLM about it so it does not try again.
-                    response.error_message += " is a thunk";
+            Iterator<ClangToken> tokenIterator = decompiled.getCCodeMarkup().tokenIterator(true);
+            String decompilationString = "";
+            Address lastMinAddress = null;
+            while (tokenIterator.hasNext()) {
+                ClangToken token = tokenIterator.next();
+                if (token.getMinAddress() != null) {
+                    if (lastMinAddress == null || !lastMinAddress.equals(token.getMinAddress())) {
+                        lastMinAddress = token.getMinAddress();
+                        decompilationString += "\n/* " + lastMinAddress.toString() + " */\n";
+                    }
+                    decompilationString += token.toString();
                 }
-                return response;
             }
-            response.decompilation = decompiledFunction.getC();
+
+            // response.decompilation = decompiledFunction.getC();
+            response.decompilation = decompilationString;
+
             LocalSymbolMap symbolMap = decompiled.getHighFunction().getLocalSymbolMap();
             Iterator<HighSymbol> symbolIterator = symbolMap.getSymbols();
             while (symbolIterator.hasNext()) {
@@ -131,6 +142,7 @@ public class RevaGetDecompilationHandler extends RevaMessageHandler {
             Msg.info(this, "Using flat decompiler");
             try {
                 response.decompilation = decompiler.decompile(function);
+
             } catch (Exception e) {
                 response.error_message = "Failed to decompile function " + function.getName();
                 Msg.error(this, "Failed to decompile function " + function.getName(), e);

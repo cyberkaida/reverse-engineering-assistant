@@ -1,9 +1,18 @@
 from typing import Dict, List, Optional
 from ..assistant_api_server import register_message_handler, RevaMessageHandler, RevaCallbackHandler
-from ..tool_protocol import RevaGetNewVariableName, RevaGetNewVariableNameResponse, RevaGetNewSymbolName, RevaGetNewSymbolNameResponse
+from ..tool_protocol import (
+    RevaExplain,
+    RevaGetNewVariableName,
+    RevaGetNewVariableNameResponse,
+    RevaGetNewSymbolName,
+    RevaGetNewSymbolNameResponse,
+    RevaExplain,
+    RevaExplainResponse,
+    RevaLocation,
+)
 
 from ..reva_exceptions import RevaToolException
-
+import threading
 import logging
 
 
@@ -37,3 +46,22 @@ class HandleGetNewSymbolName(RevaMessageHandler):
         _ = self.assistant.query(question)
         response = RevaGetNewSymbolNameResponse(response_to=message.message_id)
         return response
+
+@register_message_handler
+class HandleExplain(RevaMessageHandler):
+    handles_type = RevaExplain
+    def run(self, callback_handler: RevaCallbackHandler) -> RevaExplainResponse:
+        # Extract the content and ask the LLM what it thinks...
+        assert isinstance(callback_handler.message, RevaExplain)
+        message: RevaExplain = callback_handler.message
+        question = f"""
+        Explain the following location in detail, leave comments as needed.
+        """
+
+        location: RevaLocation = message.location
+
+        if message.location is not None:
+            question += f"\n{message.location}"
+        # Block until ReVa finishes analysis.
+        threading.Thread(target=self.assistant.query, args=(question,)).start()
+        return RevaExplainResponse(response_to=message.message_id)

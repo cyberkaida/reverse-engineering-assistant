@@ -91,13 +91,14 @@ class RevaDecompilationIndex(RevaRemoteTool):
         # Now we can ask the tool
         get_decompilation_message = RevaGetDecompilation(address=address, function=name)
         response = self.submit_to_tool(get_decompilation_message)
-        assert isinstance(response, RevaMessageResponse), "Incorrect type returned from callback handler."
-
         if response.error_message:
             raise RevaToolException(response.error_message)
+        assert isinstance(response, RevaMessageResponse), "Incorrect type returned from callback handler."
+
+
 
         if not isinstance(response, RevaGetDecompilationResponse):
-            raise ValueError(f"Expected a RevaGetDecompilationResponse, got {response}")
+            raise RevaToolException(f"Expected a RevaGetDecompilationResponse, got {response}")
 
         respose: RevaGetDecompilationResponse = response
 
@@ -107,6 +108,7 @@ class RevaDecompilationIndex(RevaRemoteTool):
             "function_signature": response.function_signature,
             "address": hex(response.address),
             "decompilation": response.decompilation,
+            "listing": response.listing,
             "variables": response.variables, #type: ignore # We can ignore this because it can be serialised to a dict
         }
 
@@ -278,3 +280,32 @@ class RevaSetSymbolName(RevaRemoteTool):
             "old_name": old_name_or_address,
             "new_name": new_name,
         }
+
+@register_tool
+class RevaSetComment(RevaRemoteTool):
+    """
+    A tool for setting comments on addresses, functions and symbols.
+    """
+
+    def __init__(self, project: AssistantProject, llm: BaseLLM) -> None:
+        super().__init__(project, llm)
+        self.description = "Used for setting comments on addresses, functions and symbols"
+
+        self.tool_functions = [
+            self.set_comment,
+        ]
+
+    def set_comment(self, comment: str, address_or_symbol: str) -> Dict[str, str]:
+        """
+        Set the comment at the given address, function or symbol to `comment`.
+        Use this when you want to add an explanation or note to a specific part
+        of the code.
+        """
+        from ..tool_protocol import RevaSetComment, RevaSetCommentResponse
+        set_comment_message: RevaMessageToTool = RevaSetComment(comment=comment, address_or_symbol=address_or_symbol)
+
+        response = self.submit_to_tool(set_comment_message)
+        assert isinstance(response, RevaSetCommentResponse), f"Expected a RevaSetCommentResponse, got {response}"
+        response: RevaSetCommentResponse = response
+
+        return response.model_dump()

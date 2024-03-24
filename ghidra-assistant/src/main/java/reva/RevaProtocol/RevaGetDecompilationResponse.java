@@ -12,6 +12,7 @@ public class RevaGetDecompilationResponse extends RevaMessageResponse {
     }
     public long address;
     public String decompilation;
+    public String listing;
     public String function;
     public String function_signature;
 

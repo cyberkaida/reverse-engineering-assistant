@@ -4,46 +4,38 @@ import ghidra.framework.plugintool.PluginInfo;
 import ghidra.framework.plugintool.PluginTool;
 import ghidra.app.plugin.ProgramPlugin;
 import ghidra.app.plugin.core.decompile.DecompilerActionContext;
-import ghidra.app.util.viewer.listingpanel.ListingPanel;
 import ghidra.framework.plugintool.util.PluginStatus;
 import ghidra.program.model.address.Address;
-import ghidra.program.model.listing.CodeUnit;
 import ghidra.program.model.listing.Function;
-import ghidra.program.model.listing.Listing;
 import ghidra.program.model.listing.Program;
 import ghidra.program.model.pcode.HighVariable;
 import ghidra.program.model.symbol.Symbol;
 import ghidra.program.util.ProgramLocation;
+import ghidra.program.util.ProgramSelection;
 import ghidra.app.context.ListingActionContext;
 import ghidra.app.context.ProgramActionContext;
-import ghidra.app.decompiler.ClangToken;
 import ghidra.app.decompiler.component.DecompilerPanel;
 import ghidra.app.plugin.PluginCategoryNames;
 import ghidra.util.Msg;
-import ghidra.util.task.Task;
 import ghidra.util.task.TaskBuilder;
-import ghidra.util.task.TaskLauncher;
-import ghidra.util.task.TaskListener;
 import ghidra.util.task.TaskMonitor;
 import resources.Icons;
+import reva.RevaProtocol.RevaExplain;
 import reva.RevaProtocol.RevaGetNewSymbolName;
 import reva.RevaProtocol.RevaGetNewVariableName;
 import reva.RevaProtocol.RevaHeartbeat;
 import reva.RevaProtocol.RevaHeartbeatResponse;
-import reva.RevaProtocol.RevaMessageResponse;
+import reva.RevaProtocol.RevaLocation;
 import reva.RevaProtocol.RevaVariable;
 
-import com.google.gson.JsonArray;
-import com.google.gson.JsonObject;
-
-import docking.ActionContext;
 import docking.action.DockingAction;
 import docking.action.builder.ActionBuilder;
 
 import ghidra.util.task.TaskMonitorAdapter;
 
 import java.util.HashMap;
-import java.util.function.Predicate;
+
+import org.python.antlr.ast.List;
 
 @PluginInfo(
         status = PluginStatus.STABLE, // probably a lie
@@ -218,44 +210,87 @@ public class RevaPlugin extends ProgramPlugin {
 	 * @param tool
 	 */
 	private void setupActionDescribeFunction(PluginTool tool) {
-		new ActionBuilder("ReVa Describe Function", getName())
-		.description("Describe the selected function")
-		.popupMenuPath("ReVa", "Describe Function")
+		new ActionBuilder("ReVa Describe", getName())
+		.description("Describe the selected")
+		.popupMenuPath("ReVa", "Describe selection")
 		.popupMenuGroup("ReVa")
 		.onAction(context -> {
 			// This should be active in both the listing and decompiler view
 			Address currentAddress;
 			Program program;
+			RevaService service;
+
 			if (context instanceof DecompilerActionContext) {
 				DecompilerActionContext decompilerActionContext = (DecompilerActionContext) context;
 				program = decompilerActionContext.getProgram();
 				ProgramLocation location = decompilerActionContext.getLocation();
 				currentAddress = location.getAddress();
+				service = services.get(decompilerActionContext.getProgram());
 			} else if (context instanceof ListingActionContext) {
 				ListingActionContext listingActionContext = (ListingActionContext) context;
 				program = listingActionContext.getProgram();
 				ProgramLocation location = listingActionContext.getLocation();
 				currentAddress = location.getAddress();
+				service = services.get(listingActionContext.getProgram());
 			} else {
 				Msg.error(this, "Unknown context type");
 				return;
 			}
 
+			RevaExplain message = new RevaExplain();
+			RevaLocation location = new RevaLocation();
+
+
 			Function currentFunction = program.getFunctionManager().getFunctionContaining(currentAddress);
-			if (currentFunction == null) {
-				Msg.error(this, "No function at address " + currentAddress.toString());
-				return;
+			if (currentFunction != null) {
+				Msg.info(this, "Describing function " + currentFunction.getName());
+				location.function_name = currentFunction.getName();
 			}
 
-			// OK now we have a function, let's ask the ReVa to describe it
-			// TODO: Send message to ReVa
-			Msg.info(this, "Describing function " + currentFunction.getName());
-			//currentFunction.setComment("This is a function");
+			// If there is something specific selected, let's send that too
+			if (context instanceof ListingActionContext) {
+				// If the user right clicked in the listing, we'll get the selection
+				if (currentFunction == null || !currentFunction.getEntryPoint().equals(currentAddress)) {
+					// The LLM can get confused if we specify both the start address
+					// and the name. So we only add the address when we aren't selecting the entry point
+					location.cursor_address = currentAddress.toString();
+				}
+
+				ListingActionContext listingActionContext = (ListingActionContext) context;
+				ProgramSelection selected = listingActionContext.getHighlight();
+				if (selected!= null &&!selected.isEmpty()) {
+					location.start_address = selected.getMinAddress().toString();
+					location.end_address = selected.getMaxAddress().toString();
+				}
+			} else if (context instanceof DecompilerActionContext) {
+				DecompilerActionContext decompilerActionContext = (DecompilerActionContext) context;
+				ProgramSelection selected = decompilerActionContext.getSelection();
+				if (selected != null && !selected.isEmpty()) {
+					// TODO: We want to get the text of the selection,
+					// but none of these techniques work.
+
+					// If we set these two without "content" set, the LLM
+					// will place the comment in the wrong place
+
+					location.start_address = selected.getMinAddress().toString();
+					location.end_address = selected.getMaxAddress().toString();
+
+					// Get the selected text from the decompilation
+					DecompilerPanel panel = decompilerActionContext.getDecompilerPanel();
+					Msg.info(this, "Highlighted: " + panel.getHighlightedText());
+					Msg.info(this, "Selected: " +  panel.getSelectedText());
+					Msg.info(this, "Cursor: " + panel.getTextUnderCursor());
+				}
+			}
+
+			message.location = location;
+			// Send the message to ReVa, we don't expect a response
+			service.sendToReva(message);
+			return;
 		})
 		.enabledWhen(context -> {
 			return (context instanceof DecompilerActionContext || context instanceof ListingActionContext);
 		})
 		.buildAndInstall(tool);
 	}
-
 }

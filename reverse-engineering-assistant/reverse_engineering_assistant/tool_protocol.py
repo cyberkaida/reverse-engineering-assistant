@@ -33,8 +33,10 @@ import json
 from pathlib import Path
 import logging
 
+from click import Option
 from pydantic import BaseModel, Field
 import pydantic
+import pydantic_core
 
 try:
     from pydantic import validator
@@ -99,9 +101,11 @@ class RevaMessage(BaseModel, ABC):
             logger.debug(f"Message class is {message_class}")
             try:
                 return message_class.model_validate(thing)
-            except pydantic.error_wrappers.ValidationError:
+            except pydantic_core.ValidationError:
+                # If we fail to turn it into a specific type, make it a generic type
+                # This allows us to extract things like error messages.
                 if issubclass(message_class, RevaMessageResponse):
-                    return RevaMessageResponse.parse_obj(thing)
+                    return RevaMessageResponse.model_validate(thing)
                 else:
                     logger.exception(f"Failed to parse {thing} as {message_class}")
                 return RevaMessage.model_validate(thing)
@@ -263,6 +267,10 @@ class RevaGetDecompilationResponse(RevaMessageToReva, RevaMessageResponse):
     decompilation: str = Field()
     """
     The decompilation of the given address
+    """
+    listing: Optional[str] = Field(default=None)
+    """
+    The disassebly listing of the function
     """
     function: str = Field()
     """
@@ -458,3 +466,44 @@ class RevaRenameVariableResponse(RevaMessageToReva, RevaMessageResponse):
     A simple yes/no, not much to respond with.
     """
     message_type: str = "RevaRenameVariableResponse"
+
+class RevaLocation(BaseModel):
+    cursor_address: Optional[str] = Field(default=None)
+    function_name: Optional[str] = Field(default=None)
+    start_address: Optional[str] = Field(default=None)
+    end_address: Optional[str] = Field(default=None)
+    content: Optional[str] = Field(default=None)
+
+@register_message
+class RevaExplain(RevaMessageToReva):
+    """
+    Ask the model to explain something
+    """
+    message_type: str = "RevaExplain"
+    location: RevaLocation = Field()
+    """
+    The location to explain
+    """
+
+@register_message
+class RevaExplainResponse(RevaMessageToTool, RevaMessageResponse):
+    """
+    Response to a RevaExplain message
+    """
+    message_type: str = "RevaExplainResponse"
+
+@register_message
+class RevaSetComment(RevaMessageToTool):
+    """
+    Set a comment at a given address
+    """
+    message_type: str = "RevaSetComment"
+    address_or_symbol: str = Field()
+    comment: str = Field()
+
+@register_message
+class RevaSetCommentResponse(RevaMessageToReva, RevaMessageResponse):
+    """
+    Response to a RevaSetComment message
+    """
+    message_type: str = "RevaSetCommentResponse"

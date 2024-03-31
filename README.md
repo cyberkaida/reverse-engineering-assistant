@@ -31,6 +31,7 @@ You can ask questions like:
 - Explain the purpose of the `__mod_init` segment.
 - What does `mmap` return?
 - What does the function at address 0x80000 do?
+- What external libraries does this program use?
 - This is a CTF problem. Start at main, examine the program in detail and write a pwntools script to get the flag.
 
 An important part of reverse engineering is the process. Many other tools simply ask a single question of the LLM,

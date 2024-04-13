@@ -85,7 +85,7 @@ RevA has a two step workflow.
 2. Open the chat session.
 
 ReVa uses an extension for your RE tool to perform analysis.
-See [Ghidra Support](#ghidra-support) and [BinaryNinja Support](#binary-ninja-support) below.
+See [Ghidra Support](#ghidra-support) below.
 
 Once open the RE tool will try to connect to ReVa's REST API on localhost.
 
@@ -106,7 +106,6 @@ To ask questions and run the inference a command line tool is provided. Run `rev
 
 To install the particular extension for your disassembler see:
 - [Ghidra Support](#ghidra-support)
-- [Binary Ninja Support](#binary-ninja-support)
 
 To install the chat component you can do the following:
 
@@ -150,19 +149,6 @@ will perform the action.
 
 Note this uses the same system as chatting with ReVa, this means you can monitor ReVas thoughts in the chat
 window while the action is performed.
-
-# Binary Ninja Support
-
-> Note: Binary Ninja support is currently on hold while the basic functions are implemented in the Ghidra plugin.
-> This is because plugin development for Binary Ninja is easier as we have Python3. I will resume development soon!
-
-Install the ReVA BinaryNinja plugin by opening your BinaryNinja plugin directory (Plugins -> Open Plugin Folder)
-and copying or symbolic linking the [binary-ninja-assistant](./binary-ninja-assistant) directory into the plugin
-directory.
-
-Restart Binary Ninja and "ReVA Push" will be available in the Plugin menu.
-Press this to push data from BinaryNinja to ReVA, then follow the instructions in the [Workflow section](#workflow).
-The project name will be the name of the current open file.
 
 # Support
 

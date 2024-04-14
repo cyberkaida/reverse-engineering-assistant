@@ -27,6 +27,7 @@ dependencies = [
     "pydantic",
     "rich",
     "Flask",
+    "grpcio",
 ]
 
 [project.scripts]

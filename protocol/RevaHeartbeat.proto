@@ -1,0 +1,14 @@
+syntax = "proto3";
+package RevaProtocol;
+
+service RevaHeartbeat {
+    rpc heartbeat(RevaHeartbeatRequest) returns (RevaHeartbeatResponse) {}
+}
+
+message RevaHeartbeatRequest {
+    string message = 1;
+}
+
+message RevaHeartbeatResponse {
+    string response = 1;
+}

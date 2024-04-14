@@ -1,2 +1,16 @@
 syntax = "proto3";
 package RevaProtocol;
+
+service RevaGetCursor {
+    rpc getCursor(RevaGetCursorRequest) returns (RevaGetCursorResponse);
+}
+
+message RevaGetCursorRequest {
+
+}
+
+message RevaGetCursorResponse {
+    uint64 cursor_address = 1;
+    string symbol = 2;
+    string function = 3;
+}

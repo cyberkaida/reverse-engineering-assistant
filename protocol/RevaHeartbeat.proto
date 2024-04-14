@@ -2,7 +2,7 @@ syntax = "proto3";
 package RevaProtocol;
 
 service RevaHeartbeat {
-    rpc heartbeat(RevaHeartbeatRequest) returns (RevaHeartbeatResponse) {}
+    rpc heartbeat(RevaHeartbeatRequest) returns (RevaHeartbeatResponse);
 }
 
 message RevaHeartbeatRequest {

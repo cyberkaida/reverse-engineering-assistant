@@ -20,10 +20,11 @@ python: protocol
 protocol:
 	# Generate Python code from proto file
 	python3 -m pip install -r $(MAKEFILE_PATH)/requirements.txt
+	mkdir -p $(REVA_PYTHON_PATH)/protocol
 	python3 -m grpc_tools.protoc \
-		--proto_path=. \
-		--python_out=$(REVA_PYTHON_PATH) \
-		--pyi_out=$(REVA_PYTHON_PATH) \
-		--grpc_python_out=$(REVA_PYTHON_PATH) \
-		protocol/*.proto
+		--proto_path=$(MAKEFILE_PATH)/protocol/ \
+		--python_out=$(REVA_PYTHON_PATH)/protocol/ \
+		--pyi_out=$(REVA_PYTHON_PATH)/protocol/ \
+		--grpc_python_out=$(REVA_PYTHON_PATH)/protocol/ \
+		$(MAKEFILE_PATH)/protocol/*.proto
 	touch $(REVA_PYTHON_PATH)/protocol/__init__.py

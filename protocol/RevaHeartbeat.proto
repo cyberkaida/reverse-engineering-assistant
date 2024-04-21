@@ -1,6 +1,6 @@
 syntax = "proto3";
 package RevaProtocol;
-
+option java_package = "reva.protocol";
 service RevaHeartbeat {
     rpc heartbeat(RevaHeartbeatRequest) returns (RevaHeartbeatResponse);
 }

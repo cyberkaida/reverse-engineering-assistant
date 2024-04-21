@@ -1,6 +1,8 @@
 syntax = "proto3";
 package RevaProtocol;
 
+option java_package = "reva.protocol";
+
 service RevaGetCursor {
     rpc getCursor(RevaGetCursorRequest) returns (RevaGetCursorResponse);
 }

@@ -5,3 +5,4 @@ dist/
 *.pyc
 .venv
 .vscode
+.vim/

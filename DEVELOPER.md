@@ -4,6 +4,26 @@ These are some notes documenting annoying or complex parts of developing for ReV
 the general architecture of ReVa. It is assumed you read the [README.md](/README.md) before
 reading this.
 
+## Design
+
+ReVa is two components:
+- An extension/plugin (Ghidra, Binary Ninja, etc.)
+- The inference component (LLM)
+
+These two components talk to each other using gRPC.
+The extension launches the inference when it starts.
+
+The inference component is written in Python and can use
+Ollama and OpenAI for inference. The Ollama server can be
+local or remote.
+
+The [protocol](./protocol/) directory contains the protobuf
+definitions for each message type and a definition for the
+functions provided. Services are small and can be hosten on
+either the extension or the inference side. This allows the LLM
+to ask the extension for information, or the extension to ask
+the LLM for analysis.
+
 ## Building the Ghidra extension
 
 You will need:
@@ -43,36 +63,12 @@ will then use ReVa -> RE Tools to perform any actions required.
 
 ## Adding a new Tool
 
-To add one of these there are a few steps to make sure the messaging
-between ReVa and the RE tool works correctly.
+We use the gRPC library to talk between the RE Tool and ReVa.
 
-We implement a message and a response in python, this is used by the inference
-and BinaryNinja plugin. Special handling is required for Ghidra.
+https://grpc.io/docs/languages/java/quickstart/
 
-1. Add a protocol entry to [tool_protocol.py](./reverse_engineering_assistant/reverse_engineering_assistant/tool_protocol.py)
-2. Add matching protocol entries to the Ghidra plugin [RevaProtocol package](./ghidra-assistant/src/main/java/reva/RevaProtocol/)
-3. Add new Java protocol entries to the [message parser](./ghidra-assistant/src/main/java/reva/RevaProtocol/RevaMessage.java)
-4. Add a handler to the Java [message handlers](./ghidra-assistant/src/main/java/reva/RevaMessageHandlers)
-5. Add your new handler to the [message handler dispatch](./ghidra-assistant/src/main/java/reva/RevaMessageHandlers/RevaMessageHandler.java)
-6. Add a tool to the python side.
 
-### Protocol entries - Python
-
-A protocol entry is a python class that subclasses either `RevaMessageToReva` or `RevaMessageToTool`
-(depending on the direction of the message).
-
-These must always have a matching response message that also subclasses
-`RevaMessageResponse`.
-
-To be used in the communication it must be decorated with the `@register_message` decorator.
-
-### Protocol entries - Java
-
-We can't use reflection to capture the types easily like with python. This means there is more
-manual setup on the Java side.
-
-To do the same thing `@register_message` does in python, you must add your class to the list
-in the [message parser](./ghidra-assistant/src/main/java/reva/RevaProtocol/RevaMessage.java).
+1. Add a protocol entry to the [protocol](./protocol/) directory.
 
 ### Handlers - Python
 

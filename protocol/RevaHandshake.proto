@@ -1,0 +1,15 @@
+syntax = "proto3";
+package RevaProtocol;
+option java_package = "reva.protocol";
+
+service RevaHandshake {
+    rpc Handshake(RevaHandshakeRequest) returns (RevaHandshakeResponse) {};
+}
+
+message RevaHandshakeRequest {
+    string inferenceHostname = 1;
+    int32 inferencePort = 2;
+}
+
+message RevaHandshakeResponse {
+}

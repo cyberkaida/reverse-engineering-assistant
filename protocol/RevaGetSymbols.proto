@@ -1,0 +1,37 @@
+syntax = "proto3";
+package RevaProtocol;
+option java_package = "reva.protocol";
+service RevaToolSymbolService {
+  rpc GetSymbols(RevaGetSymbolsRequest) returns (RevaGetSymbolsResponse);
+  rpc SetSymbolName(RevaSetSymbolNameRequest) returns (RevaSetSymbolNameResponse);
+}
+
+service RevaLLMSymbolService {
+  // TODO: This should be implemented in Ghidra. Split into new service?
+  rpc GetNewSymbolName(RevaGetNewSymbolNameRequest) returns (RevaGetNewSymbolNameResponse);
+}
+
+message RevaGetSymbolsRequest {
+  int32 page = 1;
+  int32 page_size = 2;
+}
+
+message RevaGetSymbolsResponse {
+  repeated string symbols = 1;
+}
+
+message RevaSetSymbolNameRequest {
+  string old_name_or_address = 1;
+  string new_name = 2;
+}
+
+message RevaGetNewSymbolNameRequest {
+  string symbol_name = 1;
+}
+
+message RevaGetNewSymbolNameResponse {
+  string new_symbol_name = 1;
+}
+
+message RevaSetSymbolNameResponse {
+}

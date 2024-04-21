@@ -1,3 +1,4 @@
 *.class
 build
 bin/
+lib/*.jar

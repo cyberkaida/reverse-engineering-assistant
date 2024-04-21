@@ -66,6 +66,27 @@ dependencies {
 	implementation group: 'com.google.protobuf', name: 'protoc', version: '4.26.1'
 	// https://mvnrepository.com/artifact/com.google.protobuf/protobuf-gradle-plugin
 	runtimeOnly group: 'com.google.protobuf', name: 'protobuf-gradle-plugin', version: '0.9.4'
+
+	runtimeOnly 'io.grpc:grpc-netty-shaded:1.63.0'
+	implementation 'io.grpc:grpc-protobuf:1.63.0'
+	implementation 'io.grpc:grpc-stub:1.63.0'
+	compileOnly 'org.apache.tomcat:annotations-api:6.0.53' // necessary for Java 9+
+}
+
+protobuf {
+  protoc {
+    artifact = "com.google.protobuf:protoc:4.26.1"
+  }
+  plugins {
+    grpc {
+      artifact = 'io.grpc:protoc-gen-grpc-java:1.63.0'
+    }
+  }
+  generateProtoTasks {
+    all()*.plugins {
+      grpc {}
+    }
+  }
 }
 
 // Exclude additional files from the built extension

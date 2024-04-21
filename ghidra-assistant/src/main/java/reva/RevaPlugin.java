@@ -5,6 +5,7 @@ import ghidra.framework.plugintool.PluginTool;
 import ghidra.app.plugin.ProgramPlugin;
 import ghidra.framework.plugintool.util.PluginStatus;
 import ghidra.program.model.listing.Program;
+
 import ghidra.app.plugin.PluginCategoryNames;
 import ghidra.util.Msg;
 import ghidra.util.task.TaskBuilder;
@@ -40,6 +41,7 @@ public class RevaPlugin extends ProgramPlugin {
 
 	public void registerInference(String hostname, int port) {
 		ManagedChannelBuilder<?> channel = ManagedChannelBuilder.forAddress(hostname, port);
+		Msg.info(this, String.format("Connected channel to %s:%s", hostname, port));
 		// TODO: Register each of the inference handlers
 	}
 
@@ -68,6 +70,18 @@ public class RevaPlugin extends ProgramPlugin {
 		TaskBuilder inferenceTask = new TaskBuilder("ReVa Inference", (monitor) -> {
 			// TODO: Create a subprocess to run the inference side.
 			// and pass the hostname and port.
+
+			// TODO: Append the path to the venv to the ProcessBuilder environment.
+			ProcessBuilder processBuilder = new ProcessBuilder();
+			String[] command = {"reva-server", "--connect", "localhost:71337"};
+			processBuilder.command(command);
+
+			try {
+				Process inferenceProcess = processBuilder.start();
+				inferenceProcess.waitFor();
+			} catch (Exception e) {
+				Msg.error(this, "Error starting ReVa inference server: " + e.getMessage());
+			}
 		});
 
 		task.launchInBackground(serviceMonitor);

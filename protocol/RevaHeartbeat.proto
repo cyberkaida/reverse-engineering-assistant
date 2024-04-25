@@ -6,9 +6,7 @@ service RevaHeartbeat {
 }
 
 message RevaHeartbeatRequest {
-    string message = 1;
 }
 
 message RevaHeartbeatResponse {
-    string response = 1;
 }

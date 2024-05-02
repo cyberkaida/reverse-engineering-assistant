@@ -1,19 +1,36 @@
 from typing import Dict, List, Optional
-from ..assistant_api_server import register_message_handler, RevaMessageHandler, RevaCallbackHandler
-from ..tool_protocol import (
-    RevaExplain,
-    RevaGetNewVariableName,
-    RevaGetNewVariableNameResponse,
-    RevaGetNewSymbolName,
-    RevaGetNewSymbolNameResponse,
-    RevaExplain,
-    RevaExplainResponse,
-    RevaLocation,
-)
+
+from sympy import N
+from ..assistant_api_server import get_channel
 
 from ..reva_exceptions import RevaToolException
 import threading
 import logging
+
+from ..protocol.RevaChat_pb2_grpc import RevaChatServiceServicer
+from ..protocol.RevaChat_pb2 import RevaChatMessage, RevaChatMessageResponse
+
+from functools import cache
+from ..assistant import ReverseEngineeringAssistant
+
+class RevaChat(RevaChatServiceServicer):
+
+    @cache
+    def get_assistant(self, project: str) -> ReverseEngineeringAssistant:
+        assistant = ReverseEngineeringAssistant(project)
+        return assistant
+
+    def sendMessageStream(self, request_iterator, context):
+        # let's grab a reference to our assistant
+
+        for request in request_iterator:
+            assistant = self.get_assistant(request.project)
+            print(request)
+
+            llm_response = assistant.query(request.message)
+            response = RevaChatMessageResponse()
+            response.message = llm_response
+            yield response
 
 
 @register_message_handler
@@ -21,15 +38,7 @@ class HandleGetNewVariableName(RevaMessageHandler):
     handles_type = RevaGetNewVariableName
     def run(self, callback_handler: RevaCallbackHandler) -> RevaGetNewVariableNameResponse:
         # Extract the content and ask the LLM what it thinks...
-        assert isinstance(callback_handler.message, RevaGetNewVariableName)
-        message: RevaGetNewVariableName = callback_handler.message
-        question = f"""
-        Examine the function {message.function_name} in detail and rename the following variable:
-        {message.variable}
-        """
-        # Block until ReVa finishes analysis.
-        _ = self.assistant.query(question)
-        response = RevaGetNewVariableNameResponse(response_to=message.message_id)
+        raise NotImplementedError("This function is not implemented yet.")
         return response
 
 @register_message_handler

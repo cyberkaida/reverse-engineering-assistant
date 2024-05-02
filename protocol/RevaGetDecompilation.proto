@@ -2,8 +2,14 @@ syntax = "proto3";
 package RevaProtocol;
 import "RevaVariable.proto";
 option java_package = "reva.protocol";
+
+service RevaDecompilationService {
+    rpc GetDecompilation(RevaGetDecompilationRequest) returns (RevaGetDecompilationResponse) {}
+}
+
 message RevaGetDecompilationRequest {
     string function = 1;
+    string address = 2;
 }
 
 message RevaGetDecompilationResponse {
@@ -15,4 +21,5 @@ message RevaGetDecompilationResponse {
     repeated RevaVariable variables = 6;
     string listing = 7;
     string decompilation = 8;
+    string error_message = 9;
 }

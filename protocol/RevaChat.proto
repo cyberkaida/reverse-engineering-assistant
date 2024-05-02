@@ -1,0 +1,19 @@
+syntax = "proto3";
+package RevaProtocol;
+
+option java_package = "reva.protocol";
+
+service RevaChatService {
+    rpc sendMessageStream(stream RevaChatMessage) returns (stream RevaChatMessageResponse) {}
+}
+
+message RevaChatMessage {
+    string chatId = 1;
+    string message = 2;
+    string programName = 3;
+}
+
+message RevaChatMessageResponse {
+    string chatId = 1;
+    string message = 2;
+}

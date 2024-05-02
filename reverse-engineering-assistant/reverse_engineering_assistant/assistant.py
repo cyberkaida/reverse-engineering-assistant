@@ -180,7 +180,7 @@ class ReverseEngineeringAssistant(object):
         tools (List[RevaTool]): The tools for the reverse engineering assistant.
     """
 
-    project: AssistantProject
+    #project: AssistantProject
 
     query_engine: Optional[Chain] = None
 

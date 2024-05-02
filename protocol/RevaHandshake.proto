@@ -12,4 +12,6 @@ message RevaHandshakeRequest {
 }
 
 message RevaHandshakeResponse {
+    string extensionHostname = 1;
+    int32 extensionPort = 2;
 }

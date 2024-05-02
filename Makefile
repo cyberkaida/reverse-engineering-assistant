@@ -9,6 +9,7 @@ clean:
 	rm -rf $(REVA_PYTHON_PATH)/protocol
 	rm -rf reverse-engineering-assistant/dist reverse-engineering-assistant/build
 	rm -rf ghidra-assistant/build ghidra-assistant/dist
+	gradle -b $(MAKEFILE_PATH)/ghidra-assistant/build.gradle clean
 
 ghidra: protocol
 	gradle -b $(MAKEFILE_PATH)/ghidra-assistant/build.gradle

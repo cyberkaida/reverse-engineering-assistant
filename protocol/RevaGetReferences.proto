@@ -1,11 +1,11 @@
 syntax = "proto3";
 package RevaProtocol;
 option java_package = "reva.protocol";
-service RevaProtocolService {
-  rpc get_references(RevaGetReferences) returns (RevaGetReferencesResponse);
+service RevaCrossReferenceService {
+  rpc get_references(RevaGetReferencesRequest) returns (RevaGetReferencesResponse);
 }
 
-message RevaGetReferences {
+message RevaGetReferencesRequest {
   string address_or_symbol = 1;
 }
 

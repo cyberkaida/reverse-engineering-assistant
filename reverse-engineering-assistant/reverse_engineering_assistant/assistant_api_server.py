@@ -4,6 +4,8 @@
 Here we start the gRPC server.
 """
 
+from fileinput import filename
+import grp
 from pathlib import Path
 import sys
 sys.path.append(str(Path(__file__).parent.joinpath('protocol')))
@@ -20,6 +22,10 @@ from .protocol import RevaHeartbeat_pb2_grpc, RevaHeartbeat_pb2
 
 from functools import cache
 
+import logging
+logging.basicConfig(filename='/tmp/reva-server.log', level=logging.DEBUG)
+logger = logging.getLogger("reva-server")
+
 import socket
 def get_unused_port() -> int:
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -29,13 +35,15 @@ def get_unused_port() -> int:
     return port
 
 _channel: Optional[Channel] = None
+@cache
 def get_channel() -> Channel:
+    global _channel
     if not _channel:
         raise ValueError("Channel not set")
     return _channel
 
 thread_pool = futures.ThreadPoolExecutor(max_workers=10)
-server: Server = grpc.server(thread_pool=thread_pool)
+server: Server = grpc.server(thread_pool)
 
 @cache
 def connect_to_extension(host: str, port: int) -> Channel:
@@ -61,37 +69,43 @@ def start_serving(
         connect_host: str, connect_port: int,
         host: str = 'localhost', port: Optional[int] = None):
     if not port:
-        port = get_unused_port()
-    server.add_insecure_port(f"{host}:{port}")
+        port = 0
+    port = server.add_insecure_port(f"{host}:{port}")
 
     # Start the service threads
+    logger.info(f"Starting server - {host}:{port}")
     server.start()
     # Call the handshake, we are multithreaded now so the other side
     # can immediately call us back.
 
-    connect_to_extension(connect_host, connect_port)
-    channel = get_channel()
+    logger.info(f"Connecting to extension @ {connect_host}:{connect_port}")
+    channel = connect_to_extension(connect_host, connect_port)
 
-
+    logger.info(f"Handshaking with extension @ {host}:{port}")
     stub = RevaHandshake_pb2_grpc.RevaHandshakeStub(get_channel())
+
     request = RevaHandshake_pb2.RevaHandshakeRequest()
     request.inferenceHostname = host
     request.inferencePort = port
-    _ = stub.Handshake(request)
 
+    logger.info(f"Request: {request}")
+    result = stub.Handshake(request)
+    logger.info(f"Result: {result} - {type(result)}")
 
     # Start heartbeating on a timer
-    heartbeat_thread = threading.Timer(interval=30, function=heartbeat)
-    heartbeat_thread.start()
+    #heartbeat_thread = threading.Timer(interval=30, function=heartbeat)
+    #heartbeat_thread.start()
     # Now that we have told the other side to connect to us, we can
     # perform requests
+    logger.info(f"Server started - {host}:{port}")
     server.wait_for_termination()
+    logger.warning("Server stopped")
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--connect-host', type=str, required=True, help="The callback host to connect to")
     parser.add_argument('--connect-port', type=int, required=True, help="The callback port to connect to")
-    parser.add_argument('--listen-host', type=str, default='localhost', help='The host to listen on')
+    parser.add_argument('--listen-host', type=str, default='127.0.0.1', help='The host to listen on')
     parser.add_argument('--listen-port', type=int, help='The port to listen on')
 
     args = parser.parse_args()

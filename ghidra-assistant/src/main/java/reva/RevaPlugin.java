@@ -6,6 +6,7 @@ import ghidra.framework.plugintool.PluginInfo;
 import ghidra.framework.plugintool.PluginTool;
 import ghidra.app.plugin.ProgramPlugin;
 import ghidra.framework.plugintool.util.PluginStatus;
+import ghidra.program.flatapi.FlatProgramAPI;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.Program;
@@ -19,11 +20,14 @@ import io.grpc.ManagedChannelBuilder;
 import io.grpc.Server;
 import io.grpc.ServerBuilder;
 
+import java.io.File;
+import java.io.FileWriter;
 import java.io.IOException;
 import java.net.ServerSocket;
 
 import java.util.List;
 
+import docking.DialogComponentProvider;
 import docking.action.builder.ActionBuilder;
 import reva.Handlers.*;
 
@@ -45,8 +49,16 @@ public class RevaPlugin extends ProgramPlugin {
 		return "127.0.0.1";
 	}
 
+	public String getInferenceHostname() {
+		return inferenceHostname;
+	}
+
 	public int getExtensionPort() {
 		return serverHandle.getPort();
+	}
+
+	public int getInferencePort() {
+		return inferencePort;
 	}
 
 	public enum RevaInferenceType {
@@ -174,7 +186,7 @@ public class RevaPlugin extends ProgramPlugin {
 		server.addService(new RevaGetDecompilation(this));
 		server.addService(new RevaSymbol(this));
 		//server.addService(new RevaGetCursor(this));
-		//server.addService(new RevaHeartbeat());
+		server.addService(new RevaHeartbeat(this));
 		serverHandle = server.build();
 
 		Options options = tool.getOptions("ReVa");
@@ -187,6 +199,7 @@ public class RevaPlugin extends ProgramPlugin {
 		installRestartInferenceCommand();
 
 		startInferenceServer();
+		saveConnectionInfo();
 	}
 
 	@Override
@@ -261,6 +274,8 @@ public class RevaPlugin extends ProgramPlugin {
 				};
 
 				Msg.info(this, commandString);
+				FlatProgramAPI api = new FlatProgramAPI(this.currentProgram);
+
 			})
 			.enabledWhen((context) -> this.inferenceHostname != null && this.inferencePort != 0)
 			.buildAndInstall(tool);
@@ -279,4 +294,20 @@ public class RevaPlugin extends ProgramPlugin {
 				.buildAndInstall(tool);
 	}
 
+
+	void saveConnectionInfo() {
+		// Write our server hostname and port to a well known file
+		// in the /tmp/ directory to help `reva-chat` find us
+		// when it starts up.
+		File reva_temp_dir = new File("/tmp/.reva/");
+		reva_temp_dir.mkdirs();
+		File connectionFile = new File(reva_temp_dir, String.format("reva-connection-%d.connection", getExtensionPort()));
+		// Now write "localhost:port" to the file
+		try (FileWriter writer = new FileWriter(connectionFile)) {
+			String connectionInfo = String.format("%s:%d", getExtensionHostname(), getExtensionPort());
+			writer.write(connectionInfo);
+		} catch (IOException e) {
+			Msg.error(this, "Error saving connection info: " + e.getMessage());
+		}
+	}
 }

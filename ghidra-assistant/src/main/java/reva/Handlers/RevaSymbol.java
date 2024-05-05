@@ -4,6 +4,7 @@ import ghidra.program.model.address.Address;
 import ghidra.program.model.listing.Program;
 import ghidra.program.model.symbol.SourceType;
 import ghidra.program.model.symbol.Symbol;
+import ghidra.program.model.symbol.SymbolType;
 import ghidra.util.Msg;
 import ghidra.util.exception.InvalidInputException;
 import io.grpc.stub.StreamObserver;
@@ -12,6 +13,8 @@ import reva.protocol.RevaGetSymbols.RevaGetSymbolsRequest;
 import reva.protocol.RevaGetSymbols.RevaGetSymbolsResponse;
 import reva.protocol.RevaGetSymbols.RevaSetSymbolNameRequest;
 import reva.protocol.RevaGetSymbols.RevaSetSymbolNameResponse;
+import reva.protocol.RevaGetSymbols.RevaSymbolRequest;
+import reva.protocol.RevaGetSymbols.RevaSymbolResponse;
 import reva.protocol.RevaToolSymbolServiceGrpc.RevaToolSymbolServiceImplBase;
 
 
@@ -62,4 +65,30 @@ public class RevaSymbol extends RevaToolSymbolServiceImplBase {
         responseObserver.onNext(response.build());
         responseObserver.onCompleted();
     }
+
+    @Override
+    public void getSymbol(RevaSymbolRequest request, StreamObserver<RevaSymbolResponse> responseObserver) {
+        RevaSymbolResponse.Builder response = RevaSymbolResponse.newBuilder();
+
+        Program currentProgram = this.plugin.getCurrentProgram();
+        Address address = this.plugin.addressFromAddressOrSymbol(request.getAddressOrName());
+
+        Symbol symbol = currentProgram.getSymbolTable().getPrimarySymbol(address);
+        if (symbol != null) {
+            response.setName(symbol.getName());
+            response.setAddress(symbol.getAddress().toString());
+
+            if (currentProgram.getListing().getDataAt(address) != null) {
+                response.setType(reva.protocol.RevaGetSymbols.SymbolType.DATA);
+            } else if (symbol.getSymbolType() == SymbolType.FUNCTION) {
+                response.setType(reva.protocol.RevaGetSymbols.SymbolType.FUNCTION);
+            } else if (symbol.getSymbolType() == SymbolType.LABEL) {
+                response.setType(reva.protocol.RevaGetSymbols.SymbolType.LABEL);
+            }
+        }
+
+        responseObserver.onNext(response.build());
+        responseObserver.onCompleted();
+    }
+
 }

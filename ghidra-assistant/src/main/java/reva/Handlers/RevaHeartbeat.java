@@ -1,20 +1,29 @@
 package reva.Handlers;
 
-import reva.protocol.RevaHandshakeOuterClass.*;
-import ghidra.util.Msg;
+import reva.RevaPlugin;
+import reva.protocol.RevaHeartbeatGrpc.RevaHeartbeatImplBase;
+import reva.protocol.RevaHeartbeatOuterClass.RevaHeartbeatRequest;
+import reva.protocol.RevaHeartbeatOuterClass.RevaHeartbeatResponse;
 import io.grpc.stub.StreamObserver;
-import reva.protocol.RevaHandshakeGrpc.RevaHandshakeImplBase;
 
-public class RevaHeartbeat extends RevaHandshakeImplBase {
-    public RevaHeartbeat() {
+public class RevaHeartbeat extends RevaHeartbeatImplBase {
+    RevaPlugin plugin;
+    public RevaHeartbeat(RevaPlugin plugin) {
         super();
+        this.plugin = plugin;
     }
 
-	@Override
-	public void handshake(RevaHandshakeRequest request, StreamObserver<RevaHandshakeResponse> responseObserver) {
-        RevaHandshakeResponse response = RevaHandshakeResponse.newBuilder().build();
-        responseObserver.onNext(response);
-		responseObserver.onCompleted();
-        Msg.trace(this, "Heartbeat complete");
-	}
+    @Override
+    public void heartbeat(RevaHeartbeatRequest request, StreamObserver<RevaHeartbeatResponse> responseObserver) {
+        RevaHeartbeatResponse.Builder response = RevaHeartbeatResponse.newBuilder();
+
+        response.setExtensionHostname(plugin.getExtensionHostname());
+        response.setExtensionPort(plugin.getExtensionPort());
+        response.setInferenceHostname(plugin.getInferenceHostname());
+        response.setInferencePort(plugin.getInferencePort());
+        response.setProjectName(plugin.getTool().getProject().getName());
+
+        responseObserver.onNext(response.build());
+        responseObserver.onCompleted();
+    }
 }

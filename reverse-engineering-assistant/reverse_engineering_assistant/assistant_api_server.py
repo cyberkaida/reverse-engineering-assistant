@@ -4,8 +4,11 @@
 Here we start the gRPC server.
 """
 
+import threading
 from pathlib import Path
 import sys
+
+from flask import g
 sys.path.append(str(Path(__file__).parent.joinpath('protocol')))
 
 import argparse
@@ -16,6 +19,7 @@ from grpc import Server
 
 from .protocol import RevaHandshake_pb2_grpc, RevaHandshake_pb2
 from .protocol import RevaChat_pb2_grpc
+from .protocol import RevaHeartbeat_pb2_grpc, RevaHeartbeat_pb2
 
 from .api_server_tools.llm_tools import RevaChat
 from .api_server_tools.connection import get_channel, connect_to_extension
@@ -41,6 +45,16 @@ def get_unused_port() -> int:
 
 thread_pool = futures.ThreadPoolExecutor(max_workers=10)
 server: Server = grpc.server(thread_pool)
+
+def heartbeat():
+    try:
+        stub = RevaHeartbeat_pb2_grpc.RevaHeartbeatStub(get_channel())
+        request = RevaHeartbeat_pb2.RevaHeartbeatRequest()
+        result = stub.heartbeat(request)
+    except grpc.RpcError as e:
+        logger.warning(f"Heartbeat failed: {e}")
+        server.stop(5)
+
 
 def start_serving(
         connect_host: str, connect_port: int,
@@ -72,12 +86,13 @@ def start_serving(
     result = stub.Handshake(request)
     logger.info(f"Result: {result} - {type(result)}")
 
-    # Start heartbeating on a timer
-    #heartbeat_thread = threading.Timer(interval=30, function=heartbeat)
-    #heartbeat_thread.start()
+    # Start heartbeating on a timer. We end when the heartbeat fails.
+    heartbeat_thread = threading.Timer(interval=30, function=heartbeat)
+    heartbeat_thread.start()
     # Now that we have told the other side to connect to us, we can
     # perform requests
     logger.info(f"Server running")
+
     server.wait_for_termination()
     logger.warning("Server stopped")
 

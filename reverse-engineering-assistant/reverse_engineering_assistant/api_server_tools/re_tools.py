@@ -186,6 +186,8 @@ class RevaGetSymbols(RevaRemoteTool):
     A tool for listing symbols in a program.
     These could be functions, global variables, or other named entities.
     """
+    logger = logging.getLogger("reverse_engineering_assistant.RevaGetSymbols")
+
 
     def __init__(self, project: AssistantProject, llm: BaseLLM) -> None:
         super().__init__(project, llm)
@@ -194,6 +196,9 @@ class RevaGetSymbols(RevaRemoteTool):
         self.tool_functions = [
             self.get_symbol_count,
             self.get_symbols,
+            self.get_symbol,
+            self.get_function_count,
+            self.get_functions,
         ]
 
     def _get_symbol_list(self) -> List[str]:
@@ -206,6 +211,43 @@ class RevaGetSymbols(RevaRemoteTool):
 
         return response.symbols
 
+    def _get_function_list(self) -> List[str]:
+        function_list: List[str] = []
+        for symbol_name in self._get_symbol_list():
+            symbol = self.get_symbol(symbol_name)
+            if symbol["type"] == "FUNCTION":
+                function_list.append(symbol_name)
+        return function_list
+
+    def get_function_count(self) -> int:
+        """
+        Return the total number of functions in the program.
+        Useful before calling get_functions.
+        """
+        return len(self._get_function_list())
+
+    def get_functions(self, page: int = 0, page_size: int = 20) -> List[Dict[str, str]]:
+        """
+        Return a list of functions in the program.
+        Please check the total number of functions with get_function_count before calling this.
+        The page is 0 indexed. To get the first page, set page to 0.
+        Pick a page_size that is reasonable for your context size.
+        """
+        if page < 0:
+            raise RevaToolException("page must be 0 or a positive integer")
+        if page_size <= 0:
+            raise RevaToolException("page_size must be a positive integer")
+
+        function_list = self._get_function_list()
+        start = (page - 1) * page_size
+        end = page * page_size
+
+        function_details: List[Dict[str, str]] = []
+        for function in function_list[start:end]:
+            # TODO: Replace with get_function
+            function_details.append(self.get_symbol(function))
+        return function_details
+
     def get_symbol_count(self) -> int:
         """
         Return the total number of symbols in the program.
@@ -213,7 +255,7 @@ class RevaGetSymbols(RevaRemoteTool):
         """
         return len(self._get_symbol_list())
 
-    def get_symbols(self, page: int = 0, page_size: int = 20) -> List[str]:
+    def get_symbols(self, page: int = 0, page_size: int = 20) -> List[Dict[str, str]]:
         """
         Return a list of symbols in the program.
         Please check the total number of symbols with get_symbol_count before calling this.
@@ -228,7 +270,30 @@ class RevaGetSymbols(RevaRemoteTool):
         symbol_list = self._get_symbol_list()
         start = (page - 1) * page_size
         end = page * page_size
-        return symbol_list[start:end]
+
+        symbol_details: List[Dict[str, str]] = []
+        for symbol in symbol_list[start:end]:
+            symbol_details.append(self.get_symbol(symbol))
+        return symbol_details
+
+    def get_symbol(self, address_or_name: str) -> Dict[str, str]:
+        """
+        Return information about the symbol at the given address or with the given name.
+        Returns a dictionary with the keys "name", "address", and "type".
+        """
+        from ..protocol import RevaGetSymbols_pb2_grpc, RevaGetSymbols_pb2
+        stub = RevaGetSymbols_pb2_grpc.RevaToolSymbolServiceStub(self.channel)
+
+        request = RevaGetSymbols_pb2.RevaSymbolRequest()
+        request.address_or_name = address_or_name
+        self.logger.debug(f"Getting symbol {address_or_name} request: {request}")
+        response: RevaGetSymbols_pb2.RevaSymbolResponse = stub.GetSymbol(request)
+        self.logger.debug(f"Got symbol {address_or_name} response: {response}")
+        return {
+            "name": response.name,
+            "address": response.address,
+            "type": RevaGetSymbols_pb2.SymbolType.Name(response.type),
+        }
 
 
 @register_tool

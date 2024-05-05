@@ -180,7 +180,7 @@ class ReverseEngineeringAssistant(object):
         tools (List[RevaTool]): The tools for the reverse engineering assistant.
     """
 
-    #project: AssistantProject
+    project: AssistantProject
 
     query_engine: Optional[Chain] = None
 
@@ -191,6 +191,8 @@ class ReverseEngineeringAssistant(object):
     model_memory: BaseMemory
 
     chat_history: List[str]
+
+    langchain_callbacks: List[BaseCallbackHandler]
 
     def __repr__(self) -> str:
         return f"<ReverseEngineeringAssistant for {self.project}>"
@@ -215,7 +217,7 @@ class ReverseEngineeringAssistant(object):
             return f"RevaToolException: {e}"
         raise e
 
-    def __init__(self, project: str | AssistantProject, model_type: Optional[ModelType] = None) -> None:
+    def __init__(self, project: str | AssistantProject, model_type: Optional[ModelType] = None, langchain_callbacks: Optional[List[BaseCallbackHandler]] = None) -> None:
         """
         Initializes a new instance of the ReverseEngineeringAssistant class.
 
@@ -228,6 +230,8 @@ class ReverseEngineeringAssistant(object):
             self.project = AssistantProject(project)
         else:
             self.project = project
+
+        self.langchain_callbacks = langchain_callbacks or []
 
         self.llm = get_model(model_type)
 
@@ -255,6 +259,7 @@ class ReverseEngineeringAssistant(object):
         #)
         self.model_memory = ConversationBufferMemory()
         callbacks: List[BaseCallbackHandler] = [RevaActionLogger()]
+        callbacks.extend(self.langchain_callbacks)
         callback_manager = RevaActionLoggerManager(handlers=callbacks, inheritable_handlers=callbacks)
 
         agent =  StructuredChatAgent.from_llm_and_tools(

@@ -169,10 +169,12 @@ public class RevaPlugin extends ProgramPlugin {
 
 		int port = findAvailablePort();
 		ServerBuilder<?> server = ServerBuilder.forPort(port);
+		// MARK: Register Services
 		server.addService(new RevaHandshake(this));
+		server.addService(new RevaGetDecompilation(this));
+		server.addService(new RevaSymbol(this));
 		//server.addService(new RevaGetCursor(this));
 		//server.addService(new RevaHeartbeat());
-		//server.addService(new RevaGetDecompilation(this));
 		serverHandle = server.build();
 
 		Options options = tool.getOptions("ReVa");
@@ -182,6 +184,7 @@ public class RevaPlugin extends ProgramPlugin {
 
 		// Install all the UI hooks
 		installChatCommand();
+		installRestartInferenceCommand();
 
 		startInferenceServer();
 	}
@@ -249,15 +252,31 @@ public class RevaPlugin extends ProgramPlugin {
 				// reva-chat --host localhost --port <port> --program <program>
 				// This should open in a new terminal window
 
+				String commandString = String.format("reva-chat --host %s --port %d --project %s", this.inferenceHostname, this.inferencePort, this.tool.getProject().getName());
 				String[] command = {
 					"reva-chat",
 					"--host", this.inferenceHostname,
 					"--port", String.format("%d", this.inferencePort),
-					"--program", this.currentProgram.getName()
+					"--project", this.tool.getProject().getName(),
 				};
-				Msg.info(this, command);
+
+				Msg.info(this, commandString);
 			})
 			.enabledWhen((context) -> this.inferenceHostname != null && this.inferencePort != 0)
 			.buildAndInstall(tool);
 	}
+
+	void installRestartInferenceCommand() {
+		new ActionBuilder("ReVa Restart Inference", "ReVa")
+				.menuPath("ReVa", "Restart Inference")
+				.onAction((event) -> {
+					Msg.info(this, "Restart Inference command clicked!");
+					serviceMonitor.cancel();
+					serviceMonitor = new TaskMonitorAdapter(true);
+					startInferenceServer();
+				})
+				.enabledWhen((context) -> this.inferenceHostname != null && this.inferencePort != 0)
+				.buildAndInstall(tool);
+	}
+
 }

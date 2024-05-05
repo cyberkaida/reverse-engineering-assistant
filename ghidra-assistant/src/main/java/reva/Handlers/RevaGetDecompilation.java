@@ -29,6 +29,7 @@ public class RevaGetDecompilation extends RevaDecompilationServiceImplBase {
         super();
         this.plugin = plugin;
     }
+
     @Override
     public void getDecompilation(RevaGetDecompilationRequest request,
             StreamObserver<RevaGetDecompilationResponse> responseObserver) {

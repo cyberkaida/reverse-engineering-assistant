@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "reverse-engineering-assistant"
 readme = "README.md"
-version = "1.0.3"
+version = "3.0.0"
 authors = [
     {name="サイバーカイダ (cyberkaida)"},
 ]
@@ -30,7 +30,5 @@ dependencies = [
 ]
 
 [project.scripts]
-revassistant = "reverse_engineering_assistant.assistant:main"
-reva-serve = "reverse_engineering_assistant.assistant_api_server:main"
 reva-server = "reverse_engineering_assistant.assistant_api_server:main"
 reva-chat = "reverse_engineering_assistant.chat_client:main"

@@ -6,6 +6,7 @@ from typing import Dict, List, Optional
 
 from langchain.chat_models.base import BaseChatModel
 from langchain.llms.base import BaseLLM
+from numpy import add
 
 from ..tool import AssistantProject
 from ..assistant import AssistantProject, RevaTool, BaseLLM, register_tool
@@ -68,8 +69,11 @@ class RevaDecompilationIndex(RevaRemoteTool):
         stub = RevaGetDecompilation_pb2_grpc.RevaDecompilationServiceStub(self.channel)
 
         request = RevaGetDecompilation_pb2.RevaGetDecompilationRequest()
-        request.function = name
-        request.address = address
+
+        if name:
+            request.function = name
+        if address:
+            request.address = address
 
         response: RevaGetDecompilation_pb2.RevaGetDecompilationResponse = stub.GetDecompilation(request)
 
@@ -177,6 +181,57 @@ class RevaCrossReferenceTool(RevaRemoteTool):
         }
 
 @register_tool
+class RevaGetSymbols(RevaRemoteTool):
+    """
+    A tool for listing symbols in a program.
+    These could be functions, global variables, or other named entities.
+    """
+
+    def __init__(self, project: AssistantProject, llm: BaseLLM) -> None:
+        super().__init__(project, llm)
+        self.description = "Used for retrieving symbols in the program"
+
+        self.tool_functions = [
+            self.get_symbol_count,
+            self.get_symbols,
+        ]
+
+    def _get_symbol_list(self) -> List[str]:
+        from ..protocol import RevaGetSymbols_pb2_grpc, RevaGetSymbols_pb2
+        stub = RevaGetSymbols_pb2_grpc.RevaToolSymbolServiceStub(self.channel)
+
+        request = RevaGetSymbols_pb2.RevaGetSymbolsRequest()
+
+        response: RevaGetSymbols_pb2.RevaGetSymbolsResponse = stub.GetSymbols(request)
+
+        return response.symbols
+
+    def get_symbol_count(self) -> int:
+        """
+        Return the total number of symbols in the program.
+        Useful before calling get_symbols.
+        """
+        return len(self._get_symbol_list())
+
+    def get_symbols(self, page: int = 0, page_size: int = 20) -> List[str]:
+        """
+        Return a list of symbols in the program.
+        Please check the total number of symbols with get_symbol_count before calling this.
+        The page is 0 indexed. To get the first page, set page to 0.
+        Pick a page_size that is reasonable for your context size.
+        """
+        if page < 0:
+            raise RevaToolException("page must be 0 or a positive integer")
+        if page_size <= 0:
+            raise RevaToolException("page_size must be a positive integer")
+
+        symbol_list = self._get_symbol_list()
+        start = (page - 1) * page_size
+        end = page * page_size
+        return symbol_list[start:end]
+
+
+@register_tool
 class RevaSetSymbolName(RevaRemoteTool):
     """
     A tool for creating or changing the name for a global symbol.
@@ -196,7 +251,15 @@ class RevaSetSymbolName(RevaRemoteTool):
         Set the name of the symbol at the given address to `new_name`. If an old name is
         provided, rename the symbol to `new_name`.
         """
-        raise NotImplementedError("This function is not implemented yet")
+        from ..protocol import RevaGetSymbols_pb2_grpc, RevaGetSymbols_pb2
+        stub = RevaGetSymbols_pb2_grpc.RevaToolSymbolServiceStub(self.channel)
+
+        request = RevaGetSymbols_pb2.RevaSetSymbolNameRequest()
+        request.new_name = new_name
+        request.old_name_or_address = old_name_or_address
+
+        response: RevaGetSymbols_pb2.RevaSetSymbolNameResponse = stub.SetSymbolName(request)
+
         return {
             "old_name": old_name_or_address,
             "new_name": new_name,

@@ -1,0 +1,25 @@
+syntax = "proto3";
+package RevaProtocol;
+import "RevaVariable.proto";
+option java_package = "reva.protocol";
+
+service RevaDecompilationService {
+    rpc GetDecompilation(RevaGetDecompilationRequest) returns (RevaGetDecompilationResponse) {}
+}
+
+message RevaGetDecompilationRequest {
+    string function = 1;
+    string address = 2;
+}
+
+message RevaGetDecompilationResponse {
+    uint64 address = 1;
+    string function = 2;
+    string function_signature = 3;
+    repeated string incoming_calls = 4;
+    repeated string outgoing_calls = 5;
+    repeated RevaVariable variables = 6;
+    string listing = 7;
+    string decompilation = 8;
+    string error_message = 9;
+}

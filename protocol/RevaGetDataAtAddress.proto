@@ -1,0 +1,17 @@
+syntax = "proto3";
+package RevaProtocol;
+option java_package = "reva.protocol";
+service RevaGetDataAtAddress {
+    rpc getDataAtAddress(RevaGetDataAtAddressRequest) returns (RevaGetDataAtAddressResponse);
+}
+
+message RevaGetDataAtAddressRequest {
+    string address_or_symbol = 1;
+    uint64 size = 2;
+}
+
+message RevaGetDataAtAddressResponse {
+    uint64 address = 1;
+    bytes data = 2;
+    string symbol = 3;
+}

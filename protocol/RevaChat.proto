@@ -1,0 +1,31 @@
+syntax = "proto3";
+package RevaProtocol;
+
+option java_package = "reva.protocol";
+
+service RevaChatService {
+    // Single turn chat with no history
+    rpc chat(RevaChatMessage) returns (RevaChatMessageResponse) {}
+    // Single turn chat with no history and chain of thought included
+    rpc chatResponseStream(RevaChatMessage) returns (stream RevaChatMessageResponse) {}
+    // Multi turn chat with history and chain of thought included
+    rpc chatStream(stream RevaChatMessage) returns (stream RevaChatMessageResponse) {}
+}
+
+message RevaChatMessage {
+    string chatId = 1;
+    // Message from the human
+    string message = 2;
+    // The project being discussed
+    string project = 3;
+    // The program being discussed
+    string programName = 4;
+}
+
+message RevaChatMessageResponse {
+    string chatId = 1;
+    // Thoughts from ReVa, not the final conclusion
+    string thought = 2;
+    // A conclusion from ReVa, derived from thoughts
+    string message = 3;
+}

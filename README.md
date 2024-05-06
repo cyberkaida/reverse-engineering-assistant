@@ -1,6 +1,6 @@
 # ReVA - Reverse Engineering Assistant
 
-[✨ An (old) quick demo! ✨](https://asciinema.org/a/626197)
+> Updated demo coming soon!
 
 The reverse engineering assistant (ReVA) is a project to build a disassembler agnostic AI assistant for
 reverse engineering tasks. This includes both _offline_ and online inference and a simple architecture.
@@ -47,15 +47,12 @@ Built in support is provided for:
 - [OpenAI](https://platform.openai.com/overview) for online inference and easy setup (Needs an OpenAI API key)
 - [Ollama](https://ollama.ai) and any model it supports for local on-device inference or connecting to a self hosted remote inference server.
 
-Limited support is provided for:
-- [llama-cpp](https://llama-cpp-python.readthedocs.io/en/latest/) and any model it supports for local on-device inference
-- [text-generation-webui](https://github.com/oobabooga/text-generation-webui) and any model it supports for self-hosted remote inference
-
 Adding additional inference servers is easy if it is supported by langchain.
 
-See the configuration section for more information about setting the model.
-
 ## Configuration
+
+> This is currently being moved to the Ghidra GUI
+> See Edit -> Tool Options -> ReVa in the Codebrowser Tool
 
 Configuration for the reverse engineering assistant is stored at
 `~/.config/reverse-engineering-assistant/config.yaml`. If this
@@ -85,54 +82,47 @@ RevA has a two step workflow.
 2. Open the chat session.
 
 ReVa uses an extension for your RE tool to perform analysis.
-See [Ghidra Support](#ghidra-support) and [BinaryNinja Support](#binary-ninja-support) below.
+See [Ghidra Support](#ghidra-support) below.
 
-Once open the RE tool will try to connect to ReVa's REST API on localhost.
+To ask questions and run the inference a command line tool is provided. Run `reva-chat` to begin the chat session. This command will find your open Ghidra
+and connect to it. To open a new chat, run the command again in another terminal.
 
-A project cache is created in `~/.cache/reverse-engineering-assistant/projects`. This contains your chat log and other
-cache data. This can be deleted at any time and ReVa will re-generate the data as needed.
-
-To ask questions and run the inference a command line tool is provided. Run `revassistant --project ${NAME_OF_YOUR_FILE}` to begin the chat session.
-
-> Note: In the future `--project` will refer to a _project_ in Ghidra and allow inference across multiple files.
-> I am waiting for BinaryNinja's project feature to make this change, if this takes too long I will rework this argument.
-
-`revassistant` provides a chat window and runs the command API to talk with the RE tool.
-
-> Note: Right now only one `revassistant` can run at a time (as we start a server on a well known port)
-> In the future we will share the server between chat clients and RE tool connections.
+If you have more than one Ghidra open, you can select the right one with
+`reva-chat --project ${project-name}`, if it is not set, `reva-chat` will
+ask you which project you want to connect to.
 
 ## Installation
 
+First install the python component, I like to use `pipx`. It is best to make
+sure that `reva-server` and `reva-chat` are on your path.
+The Ghidra extension will need to start `reva-server`, and you will need to
+run `reva-chat`.
+
 To install the particular extension for your disassembler see:
 - [Ghidra Support](#ghidra-support)
-- [Binary Ninja Support](#binary-ninja-support)
-
-To install the chat component you can do the following:
-
-```sh
-python3 -m pip install ./reverse-engineering-assistant
-```
 
 The chat can be started with:
 
 ```sh
-revassistant --project ${NAME_OF_YOUR_PROJECT}
+reva-chat
 ```
+
+> You can also configure the path to `reva-server` in `Edit -> Tool Options -> ReVa`
+> if it is not on your path. But you really should put it on your path!
 
 # Ghidra Support
 
 ## Usage
 
-The [ghidra-assistant](ghidra-assistant/README.md) plugin must be installed first. 
+> The Python package must be installed for the Ghidra extension to work!
+
+Follow the instructions in the [ghidra-assistant](ghidra-assistant/README.md) plugin.
 
 After installation, enable the `ReVaPlugin` extension in the CodeBrowser tool (Open a file and click: File -> Configure -> Miscellaneous).
 
 If you want ReVa enabled by default, click File -> Save Tool to save the configuration.
 
-To start the inference side, open Help -> About ${program name}. In this popup you will see details about your open file.
-The `Program Name:` field is the name you need to pass to `revassistant --project` to start the inference server. In some
-cases this is different to the name in the project view.
+If everything is working correctly you will see a ReVa menu on your menu bar.
 
 ## Undo
 
@@ -141,28 +131,14 @@ one undo.
 
 ## Menus
 
+> These are being added in the next release
+
 ReVa adds some elements to the Ghidra UI. You can either ask ReVa to do something in the chat window,
 "Examine the variable usage in `main` in detail, rename the variables with more descriptive names.",
 or use the menu system.
 
 For example you can right click a variable in the decompilation, select Reva -> Rename variable and ReVa
 will perform the action.
-
-Note this uses the same system as chatting with ReVa, this means you can monitor ReVas thoughts in the chat
-window while the action is performed.
-
-# Binary Ninja Support
-
-> Note: Binary Ninja support is currently on hold while the basic functions are implemented in the Ghidra plugin.
-> This is because plugin development for Binary Ninja is easier as we have Python3. I will resume development soon!
-
-Install the ReVA BinaryNinja plugin by opening your BinaryNinja plugin directory (Plugins -> Open Plugin Folder)
-and copying or symbolic linking the [binary-ninja-assistant](./binary-ninja-assistant) directory into the plugin
-directory.
-
-Restart Binary Ninja and "ReVA Push" will be available in the Plugin menu.
-Press this to push data from BinaryNinja to ReVA, then follow the instructions in the [Workflow section](#workflow).
-The project name will be the name of the current open file.
 
 # Support
 

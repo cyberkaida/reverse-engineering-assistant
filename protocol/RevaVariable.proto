@@ -1,0 +1,10 @@
+syntax = "proto3";
+package RevaProtocol;
+option java_package = "reva.protocol";
+
+message RevaVariable {
+    string name = 1;
+    string storage = 2;
+    string data_type = 3;
+    uint64 size = 4;
+}

@@ -1,0 +1,179 @@
+#!/usr/bin/env python3
+from re import M
+from typing import Generator, List, Tuple
+from prompt_toolkit import PromptSession
+import prompt_toolkit
+from prompt_toolkit.history import FileHistory
+import rich
+import argparse
+from pathlib import Path
+import random
+
+import threading
+
+# Necessary for gRPC and Protobuf
+import sys
+sys.path.append(str(Path(__file__).parent.joinpath('protocol')))
+
+import grpc
+from .protocol.RevaChat_pb2_grpc import RevaChatServiceStub
+from .protocol.RevaChat_pb2 import RevaChatMessage, RevaChatMessageResponse
+
+from .protocol.RevaHeartbeat_pb2_grpc import RevaHeartbeatStub
+from .protocol.RevaHeartbeat_pb2 import RevaHeartbeatRequest, RevaHeartbeatResponse
+
+from rich.console import Console
+from rich.markdown import Markdown
+from rich.pretty import Pretty
+
+import logging
+logging.basicConfig(
+    filename='/tmp/reva-server.log', level=logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+)
+logger = logging.getLogger("reva-chat")
+
+def read_loop(project: str, prompt_session: PromptSession):
+    while True:
+        try:
+            message: str = prompt_session.prompt("> ")
+            chat_message = RevaChatMessage(project=project, message=message)
+            logger.info(f"Sending message: {chat_message}")
+            yield chat_message
+        except KeyboardInterrupt:
+            pass
+        except EOFError:
+            break
+
+def get_thinking_emoji() -> str:
+    """
+    Returns a random thinking emoji.
+    """
+    return random.choice([
+        "🤔",
+        "🧐",
+        "🤨",
+        "👩‍💻",
+        "😖",
+        "✨",
+        "🔮",
+        "🔍",
+        "🧙‍♀️",
+    ])
+
+def find_connectable_extensions() -> Generator[Tuple[Path, str, str], None, None]:
+    reva_temp = Path("/tmp/.reva")
+    if reva_temp.exists():
+        for file in reva_temp.glob("reva-connection-*.connection"):
+            connection_string = file.read_text()
+            content = connection_string.split(":")
+            if len(content) == 2:
+                yield file, content[0], content[1]
+            else:
+                logger.warning(f"Invalid connection string: {connection_string}. Cleaning.")
+                file.unlink()
+
+def main():
+    parser = argparse.ArgumentParser(description="Reva Chat Client")
+    parser.add_argument("--host", default="localhost", help="The host to connect to")
+    parser.add_argument("--port", required=False, type=int, help="The port to connect to")
+
+    parser.add_argument("--project", required=False, help="The project to connect to")
+    parser.add_argument("--program", required=False, help="The program to connect to")
+
+    parser.add_argument("--debug", action="store_true", help="Enable debug logging")
+    args = parser.parse_args()
+    if args.debug:
+        logger.setLevel(logging.DEBUG)
+        logger.addHandler(logging.StreamHandler(sys.stdout))
+    console = Console(record=True)
+    if not args.port:
+        connectable_extensions: List[RevaHeartbeatResponse] = []
+        for file, host, port in find_connectable_extensions():
+            # First try a heartbeat to see if the connection is still alive
+            try:
+                channel = grpc.insecure_channel(f"{host}:{port}")
+                stub = RevaHeartbeatStub(channel)
+                response = stub.heartbeat(RevaHeartbeatRequest())
+                connectable_extensions.append(response)
+                logger.info(f"Found connectable extension: {response}")
+            except grpc.RpcError as e:
+                # If we can't connect, clean it up
+                logger.debug(f"Removing invalid connection file: {file}")
+                file.unlink()
+        if len(connectable_extensions) == 0:
+            logger.error("No connectable extensions found. Is Ghidra running? Is the extension enabled?")
+            parser.error("No connectable extensions found. Is Ghidra running? Is the extension enabled?")
+        elif len(connectable_extensions) == 1:
+            # If there's only one thing running, we won't ask the user
+            response = connectable_extensions[0]
+            logger.info(f"Using only connectable extension: {response}")
+            args.host = response.inference_hostname
+            args.port = response.inference_port
+            args.project = response.project_name
+        elif args.program:
+            logger.info(f"Looking for program: {args.program} in connectable extensions")
+            # If there's a program specified, we'll try to find the right connection
+            for response in connectable_extensions:
+                if response.project_name == args.project:
+                    logger.info(f"Found connectable extension for program {args.program}: {response}")
+                    args.host = response.inference_hostname
+                    args.port = response.inference_port
+                    args.project = response.project_name
+                    break
+        else:
+            # Use prompt-toolkit to ask the user
+            logger.debug(f"Multiple connectable extensions found: {connectable_extensions}")
+            console.print("Multiple connectable extensions found. Please select one:")
+            result = prompt_toolkit.shortcuts.radiolist_dialog(
+                title="Multiple connectable extensions found. Please select one:",
+                values=[(response, response.project_name) for response in connectable_extensions],
+            ).run()
+            logger.info(f"User selected: {result}")
+            args.host = result.inference_hostname
+            args.port = result.inference_port
+            args.project = result.project_name
+
+    if not args.project:
+        logger.error("A project must be specified")
+        parser.error("A project must be specified. Is Ghidra running? Is the extension enabled?")
+    history_file_path: Path = Path.home() / ".cache" / "reverse-engineering-assistant" / args.project / "chat-questions.txt"
+    history_file_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if not args.port or not args.host:
+        logger.error("A host and port must be specified")
+        parser.error("A host and port must be specified. Is Ghidra running? Is the extension enabled?")
+    channel = grpc.insecure_channel(f"{args.host}:{args.port}")
+    stub = RevaChatServiceStub(channel)
+
+    console.print("[bold]Welcome to Reva Chat![/bold]")
+    history_file = FileHistory(str(history_file_path))
+    prompt_session = PromptSession(history=history_file)
+
+    try:
+        while True:
+            query: str = prompt_session.prompt("> ")
+            try:
+                console.print(f"[green]{query}[/green]")
+                chat_message = RevaChatMessage(project=args.project, message=query)
+
+                logger.info(f"Sending message: {chat_message}")
+                for response in stub.chatResponseStream(chat_message):
+                    logger.info(f"Received response: {response}")
+                    console.print(Markdown("---"))
+                    if response.thought:
+                        console.print(Markdown(f"### {get_thinking_emoji()} - ReVa Thinking..."))
+                        thought = response.thought
+                        console.print(Markdown(thought))
+                    elif response.message:
+                        console.print(Markdown(f"# 👩‍💻 - ReVa\n\n>{query}\n\n{response.message}"))
+                    else:
+                        # ReVa had no thoughts? We all feel this way some times...
+                        raise ValueError("Head empty, no thoughts, no message")
+            except KeyboardInterrupt:
+                console.print("[bold][yellow]Cancelled. Press Ctrl-C again to exit.[/yellow][/bold]")
+    except KeyboardInterrupt:
+        console.print("Goodbye! :wave:")
+
+if __name__ == "__main__":
+    main()

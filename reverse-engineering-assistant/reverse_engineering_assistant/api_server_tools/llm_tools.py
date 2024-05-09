@@ -60,7 +60,7 @@ class RevaChat(RevaChatServiceServicer):
 
     def chat(self, request, context):
         self.logger.info(f"Received request: {request}")
-        assistant = ReverseEngineeringAssistant(request.project, langchain_callbacks=[RevaActionCollector(callback)])
+        assistant = ReverseEngineeringAssistant(request.project)
         self.logger.info(f"Assistant: {assistant}")
         llm_response = assistant.query(request.message)
         self.logger.info(f"LLM Response: {llm_response}")

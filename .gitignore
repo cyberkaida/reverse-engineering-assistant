@@ -6,3 +6,4 @@ dist/
 .venv
 .vscode
 .vim/
+.DS_Store

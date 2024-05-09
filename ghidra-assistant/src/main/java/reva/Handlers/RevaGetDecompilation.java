@@ -69,6 +69,10 @@ public class RevaGetDecompilation extends RevaDecompilationServiceImplBase {
             }
         }
 
+        if (function == null) {
+            throw new IllegalStateException("Function was null, but we should have caught this earlier");
+        }
+
         for (Function caller : function.getCallingFunctions(monitor)) {
             response.addIncomingCalls(caller.getName());
         }

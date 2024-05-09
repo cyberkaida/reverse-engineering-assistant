@@ -16,9 +16,11 @@ import ghidra.util.Msg;
 import ghidra.util.task.TaskBuilder;
 import ghidra.util.task.TaskMonitor;
 import ghidra.util.task.TaskMonitorAdapter;
+import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
 import io.grpc.Server;
 import io.grpc.ServerBuilder;
+import io.grpc.stub.StreamObserver;
 
 import java.io.File;
 import java.io.FileWriter;
@@ -27,9 +29,17 @@ import java.net.ServerSocket;
 
 import java.util.List;
 
-import docking.DialogComponentProvider;
+import docking.ActionContext;
+import docking.action.DockingAction;
 import docking.action.builder.ActionBuilder;
+import reva.Actions.RevaAction;
+import reva.Actions.RevaActionTable;
+import reva.Actions.RevaActionTableComponentProvider;
 import reva.Handlers.*;
+import reva.protocol.RevaChat;
+import reva.protocol.RevaChat.RevaChatMessage;
+import reva.protocol.RevaChat.RevaChatMessageResponse;
+import reva.protocol.RevaChatServiceGrpc.RevaChatServiceStub;
 
 @PluginInfo(
         status = PluginStatus.STABLE, // probably a lie
@@ -43,7 +53,23 @@ import reva.Handlers.*;
 public class RevaPlugin extends ProgramPlugin {
 	TaskMonitor serviceMonitor;
 	Server serverHandle;
+	RevaActionTableComponentProvider actionTableProvider;
+	Options options;
 
+	/**
+	 * Add an action to track in the UI.
+	 * Should be called by anything that monitors the
+	 * database.
+	 * @param action
+	 */
+	public void addAction(RevaAction action) {
+		if (autoAcceptActions()) {
+			action.onAccepted.run();
+			return;
+		} else {
+			actionTableProvider.addAction(action);
+		}
+	}
 
 	public String getExtensionHostname() {
 		return "127.0.0.1";
@@ -59,6 +85,10 @@ public class RevaPlugin extends ProgramPlugin {
 
 	public int getInferencePort() {
 		return inferencePort;
+	}
+
+	public boolean autoAcceptActions() {
+		return options.getBoolean("Auto-accept ReVa actions", true);
 	}
 
 	public enum RevaInferenceType {
@@ -93,6 +123,7 @@ public class RevaPlugin extends ProgramPlugin {
 
 	public String inferenceHostname;
 	public int inferencePort;
+	public ManagedChannel inferenceChannel = null;
 	public void registerInference(String hostname, int port) {
 		ManagedChannelBuilder<?> channel = ManagedChannelBuilder.forAddress(hostname, port);
 		channel.usePlaintext();
@@ -100,7 +131,8 @@ public class RevaPlugin extends ProgramPlugin {
 		Msg.info(this, String.format("Connected channel to %s:%s", hostname, port));
 		inferenceHostname = hostname;
 		inferencePort = port;
-		// TODO: Register each of the inference handlers
+
+		inferenceChannel = channel.build();
 	}
 
 	public int findAvailablePort() {
@@ -189,14 +221,15 @@ public class RevaPlugin extends ProgramPlugin {
 		server.addService(new RevaHeartbeat(this));
 		serverHandle = server.build();
 
-		Options options = tool.getOptions("ReVa");
+		options = tool.getOptions("ReVa");
 
 		options.registerOption("Path to reva-server", OptionType.STRING_TYPE, "reva-server", null, "Path to the reva-server binary, or `reva-server` if it is on the system path.");
 		options.registerOption("Inference type", OptionType.ENUM_TYPE, RevaInferenceType.OpenAI, null, "The type of inference server to connect to.");
+		options.registerOption("Auto-accept ReVa actions", OptionType.BOOLEAN_TYPE, true, null, "Automatically accept ReVa actions, don't hold them for user review.");
 
 		// Install all the UI hooks
-		installChatCommand();
-		installRestartInferenceCommand();
+		installMagicRECommand();
+		installRevaActionTable();
 
 		startInferenceServer();
 		saveConnectionInfo();
@@ -253,34 +286,6 @@ public class RevaPlugin extends ProgramPlugin {
         return address;
     }
 
-	void installChatCommand() {
-		new ActionBuilder("ReVa Chat", "ReVa")
-			.menuPath("ReVa", "Chat")
-			.onAction((event) -> {
-				Msg.info(this, "Chat command clicked!");
-				// TODO: Open a chat window
-
-				// Start a process to open a chat window
-				// The program is:
-				// reva-chat --host localhost --port <port> --program <program>
-				// This should open in a new terminal window
-
-				String commandString = String.format("reva-chat --host %s --port %d --project %s", this.inferenceHostname, this.inferencePort, this.tool.getProject().getName());
-				String[] command = {
-					"reva-chat",
-					"--host", this.inferenceHostname,
-					"--port", String.format("%d", this.inferencePort),
-					"--project", this.tool.getProject().getName(),
-				};
-
-				Msg.info(this, commandString);
-				FlatProgramAPI api = new FlatProgramAPI(this.currentProgram);
-
-			})
-			.enabledWhen((context) -> this.inferenceHostname != null && this.inferencePort != 0)
-			.buildAndInstall(tool);
-	}
-
 	void installRestartInferenceCommand() {
 		new ActionBuilder("ReVa Restart Inference", "ReVa")
 				.menuPath("ReVa", "Restart Inference")
@@ -290,8 +295,57 @@ public class RevaPlugin extends ProgramPlugin {
 					serviceMonitor = new TaskMonitorAdapter(true);
 					startInferenceServer();
 				})
-				.enabledWhen((context) -> this.inferenceHostname != null && this.inferencePort != 0)
+				.enabledWhen((context) -> this.inferenceChannel != null)
 				.buildAndInstall(tool);
+	}
+
+	void installMagicRECommand() {
+		new ActionBuilder("Examine here", "ReVa")
+			.menuPath("ReVa", "Examine here")
+			.onAction((event) -> {
+				// Here we'll grab the current location and ask ReVa to
+				// RE the program from here
+				RevaChatServiceStub chatStub = reva.protocol.RevaChatServiceGrpc.newStub(this.inferenceChannel);
+				RevaChatMessage.Builder builder = RevaChatMessage.newBuilder();
+
+				// Create a monitor to display progress
+				TaskMonitor monitor = new TaskMonitorAdapter();
+				monitor.setIndeterminate(true);
+				monitor.setMessage("ReVa is examining the program...");
+				monitor.setShowProgressValue(true);
+
+				builder.setMessage(
+					String.format("Examine the function in detail, starting at `%s`. Set comments as you go.",
+						currentLocation.getAddress().toString()
+					)
+				);
+				builder.setProgramName(currentProgram.getName());
+				builder.setProject(tool.getProject().getName());
+				StreamObserver<RevaChatMessageResponse> responseStream = new StreamObserver<RevaChat.RevaChatMessageResponse>() {
+					@Override
+					public void onNext(RevaChatMessageResponse value) {
+						Msg.info(this, "ReVa response: " + value.getMessage());
+						monitor.setMessage(value.getMessage());
+						monitor.incrementProgress();
+					}
+
+					@Override
+					public void onError(Throwable t) {
+						Msg.error(this, "ReVa error: " + t.getMessage());
+						monitor.cancel();
+					}
+
+					@Override
+					public void onCompleted() {
+						Msg.info(this, "ReVa completed.");
+						monitor.setMessage("ReVa completed.");
+					}
+				};
+
+				chatStub.chat(builder.build(), responseStream);
+			})
+			.enabledWhen((context) -> this.inferenceChannel != null)
+			.buildAndInstall(tool);
 	}
 
 
@@ -309,5 +363,10 @@ public class RevaPlugin extends ProgramPlugin {
 		} catch (IOException e) {
 			Msg.error(this, "Error saving connection info: " + e.getMessage());
 		}
+	}
+
+	void installRevaActionTable() {
+		actionTableProvider = new RevaActionTableComponentProvider(tool);
+		tool.addComponentProvider(actionTableProvider, false);
 	}
 }

@@ -4,6 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from flask import request
 from langchain.chat_models.base import BaseChatModel
 from langchain.llms.base import BaseLLM
 from numpy import add
@@ -54,7 +55,7 @@ class RevaDecompilationIndex(RevaRemoteTool):
         address: Optional[int] = None
         name: Optional[str] = None
         if isinstance(function_name_or_address, int):
-                address = function_name_or_address
+            address = function_name_or_address
         elif isinstance(function_name_or_address, str):
             name = function_name_or_address
 
@@ -106,8 +107,7 @@ class RevaDecompilationIndex(RevaRemoteTool):
         raise NotImplementedError("This function is not implemented yet")
         return response.function_count
 
-# TODO: This tool is not implemented yet
-#@register_tool
+@register_tool
 class RevaRenameFunctionVariable(RevaRemoteTool):
     """
     A tool for renaming variables used in functions
@@ -134,6 +134,7 @@ class RevaRenameFunctionVariable(RevaRemoteTool):
         If there is a failure, retrying the operation will not help.
         """
         outputs: List[str] = []
+        # TODO: Do we want to scatter gather this?
         for old_name, new_name in new_names.items():
             outputs.append(self.rename_variable_in_function(new_name, old_name, containing_function))
         return outputs
@@ -143,7 +144,16 @@ class RevaRenameFunctionVariable(RevaRemoteTool):
         Change the name of the variable with the name `old_name` in `containing_function` to `new_name`.
         If the thing you want to rename is not in a function, you should use rename symbol instead,
         """
-        raise NotImplementedError("This function is not implemented yet")
+        from ..protocol import RevaGetDecompilation_pb2_grpc, RevaGetDecompilation_pb2
+        stub = RevaGetDecompilation_pb2_grpc.RevaDecompilationServiceStub(self.channel)
+
+        request = RevaGetDecompilation_pb2.RevaRenameFunctionVariableRequest()
+        request.new_name = new_name
+        request.old_name = old_name
+        request.function_name = containing_function
+
+        response: RevaGetDecompilation_pb2.RevaRenameFunctionVariableResponse = stub.RenameFunctionVariable(request)
+
         return f"Renamed {old_name} to {new_name} in {containing_function}"
 
 #TODO: This tool is not implemented yet
@@ -344,11 +354,18 @@ class RevaSetComment(RevaRemoteTool):
             self.set_comment,
         ]
 
-    def set_comment(self, comment: str, address_or_symbol: str) -> Dict[str, str]:
+    def set_comment(self, comment: str, address_or_symbol: str):
         """
         Set the comment at the given address, function or symbol to `comment`.
         Use this when you want to add an explanation or note to a specific part
         of the code.
         """
-        raise NotImplementedError("This function is not implemented yet")
-        return response.model_dump()
+        from ..protocol import RevaComment_pb2_grpc, RevaComment_pb2
+        stub = RevaComment_pb2_grpc.RevaCommentServiceStub(self.channel)
+
+        request = RevaComment_pb2.RevaSetCommentRequest()
+        request.comment = comment
+        request.symbol_or_address = address_or_symbol
+
+        response: RevaComment_pb2.RevaSetCommentResponse = stub.SetComment(request)
+        return

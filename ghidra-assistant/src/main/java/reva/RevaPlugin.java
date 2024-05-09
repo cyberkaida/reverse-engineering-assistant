@@ -6,7 +6,6 @@ import ghidra.framework.plugintool.PluginInfo;
 import ghidra.framework.plugintool.PluginTool;
 import ghidra.app.plugin.ProgramPlugin;
 import ghidra.framework.plugintool.util.PluginStatus;
-import ghidra.program.flatapi.FlatProgramAPI;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.Program;
@@ -29,11 +28,8 @@ import java.net.ServerSocket;
 
 import java.util.List;
 
-import docking.ActionContext;
-import docking.action.DockingAction;
 import docking.action.builder.ActionBuilder;
 import reva.Actions.RevaAction;
-import reva.Actions.RevaActionTable;
 import reva.Actions.RevaActionTableComponentProvider;
 import reva.Handlers.*;
 import reva.protocol.RevaChat;
@@ -217,6 +213,7 @@ public class RevaPlugin extends ProgramPlugin {
 		server.addService(new RevaHandshake(this));
 		server.addService(new RevaGetDecompilation(this));
 		server.addService(new RevaSymbol(this));
+		server.addService(new RevaComment(this));
 		//server.addService(new RevaGetCursor(this));
 		server.addService(new RevaHeartbeat(this));
 		serverHandle = server.build();

@@ -1,0 +1,16 @@
+syntax = "proto3";
+package RevaProtocol;
+
+option java_package = "reva.protocol";
+
+service RevaCommentService {
+    rpc SetComment(RevaSetCommentRequest) returns (RevaSetCommentResponse) {}
+}
+
+message RevaSetCommentRequest {
+    string symbol_or_address = 1;
+    string comment = 2;
+}
+
+message RevaSetCommentResponse {
+}

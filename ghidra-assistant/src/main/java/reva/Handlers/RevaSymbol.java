@@ -110,7 +110,7 @@ public class RevaSymbol extends RevaToolSymbolServiceImplBase {
         // Lowest priority if is the address is just _within_ a function
         Function function = currentProgram.getFunctionManager().getFunctionContaining(address);
         if (function != null) {
-            response.setName(function.getName());
+            response.setName(function.getName(true));
             response.setAddress(function.getEntryPoint().toString());
             response.setType(reva.protocol.RevaGetSymbols.SymbolType.FUNCTION);
         }
@@ -126,7 +126,7 @@ public class RevaSymbol extends RevaToolSymbolServiceImplBase {
         // Finally if there is a symbol at the address
         Symbol symbol = currentProgram.getSymbolTable().getPrimarySymbol(address);
         if (symbol != null) {
-            response.setName(symbol.getName());
+            response.setName(symbol.getName(true));
             response.setAddress(symbol.getAddress().toString());
 
             if (currentProgram.getListing().getDataAt(address) != null) {

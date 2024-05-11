@@ -2,6 +2,7 @@ package reva.Handlers;
 
 import ghidra.program.flatapi.FlatProgramAPI;
 import ghidra.program.model.address.Address;
+import io.grpc.Status;
 import io.grpc.stub.StreamObserver;
 import reva.RevaPlugin;
 import reva.Actions.RevaAction;
@@ -37,7 +38,8 @@ public class RevaComment extends RevaCommentServiceImplBase {
                 responseObserver.onCompleted();
             })
             .setOnRejected(() -> {
-                responseObserver.onError(new RevaActionCancelled("Comment rejected by user"));
+                Status status = Status.CANCELLED.withDescription("User rejected the action");
+                responseObserver.onError(status.asRuntimeException());
             })
             .build();
         plugin.addAction(action);

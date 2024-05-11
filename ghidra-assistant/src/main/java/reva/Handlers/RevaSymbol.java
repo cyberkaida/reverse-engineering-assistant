@@ -11,6 +11,7 @@ import ghidra.program.model.symbol.SymbolType;
 import ghidra.util.Msg;
 import ghidra.util.exception.DuplicateNameException;
 import ghidra.util.exception.InvalidInputException;
+import io.grpc.Status;
 import io.grpc.stub.StreamObserver;
 import reva.RevaPlugin;
 import reva.Actions.RevaAction;
@@ -93,7 +94,8 @@ public class RevaSymbol extends RevaToolSymbolServiceImplBase {
                 currentProgram.endTransaction(transactionId, true);
             })
             .setOnRejected(() -> {
-                responseObserver.onError(new RevaActionCancelled("User rejected the action"));
+                Status status = Status.CANCELLED.withDescription("User rejected the action");
+                responseObserver.onError(status.asRuntimeException());
             })
             .build();
 
@@ -106,7 +108,10 @@ public class RevaSymbol extends RevaToolSymbolServiceImplBase {
 
         Program currentProgram = this.plugin.getCurrentProgram();
         Address address = this.plugin.addressFromAddressOrSymbol(request.getAddressOrName());
-
+        if (address == null) {
+            responseObserver.onError(Status.NOT_FOUND.withDescription("Could not find address").asRuntimeException());
+            return;
+        }
         // Lowest priority if is the address is just _within_ a function
         Function function = currentProgram.getFunctionManager().getFunctionContaining(address);
         if (function != null) {

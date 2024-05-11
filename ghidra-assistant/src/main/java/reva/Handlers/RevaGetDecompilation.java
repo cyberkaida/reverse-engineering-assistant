@@ -20,6 +20,7 @@ import ghidra.util.exception.DuplicateNameException;
 import ghidra.util.exception.InvalidInputException;
 import ghidra.util.task.TaskMonitor;
 import ghidra.util.task.TaskMonitorAdapter;
+import io.grpc.Status;
 import io.grpc.stub.StreamObserver;
 import reva.RevaPlugin;
 import reva.Actions.RevaAction;
@@ -219,7 +220,8 @@ public class RevaGetDecompilation extends RevaDecompilationServiceImplBase {
                             break;
                         } catch (DuplicateNameException | InvalidInputException e) {
                             String error = "Failed to rename variable: " + e.getMessage();
-                            responseObserver.onError(new RevaActionCancelled(error));
+                            Status status = Status.ALREADY_EXISTS.withDescription(error);
+                            responseObserver.onError(status.asRuntimeException());
                             return;
                         }
                     }
@@ -237,7 +239,8 @@ public class RevaGetDecompilation extends RevaDecompilationServiceImplBase {
                             break;
                         } catch (DuplicateNameException | InvalidInputException e) {
                             String error = "Failed to rename variable: " + e.getMessage();
-                            responseObserver.onError(new RevaActionCancelled(error));
+                            Status status = Status.ALREADY_EXISTS.withDescription(error);
+                            responseObserver.onError(status.asRuntimeException());
                             return;
                         }
                     }
@@ -247,7 +250,9 @@ public class RevaGetDecompilation extends RevaDecompilationServiceImplBase {
                 responseObserver.onCompleted();
             })
             .setOnRejected(() -> {
-                    responseObserver.onError(new RevaActionCancelled("User rejected renaming variable"));
+                    Status status = Status.CANCELLED.withDescription("User rejected the action");
+
+                    responseObserver.onError(status.asRuntimeException());
                 }
             )
             .build();

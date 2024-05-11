@@ -10,6 +10,7 @@ import ghidra.program.model.address.Address;
 import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.Program;
 import ghidra.program.model.symbol.Symbol;
+import ghidra.program.model.symbol.SymbolIterator;
 import ghidra.app.plugin.PluginCategoryNames;
 import ghidra.util.Msg;
 import ghidra.util.task.TaskBuilder;
@@ -60,11 +61,10 @@ public class RevaPlugin extends ProgramPlugin {
 	 */
 	public void addAction(RevaAction action) {
 		if (autoAcceptActions()) {
-			action.onAccepted.run();
-			return;
-		} else {
-			actionTableProvider.addAction(action);
+			action.accept();
 		}
+		// Always add for tracking the action in the UI.
+		actionTableProvider.addAction(action);
 	}
 
 	public String getExtensionHostname() {
@@ -272,9 +272,9 @@ public class RevaPlugin extends ProgramPlugin {
         Address address = this.currentProgram.getAddressFactory().getAddress(addressOrSymbol);
         if (address == null) {
             // OK, it's not an address, let's try a symbol
-            List<Symbol> symbols = this.currentProgram.getSymbolTable().getGlobalSymbols(addressOrSymbol);
-            if (symbols.size() > 0) {
-                Symbol symbol = symbols.get(0);
+            SymbolIterator symbols = this.currentProgram.getSymbolTable().getSymbols(addressOrSymbol);
+            if (symbols.hasNext()) {
+                Symbol symbol = symbols.next();
                 if (symbol != null) {
                     address = symbol.getAddress();
                 }
@@ -363,7 +363,11 @@ public class RevaPlugin extends ProgramPlugin {
 	}
 
 	void installRevaActionTable() {
-		actionTableProvider = new RevaActionTableComponentProvider(tool);
+		actionTableProvider = new RevaActionTableComponentProvider(this);
 		tool.addComponentProvider(actionTableProvider, false);
+	}
+
+	public boolean goTo(Address address) {
+		return super.goTo(address);
 	}
 }

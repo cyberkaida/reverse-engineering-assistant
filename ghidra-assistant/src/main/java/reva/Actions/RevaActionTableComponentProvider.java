@@ -4,13 +4,14 @@ import javax.swing.JComponent;
 
 import docking.ComponentProvider;
 import ghidra.framework.plugintool.PluginTool;
+import reva.RevaPlugin;
 
 public class RevaActionTableComponentProvider extends ComponentProvider {
     private RevaActionTable table;
 
-    public RevaActionTableComponentProvider(PluginTool tool) {
-        super(tool, "ReVa Action Tracker", "ReVa");
-        table = new RevaActionTable();
+    public RevaActionTableComponentProvider(RevaPlugin plugin) {
+        super(plugin.getTool(), "ReVa Action Tracker", "ReVa");
+        table = new RevaActionTable(plugin);
     }
 
     @Override

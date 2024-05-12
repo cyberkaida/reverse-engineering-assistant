@@ -312,7 +312,8 @@ public class RevaPlugin extends ProgramPlugin {
 				monitor.setShowProgressValue(true);
 
 				builder.setMessage(
-					String.format("Examine the function in detail, starting at `%s`. Set comments as you go.",
+					String.format("Please examine the program in detail from the `%s` function. Set important comments, remame va\n" + //
+												"riables and functions as you go.",
 						currentLocation.getAddress().toString()
 					)
 				);

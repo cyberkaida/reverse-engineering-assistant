@@ -30,7 +30,7 @@ from .api_server_tools.re_tools import *
 
 import logging
 logging.basicConfig(
-    filename='/tmp/reva-server.log', level=logging.DEBUG,
+    filename='/tmp/reva-api-server.log', level=logging.DEBUG,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
 )
 logger = logging.getLogger("reva-server")

@@ -36,7 +36,10 @@ def get_llm_openai() -> BaseChatModel:
     if not api_key:
         raise ValueError("OpenAI API key not set. Please set the OPENAI_API_KEY environment variable or set your key in the ReVA config.")
 
-    llm = ChatOpenAI(model=model, api_key=api_key)
+    llm = ChatOpenAI(
+        model=model,
+        api_key=api_key
+    )
     return llm
 
 def get_llm_ollama() -> BaseLLM:

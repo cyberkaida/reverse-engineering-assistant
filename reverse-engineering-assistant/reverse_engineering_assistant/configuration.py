@@ -60,7 +60,7 @@ Previous reasoning: {prev_reasoning}
 New question:'''
 
 class Llama2InstructTemplates(PromptTemplates):
-    base_prompt_format: str = '''<<SYS>> 
+    base_prompt_format: str = '''<<SYS>>
 {system_prompt}
 <</SYS>>
 

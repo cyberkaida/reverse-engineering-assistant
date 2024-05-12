@@ -9,7 +9,7 @@ from abc import ABC, abstractmethod
 from functools import cache, cached_property
 from pathlib import Path
 import tempfile
-from typing import Any, Callable, Dict, List, Optional, Sequence, Type
+from typing import Any, Callable, Dict, List, Optional, Sequence, Type, Union
 from uuid import UUID
 
 from langchain.chains.base import Chain
@@ -22,6 +22,7 @@ from langchain.llms.base import BaseLLM
 from langchain.chat_models.base import BaseChatModel
 from langchain.memory import ConversationTokenBufferMemory, ChatMessageHistory, ConversationBufferMemory
 from langchain.memory.chat_memory import BaseMemory
+from langchain_community.chat_message_histories import SQLChatMessageHistory
 from langchain.tools.base import BaseTool, StructuredTool, Tool
 from prompt_toolkit import PromptSession
 from prompt_toolkit.history import FileHistory
@@ -30,6 +31,12 @@ from rich.console import Console
 from rich.logging import RichHandler
 from rich.prompt import Prompt
 from rich.markdown import Markdown
+from langchain_core.chat_history import BaseChatMessageHistory
+from langchain_core.messages import (
+    AIMessage,
+    BaseMessage,
+    HumanMessage,
+)
 
 from .configuration import AssistantConfiguration, load_configuration
 from .documents import AssistantDocument, CrossReferenceDocument, DecompiledFunctionDocument
@@ -137,6 +144,43 @@ class RevaActionLoggerManager(BaseCallbackManager):
     """
     pass
 
+class RevaMemory(BaseChatMessageHistory):
+    '''
+    A simple memory for ReVa that stores messages in a JSON file.
+    # TODO: This causes a deadlock, this is probably a bug in langchain
+    '''
+    project: AssistantProject
+    history_file: Path
+    logger: logging.Logger
+
+    def __init__(self, project: AssistantProject) -> None:
+        self.project = project
+        self.logger = logging.getLogger(f"reverse_engineering_assistant.RevaMemory.{self.project.project}")
+        self.history_file = self.project.project_path / "reva-memory.json"
+        if self.history_file.exists():
+            self._load_messages()
+
+    def _load_messages(self):
+        json_messages = json.loads(self.history_file.read_text())
+        self.messages = [self._message_from_dict(message_dict) for message_dict in json_messages]
+        self.logger.debug(f"Loaded {len(self.messages)} messages from {self.history_file}")
+
+    def _message_to_dict(self, message: BaseMessage) -> Dict:
+        return message.dict()
+
+    def _message_from_dict(self, message_dict: Dict) -> BaseMessage:
+        return BaseMessage.parse_obj(message_dict)
+
+    def add_message(self, message: BaseMessage) -> None:
+        self.logger.info(f"Memorisng message: {message}")
+        self.messages.append(message)
+        json_messages = [self._message_to_dict(message) for message in self.messages]
+        self.history_file.write_text(json.dumps(json_messages))
+
+    def clear(self) -> None:
+        self.history_file.unlink()
+        self.messages = []
+
 class RevaActionLogger(BaseCallbackHandler):
     """
     A callback handler for logging agent actions in the reverse engineering assistant.
@@ -180,6 +224,7 @@ class ReverseEngineeringAssistant(object):
         tools (List[RevaTool]): The tools for the reverse engineering assistant.
     """
 
+    logger: logging.Logger
     project: AssistantProject
 
     query_engine: Optional[Chain] = None
@@ -193,6 +238,7 @@ class ReverseEngineeringAssistant(object):
     chat_history: List[str]
 
     langchain_callbacks: List[BaseCallbackHandler]
+    system_prompt = '''You are ReVa, the Reverse Engineering Assistant. Your primary task is to annotate the database during reverse engineering processes, ensuring that all elements are clearly and accurately labeled. As you gather contextual information, prioritize setting informative comments and renaming any elements with default or unclear names to enhance user comprehension and productivity. Remember, your work is a collaborative effort with the user. Utilize your tools effectively to accomplish these tasks and support the user's understanding.'''
 
     def __repr__(self) -> str:
         return f"<ReverseEngineeringAssistant for {self.project}>"
@@ -231,6 +277,9 @@ class ReverseEngineeringAssistant(object):
         else:
             self.project = project
 
+        self.logger = logging.getLogger(f"reverse_engineering_assistant.ReverseEngineeringAssistant.{self.project.project}")
+        self.logger.addHandler(logging.FileHandler(self.project.project_path / "reva.log"))
+
         self.langchain_callbacks = langchain_callbacks or []
 
         self.llm = get_model(model_type)
@@ -238,7 +287,7 @@ class ReverseEngineeringAssistant(object):
         # Let's take the tools that have been decorated with @register_tool and turn them into
         # tools the LLM can use.
         self.tools = [ tool_type(self.project, self.llm) for tool_type in _reva_tool_list]
-        logger.debug(f"Loaded tools: {[ x for x in self.tools]}")
+        self.logger.debug(f"Loaded tools: {[ x for x in self.tools]}")
 
     def create_query_engine(self) -> Chain:
         """
@@ -257,7 +306,13 @@ class ReverseEngineeringAssistant(object):
         #self.model_memory = ConversationTokenBufferMemory(
         #    llm=self.llm
         #)
+        #self.model_memory = RevaMemory(self.project)
         self.model_memory = ConversationBufferMemory()
+        self.logger.info(f"Memory created")
+
+        # TODO: This is deadlocking the process, this is probably a bug in langchain
+        # I would like to scream. 🫠
+
         callbacks: List[BaseCallbackHandler] = [RevaActionLogger()]
         callbacks.extend(self.langchain_callbacks)
         callback_manager = RevaActionLoggerManager(handlers=callbacks, inheritable_handlers=callbacks)
@@ -265,11 +320,12 @@ class ReverseEngineeringAssistant(object):
         agent =  StructuredChatAgent.from_llm_and_tools(
             llm=self.llm,
             tools=base_tools,
-            system_message=configuration.prompt_template.system_prompt,
+            system_message=self.system_prompt,
             verbose=False,
             handle_parsing_errors=self.handle_reva_tool_error,
             stop_words=["\nObservation", "\nThought"],
             callback_manager=callback_manager,
+            prefix=self.system_prompt,
         )
         # TODO: Switch to this thing https://python.langchain.com/docs/expression_language/get_started
         executor = AgentExecutor.from_agent_and_tools(
@@ -279,9 +335,11 @@ class ReverseEngineeringAssistant(object):
             handle_parsing_errors=self.handle_reva_tool_error,
             memory=self.model_memory,
             callbacks=callbacks,
+            max_iterations=None
         )
 
         self.query_engine = executor
+        self.logger.info(f"Query engine created")
         return executor
 
     def query(self, query: str) -> str:
@@ -304,21 +362,25 @@ class ReverseEngineeringAssistant(object):
                     "input": query,
                 }
 
+            self.logger.debug(f"Query: {query}")
+
             answer = self.query_engine.invoke(
                input=query_engine_input,
             )
+
+            self.logger.debug(f"Answer: {answer}")
 
             #import pdb; pdb.set_trace()
 
             return str(answer["output"])
         except json.JSONDecodeError as e:
-            logger.exception(f"Failed to parse JSON response from query engine: {e.doc}")
+            self.logger.exception(f"Failed to parse JSON response from query engine: {e.doc}")
             return "Failed to parse JSON response from query engine"
         except ValueError as e:
-            logger.exception(f"Failed to query engine: {e}")
+            self.logger.exception(f"Failed to query engine: {e}")
             return "Failed to query engine... Try again?"
         except Exception as e:
-            logger.exception(f"Failed to query engine: {e}")
+            self.logger.exception(f"Failed to query engine: {e}")
             return "Failed to query engine... Try again?"
 
 def get_thinking_emoji() -> str:

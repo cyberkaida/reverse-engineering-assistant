@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
+from concurrent.futures import thread
+import queue
 from re import M
 from typing import Generator, List, Tuple
+from uuid import uuid4
 from prompt_toolkit import PromptSession
 import prompt_toolkit
 from prompt_toolkit.history import FileHistory
@@ -28,7 +31,7 @@ from rich.pretty import Pretty
 
 import logging
 logging.basicConfig(
-    filename='/tmp/reva-server.log', level=logging.DEBUG,
+    filename='/tmp/reva-chat.log', level=logging.DEBUG,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
 )
 logger = logging.getLogger("reva-chat")
@@ -146,19 +149,35 @@ def main():
     channel = grpc.insecure_channel(f"{args.host}:{args.port}")
     stub = RevaChatServiceStub(channel)
 
+
     console.print("[bold]Welcome to Reva Chat![/bold]")
     history_file = FileHistory(str(history_file_path))
     prompt_session = PromptSession(history=history_file)
+
+    chat_id: str = str(uuid4())
+
+    send_queue = queue.Queue()
+    receive_queue = queue.Queue()
+
+    def get_message_from_queue():
+        while True:
+            yield send_queue.get()
+    def chat_thread_func():
+        for response in stub.chatStream(get_message_from_queue()):
+            receive_queue.put(response)
+    chat_thread = threading.Thread(target=chat_thread_func, daemon=True)
+    chat_thread.start()
 
     try:
         while True:
             query: str = prompt_session.prompt("> ")
             try:
                 console.print(f"[green]{query}[/green]")
-                chat_message = RevaChatMessage(project=args.project, message=query)
-
+                chat_message = RevaChatMessage(chatId=chat_id, project=args.project, message=query)
                 logger.info(f"Sending message: {chat_message}")
-                for response in stub.chatResponseStream(chat_message):
+                send_queue.put(chat_message)
+                while True:
+                    response = receive_queue.get()
                     logger.info(f"Received response: {response}")
                     console.print(Markdown("---"))
                     if response.thought:
@@ -167,6 +186,7 @@ def main():
                         console.print(Markdown(thought))
                     elif response.message:
                         console.print(Markdown(f"# 👩‍💻 - ReVa\n\n>{query}\n\n{response.message}"))
+                        break
                     else:
                         # ReVa had no thoughts? We all feel this way some times...
                         raise ValueError("Head empty, no thoughts, no message")
@@ -174,6 +194,8 @@ def main():
                 console.print("[bold][yellow]Cancelled. Press Ctrl-C again to exit.[/yellow][/bold]")
     except KeyboardInterrupt:
         console.print("Goodbye! :wave:")
+
+    chat_thread.join(2)
 
 if __name__ == "__main__":
     main()

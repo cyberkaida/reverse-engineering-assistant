@@ -73,6 +73,15 @@ dependencies {
 	compileOnly 'org.apache.tomcat:annotations-api:6.0.53' // necessary for Java 9+
 }
 
+sourceSets {
+  main {
+    proto {
+      // This is in addition to the default 'src/main/proto'
+      srcDir '../protocol'
+    }
+  }
+}
+
 protobuf {
   protoc {
     artifact = "com.google.protobuf:protoc:4.26.1"
@@ -87,6 +96,12 @@ protobuf {
       grpc {}
     }
   }
+}
+
+["extractIncludeProto", "extractIncludeTestProto"].each { taskName ->
+    tasks.named(taskName).configure {
+        dependsOn "copyDependencies"
+    }
 }
 
 // Exclude additional files from the built extension

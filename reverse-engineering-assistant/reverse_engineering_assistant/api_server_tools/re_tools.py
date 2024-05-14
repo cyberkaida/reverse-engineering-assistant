@@ -4,13 +4,14 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from flask import request
-from langchain.chat_models.base import BaseChatModel
-from langchain.llms.base import BaseLLM
+import grpc
+
+from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.language_models.base import BaseLanguageModel
 from numpy import add
 
 from ..tool import AssistantProject
-from ..assistant import AssistantProject, RevaTool, BaseLLM, register_tool
+from ..assistant import AssistantProject, RevaTool, register_tool
 from ..assistant_api_server import get_channel
 
 from ..reva_exceptions import RevaToolException
@@ -34,7 +35,7 @@ class RevaDecompilationIndex(RevaRemoteTool):
     description = "Used for retrieving decompiled functions"
     logger = logging.getLogger("reverse_engineering_assistant.RevaDecompilationIndex")
 
-    def __init__(self, project: AssistantProject, llm: BaseLLM) -> None:
+    def __init__(self, project: AssistantProject, llm: BaseLanguageModel) -> None:
         super().__init__(project, llm)
         self.description = "Used for retrieveing decompiled functions"
         self.tool_functions = [
@@ -76,7 +77,10 @@ class RevaDecompilationIndex(RevaRemoteTool):
         if address:
             request.address = address
 
-        response: RevaGetDecompilation_pb2.RevaGetDecompilationResponse = stub.GetDecompilation(request)
+        try:
+            response: RevaGetDecompilation_pb2.RevaGetDecompilationResponse = stub.GetDecompilation(request)
+        except grpc.RpcError as e:
+            raise RevaToolException(f"Failed to get decompilation: {e}")
 
         # Finally we can return the response
         return {
@@ -116,7 +120,7 @@ class RevaRenameFunctionVariable(RevaRemoteTool):
     description = "Used for renaming variables used in functions"
     logger = logging.getLogger("reverse_engineering_assistant.RevaRenameFunctionVariable")
 
-    def __init__(self, project: AssistantProject, llm: BaseLLM | BaseChatModel) -> None:
+    def __init__(self, project: AssistantProject, llm: BaseLanguageModel | BaseChatModel) -> None:
         super().__init__(project, llm)
         self.description = "Used for renaming variables used in functions"
         self.tool_functions = [
@@ -152,7 +156,10 @@ class RevaRenameFunctionVariable(RevaRemoteTool):
         request.old_name = old_name
         request.function_name = containing_function
 
-        response: RevaGetDecompilation_pb2.RevaRenameFunctionVariableResponse = stub.RenameFunctionVariable(request)
+        try:
+            response: RevaGetDecompilation_pb2.RevaRenameFunctionVariableResponse = stub.RenameFunctionVariable(request)
+        except grpc.RpcError as e:
+            raise RevaToolException(f"Failed to rename variable: {e}")
 
         return f"Renamed {old_name} to {new_name} in {containing_function}"
 
@@ -163,7 +170,7 @@ class RevaCrossReferenceTool(RevaRemoteTool):
     An tool to retrieve cross references, to and from, addresses.
     """
     index_directory: Path
-    def __init__(self, project: AssistantProject, llm: BaseLLM) -> None:
+    def __init__(self, project: AssistantProject, llm: BaseLanguageModel) -> None:
         super().__init__(project, llm)
         self.description = "Used for retrieving cross references to and from addresses"
 
@@ -183,7 +190,10 @@ class RevaCrossReferenceTool(RevaRemoteTool):
         request = RevaGetReferences_pb2.RevaGetReferencesRequest()
         request.address_or_symbol = address_or_symbol
 
-        response: RevaGetReferences_pb2.RevaGetReferencesResponse = stub.GetReferences(request)
+        try:
+            response: RevaGetReferences_pb2.RevaGetReferencesResponse = stub.GetReferences(request)
+        except grpc.RpcError as e:
+            raise RevaToolException(f"Failed to get references: {e}")
 
         return {
             "references_to": response.references_to,
@@ -199,7 +209,7 @@ class RevaGetSymbols(RevaRemoteTool):
     logger = logging.getLogger("reverse_engineering_assistant.RevaGetSymbols")
 
 
-    def __init__(self, project: AssistantProject, llm: BaseLLM) -> None:
+    def __init__(self, project: AssistantProject, llm: BaseLanguageModel) -> None:
         super().__init__(project, llm)
         self.description = "Used for retrieving symbols in the program"
 
@@ -217,7 +227,10 @@ class RevaGetSymbols(RevaRemoteTool):
 
         request = RevaGetSymbols_pb2.RevaGetSymbolsRequest()
 
-        response: RevaGetSymbols_pb2.RevaGetSymbolsResponse = stub.GetSymbols(request)
+        try:
+            response: RevaGetSymbols_pb2.RevaGetSymbolsResponse = stub.GetSymbols(request)
+        except grpc.RpcError as e:
+            raise RevaToolException(f"Failed to get symbols: {e}")
 
         return response.symbols
 
@@ -297,7 +310,10 @@ class RevaGetSymbols(RevaRemoteTool):
         request = RevaGetSymbols_pb2.RevaSymbolRequest()
         request.address_or_name = address_or_name
         self.logger.debug(f"Getting symbol {address_or_name} request: {request}")
-        response: RevaGetSymbols_pb2.RevaSymbolResponse = stub.GetSymbol(request)
+        try:
+            response: RevaGetSymbols_pb2.RevaSymbolResponse = stub.GetSymbol(request)
+        except grpc.RpcError as e:
+            raise RevaToolException(f"Failed to get symbol: {e}")
         self.logger.debug(f"Got symbol {address_or_name} response: {response}")
         return {
             "name": response.name,
@@ -313,7 +329,7 @@ class RevaSetSymbolName(RevaRemoteTool):
     This could be a function name, or a global variable name.
     """
 
-    def __init__(self, project: AssistantProject, llm: BaseLLM) -> None:
+    def __init__(self, project: AssistantProject, llm: BaseLanguageModel) -> None:
         super().__init__(project, llm)
         self.description = "Used for retrieving cross references to and from addresses"
 
@@ -333,7 +349,10 @@ class RevaSetSymbolName(RevaRemoteTool):
         request.new_name = new_name
         request.old_name_or_address = old_name_or_address
 
-        response: RevaGetSymbols_pb2.RevaSetSymbolNameResponse = stub.SetSymbolName(request)
+        try:
+            response: RevaGetSymbols_pb2.RevaSetSymbolNameResponse = stub.SetSymbolName(request)
+        except grpc.RpcError as e:
+            raise RevaToolException(f"Failed to set symbol name: {e}")
 
         return {
             "old_name": old_name_or_address,
@@ -346,7 +365,7 @@ class RevaSetComment(RevaRemoteTool):
     A tool for setting comments on addresses, functions and symbols.
     """
 
-    def __init__(self, project: AssistantProject, llm: BaseLLM) -> None:
+    def __init__(self, project: AssistantProject, llm: BaseLanguageModel) -> None:
         super().__init__(project, llm)
         self.description = "Used for setting comments on addresses, functions and symbols"
 
@@ -354,7 +373,7 @@ class RevaSetComment(RevaRemoteTool):
             self.set_comment,
         ]
 
-    def set_comment(self, comment: str, address_or_symbol: str):
+    def set_comment(self, comment: str, address_or_symbol: str) -> str:
         """
         Set the comment at the given address, function or symbol to `comment`.
         Use this when you want to add an explanation or note to a specific part
@@ -367,5 +386,8 @@ class RevaSetComment(RevaRemoteTool):
         request.comment = comment
         request.symbol_or_address = address_or_symbol
 
-        response: RevaComment_pb2.RevaSetCommentResponse = stub.SetComment(request)
-        return
+        try:
+            response: RevaComment_pb2.RevaSetCommentResponse = stub.SetComment(request)
+        except grpc.RpcError as e:
+            raise RevaToolException(f"Failed to set comment: {e}")
+        return "Set comment successfully"

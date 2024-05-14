@@ -18,6 +18,9 @@ module_logger = logging.getLogger("reva-server")
 from langchain_core.callbacks.base import BaseCallbackHandler
 from langchain_core.agents import AgentAction, AgentFinish
 
+from langchain_core.language_models.base import BaseLanguageModel
+from langchain_core.language_models.chat_models import BaseChatModel
+
 class RevaActionCollector(BaseCallbackHandler):
     """
     A callback handler for logging agent actions in the reverse engineering assistant.
@@ -57,10 +60,17 @@ class RevaActionCollector(BaseCallbackHandler):
 
 class RevaChat(RevaChatServiceServicer):
     logger = logging.getLogger("reva-server.RevaChat")
+    llm: BaseLanguageModel | BaseChatModel
+
+    def __init__(self, llm: BaseLanguageModel | BaseChatModel) -> None:
+        self.llm = llm
 
     def chat(self, request, context):
         self.logger.info(f"Received request: {request}")
-        assistant = ReverseEngineeringAssistant(request.project)
+        assistant = ReverseEngineeringAssistant(
+            request.project,
+            model=self.llm
+        )
         self.logger.info(f"Assistant: {assistant}")
         llm_response = assistant.query(request.message)
         self.logger.info(f"LLM Response: {llm_response}")
@@ -83,7 +93,11 @@ class RevaChat(RevaChatServiceServicer):
             response.thought = message
             response_queue.put(response)
 
-        assistant = ReverseEngineeringAssistant(request.project, langchain_callbacks=[RevaActionCollector(callback)])
+        assistant = ReverseEngineeringAssistant(
+            request.project,
+            model=self.llm,
+            langchain_callbacks=[RevaActionCollector(callback)]
+        )
         self.logger.info(f"Assistant: {assistant}")
 
         def run_query(query: str):
@@ -117,7 +131,11 @@ class RevaChat(RevaChatServiceServicer):
 
         for request in request_iterator:
             if not assistant:
-                assistant = ReverseEngineeringAssistant(request.project, langchain_callbacks=[RevaActionCollector(callback)])
+                assistant = ReverseEngineeringAssistant(
+                    request.project,
+                    model=self.llm,
+                    langchain_callbacks=[RevaActionCollector(callback)]
+                )
             self.logger.info(f"Received request: {request}")
             def run_query(query: str):
                 assert assistant is not None

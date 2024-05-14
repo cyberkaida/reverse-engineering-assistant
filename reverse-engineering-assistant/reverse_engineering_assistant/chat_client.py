@@ -177,19 +177,20 @@ def main():
                 logger.info(f"Sending message: {chat_message}")
                 send_queue.put(chat_message)
                 while True:
-                    response = receive_queue.get()
-                    logger.info(f"Received response: {response}")
-                    console.print(Markdown("---"))
-                    if response.thought:
-                        console.print(Markdown(f"### {get_thinking_emoji()} - ReVa Thinking..."))
-                        thought = response.thought
-                        console.print(Markdown(thought))
-                    elif response.message:
-                        console.print(Markdown(f"# 👩‍💻 - ReVa\n\n>{query}\n\n{response.message}"))
-                        break
-                    else:
-                        # ReVa had no thoughts? We all feel this way some times...
-                        raise ValueError("Head empty, no thoughts, no message")
+                    with console.status(f"{get_thinking_emoji()} Thinking..."):
+                        response = receive_queue.get()
+                        logger.info(f"Received response: {response}")
+                        console.print(Markdown("---"))
+                        if response.thought:
+                            console.print(Markdown(f"### {get_thinking_emoji()} - ReVa Thinking..."))
+                            thought = response.thought
+                            console.print(Markdown(thought))
+                        elif response.message:
+                            console.print(Markdown(f"# 👩‍💻 - ReVa\n\n>{query}\n\n{response.message}"))
+                            break
+                        else:
+                            # ReVa had no thoughts? We all feel this way some times...
+                            raise ValueError("Head empty, no thoughts, no message")
             except KeyboardInterrupt:
                 console.print("[bold][yellow]Cancelled. Press Ctrl-C again to exit.[/yellow][/bold]")
     except KeyboardInterrupt:

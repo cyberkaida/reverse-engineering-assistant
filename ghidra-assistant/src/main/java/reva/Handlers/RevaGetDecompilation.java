@@ -160,6 +160,17 @@ public class RevaGetDecompilation extends RevaDecompilationServiceImplBase {
             }
         }
 
+        // Load the decompilation into the tracker so the user
+        // can follow ReVa.
+        RevaAction action = new RevaAction.Builder()
+            .setPlugin(this.plugin)
+            .setLocation(function.getEntryPoint())
+            .setName("Decompile function")
+            .setDescription("Decompiling function " + function.getName(true))
+            .build();
+        this.plugin.addAction(action);
+        action.accept(); // Always accept decompilation
+
         responseObserver.onNext(response.build());
         responseObserver.onCompleted();
     }
@@ -205,6 +216,7 @@ public class RevaGetDecompilation extends RevaDecompilationServiceImplBase {
 
 
         RevaAction action = new RevaAction.Builder()
+            .setPlugin(this.plugin)
             .setLocation(function.getEntryPoint())
             .setName("Rename Variable")
             .setDescription("Rename variable " + request.getOldName() + " to " + request.getNewName())

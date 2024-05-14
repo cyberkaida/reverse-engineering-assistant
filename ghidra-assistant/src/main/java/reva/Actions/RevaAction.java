@@ -1,6 +1,8 @@
 package reva.Actions;
 
 import ghidra.program.model.address.Address;
+import ghidra.util.Msg;
+import reva.RevaPlugin;
 
 /**
  * A RevaAction is a thing the LLM has requested be
@@ -15,13 +17,19 @@ public class RevaAction {
     }
 
     public static class Builder {
+        RevaPlugin plugin;
         Address location;
         String name;
         String description;
-        Runnable onAccepted;
-        Runnable onRejected;
+        Runnable onAccepted = null;
+        Runnable onRejected = null;
 
         public Builder() {}
+
+        public Builder setPlugin(RevaPlugin plugin) {
+            this.plugin = plugin;
+            return this;
+        }
 
         public Builder setLocation(Address location) {
             this.location = location;
@@ -49,17 +57,19 @@ public class RevaAction {
         }
 
         public RevaAction build() {
-            return new RevaAction(location, name, description, onAccepted, onRejected);
+            return new RevaAction(plugin, location, name, description, onAccepted, onRejected);
         }
     }
 
     public RevaAction(
+            RevaPlugin plugin,
             Address location,
             String name,
             String description,
             Runnable onAccepted,
             Runnable onRejected
     ) {
+        this.plugin = plugin;
         this.location = location;
         this.name = name;
         this.description = description;
@@ -71,20 +81,32 @@ public class RevaAction {
     public final Address location;
     public final String name;
     public final String description;
-    public final Runnable onAccepted;
-    public final Runnable onRejected;
+    private final Runnable onAccepted;
+    private final Runnable onRejected;
     public Status status = Status.PENDING;
+    private RevaPlugin plugin = null;
 
     public void accept() {
+        Msg.debug(this, String.format("Accepting action %s", name));
         if (status == Status.PENDING) {
-            onAccepted.run();
+            if (plugin != null && plugin.revaFollowEnabled()) {
+                Msg.info(this, "Going to location: " + location.toString());
+                plugin.goTo(location);
+            }
+
+            if (onAccepted != null) {
+                onAccepted.run();
+            }
             status = Status.ACCEPTED;
         }
     }
 
     public void reject() {
+        Msg.info(this, String.format("Rejecting action %s", name));
         if (status == Status.PENDING) {
-            onRejected.run();
+            if (onRejected != null) {
+                onRejected.run();
+            }
             status = Status.REJECTED;
         }
     }

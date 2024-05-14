@@ -26,6 +26,7 @@ public class RevaComment extends RevaCommentServiceImplBase {
         RevaSetCommentResponse response = RevaSetCommentResponse.newBuilder().build();
         // Create an action to comment
         RevaAction action = new RevaAction.Builder()
+            .setPlugin(this.plugin)
             .setLocation(address)
             .setName("Comment")
             .setDescription("Comment: " + comment)

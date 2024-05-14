@@ -5,14 +5,21 @@ import ghidra.framework.options.Options;
 import ghidra.framework.plugintool.PluginInfo;
 import ghidra.framework.plugintool.PluginTool;
 import ghidra.app.plugin.ProgramPlugin;
+import ghidra.app.plugin.core.decompile.DecompilerActionContext;
 import ghidra.framework.plugintool.util.PluginStatus;
+import ghidra.framework.task.gui.GProgressBar;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.Program;
+import ghidra.program.model.pcode.HighVariable;
 import ghidra.program.model.symbol.Symbol;
 import ghidra.program.model.symbol.SymbolIterator;
+import ghidra.program.util.ProgramLocation;
+import ghidra.app.context.ListingActionContext;
+import ghidra.app.decompiler.component.DecompilerPanel;
 import ghidra.app.plugin.PluginCategoryNames;
 import ghidra.util.Msg;
+import ghidra.util.task.CancelledListener;
 import ghidra.util.task.TaskBuilder;
 import ghidra.util.task.TaskMonitor;
 import ghidra.util.task.TaskMonitorAdapter;
@@ -27,8 +34,6 @@ import java.io.FileWriter;
 import java.io.IOException;
 import java.net.ServerSocket;
 
-import java.util.List;
-
 import docking.action.builder.ActionBuilder;
 import reva.Actions.RevaAction;
 import reva.Actions.RevaActionTableComponentProvider;
@@ -37,6 +42,7 @@ import reva.protocol.RevaChat;
 import reva.protocol.RevaChat.RevaChatMessage;
 import reva.protocol.RevaChat.RevaChatMessageResponse;
 import reva.protocol.RevaChatServiceGrpc.RevaChatServiceStub;
+import reva.protocol.RevaVariableOuterClass.RevaVariable;
 
 @PluginInfo(
         status = PluginStatus.STABLE, // probably a lie
@@ -115,6 +121,9 @@ public class RevaPlugin extends ProgramPlugin {
 
 	@Override
 	protected void programDeactivated(Program program) {
+		// Stop the service
+		Msg.info(this, "Stopping ReVa service for " + program.getName());
+		serviceMonitor.cancel();
 	}
 
 	public String inferenceHostname;
@@ -144,6 +153,9 @@ public class RevaPlugin extends ProgramPlugin {
 
 	private void startInferenceServer() {
 
+		RevaInferenceType inferenceType = options.getEnum("Inference type", RevaInferenceType.OpenAI);
+		String inferenceTypeString = inferenceType.getValue().toLowerCase();
+
 		TaskBuilder task = new TaskBuilder("ReVa Server", (monitor) -> {
 			try {
 				Msg.info(this, "Started Extension RPC server...");
@@ -161,6 +173,13 @@ public class RevaPlugin extends ProgramPlugin {
 				"reva-server",
 				"--connect-host", getExtensionHostname(),
 				"--connect-port", portString,
+				"--provider", inferenceTypeString,
+				// Here we pass all our available options, the server will pick the ones it needs
+				// and ignore the rest.
+				"--openai-model", options.getOptions("OpenAI").getString("OpenAI Model", "gpt-4o"),
+				"--openai-api-key", options.getOptions("OpenAI").getString("OpenAI API Key", "OPENAI_API_KEY"),
+				"--ollama-server-url", options.getOptions("Ollama").getString("Ollama inference URL", "http://localhost:11434"),
+				"--ollama-model", options.getOptions("Ollama").getString("Ollama Model", "llama3")
 			};
 			processBuilder.command(command);
 			processBuilder.redirectError(ProcessBuilder.Redirect.DISCARD);
@@ -219,14 +238,26 @@ public class RevaPlugin extends ProgramPlugin {
 		serverHandle = server.build();
 
 		options = tool.getOptions("ReVa");
+		Options openAiOptions = options.getOptions("OpenAI");
+		Options ollamaOptions = options.getOptions("Ollama");
 
 		options.registerOption("Path to reva-server", OptionType.STRING_TYPE, "reva-server", null, "Path to the reva-server binary, or `reva-server` if it is on the system path.");
 		options.registerOption("Inference type", OptionType.ENUM_TYPE, RevaInferenceType.OpenAI, null, "The type of inference server to connect to.");
+
+		openAiOptions.registerOption("OpenAI Model", OptionType.STRING_TYPE, "gpt-4o", null, "The OpenAI model to use for inference.");
+		openAiOptions.registerOption("OpenAI API Key", OptionType.STRING_TYPE, "OPENAI_API_KEY", null, "The OpenAI API key to use for inference. If the magic value 'OPENAI_API_KEY', then the environment variable OPENAI_API_KEY will be used.");
+
+		ollamaOptions.registerOption("Ollama inference URL", OptionType.STRING_TYPE, "http://localhost:11434", null, "The URL of the Ollama inference server.");
+		ollamaOptions.registerOption("Ollama Model", OptionType.STRING_TYPE, "llama3", null, "The Ollama model to use for inference. This must be pulled already.");
+
 		options.registerOption("Auto-accept ReVa actions", OptionType.BOOLEAN_TYPE, true, null, "Automatically accept ReVa actions, don't hold them for user review.");
+		options.registerOption("Follow ReVa", OptionType.BOOLEAN_TYPE, false, null, "Follow ReVa as she takes actions in the program.");
 
 		// Install all the UI hooks
 		installMagicRECommand();
 		installRevaActionTable();
+		installActionRenameSymbol();
+		installActionRenameFunctionVariable();
 
 		startInferenceServer();
 		saveConnectionInfo();
@@ -346,6 +377,110 @@ public class RevaPlugin extends ProgramPlugin {
 			.buildAndInstall(tool);
 	}
 
+	private void installActionRenameSymbol() {
+		tool = this.tool;
+		new ActionBuilder("ReVa Rename", getName())
+		.description("Rename the selection")
+		.popupMenuPath("ReVa", "Rename")
+		.popupMenuGroup("ReVa")
+		.onAction(context -> {
+			RevaChatServiceStub chatStub = reva.protocol.RevaChatServiceGrpc.newStub(this.inferenceChannel);
+			RevaChatMessage.Builder builder = RevaChatMessage.newBuilder();
+
+			ListingActionContext listingContext = (ListingActionContext) context;
+
+			ProgramLocation location = listingContext.getLocation();
+			Symbol symbol = listingContext.getProgram().getSymbolTable().getPrimarySymbol(location.getAddress());
+			if (symbol == null) {
+				Msg.error(this, "No symbol found, we can't rename this yet.");
+				return;
+			}
+
+			builder.setMessage(
+				String.format("Please rename the symbol `%s` to something more meaningful. Remember to use your tools to gather context if you are not sure!", symbol.getName())
+			);
+			builder.setProgramName(currentProgram.getName());
+			builder.setProject(tool.getProject().getName());
+			StreamObserver<RevaChatMessageResponse> responseStream = new StreamObserver<RevaChat.RevaChatMessageResponse>() {
+				@Override
+				public void onNext(RevaChatMessageResponse value) {
+					Msg.info(this, "ReVa response: " + value.getMessage());
+				}
+
+				@Override
+				public void onError(Throwable t) {
+					Msg.error(this, "ReVa error: " + t.getMessage());
+				}
+
+				@Override
+				public void onCompleted() {
+					Msg.info(this, "ReVa completed.");
+				}
+			};
+
+			chatStub.chat(builder.build(), responseStream);
+		})
+		.enabledWhen(context -> { return context instanceof ListingActionContext; })
+		.buildAndInstall(tool);
+	}
+
+	/**
+	 * Right click menu action to rename the selected variable.
+	 * @param tool
+	 */
+	private void installActionRenameFunctionVariable() {
+		tool = this.tool;
+		new ActionBuilder("ReVa Rename", getName())
+		.description("Rename the selection")
+		.popupMenuPath("ReVa", "Rename")
+		.popupMenuGroup("ReVa")
+		.onAction(context -> {
+			RevaChatServiceStub chatStub = reva.protocol.RevaChatServiceGrpc.newStub(this.inferenceChannel);
+			RevaChatMessage.Builder builder = RevaChatMessage.newBuilder();
+
+			DecompilerActionContext decompilerContext = (DecompilerActionContext) context;
+			DecompilerPanel panel = decompilerContext.getDecompilerPanel();
+
+			ProgramLocation location = panel.getCurrentLocation();
+			var token = panel.getTokenAtCursor();
+
+			Msg.info(this, "Renaming " + token.getText());
+			HighVariable highVariable = token.getHighVariable();
+			if (highVariable == null) {
+				Msg.error(this, "No high variable found, we can't rename this yet.");
+				return;
+			}
+
+			builder.setMessage(
+				String.format("Please rename the variable `%s` in the function `%s` to something more meaningful. Remember to use your tools to gather context if you are not sure!", highVariable.getName(), highVariable.getHighFunction().getFunction().getName(true))
+			);
+
+			builder.setProgramName(currentProgram.getName());
+			builder.setProject(tool.getProject().getName());
+			StreamObserver<RevaChatMessageResponse> responseStream = new StreamObserver<RevaChat.RevaChatMessageResponse>() {
+				@Override
+				public void onNext(RevaChatMessageResponse value) {
+					Msg.info(this, "ReVa response: " + value.getMessage());
+				}
+
+				@Override
+				public void onError(Throwable t) {
+					Msg.error(this, "ReVa error: " + t.getMessage());
+				}
+
+				@Override
+				public void onCompleted() {
+					Msg.info(this, "ReVa completed.");
+				}
+			};
+
+			chatStub.chat(builder.build(), responseStream);
+		})
+		.enabledWhen(context -> { return context instanceof DecompilerActionContext; })
+		.buildAndInstall(tool);
+	}
+
+
 
 	void saveConnectionInfo() {
 		// Write our server hostname and port to a well known file
@@ -370,5 +505,13 @@ public class RevaPlugin extends ProgramPlugin {
 
 	public boolean goTo(Address address) {
 		return super.goTo(address);
+	}
+
+	/**
+	 * Return true if the view should follow ReVa as she takes actions.
+	 * @return true if the view should follow ReVa.
+	 */
+	public boolean revaFollowEnabled() {
+		return options.getBoolean("Follow ReVa", false);
 	}
 }

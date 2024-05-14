@@ -4,11 +4,13 @@
 Here we start the gRPC server.
 """
 
+from ast import parse
 import threading
 from pathlib import Path
 import sys
 
-from flask import g
+import openai
+
 sys.path.append(str(Path(__file__).parent.joinpath('protocol')))
 
 import argparse
@@ -28,12 +30,16 @@ from .api_server_tools.connection import get_channel, connect_to_extension
 # poor ReVa won't know about her tools and she can't help you.
 from .api_server_tools.re_tools import *
 
+from .model import get_llm_ollama, get_llm_openai
+
 import logging
 logging.basicConfig(
     filename='/tmp/reva-api-server.log', level=logging.DEBUG,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
 )
 logger = logging.getLogger("reva-server")
+
+
 
 import socket
 def get_unused_port() -> int:
@@ -45,6 +51,7 @@ def get_unused_port() -> int:
 
 thread_pool = futures.ThreadPoolExecutor(max_workers=10)
 server: Server = grpc.server(thread_pool)
+heartbeat_thread: threading.Thread
 
 def heartbeat():
     try:
@@ -55,19 +62,20 @@ def heartbeat():
         logger.warning(f"Heartbeat failed: {e}")
         server.stop(5)
 
-
 def start_serving(
         connect_host: str, connect_port: int,
-        host: str = 'localhost', port: Optional[int] = None):
-    if not port:
-        port = 0
-    port = server.add_insecure_port(f"{host}:{port}")
+        model: BaseChatModel | BaseLanguageModel = None,
+        serve_host: str = 'localhost', serve_port: Optional[int] = None
+        ):
+    if not serve_port:
+        serve_port = 0
+    serve_port = server.add_insecure_port(f"{serve_host}:{serve_port}")
 
     # Register handlers
-    RevaChat_pb2_grpc.add_RevaChatServiceServicer_to_server(RevaChat(), server)
+    RevaChat_pb2_grpc.add_RevaChatServiceServicer_to_server(RevaChat(model), server)
 
     # Start the service threads
-    logger.info(f"Starting server - {host}:{port}")
+    logger.info(f"Starting server - {serve_host}:{serve_port}")
     server.start()
     # Call the handshake, we are multithreaded now so the other side
     # can immediately call us back.
@@ -75,12 +83,12 @@ def start_serving(
     logger.info(f"Connecting to extension @ {connect_host}:{connect_port}")
     _ = connect_to_extension(connect_host, connect_port)
 
-    logger.info(f"Handshaking with extension @ {host}:{port}")
+    logger.info(f"Handshaking with extension @ {serve_host}:{serve_port}")
     stub = RevaHandshake_pb2_grpc.RevaHandshakeStub(get_channel())
 
     request = RevaHandshake_pb2.RevaHandshakeRequest()
-    request.inferenceHostname = host
-    request.inferencePort = port
+    request.inferenceHostname = serve_host
+    request.inferencePort = serve_port
 
     logger.info(f"Request: {request}")
     result = stub.Handshake(request)
@@ -103,9 +111,45 @@ def main():
     parser.add_argument('--listen-host', type=str, default='127.0.0.1', help='The host to listen on')
     parser.add_argument('--listen-port', type=int, help='The port to listen on')
 
+    parser.add_argument('--provider', choices=[
+        "ollama",
+        "openai"
+    ])
+
+    openai_group = parser.add_argument_group("OpenAI")
+    openai_group.add_argument('--openai-model', type=str, help="The OpenAI model to use, see https://platform.openai.com/docs/models for options")
+    openai_group.add_argument('--openai-api-key', type=str, help="The OpenAI API key")
+
+    ollama_group = parser.add_argument_group("Ollama")
+    ollama_group.add_argument('--ollama-model', type=str, help="The Ollama model to use. Must be pulled into ollama.")
+    ollama_group.add_argument('--ollama-server-url', type=str, help="The Ollama server URL")
+
     args = parser.parse_args()
 
-    start_serving(args.connect_host, args.connect_port, args.listen_host, args.listen_port)
+    if args.openai_api_key == "OPENAI_API_KEY":
+        args.openai_api_key = None
+
+    # First get the right model
+    if args.provider == "openai":
+        model = get_llm_openai(
+            model=args.openai_model,
+            api_key=args.openai_api_key
+        )
+    elif args.provider == "ollama":
+        model = get_llm_ollama(
+            model=args.ollama_model,
+            base_url=args.ollama_server_url
+        )
+    else:
+        raise ValueError(f"Incorrect provider specified {args.provider}")
+
+    start_serving(
+        connect_host=args.connect_host,
+        connect_port=args.connect_port,
+        model=model,
+        serve_host=args.listen_host,
+        serve_port=args.listen_port
+    )
 
 if __name__ == "__main__":
     main()

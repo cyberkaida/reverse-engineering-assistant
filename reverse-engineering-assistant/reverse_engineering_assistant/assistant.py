@@ -38,7 +38,6 @@ from langchain_core.messages import (
     HumanMessage,
 )
 
-from .configuration import AssistantConfiguration, load_configuration
 from .documents import AssistantDocument, CrossReferenceDocument, DecompiledFunctionDocument
 from .model import ModelType, get_model
 from .tool import AssistantProject
@@ -100,7 +99,7 @@ class RevaTool(ABC):
         tools: List[BaseTool] = []
         for tool_function in self.tool_functions:
             wrapper = RevaToolFunctionWrapper(tool_function)
-            from langchain.tools.base import create_schema_from_function
+            from langchain_core.tools import create_schema_from_function
             schema = create_schema_from_function(f"{tool_function.__name__}Schema", tool_function)
             tool = StructuredTool.from_function(
                 wrapper.wrapped,
@@ -235,10 +234,10 @@ class ReverseEngineeringAssistant(object):
 
     model_memory: BaseMemory
 
-    chat_history: List[str]
+    chat_history: str
 
     langchain_callbacks: List[BaseCallbackHandler]
-    system_prompt = '''You are ReVa, the Reverse Engineering Assistant. Your primary task is to annotate the database during reverse engineering processes, ensuring that all elements are clearly and accurately labeled. As you gather contextual information, prioritize setting informative comments and renaming any elements with default or unclear names to enhance user comprehension and productivity. Remember, your work is a collaborative effort with the user. Utilize your tools effectively to accomplish these tasks and support the user's understanding.'''
+    system_prompt = '''You are ReVa, the Reverse Engineering Assistant. Your primary task is to annotate the database during reverse engineering processes, ensuring that all elements are clearly and accurately labeled. As you gather contextual information, prioritize setting informative comments and renaming any elements with default or unclear names to enhance user comprehension and productivity. Remember, your work is a collaborative effort with the user. Utilize your tools effectively to accomplish these tasks and support the user's understanding by annotating their database.'''
 
     def __repr__(self) -> str:
         return f"<ReverseEngineeringAssistant for {self.project}>"
@@ -263,7 +262,12 @@ class ReverseEngineeringAssistant(object):
             return f"RevaToolException: {e}"
         raise e
 
-    def __init__(self, project: str | AssistantProject, model_type: Optional[ModelType] = None, langchain_callbacks: Optional[List[BaseCallbackHandler]] = None) -> None:
+    def __init__(self,
+                project: str | AssistantProject,
+                model_type: Optional[ModelType] = None,
+                model: Optional[BaseLLM | BaseChatModel] = None,
+                langchain_callbacks: Optional[List[BaseCallbackHandler]] = None
+        ) -> None:
         """
         Initializes a new instance of the ReverseEngineeringAssistant class.
 
@@ -271,7 +275,7 @@ class ReverseEngineeringAssistant(object):
             project (str | AssistantProject): The reverse engineering project to query.
             model_type (Optional[ModelType], optional): The model type for the reverse engineering assistant. Defaults to None.
         """
-        self.chat_history = []
+        self.chat_history = ''
         if isinstance(project, str):
             self.project = AssistantProject(project)
         else:
@@ -282,7 +286,12 @@ class ReverseEngineeringAssistant(object):
 
         self.langchain_callbacks = langchain_callbacks or []
 
-        self.llm = get_model(model_type)
+        if model:
+            self.llm = model
+        elif model_type:
+            self.llm = get_model(model_type)
+        else:
+            raise ValueError("Either model or model_type must be specified")
 
         # Let's take the tools that have been decorated with @register_tool and turn them into
         # tools the LLM can use.
@@ -296,22 +305,17 @@ class ReverseEngineeringAssistant(object):
 
         # Here I pull our own prompt
 
-        configuration: AssistantConfiguration = load_configuration()
-
         base_tools: List[BaseTool] = []
         for tool in self.tools:
             for function in tool.as_tools():
                 base_tools.append(function)
 
-        #self.model_memory = ConversationTokenBufferMemory(
-        #    llm=self.llm
-        #)
-        #self.model_memory = RevaMemory(self.project)
-        self.model_memory = ConversationBufferMemory()
-        self.logger.info(f"Memory created")
-
         # TODO: This is deadlocking the process, this is probably a bug in langchain
         # I would like to scream. 🫠
+        # We should base our memory on CoversationBufferMemory
+        # self.model_memory = RevaMemory(self.project)
+        self.model_memory = ConversationBufferMemory()
+        self.logger.info(f"Memory created")
 
         callbacks: List[BaseCallbackHandler] = [RevaActionLogger()]
         callbacks.extend(self.langchain_callbacks)
@@ -358,8 +362,14 @@ class ReverseEngineeringAssistant(object):
             raise Exception("No query engine available")
         try:
 
+            if Path(self.project.project_path / "chat.txt").exists():
+                with open(self.project.project_path / "chat.txt", "r") as f:
+                    self.chat_history = f.read()
+
             query_engine_input =  {
                     "input": query,
+                    # TODO: Does t actually work?
+                    "history": self.chat_history,
                 }
 
             self.logger.debug(f"Query: {query}")
@@ -368,6 +378,8 @@ class ReverseEngineeringAssistant(object):
                input=query_engine_input,
             )
 
+            with open(self.project.project_path / "chat.txt", "w") as f:
+                f.write(f"{self.model_memory.buffer_as_str}")
             self.logger.debug(f"Answer: {answer}")
 
             #import pdb; pdb.set_trace()
@@ -401,115 +413,9 @@ def get_thinking_emoji() -> str:
 
 
 def main():
-    import argparse
-
-    default_log_filename = f"ReVa-{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}.reva"
-    default_log_path = Path(tempfile.gettempdir()) / Path(default_log_filename+".log")
-    default_chat_path = Path(tempfile.gettempdir()) / Path(default_log_filename+".chat.txt")
-    default_html_path = Path(tempfile.gettempdir()) / Path(default_log_filename+".html")
-
-    parser = argparse.ArgumentParser(description="Reverse Engineering Assistant")
-    parser.add_argument('-v', '--verbose', action='store_true', help="Verbose output")
-    parser.add_argument('--debug', action='store_true', help="Debug output, useful during development")
-    parser.add_argument("--project", required=False, type=str, help="Project name")
-    parser.add_argument("-i", "--interactive", action="store_true", help="Enter interactive mode after processing queries")
-
-    parser.add_argument('-f', '--file', default=default_log_path, type=Path, help=f"Save output to file. Defaults to {default_log_path}")
-
-    parser.add_argument("-p", "--provider", required=False, choices=ModelType._member_names_, help="The model provider to use, defaults to the value of `model_type` in the config file.")
-
-    parser.add_argument("QUERY", nargs="*", help="Queries to run, if not specified, enter interactive mode")
-
-    args = parser.parse_args()
-
-    model_type = ModelType._member_map_[args.provider] if args.provider else None
-
-    console.print(f"Welcome to ReVa! The Reverse Engineering Assistant", style="bold green")
-    console.print(f"Logging to {args.file}")
-
-    logging_level = logging.DEBUG if args.debug else logging.INFO
-    logger.level = logging.DEBUG
-
-    rich_handler = RichHandler(
-        console=console,
-        level=logging_level,
-    )
-    logger.addHandler(rich_handler)
-
-    # Create a logger for logging to a file. We'll log everything to the file.
-    file_handler = logging.FileHandler(args.file)
-    file_handler.setLevel(logging.DEBUG)
-    file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
-    logging.root.setLevel(logging.DEBUG)
-    logging.root.addHandler(file_handler)
-
-    # If the debug flag is enabled we turn these on.
-    if args.debug:
-        logging.getLogger('httpx').addHandler(rich_handler)
-        logging.getLogger('openai._base_client').addHandler(rich_handler)
-        logging.getLogger('httpcore').addHandler(rich_handler)
-
-    if not args.project:
-        args.project = Prompt.ask("No project specified, please select from the following:", choices=ReverseEngineeringAssistant.get_projects())
-
-    # Start up the API server
-    from .assistant_api_server import run_server
-    from threading import Thread
-    server_thread = Thread(target=run_server, args=())
-    server_thread.start()
-    console.print("API server started", style="bold green")
-
-
-    logger.info(f"Loading project {args.project}")
-    assistant = ReverseEngineeringAssistant(args.project, model_type)
-    assistant.create_query_engine()
-    logger.info(f"Project loaded!")
-
-
-
-    # Enter into a loop answering questions
-
-    history_file = FileHistory(assistant.project.project_path / "chat-questions.txt")
-    prompt_session = PromptSession(history=history_file)
-
-    for query in args.QUERY:
-        logger.debug(query)
-        console.print(f"> {query}")
-        # Add the query to the history file
-        # so the user can autocomplete this later
-        history_file.append_string(query)
-
-        with console.status(f"Thinking..."):
-            result = assistant.query(query)
-            console.print(Markdown(result))
-            console.print(Markdown('---'))
-
-
-    if args.interactive or not args.QUERY:
-        try:
-            while True:
-                query = prompt_session.prompt("> ", auto_suggest=AutoSuggestFromHistory())
-                try:
-                    logger.debug(query)
-                    console.print(f"[green]{query}[/green]")
-                    with console.status(f"{get_thinking_emoji()} Thinking..."):
-                        result = assistant.query(query)
-                        console.print(Markdown(result))
-                        console.print(Markdown('---'))
-                except KeyboardInterrupt:
-                    console.print("[bold][yellow]Cancelled. Press Ctrl-C again to exit.[/yellow][/bold]")
-
-        except KeyboardInterrupt:
-            console.print("Finished!")
-        except EOFError:
-            console.print("Finished")
-
-    if args.file:
-        logger.info(f"Output saved to {args.file}")
-        logger.info(f"Chat saved to {default_chat_path}")
-        console.save_text(default_chat_path, clear=False)
-        logger.info(f"HTML saved to {default_html_path}")
-        console.save_html(default_html_path, clear=False)
+   import argparse
+   parser = argparse.ArgumentParser()
+   parser.error("Please run reva-server, not this script")
 
 if __name__ == '__main__':
     main()

@@ -26,6 +26,8 @@ public class RevaActionTable extends JPanel {
         tableModel = new RevaActionTableModel();
         // Create the table with the table model
         table = new GTable(tableModel);
+        // Scroll to the bottom as new things are added
+        table.setAutoscrolls(true);
 
         table.addMouseListener(new MouseAdapter() {
             public void mouseClicked(MouseEvent e) {
@@ -44,6 +46,7 @@ public class RevaActionTable extends JPanel {
                 }
             }
         });
+
         // Add a scroll pane to the table
         JScrollPane scrollPane = new JScrollPane(table);
         add(scrollPane, BorderLayout.CENTER);

@@ -38,15 +38,28 @@ public class RevaSymbol extends RevaToolSymbolServiceImplBase {
         // Get the program, get the symbols and send them back
         RevaGetSymbolsResponse.Builder response = RevaGetSymbolsResponse.newBuilder();
 
-        Program currentProgram = this.plugin.getCurrentProgram();
-        currentProgram.getSymbolTable().getSymbolIterator(true).forEach(
-            symbol -> {
-                response.addSymbols(symbol.getName(true));
-            }
-        );
+        RevaAction action = new RevaAction.Builder()
+            .setPlugin(this.plugin)
+            .setDescription("Get all symbols")
+            .setName("Get Symbols")
+            .setOnAccepted(() -> {
+                Program currentProgram = this.plugin.getCurrentProgram();
+                currentProgram.getSymbolTable().getSymbolIterator(true).forEach(
+                    symbol -> {
+                        response.addSymbols(symbol.getName(true));
+                    }
+                );
+                responseObserver.onNext(response.build());
+                responseObserver.onCompleted();
+            })
+            .setOnRejected(() -> {
+                Status status = Status.CANCELLED.withDescription("User rejected the action");
+                responseObserver.onError(status.asRuntimeException());
+            })
+            .build();
 
-        responseObserver.onNext(response.build());
-        responseObserver.onCompleted();
+        action.accept();
+        this.plugin.addAction(action);
     }
 
     @Override
@@ -64,6 +77,7 @@ public class RevaSymbol extends RevaToolSymbolServiceImplBase {
         Address address = this.plugin.addressFromAddressOrSymbol(request.getOldNameOrAddress());
 
         RevaAction action = new RevaAction.Builder()
+            .setPlugin(this.plugin)
             .setLocation(address)
             .setDescription("Set the symbol name to " + newSymbolName)
             .setName("Set Symbol Name")

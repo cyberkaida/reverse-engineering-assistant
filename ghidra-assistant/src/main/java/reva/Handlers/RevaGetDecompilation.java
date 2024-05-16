@@ -37,6 +37,36 @@ public class RevaGetDecompilation extends RevaDecompilationServiceImplBase {
         this.plugin = plugin;
     }
 
+
+
+    @Override
+    public void getFunctionList(RevaGetFunctionListRequest request,
+            StreamObserver<RevaGetFunctionListResponse> responseObserver) {
+
+        Program currentProgram = this.plugin.getCurrentProgram();
+        TaskMonitor monitor = new TaskMonitorAdapter();
+
+        currentProgram.getFunctionManager().getFunctions(true).forEach(
+            function -> {
+                RevaGetFunctionListResponse.Builder response = RevaGetFunctionListResponse.newBuilder();
+                response.setFunctionName(function.getName(true));
+                response.setFunctionSignature(function.getSignature().getPrototypeString(true));
+                response.setEntryPoint(function.getEntryPoint().toString());
+                for (Function caller : function.getCallingFunctions(monitor)) {
+                    response.addIncomingCalls(caller.getName(true));
+                }
+
+                for (Function callee : function.getCalledFunctions(monitor)) {
+                    response.addOutgoingCalls(callee.getName(true));
+                }
+                responseObserver.onNext(response.build());
+            }
+        );
+        responseObserver.onCompleted();
+    }
+
+
+
     @Override
     public void getDecompilation(RevaGetDecompilationRequest request,
             StreamObserver<RevaGetDecompilationResponse> responseObserver) {

@@ -7,6 +7,7 @@ import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.Program;
 import ghidra.program.model.symbol.SourceType;
 import ghidra.program.model.symbol.Symbol;
+import ghidra.program.model.symbol.SymbolIterator;
 import ghidra.program.model.symbol.SymbolType;
 import ghidra.util.Msg;
 import ghidra.util.exception.DuplicateNameException;
@@ -44,11 +45,14 @@ public class RevaSymbol extends RevaToolSymbolServiceImplBase {
             .setName("Get Symbols")
             .setOnAccepted(() -> {
                 Program currentProgram = this.plugin.getCurrentProgram();
+                Msg.info(this, "Getting all symbols");
                 currentProgram.getSymbolTable().getSymbolIterator(true).forEach(
                     symbol -> {
+                        Msg.info(this, "Found Symbol: " + symbol.getName(true));
                         response.addSymbols(symbol.getName(true));
                     }
                 );
+                Msg.info(this, "Sending response");
                 responseObserver.onNext(response.build());
                 responseObserver.onCompleted();
             })
@@ -58,8 +62,8 @@ public class RevaSymbol extends RevaToolSymbolServiceImplBase {
             })
             .build();
 
-        action.accept();
         this.plugin.addAction(action);
+        action.accept();
     }
 
     @Override
@@ -119,14 +123,23 @@ public class RevaSymbol extends RevaToolSymbolServiceImplBase {
     @Override
     public void getSymbol(RevaSymbolRequest request, StreamObserver<RevaSymbolResponse> responseObserver) {
         RevaSymbolResponse.Builder response = RevaSymbolResponse.newBuilder();
-
         Program currentProgram = this.plugin.getCurrentProgram();
-        Address address = this.plugin.addressFromAddressOrSymbol(request.getAddressOrName());
-        if (address == null) {
-            responseObserver.onError(Status.NOT_FOUND.withDescription("Could not find address").asRuntimeException());
-            return;
+
+        Address address = currentProgram.getAddressFactory().getAddress(request.getAddress());
+        if (address != null) {
+            Symbol symbol = currentProgram.getSymbolTable().getPrimarySymbol(address);
+            if (symbol != null) {
+                response.setName(symbol.getName(true));
+                response.setAddress(symbol.getAddress().toString());
+
+                if (symbol.getSymbolType() == SymbolType.FUNCTION) {
+                    response.setType(reva.protocol.RevaGetSymbols.SymbolType.FUNCTION);
+                } else if (symbol.getSymbolType() == SymbolType.LABEL) {
+                    response.setType(reva.protocol.RevaGetSymbols.SymbolType.LABEL);
+                }
+            }
         }
-        // Lowest priority if is the address is just _within_ a function
+
         Function function = currentProgram.getFunctionManager().getFunctionContaining(address);
         if (function != null) {
             response.setName(function.getName(true));
@@ -134,7 +147,6 @@ public class RevaSymbol extends RevaToolSymbolServiceImplBase {
             response.setType(reva.protocol.RevaGetSymbols.SymbolType.FUNCTION);
         }
 
-        // Next if the address is within some data
         Data data = currentProgram.getListing().getDataContaining(address);
         if (data != null) {
             response.setName(data.getLabel());
@@ -142,23 +154,7 @@ public class RevaSymbol extends RevaToolSymbolServiceImplBase {
             response.setType(reva.protocol.RevaGetSymbols.SymbolType.DATA);
         }
 
-        // Finally if there is a symbol at the address
-        Symbol symbol = currentProgram.getSymbolTable().getPrimarySymbol(address);
-        if (symbol != null) {
-            response.setName(symbol.getName(true));
-            response.setAddress(symbol.getAddress().toString());
-
-            if (currentProgram.getListing().getDataAt(address) != null) {
-                response.setType(reva.protocol.RevaGetSymbols.SymbolType.DATA);
-            } else if (symbol.getSymbolType() == SymbolType.FUNCTION) {
-                response.setType(reva.protocol.RevaGetSymbols.SymbolType.FUNCTION);
-            } else if (symbol.getSymbolType() == SymbolType.LABEL) {
-                response.setType(reva.protocol.RevaGetSymbols.SymbolType.LABEL);
-            }
-        }
-
         responseObserver.onNext(response.build());
         responseObserver.onCompleted();
     }
-
 }

@@ -27,8 +27,7 @@ either the extension or the inference side. This allows the LLM
 to ask the extension for information, or the extension to ask
 the LLM for analysis.
 
-The `reva-chat` client first locates
-the running extension, and then gets details of the `reva-server` started by that extension. The `/tmp/.reva` directory is used to find running extensions.
+The `reva-chat` client first locates the running extension, and then gets details of the `reva-server` started by that extension. The `/tmp/.reva` (or, on Windows, the `%TEMP%/.reva`) directory is used to find running extensions.
 
 ## Building the Ghidra extension
 

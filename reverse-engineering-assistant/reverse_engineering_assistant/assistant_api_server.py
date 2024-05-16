@@ -32,9 +32,13 @@ from .api_server_tools.re_tools import *
 
 from .model import get_llm_ollama, get_llm_openai
 
+import os
 import logging
+# Get the appropriate temp directory depending on the OS
+temp_dir = os.getenv('TEMP') if os.name == 'nt' else '/tmp'
+log_file = os.path.join(temp_dir, 'reva-chat.log')
 logging.basicConfig(
-    filename='/tmp/reva-api-server.log', level=logging.DEBUG,
+    filename=log_file, level=logging.DEBUG,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
 )
 logger = logging.getLogger("reva-server")
@@ -105,7 +109,7 @@ def start_serving(
     logger.warning("Server stopped")
 
 def main():
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description="Reva Chat Server")
     parser.add_argument('--connect-host', type=str, required=True, help="The callback host to connect to")
     parser.add_argument('--connect-port', type=int, required=True, help="The callback port to connect to")
     parser.add_argument('--listen-host', type=str, default='127.0.0.1', help='The host to listen on')

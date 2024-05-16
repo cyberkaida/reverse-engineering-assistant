@@ -28,6 +28,7 @@ dependencies = [
     "rich",
     "grpcio",
     "protobuf",
+    "flask",
 ]
 
 [project.scripts]

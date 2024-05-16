@@ -44,236 +44,257 @@ import reva.protocol.RevaChat.RevaChatMessageResponse;
 import reva.protocol.RevaChatServiceGrpc.RevaChatServiceStub;
 import reva.protocol.RevaVariableOuterClass.RevaVariable;
 
-@PluginInfo(
-        status = PluginStatus.STABLE, // probably a lie
+@PluginInfo(status = PluginStatus.STABLE, // probably a lie
         packageName = "ReVa",
         category = PluginCategoryNames.ANALYSIS,
         shortDescription = "Reverse Engineering Assistant",
         description = "An AI companion for your Ghidra project",
-	servicesRequired = {  },
-	servicesProvided = {  }
-)
+        servicesRequired = {},
+        servicesProvided = {}
+    )
 public class RevaPlugin extends ProgramPlugin {
-	TaskMonitor serviceMonitor;
-	Server serverHandle;
-	RevaActionTableComponentProvider actionTableProvider;
-	Options options;
+    TaskMonitor serviceMonitor;
+    Server serverHandle;
+    RevaActionTableComponentProvider actionTableProvider;
+    Options options;
 
-	/**
-	 * Add an action to track in the UI.
-	 * Should be called by anything that monitors the
-	 * database.
-	 * @param action
-	 */
-	public void addAction(RevaAction action) {
-		if (autoAcceptActions()) {
-			action.accept();
-		}
-		// Always add for tracking the action in the UI.
-		actionTableProvider.addAction(action);
-	}
+    /**
+     * Add an action to track in the UI.
+     * Should be called by anything that monitors the
+     * database.
+     *
+     * @param action
+     */
+    public void addAction(RevaAction action) {
+        if (autoAcceptActions()) {
+            action.accept();
+        }
+        // Always add for tracking the action in the UI.
+        actionTableProvider.addAction(action);
+    }
 
-	public String getExtensionHostname() {
-		return "127.0.0.1";
-	}
+    public String getExtensionHostname() {
+        return "127.0.0.1";
+    }
 
-	public String getInferenceHostname() {
-		return inferenceHostname;
-	}
+    public String getInferenceHostname() {
+        return inferenceHostname;
+    }
 
-	public int getExtensionPort() {
-		return serverHandle.getPort();
-	}
+    public int getExtensionPort() {
+        return serverHandle.getPort();
+    }
 
-	public int getInferencePort() {
-		return inferencePort;
-	}
+    public int getInferencePort() {
+        return inferencePort;
+    }
 
-	public boolean autoAcceptActions() {
-		return options.getBoolean("Auto-accept ReVa actions", true);
-	}
+    public boolean autoAcceptActions() {
+        return options.getBoolean("Auto-accept ReVa actions", true);
+    }
 
-	public enum RevaInferenceType {
-		// These values must match to the arguments taken
-		// by `reva-server`.
-		OpenAI("OpenAI"),
-		Ollama("Ollama");
+    public enum RevaInferenceType {
+        // These values must match to the arguments taken
+        // by `reva-server`.
+        OpenAI("OpenAI"),
+        Ollama("Ollama");
 
-		private String value;
+        private String value;
 
-		RevaInferenceType(String string) {
-			this.value = string;
-		}
+        RevaInferenceType(String string) {
+            this.value = string;
+        }
 
-		public String getValue() {
-			return value;
-		}
-	}
+        public String getValue() {
+            return value;
+        }
+    }
 
-	public Program getCurrentProgram() {
-		return currentProgram;
-	}
+    public Program getCurrentProgram() {
+        return currentProgram;
+    }
 
-	@Override
-	protected void programActivated(Program program) {
-		Msg.info(this, "Starting ReVa service for " + program.getName());
-	}
+    @Override
+    protected void programActivated(Program program) {
+        Msg.info(this, "Starting ReVa service for " + program.getName());
+    }
 
-	@Override
-	protected void programDeactivated(Program program) {
-		// Stop the service
-		Msg.info(this, "Stopping ReVa service for " + program.getName());
-		serviceMonitor.cancel();
-	}
+    @Override
+    protected void programDeactivated(Program program) {
+        // Stop the service
+        Msg.info(this, "Stopping ReVa service for " + program.getName());
+        serviceMonitor.cancel();
+    }
 
-	public String inferenceHostname;
-	public int inferencePort;
-	public ManagedChannel inferenceChannel = null;
-	public void registerInference(String hostname, int port) {
-		ManagedChannelBuilder<?> channel = ManagedChannelBuilder.forAddress(hostname, port);
-		channel.usePlaintext();
-		channel.enableRetry();
-		Msg.info(this, String.format("Connected channel to %s:%s", hostname, port));
-		inferenceHostname = hostname;
-		inferencePort = port;
+    public String inferenceHostname;
+    public int inferencePort;
+    public ManagedChannel inferenceChannel = null;
 
-		inferenceChannel = channel.build();
-	}
+    public void registerInference(String hostname, int port) {
+        ManagedChannelBuilder<?> channel = ManagedChannelBuilder.forAddress(hostname, port);
+        channel.usePlaintext();
+        channel.enableRetry();
+        Msg.info(this, String.format("Connected channel to %s:%s", hostname, port));
+        inferenceHostname = hostname;
+        inferencePort = port;
 
-	public int findAvailablePort() {
-		int port = -1;
-		try (ServerSocket socket = new ServerSocket(0)) {
-			port = socket.getLocalPort();
-			socket.close();
-		} catch (IOException e) {
-			Msg.error(this, "Error finding an open port: " + e.getMessage());
-		}
-		return port;
-	}
+        inferenceChannel = channel.build();
+    }
 
-	private void startInferenceServer() {
+    public int findAvailablePort() {
+        int port = -1;
+        try (ServerSocket socket = new ServerSocket(0)) {
+            port = socket.getLocalPort();
+            socket.close();
+        } catch (IOException e) {
+            Msg.error(this, "Error finding an open port: " + e.getMessage());
+        }
+        return port;
+    }
 
-		RevaInferenceType inferenceType = options.getEnum("Inference type", RevaInferenceType.OpenAI);
-		String inferenceTypeString = inferenceType.getValue().toLowerCase();
+    private void startInferenceServer() {
 
-		TaskBuilder task = new TaskBuilder("ReVa Server", (monitor) -> {
-			try {
-				Msg.info(this, "Started Extension RPC server...");
-				serverHandle.awaitTermination();
-				Msg.error(this, "ReVa server exited!");
-			} catch (Exception e) {
-				Msg.error(this, "Error starting ReVa server: " + e.getMessage());
-			}
-		});
+        RevaInferenceType inferenceType = options.getEnum("Inference type", RevaInferenceType.OpenAI);
+        String inferenceTypeString = inferenceType.getValue().toLowerCase();
 
-		TaskBuilder inferenceTask = new TaskBuilder("ReVa Inference", (monitor) -> {
-			ProcessBuilder processBuilder = new ProcessBuilder();
-			String portString = String.format("%d", serverHandle.getPort());
-			String[] command = {
-				"reva-server",
-				"--connect-host", getExtensionHostname(),
-				"--connect-port", portString,
-				"--provider", inferenceTypeString,
-				// Here we pass all our available options, the server will pick the ones it needs
-				// and ignore the rest.
-				"--openai-model", options.getOptions("OpenAI").getString("OpenAI Model", "gpt-4o"),
-				"--openai-api-key", options.getOptions("OpenAI").getString("OpenAI API Key", "OPENAI_API_KEY"),
-				"--ollama-server-url", options.getOptions("Ollama").getString("Ollama inference URL", "http://localhost:11434"),
-				"--ollama-model", options.getOptions("Ollama").getString("Ollama Model", "llama3")
-			};
-			processBuilder.command(command);
-			processBuilder.redirectError(ProcessBuilder.Redirect.DISCARD);
-			processBuilder.redirectOutput(ProcessBuilder.Redirect.DISCARD);
-			Msg.info(this, "Starting inference server... " + String.join(" ", command));
-			try {
-				final Process inferenceProcess = processBuilder.start();
-				try {
-					Msg.info(this, String.format("Inference process pid: %d", inferenceProcess.pid()));
-					// If the monitor is cancelled we are going down and we take the inference
-					// process down too
-					monitor.addCancelledListener(() -> {
-						Msg.info(this, "Cancelling inference process...");
-						inferenceProcess.destroy();
-					});
+        TaskBuilder task = new TaskBuilder("ReVa Server", (monitor) -> {
+            try {
+                Msg.info(this, "Started Extension RPC server...");
+                serverHandle.awaitTermination();
+                Msg.error(this, "ReVa server exited!");
+            } catch (Exception e) {
+                Msg.error(this, "Error starting ReVa server: " + e.getMessage());
+            }
+        });
 
-					inferenceProcess.waitFor();
-					byte[] b = inferenceProcess.getErrorStream().readAllBytes();
-					Msg.info(this, new String(b));
-					Msg.warn(this, "Inference process exited!");
-				} catch (Exception e) {
-					Msg.error(this, "Error starting ReVa inference server: " + e.getMessage(), e);
-					if (inferenceProcess != null) {
-						inferenceProcess.destroy();
-					}
-				}
-			} catch (IOException e) {
-				Msg.error(this, "Error starting ReVa inference server: " + e.getMessage(), e);
-			}
+        TaskBuilder inferenceTask = new TaskBuilder("ReVa Inference", (monitor) -> {
+            ProcessBuilder processBuilder = new ProcessBuilder();
+            String portString = String.format("%d", serverHandle.getPort());
+            String[] command = {
+                    "reva-server",
+                    "--connect-host", getExtensionHostname(),
+                    "--connect-port", portString,
+                    "--provider", inferenceTypeString,
+                    // Here we pass all our available options, the server will pick the ones it
+                    // needs
+                    // and ignore the rest.
+                    "--openai-model", options.getOptions("OpenAI").getString("OpenAI Model", "gpt-4o"),
+                    "--openai-api-key", options.getOptions("OpenAI").getString("OpenAI API Key", "OPENAI_API_KEY"),
+                    "--ollama-server-url",
+                    options.getOptions("Ollama").getString("Ollama inference URL", "http://localhost:11434"),
+                    "--ollama-model", options.getOptions("Ollama").getString("Ollama Model", "llama3")
+            };
+            processBuilder.command(command);
+            Msg.info(this, "Starting inference server with command: " + String.join(" ", command));
+            try {
+                final Process inferenceProcess = processBuilder.start();
+                try {
+                    Msg.info(this, String.format("Inference process pid: %d", inferenceProcess.pid()));
+                    // If the monitor is cancelled we are going down and we take the inference
+                    // process down too
+                    monitor.addCancelledListener(() -> {
+                        Msg.info(this, "Cancelling inference process...");
+                        inferenceProcess.destroy();
+                    });
 
-		}).setCanCancel(true);
+                    int exitCode = inferenceProcess.waitFor();
+                    Msg.info(this, "Inference process exited with code: " + exitCode);
 
-		try {
-			serverHandle.start();
-		} catch (IOException e) {
-			Msg.error(this, "Error starting ReVa server: " + e.getMessage(), e);
-		}
-		task.launchInBackground(serviceMonitor);
-		inferenceTask.launchInBackground(serviceMonitor);
-	}
+                    byte[] errorBytes = inferenceProcess.getErrorStream().readAllBytes();
+                    String errorOutput = new String(errorBytes);
+                    if (!errorOutput.isEmpty()) {
+                        Msg.info(this, "Inference process error output: " + errorOutput);
+                    }
 
-	public RevaPlugin(PluginTool tool) {
-		super(tool);
-		serviceMonitor = new TaskMonitorAdapter(true);
-		Msg.info(this, "ReVa plugin loaded!");
+                    byte[] outputBytes = inferenceProcess.getInputStream().readAllBytes();
+                    String output = new String(outputBytes);
+                    if (!output.isEmpty()) {
+                        Msg.info(this, "Inference process output: " + output);
+                    }
 
-		int port = findAvailablePort();
-		ServerBuilder<?> server = ServerBuilder.forPort(port);
-		// MARK: Register Services
-		server.addService(new RevaHandshake(this));
-		server.addService(new RevaGetDecompilation(this));
-		server.addService(new RevaSymbol(this));
-		server.addService(new RevaComment(this));
-		//server.addService(new RevaGetCursor(this));
-		server.addService(new RevaHeartbeat(this));
-		server.addService(new RevaData(this));
-		serverHandle = server.build();
+                    Msg.warn(this, "Inference process exited!");
+                } catch (Exception e) {
+                    Msg.error(this, "Error starting ReVa inference server: " + e.getMessage(), e);
+                    if (inferenceProcess != null) {
+                        inferenceProcess.destroy();
+                    }
+                }
+            } catch (IOException e) {
+                Msg.error(this, "Error starting ReVa inference server: " + e.getMessage(), e);
+            }
 
-		options = tool.getOptions("ReVa");
-		Options openAiOptions = options.getOptions("OpenAI");
-		Options ollamaOptions = options.getOptions("Ollama");
+        }).setCanCancel(true);
 
-		options.registerOption("Path to reva-server", OptionType.STRING_TYPE, "reva-server", null, "Path to the reva-server binary, or `reva-server` if it is on the system path.");
-		options.registerOption("Inference type", OptionType.ENUM_TYPE, RevaInferenceType.OpenAI, null, "The type of inference server to connect to.");
+        try {
+            serverHandle.start();
+        } catch (IOException e) {
+            Msg.error(this, "Error starting ReVa server: " + e.getMessage(), e);
+        }
+        task.launchInBackground(serviceMonitor);
+        inferenceTask.launchInBackground(serviceMonitor);
+    }
 
-		openAiOptions.registerOption("OpenAI Model", OptionType.STRING_TYPE, "gpt-4o", null, "The OpenAI model to use for inference.");
-		openAiOptions.registerOption("OpenAI API Key", OptionType.STRING_TYPE, "OPENAI_API_KEY", null, "The OpenAI API key to use for inference. If the magic value 'OPENAI_API_KEY', then the environment variable OPENAI_API_KEY will be used.");
+    public RevaPlugin(PluginTool tool) {
+        super(tool);
+        serviceMonitor = new TaskMonitorAdapter(true);
+        Msg.info(this, "ReVa plugin loaded!");
 
-		ollamaOptions.registerOption("Ollama inference URL", OptionType.STRING_TYPE, "http://localhost:11434", null, "The URL of the Ollama inference server.");
-		ollamaOptions.registerOption("Ollama Model", OptionType.STRING_TYPE, "llama3", null, "The Ollama model to use for inference. This must be pulled already.");
+        int port = findAvailablePort();
+        ServerBuilder<?> server = ServerBuilder.forPort(port);
+        // MARK: Register Services
+        server.addService(new RevaHandshake(this));
+        server.addService(new RevaGetDecompilation(this));
+        server.addService(new RevaSymbol(this));
+        server.addService(new RevaComment(this));
+        // server.addService(new RevaGetCursor(this));
+        server.addService(new RevaHeartbeat(this));
+        server.addService(new RevaData(this));
+        serverHandle = server.build();
 
-		options.registerOption("Auto-accept ReVa actions", OptionType.BOOLEAN_TYPE, true, null, "Automatically accept ReVa actions, don't hold them for user review.");
-		options.registerOption("Follow ReVa", OptionType.BOOLEAN_TYPE, false, null, "Follow ReVa as she takes actions in the program.");
+        options = tool.getOptions("ReVa");
+        Options openAiOptions = options.getOptions("OpenAI");
+        Options ollamaOptions = options.getOptions("Ollama");
 
-		// Install all the UI hooks
-		installMagicRECommand();
-		installRevaActionTable();
-		installActionRenameSymbol();
-		installActionRenameFunctionVariable();
+        options.registerOption("Path to reva-server", OptionType.STRING_TYPE, "reva-server", null,
+                "Path to the reva-server binary, or `reva-server` if it is on the system path.");
+        options.registerOption("Inference type", OptionType.ENUM_TYPE, RevaInferenceType.OpenAI, null,
+                "The type of inference server to connect to.");
 
-		startInferenceServer();
-		saveConnectionInfo();
-	}
+        openAiOptions.registerOption("OpenAI Model", OptionType.STRING_TYPE, "gpt-4o", null,
+                "The OpenAI model to use for inference.");
+        openAiOptions.registerOption("OpenAI API Key", OptionType.STRING_TYPE, "OPENAI_API_KEY", null,
+                "The OpenAI API key to use for inference. If the magic value 'OPENAI_API_KEY', then the environment variable OPENAI_API_KEY will be used.");
 
-	@Override
-	protected void dispose() {
-		serverHandle.shutdown();
-		this.serviceMonitor.cancel();
-		super.dispose();
-	}
+        ollamaOptions.registerOption("Ollama inference URL", OptionType.STRING_TYPE, "http://localhost:11434", null,
+                "The URL of the Ollama inference server.");
+        ollamaOptions.registerOption("Ollama Model", OptionType.STRING_TYPE, "llama3", null,
+                "The Ollama model to use for inference. This must be pulled already.");
 
+        options.registerOption("Auto-accept ReVa actions", OptionType.BOOLEAN_TYPE, true, null,
+                "Automatically accept ReVa actions, don't hold them for user review.");
+        options.registerOption("Follow ReVa", OptionType.BOOLEAN_TYPE, false, null,
+                "Follow ReVa as she takes actions in the program.");
 
-	/**
+        // Install all the UI hooks
+        installMagicRECommand();
+        installRevaActionTable();
+        installActionRenameSymbol();
+        installActionRenameFunctionVariable();
+
+        startInferenceServer();
+        saveConnectionInfo();
+    }
+
+    @Override
+    protected void dispose() {
+        serverHandle.shutdown();
+        this.serviceMonitor.cancel();
+        super.dispose();
+    }
+
+    /**
      * Given a function name from ReVa, find the function in the current program.
+     *
      * @param functionName
      * @return The function, or null if not found.
      */
@@ -309,211 +330,221 @@ public class RevaPlugin extends ProgramPlugin {
                 Symbol symbol = symbols.next();
                 address = symbol.getAddress();
                 if (symbol.getName(true).equals(addressOrSymbol)) {
-					return address;
-				}
+                    return address;
+                }
             }
         }
         return address;
     }
 
-	void installRestartInferenceCommand() {
-		new ActionBuilder("ReVa Restart Inference", "ReVa")
-				.menuPath("ReVa", "Restart Inference")
-				.onAction((event) -> {
-					Msg.info(this, "Restart Inference command clicked!");
-					serviceMonitor.cancel();
-					serviceMonitor = new TaskMonitorAdapter(true);
-					startInferenceServer();
-				})
-				.enabledWhen((context) -> this.inferenceChannel != null)
-				.buildAndInstall(tool);
-	}
+    void installRestartInferenceCommand() {
+        new ActionBuilder("ReVa Restart Inference", "ReVa")
+                .menuPath("ReVa", "Restart Inference")
+                .onAction((event) -> {
+                    Msg.info(this, "Restart Inference command clicked!");
+                    serviceMonitor.cancel();
+                    serviceMonitor = new TaskMonitorAdapter(true);
+                    startInferenceServer();
+                })
+                .enabledWhen((context) -> this.inferenceChannel != null)
+                .buildAndInstall(tool);
+    }
 
-	void installMagicRECommand() {
-		new ActionBuilder("Examine here", "ReVa")
-			.menuPath("ReVa", "Examine here")
-			.onAction((event) -> {
-				// Here we'll grab the current location and ask ReVa to
-				// RE the program from here
-				RevaChatServiceStub chatStub = reva.protocol.RevaChatServiceGrpc.newStub(this.inferenceChannel);
-				RevaChatMessage.Builder builder = RevaChatMessage.newBuilder();
+    void installMagicRECommand() {
+        new ActionBuilder("Examine here", "ReVa")
+                .menuPath("ReVa", "Examine here")
+                .onAction((event) -> {
+                    // Here we'll grab the current location and ask ReVa to
+                    // RE the program from here
+                    RevaChatServiceStub chatStub = reva.protocol.RevaChatServiceGrpc.newStub(this.inferenceChannel);
+                    RevaChatMessage.Builder builder = RevaChatMessage.newBuilder();
 
-				// Create a monitor to display progress
-				TaskMonitor monitor = new TaskMonitorAdapter();
-				monitor.setIndeterminate(true);
-				monitor.setMessage("ReVa is examining the program...");
-				monitor.setShowProgressValue(true);
+                    // Create a monitor to display progress
+                    TaskMonitor monitor = new TaskMonitorAdapter();
+                    monitor.setIndeterminate(true);
+                    monitor.setMessage("ReVa is examining the program...");
+                    monitor.setShowProgressValue(true);
 
-				builder.setMessage(
-					String.format("Please examine the program in detail from the `%s` function. Set important comments, remame va\n" + //
-												"riables and functions as you go.",
-						currentLocation.getAddress().toString()
-					)
-				);
-				builder.setProgramName(currentProgram.getName());
-				builder.setProject(tool.getProject().getName());
-				StreamObserver<RevaChatMessageResponse> responseStream = new StreamObserver<RevaChat.RevaChatMessageResponse>() {
-					@Override
-					public void onNext(RevaChatMessageResponse value) {
-						Msg.info(this, "ReVa response: " + value.getMessage());
-						monitor.setMessage(value.getMessage());
-						monitor.incrementProgress();
-					}
+                    builder.setMessage(
+                            String.format(
+                                    "Please examine the program in detail from the `%s` function. Set important comments, remame va\n"
+                                            + //
+                                            "riables and functions as you go.",
+                                    currentLocation.getAddress().toString()));
+                    builder.setProgramName(currentProgram.getName());
+                    builder.setProject(tool.getProject().getName());
+                    StreamObserver<RevaChatMessageResponse> responseStream = new StreamObserver<RevaChat.RevaChatMessageResponse>() {
+                        @Override
+                        public void onNext(RevaChatMessageResponse value) {
+                            Msg.info(this, "ReVa response: " + value.getMessage());
+                            monitor.setMessage(value.getMessage());
+                            monitor.incrementProgress();
+                        }
 
-					@Override
-					public void onError(Throwable t) {
-						Msg.error(this, "ReVa error: " + t.getMessage());
-						monitor.cancel();
-					}
+                        @Override
+                        public void onError(Throwable t) {
+                            Msg.error(this, "ReVa error: " + t.getMessage());
+                            monitor.cancel();
+                        }
 
-					@Override
-					public void onCompleted() {
-						Msg.info(this, "ReVa completed.");
-						monitor.setMessage("ReVa completed.");
-					}
-				};
+                        @Override
+                        public void onCompleted() {
+                            Msg.info(this, "ReVa completed.");
+                            monitor.setMessage("ReVa completed.");
+                        }
+                    };
 
-				chatStub.chat(builder.build(), responseStream);
-			})
-			.enabledWhen((context) -> this.inferenceChannel != null)
-			.buildAndInstall(tool);
-	}
+                    chatStub.chat(builder.build(), responseStream);
+                })
+                .enabledWhen((context) -> this.inferenceChannel != null)
+                .buildAndInstall(tool);
+    }
 
-	private void installActionRenameSymbol() {
-		tool = this.tool;
-		new ActionBuilder("ReVa Rename", getName())
-		.description("Rename the selection")
-		.popupMenuPath("ReVa", "Rename")
-		.popupMenuGroup("ReVa")
-		.onAction(context -> {
-			RevaChatServiceStub chatStub = reva.protocol.RevaChatServiceGrpc.newStub(this.inferenceChannel);
-			RevaChatMessage.Builder builder = RevaChatMessage.newBuilder();
+    private void installActionRenameSymbol() {
+        tool = this.tool;
+        new ActionBuilder("ReVa Rename", getName())
+                .description("Rename the selection")
+                .popupMenuPath("ReVa", "Rename")
+                .popupMenuGroup("ReVa")
+                .onAction(context -> {
+                    RevaChatServiceStub chatStub = reva.protocol.RevaChatServiceGrpc.newStub(this.inferenceChannel);
+                    RevaChatMessage.Builder builder = RevaChatMessage.newBuilder();
 
-			ListingActionContext listingContext = (ListingActionContext) context;
+                    ListingActionContext listingContext = (ListingActionContext) context;
 
-			ProgramLocation location = listingContext.getLocation();
-			Symbol symbol = listingContext.getProgram().getSymbolTable().getPrimarySymbol(location.getAddress());
-			if (symbol == null) {
-				Msg.error(this, "No symbol found, we can't rename this yet.");
-				return;
-			}
+                    ProgramLocation location = listingContext.getLocation();
+                    Symbol symbol = listingContext.getProgram().getSymbolTable()
+                            .getPrimarySymbol(location.getAddress());
+                    if (symbol == null) {
+                        Msg.error(this, "No symbol found, we can't rename this yet.");
+                        return;
+                    }
 
-			builder.setMessage(
-				String.format("Please rename the symbol `%s` to something more meaningful. Remember to use your tools to gather context if you are not sure!", symbol.getName())
-			);
-			builder.setProgramName(currentProgram.getName());
-			builder.setProject(tool.getProject().getName());
-			StreamObserver<RevaChatMessageResponse> responseStream = new StreamObserver<RevaChat.RevaChatMessageResponse>() {
-				@Override
-				public void onNext(RevaChatMessageResponse value) {
-					Msg.info(this, "ReVa response: " + value.getMessage());
-				}
+                    builder.setMessage(
+                            String.format(
+                                    "Please rename the symbol `%s` to something more meaningful. Remember to use your tools to gather context if you are not sure!",
+                                    symbol.getName()));
+                    builder.setProgramName(currentProgram.getName());
+                    builder.setProject(tool.getProject().getName());
+                    StreamObserver<RevaChatMessageResponse> responseStream = new StreamObserver<RevaChat.RevaChatMessageResponse>() {
+                        @Override
+                        public void onNext(RevaChatMessageResponse value) {
+                            Msg.info(this, "ReVa response: " + value.getMessage());
+                        }
 
-				@Override
-				public void onError(Throwable t) {
-					Msg.error(this, "ReVa error: " + t.getMessage());
-				}
+                        @Override
+                        public void onError(Throwable t) {
+                            Msg.error(this, "ReVa error: " + t.getMessage());
+                        }
 
-				@Override
-				public void onCompleted() {
-					Msg.info(this, "ReVa completed.");
-				}
-			};
+                        @Override
+                        public void onCompleted() {
+                            Msg.info(this, "ReVa completed.");
+                        }
+                    };
 
-			chatStub.chat(builder.build(), responseStream);
-		})
-		.enabledWhen(context -> { return context instanceof ListingActionContext; })
-		.buildAndInstall(tool);
-	}
+                    chatStub.chat(builder.build(), responseStream);
+                })
+                .enabledWhen(context -> {
+                    return context instanceof ListingActionContext;
+                })
+                .buildAndInstall(tool);
+    }
 
-	/**
-	 * Right click menu action to rename the selected variable.
-	 * @param tool
-	 */
-	private void installActionRenameFunctionVariable() {
-		tool = this.tool;
-		new ActionBuilder("ReVa Rename", getName())
-		.description("Rename the selection")
-		.popupMenuPath("ReVa", "Rename")
-		.popupMenuGroup("ReVa")
-		.onAction(context -> {
-			RevaChatServiceStub chatStub = reva.protocol.RevaChatServiceGrpc.newStub(this.inferenceChannel);
-			RevaChatMessage.Builder builder = RevaChatMessage.newBuilder();
+    /**
+     * Right click menu action to rename the selected variable.
+     *
+     * @param tool
+     */
+    private void installActionRenameFunctionVariable() {
+        tool = this.tool;
+        new ActionBuilder("ReVa Rename", getName())
+                .description("Rename the selection")
+                .popupMenuPath("ReVa", "Rename")
+                .popupMenuGroup("ReVa")
+                .onAction(context -> {
+                    RevaChatServiceStub chatStub = reva.protocol.RevaChatServiceGrpc.newStub(this.inferenceChannel);
+                    RevaChatMessage.Builder builder = RevaChatMessage.newBuilder();
 
-			DecompilerActionContext decompilerContext = (DecompilerActionContext) context;
-			DecompilerPanel panel = decompilerContext.getDecompilerPanel();
+                    DecompilerActionContext decompilerContext = (DecompilerActionContext) context;
+                    DecompilerPanel panel = decompilerContext.getDecompilerPanel();
 
-			ProgramLocation location = panel.getCurrentLocation();
-			var token = panel.getTokenAtCursor();
+                    ProgramLocation location = panel.getCurrentLocation();
+                    var token = panel.getTokenAtCursor();
 
-			Msg.info(this, "Renaming " + token.getText());
-			HighVariable highVariable = token.getHighVariable();
-			if (highVariable == null) {
-				Msg.error(this, "No high variable found, we can't rename this yet.");
-				return;
-			}
+                    Msg.info(this, "Renaming " + token.getText());
+                    HighVariable highVariable = token.getHighVariable();
+                    if (highVariable == null) {
+                        Msg.error(this, "No high variable found, we can't rename this yet.");
+                        return;
+                    }
 
-			builder.setMessage(
-				String.format("Please rename the variable `%s` in the function `%s` to something more meaningful. Remember to use your tools to gather context if you are not sure!", highVariable.getName(), highVariable.getHighFunction().getFunction().getName(true))
-			);
+                    builder.setMessage(
+                            String.format(
+                                    "Please rename the variable `%s` in the function `%s` to something more meaningful. Remember to use your tools to gather context if you are not sure!",
+                                    highVariable.getName(),
+                                    highVariable.getHighFunction().getFunction().getName(true)));
 
-			builder.setProgramName(currentProgram.getName());
-			builder.setProject(tool.getProject().getName());
-			StreamObserver<RevaChatMessageResponse> responseStream = new StreamObserver<RevaChat.RevaChatMessageResponse>() {
-				@Override
-				public void onNext(RevaChatMessageResponse value) {
-					Msg.info(this, "ReVa response: " + value.getMessage());
-				}
+                    builder.setProgramName(currentProgram.getName());
+                    builder.setProject(tool.getProject().getName());
+                    StreamObserver<RevaChatMessageResponse> responseStream = new StreamObserver<RevaChat.RevaChatMessageResponse>() {
+                        @Override
+                        public void onNext(RevaChatMessageResponse value) {
+                            Msg.info(this, "ReVa response: " + value.getMessage());
+                        }
 
-				@Override
-				public void onError(Throwable t) {
-					Msg.error(this, "ReVa error: " + t.getMessage());
-				}
+                        @Override
+                        public void onError(Throwable t) {
+                            Msg.error(this, "ReVa error: " + t.getMessage());
+                        }
 
-				@Override
-				public void onCompleted() {
-					Msg.info(this, "ReVa completed.");
-				}
-			};
+                        @Override
+                        public void onCompleted() {
+                            Msg.info(this, "ReVa completed.");
+                        }
+                    };
 
-			chatStub.chat(builder.build(), responseStream);
-		})
-		.enabledWhen(context -> { return context instanceof DecompilerActionContext; })
-		.buildAndInstall(tool);
-	}
+                    chatStub.chat(builder.build(), responseStream);
+                })
+                .enabledWhen(context -> {
+                    return context instanceof DecompilerActionContext;
+                })
+                .buildAndInstall(tool);
+    }
 
+    void saveConnectionInfo() {
+        // Write our server hostname and port to a well known file
+        // in the temp directory to help `reva-chat` find us
+        // when it starts up.
+        String temp_dir = System.getProperty("java.io.tmpdir");
+        File reva_temp_dir = new File(temp_dir, ".reva");
+        reva_temp_dir.mkdirs();
+        File connectionFile = new File(reva_temp_dir,
+                String.format("reva-connection-%d.connection", getExtensionPort()));
+        // Now write "localhost:port" to the file
+        try (FileWriter writer = new FileWriter(connectionFile)) {
+            String connectionInfo = String.format("%s:%d", getExtensionHostname(), getExtensionPort());
+            writer.write(connectionInfo);
+        } catch (IOException e) {
+            Msg.error(this, "Error saving connection info: " + e.getMessage());
+        }
+    }
 
+    void installRevaActionTable() {
+        actionTableProvider = new RevaActionTableComponentProvider(this);
+        tool.addComponentProvider(actionTableProvider, false);
+    }
 
-	void saveConnectionInfo() {
-		// Write our server hostname and port to a well known file
-		// in the /tmp/ directory to help `reva-chat` find us
-		// when it starts up.
-		File reva_temp_dir = new File("/tmp/.reva/");
-		reva_temp_dir.mkdirs();
-		File connectionFile = new File(reva_temp_dir, String.format("reva-connection-%d.connection", getExtensionPort()));
-		// Now write "localhost:port" to the file
-		try (FileWriter writer = new FileWriter(connectionFile)) {
-			String connectionInfo = String.format("%s:%d", getExtensionHostname(), getExtensionPort());
-			writer.write(connectionInfo);
-		} catch (IOException e) {
-			Msg.error(this, "Error saving connection info: " + e.getMessage());
-		}
-	}
+    public boolean goTo(Address address) {
+        return super.goTo(address);
+    }
 
-	void installRevaActionTable() {
-		actionTableProvider = new RevaActionTableComponentProvider(this);
-		tool.addComponentProvider(actionTableProvider, false);
-	}
-
-	public boolean goTo(Address address) {
-		return super.goTo(address);
-	}
-
-	/**
-	 * Return true if the view should follow ReVa as she takes actions.
-	 * @return true if the view should follow ReVa.
-	 */
-	public boolean revaFollowEnabled() {
-		return options.getBoolean("Follow ReVa", false);
-	}
+    /**
+     * Return true if the view should follow ReVa as she takes actions.
+     *
+     * @return true if the view should follow ReVa.
+     */
+    public boolean revaFollowEnabled() {
+        return options.getBoolean("Follow ReVa", false);
+    }
 }

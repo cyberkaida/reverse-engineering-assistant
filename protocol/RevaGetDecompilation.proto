@@ -6,6 +6,7 @@ option java_package = "reva.protocol";
 service RevaDecompilationService {
     rpc GetDecompilation(RevaGetDecompilationRequest) returns (RevaGetDecompilationResponse) {}
     rpc RenameFunctionVariable(RevaRenameFunctionVariableRequest) returns (RevaRenameFunctionVariableResponse) {}
+    rpc GetFunctionList(RevaGetFunctionListRequest) returns (stream RevaGetFunctionListResponse) {}
 }
 
 message RevaGetDecompilationRequest {
@@ -32,4 +33,15 @@ message RevaRenameFunctionVariableRequest {
 }
 
 message RevaRenameFunctionVariableResponse {
+}
+
+message RevaGetFunctionListRequest {
+}
+
+message RevaGetFunctionListResponse {
+    string function_name = 1;
+    string function_signature = 2;
+    string entry_point = 3;
+    repeated string incoming_calls = 4;
+    repeated string outgoing_calls = 5;
 }

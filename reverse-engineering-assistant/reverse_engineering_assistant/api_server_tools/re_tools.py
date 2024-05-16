@@ -2,7 +2,7 @@ from __future__ import annotations
 
 
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 import grpc
 
@@ -15,6 +15,9 @@ from ..assistant import AssistantProject, RevaTool, register_tool
 from ..assistant_api_server import get_channel
 
 from ..reva_exceptions import RevaToolException
+
+from ..protocol import RevaGetDecompilation_pb2_grpc, RevaGetDecompilation_pb2
+
 
 import logging
 
@@ -232,14 +235,15 @@ class RevaGetSymbols(RevaRemoteTool):
         except grpc.RpcError as e:
             raise RevaToolException(f"Failed to get symbols: {e}")
 
-        return response.symbols
+        return list(response.symbols)
 
-    def _get_function_list(self) -> List[str]:
-        function_list: List[str] = []
-        for symbol_name in self._get_symbol_list():
-            symbol = self.get_symbol(symbol_name)
-            if symbol["type"] == "FUNCTION":
-                function_list.append(symbol_name)
+    def _get_function_list(self) -> List[RevaGetDecompilation_pb2.RevaGetFunctionListResponse]:
+        stub = RevaGetDecompilation_pb2_grpc.RevaDecompilationServiceStub(self.channel)
+
+        request = RevaGetDecompilation_pb2.RevaGetDecompilationRequest()
+        function_list = []
+        for response in stub.GetFunctionList(request):
+            function_list.append(response)
         return function_list
 
     def get_function_count(self) -> int:
@@ -249,26 +253,23 @@ class RevaGetSymbols(RevaRemoteTool):
         """
         return len(self._get_function_list())
 
-    def get_functions(self, page: int = 0, page_size: int = 20) -> List[Dict[str, str]]:
+    def get_functions(self) -> List[Dict[str, Union[str, List[str]]]]:
         """
         Return a list of functions in the program.
         Please check the total number of functions with get_function_count before calling this.
-        The page is 0 indexed. To get the first page, set page to 0.
-        Pick a page_size that is reasonable for your context size.
         """
-        if page < 0:
-            raise RevaToolException("page must be 0 or a positive integer")
-        if page_size <= 0:
-            raise RevaToolException("page_size must be a positive integer")
 
         function_list = self._get_function_list()
-        start = (page - 1) * page_size
-        end = page * page_size
 
-        function_details: List[Dict[str, str]] = []
-        for function in function_list[start:end]:
-            # TODO: Replace with get_function
-            function_details.append(self.get_symbol(function))
+        function_details: List[Dict[str, Union[str, List[str]]]] = []
+        for function in function_list:
+            function_details.append({
+                "function_name": function.function_name,
+                "function_signature": function.function_signature,
+                "entry_point": function.entry_point,
+                "incoming_calls": list(function.incoming_calls),
+                "outgoing_calls": list(function.outgoing_calls),
+            })
         return function_details
 
     def get_symbol_count(self) -> int:
@@ -278,24 +279,16 @@ class RevaGetSymbols(RevaRemoteTool):
         """
         return len(self._get_symbol_list())
 
-    def get_symbols(self, page: int = 0, page_size: int = 20) -> List[Dict[str, str]]:
+    def get_symbols(self) -> List[Dict[str, str]]:
         """
         Return a list of symbols in the program.
         Please check the total number of symbols with get_symbol_count before calling this.
-        The page is 0 indexed. To get the first page, set page to 0.
-        Pick a page_size that is reasonable for your context size.
         """
-        if page < 0:
-            raise RevaToolException("page must be 0 or a positive integer")
-        if page_size <= 0:
-            raise RevaToolException("page_size must be a positive integer")
 
         symbol_list = self._get_symbol_list()
-        start = (page - 1) * page_size
-        end = page * page_size
 
         symbol_details: List[Dict[str, str]] = []
-        for symbol in symbol_list[start:end]:
+        for symbol in symbol_list:
             symbol_details.append(self.get_symbol(symbol))
         return symbol_details
 
@@ -308,18 +301,28 @@ class RevaGetSymbols(RevaRemoteTool):
         stub = RevaGetSymbols_pb2_grpc.RevaToolSymbolServiceStub(self.channel)
 
         request = RevaGetSymbols_pb2.RevaSymbolRequest()
-        request.address_or_name = address_or_name
+        try:
+
+            request.address = hex(int(address_or_name, 16))
+        except ValueError:
+            request.name = address_or_name
+
         self.logger.debug(f"Getting symbol {address_or_name} request: {request}")
         try:
             response: RevaGetSymbols_pb2.RevaSymbolResponse = stub.GetSymbol(request)
         except grpc.RpcError as e:
             raise RevaToolException(f"Failed to get symbol: {e}")
         self.logger.debug(f"Got symbol {address_or_name} response: {response}")
-        return {
+        response_dict = {
             "name": response.name,
             "address": response.address,
-            "type": RevaGetSymbols_pb2.SymbolType.Name(response.type),
+            "type": None,
         }
+
+        if response.type:
+            response_dict["type"] = RevaGetSymbols_pb2.SymbolType.Name(response.type)
+
+        return response_dict
 
 
 @register_tool

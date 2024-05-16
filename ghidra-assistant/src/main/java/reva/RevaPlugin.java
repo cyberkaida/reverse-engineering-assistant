@@ -303,12 +303,13 @@ public class RevaPlugin extends ProgramPlugin {
         Address address = this.currentProgram.getAddressFactory().getAddress(addressOrSymbol);
         if (address == null) {
             // OK, it's not an address, let's try a symbol
-            SymbolIterator symbols = this.currentProgram.getSymbolTable().getSymbols(addressOrSymbol);
+            SymbolIterator symbols = this.currentProgram.getSymbolTable().getAllSymbols(true);
             if (symbols.hasNext()) {
                 Symbol symbol = symbols.next();
-                if (symbol != null) {
-                    address = symbol.getAddress();
-                }
+                address = symbol.getAddress();
+                if (symbol.getName(true).equals(addressOrSymbol)) {
+					return address;
+				}
             }
         }
         return address;

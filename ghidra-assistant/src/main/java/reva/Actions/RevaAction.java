@@ -69,6 +69,16 @@ public class RevaAction {
             Runnable onAccepted,
             Runnable onRejected
     ) {
+
+        assert plugin != null;
+        assert name != null;
+        if (description == null) {
+            description = name;
+        }
+        if (location == null) {
+            Msg.debug(this, "Location is null, setting to current program's min address");
+            location = plugin.getCurrentProgram().getMinAddress();
+        }
         this.plugin = plugin;
         this.location = location;
         this.name = name;

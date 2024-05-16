@@ -98,24 +98,41 @@ If you have more than one Ghidra open, you can select the right one with
 `reva-chat --project ${project-name}`, if it is not set, `reva-chat` will
 ask you which project you want to connect to.
 
-## Installation
+## Protocol Build
 
-First install the python component, I like to use `pipx`. It is best to make
-sure that `reva-server` and `reva-chat` are on your path.
-The Ghidra extension will need to start `reva-server`, and you will need to
-run `reva-chat`.
+To facilitate communication between `reva-server` and RE tools' plugins, a protocol has been defined. You can read more about that (here)[./DEVELOPER.md]. Building the source files from those protocol definitions is driven from the [Makefile](./Makefile). To build the protocol source code files, run this command in the project's root:
 
-To install the particular extension for your disassembler see:
-- [Ghidra Support](#ghidra-support)
+```
+make all
+```
 
-The chat can be started with:
+## Python Project (reva-server and reva-chat) Installation
+
+First install the python component, I like to use `pipx`. Install it with something like: 
+
+```
+pip install pipx
+```
+
+In the `reverse-engineering-assistant` folder, run:
+
+```
+pipx install .
+```
+
+After installing the python project, pipx may warn you that you need to add a folder to your PATH environment variable. Make sure that the folder (now containing `reva-server` and `reva-chat`) are in your PATH variable. You can add it to the PATH variable by editing that variable (via some .rc file or the Windows GUI) or pipx can do it for you with this command: 
+
+```
+pipx ensurepath
+```
+
+Your chosen RE tool's extension will need to start `reva-server`, and you will need to run `reva-chat`. In case you very much do not want to add them to your PATH, your tool's ReVA extension should expose configuration to set the path to `reva-server`.
+
+Once the `reva-server` has been started (ideally by your tool's ReVA plugin/extension) the chat can be started with:
 
 ```sh
 reva-chat
 ```
-
-> You can also configure the path to `reva-server` in `Edit -> Tool Options -> ReVa`
-> if it is not on your path. But you really should put it on your path!
 
 # Ghidra Support
 
@@ -130,6 +147,10 @@ After installation, enable the `ReVa Plugin` extension in the CodeBrowser tool (
 If you want ReVa enabled by default, click File -> Save Tool to save the configuration.
 
 If everything is working correctly you will see a ReVa menu on your menu bar.
+
+## Configuration
+
+You can modify the plugin configuration in `Edit -> Tool Options -> ReVa`.
 
 ## Undo
 

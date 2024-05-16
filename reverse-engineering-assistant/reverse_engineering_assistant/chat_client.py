@@ -29,9 +29,13 @@ from rich.console import Console
 from rich.markdown import Markdown
 from rich.pretty import Pretty
 
+import os
 import logging
+# Get the appropriate temp directory depending on the OS
+temp_dir = os.getenv('TEMP') if os.name == 'nt' else '/tmp'
+log_file = os.path.join(temp_dir, 'reva-chat.log')
 logging.basicConfig(
-    filename='/tmp/reva-chat.log', level=logging.DEBUG,
+    filename=log_file, level=logging.DEBUG,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
 )
 logger = logging.getLogger("reva-chat")
@@ -65,7 +69,8 @@ def get_thinking_emoji() -> str:
     ])
 
 def find_connectable_extensions() -> Generator[Tuple[Path, str, str], None, None]:
-    reva_temp = Path("/tmp/.reva")
+    reva_temp_directory = os.path.join(temp_dir, '.reva')
+    reva_temp = Path(reva_temp_directory)
     if reva_temp.exists():
         for file in reva_temp.glob("reva-connection-*.connection"):
             connection_string = file.read_text()
@@ -80,10 +85,8 @@ def main():
     parser = argparse.ArgumentParser(description="Reva Chat Client")
     parser.add_argument("--host", default="localhost", help="The host to connect to")
     parser.add_argument("--port", required=False, type=int, help="The port to connect to")
-
     parser.add_argument("--project", required=False, help="The project to connect to")
     parser.add_argument("--program", required=False, help="The program to connect to")
-
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
     args = parser.parse_args()
     if args.debug:

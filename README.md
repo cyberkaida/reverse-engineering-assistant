@@ -47,33 +47,40 @@ Built in support is provided for:
 - [OpenAI](https://platform.openai.com/overview) for online inference and easy setup (Needs an OpenAI API key)
 - [Ollama](https://ollama.ai) and any model it supports for local on-device inference or connecting to a self hosted remote inference server.
 
+See [Configuration](#configuration) for more information about settings for the providers.
+
 Adding additional inference servers is easy if it is supported by langchain.
 
 ## Configuration
 
-> This is currently being moved to the Ghidra GUI
-> See Edit -> Tool Options -> ReVa in the Codebrowser Tool
+Configuration for ReVa is in the CodeBrowser Tool options.
+Open a program and go to Edit -> Tool Options -> ReVa.
 
-Configuration for the reverse engineering assistant is stored at
-`~/.config/reverse-engineering-assistant/config.yaml`. If this
-is not present on first start, a default configuration using
-OpenAI for inference and the `OPENAI_API_TOKEN` environment
-variable will be used.
+There are options for:
+- Selecting a provider (OpenAI or Ollama, others coming soon!)
+- Enabling "Follow", this will move the Ghidra view to the location of
+things ReVa is examining or changing.
+- Enabling "Auto-allow", ReVa will log her actions for the user to accept
+in the "ReVa Actions Log" window.
 
-The most important setting is the `type` top level setting.
-This controls what inference service you use. These are the
-same as the configuration keys, for example to use Ollama,
-set type to `ollama` and configure the settings in the `ollama:`
-section.
+There are sections for the providers.
 
-The configuration also contains the prompts used for the models.
-If you use Ollama or OpenAI these will be processed to fit the
-model specific prompt pattern (placing the system prompt in the
-correct tags, etc).
+### OpenAI
 
-For `llama-cpp` and `text-generation-webui` these may need to be
-configured for your specific model. For this reason Ollama is
-preferred for self hosting.
+By default, the OpenAI key is loaded from the environment variable `OPENAI_API_KEY`. You can also set your key inside Ghidra. Setting the key back to the `OPENAI_API_KEY` value will clear the key from the Ghidra configuration and load it from the environment.
+
+You can also select the model. By default `gpt-4o` is selected. This model works best with the tools and the prompt provided by ReVa.
+
+`gpt-4` also works well, but is slow and needs more prompting by the user to explore a binary.
+
+### Ollama
+
+Ollama is a local inference server. The default server is set to localhost, with the default Ollama port. You can change this to a remote server if you want to perform inference on a remote machine. This is useful for organisations that self host.
+
+You can also select a model. The model must alread be loaded on the server. Good performance has been seen with:
+- `mixtral`
+- `llama3`
+- `phi`
 
 ## Workflow
 
@@ -118,7 +125,7 @@ reva-chat
 
 Follow the instructions in the [ghidra-assistant](ghidra-assistant/README.md) plugin.
 
-After installation, enable the `ReVaPlugin` extension in the CodeBrowser tool (Open a file and click: File -> Configure -> Miscellaneous).
+After installation, enable the `ReVa Plugin` extension in the CodeBrowser tool (Open a file and click: File -> Configure -> Miscellaneous).
 
 If you want ReVa enabled by default, click File -> Save Tool to save the configuration.
 
@@ -131,9 +138,17 @@ one undo.
 
 ## Menus
 
-> These are being added in the next release
+ReVa adds an option to the CodeBrowser Tool's Window menu.
+Select Window -> ReVa Action Log to open the ReVa Action Log window.
 
-ReVa adds some elements to the Ghidra UI. You can either ask ReVa to do something in the chat window,
+This window shows actions ReVa has performed and would like to perform.
+You can accept or reject a change by double clicking the ✅ or ❌ icon. You can also go to the location the action will be performed by double clicking the address.
+
+If you reject an action, ReVa will be told and she will move on.
+
+You can also enable "Auto-allow" in the ReVa options. This will automatically accept all actions ReVa wants to perform.
+
+ReVa also adds some elements to the Ghidra UI. You can either ask ReVa to do something in the chat window,
 "Examine the variable usage in `main` in detail, rename the variables with more descriptive names.",
 or use the menu system.
 

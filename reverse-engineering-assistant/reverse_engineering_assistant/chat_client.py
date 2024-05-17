@@ -69,7 +69,7 @@ def get_thinking_emoji() -> str:
     ])
 
 def find_connectable_extensions() -> Generator[Tuple[Path, str, str], None, None]:
-    reva_temp_directory = os.path.join(temp_dir, '.reva')
+    reva_temp_directory = os.path.join(Path.home(), '.reva')
     reva_temp = Path(reva_temp_directory)
     if reva_temp.exists():
         for file in reva_temp.glob("reva-connection-*.connection"):

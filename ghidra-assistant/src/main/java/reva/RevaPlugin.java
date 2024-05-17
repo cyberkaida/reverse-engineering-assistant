@@ -516,8 +516,8 @@ public class RevaPlugin extends ProgramPlugin {
         // Write our server hostname and port to a well known file
         // in the temp directory to help `reva-chat` find us
         // when it starts up.
-        String temp_dir = System.getProperty("java.io.tmpdir");
-        File reva_temp_dir = new File(temp_dir, ".reva");
+        String homeDirectory = System.getProperty("user.home");
+        File reva_temp_dir = new File(homeDirectory, ".reva");
         reva_temp_dir.mkdirs();
         File connectionFile = new File(reva_temp_dir,
                 String.format("reva-connection-%d.connection", getExtensionPort()));

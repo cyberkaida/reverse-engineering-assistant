@@ -1,3 +1,7 @@
+ifeq ($(OS),Windows_NT)
+	SHELL=cmd
+endif
+
 # Get the directory of the current Makefile
 MAKEFILE_PATH := $(dir $(realpath $(firstword $(MAKEFILE_LIST))))
 REVA_PYTHON_PATH := $(MAKEFILE_PATH)/reverse-engineering-assistant/reverse_engineering_assistant

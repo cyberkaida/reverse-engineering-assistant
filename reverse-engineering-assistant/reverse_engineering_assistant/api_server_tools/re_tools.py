@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 
+from binascii import a2b_base64, a2b_hex, b2a_hex
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 import grpc
 
+from httpx import request
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.language_models.base import BaseLanguageModel
 from numpy import add
@@ -139,9 +141,9 @@ class RevaRenameFunctionVariable(RevaRemoteTool):
         If there are many variables to rename in a function, use this. It is more efficient than calling rename_variable_in_function multiple times.
         After calling this, you can confirm the changes by decompiling the function again.
         If there is a failure, retrying the operation will not help.
+        Don't use this for renaming symbols, use set_multiple_symbol_names instead.
         """
         outputs: List[str] = []
-        # TODO: Do we want to scatter gather this?
         for old_name, new_name in new_names.items():
             outputs.append(self.rename_variable_in_function(new_name, old_name, containing_function))
         return outputs
@@ -279,7 +281,7 @@ class RevaGetSymbols(RevaRemoteTool):
         """
         return len(self._get_symbol_list())
 
-    def get_symbols(self) -> List[Dict[str, str]]:
+    def get_symbols(self) -> List[Dict[str, Optional[str]]]:
         """
         Return a list of symbols in the program.
         Please check the total number of symbols with get_symbol_count before calling this.
@@ -287,12 +289,12 @@ class RevaGetSymbols(RevaRemoteTool):
 
         symbol_list = self._get_symbol_list()
 
-        symbol_details: List[Dict[str, str]] = []
+        symbol_details: List[Dict[str, Optional[str]]] = []
         for symbol in symbol_list:
             symbol_details.append(self.get_symbol(symbol))
         return symbol_details
 
-    def get_symbol(self, address_or_name: str) -> Dict[str, str]:
+    def get_symbol(self, address_or_name: str) -> Dict[str, Optional[str]]:
         """
         Return information about the symbol at the given address or with the given name.
         Returns a dictionary with the keys "name", "address", and "type".
@@ -334,11 +336,28 @@ class RevaSetSymbolName(RevaRemoteTool):
 
     def __init__(self, project: AssistantProject, llm: BaseLanguageModel) -> None:
         super().__init__(project, llm)
-        self.description = "Used for retrieving cross references to and from addresses"
+        self.description = "Used for setting names for global symbols"
 
         self.tool_functions = [
             self.set_symbol_name,
+            self.set_multiple_symbol_names,
         ]
+
+    def set_multiple_symbol_names(self, new_names: Dict[str, str]) -> List[Dict[str, str]]:
+        """
+        Change the names of multiple symbols to the new names specified in `new_names`.
+        `new_names` is a dictionary where the keys are the old names or addresses and the values are the new names.
+
+        If there are many symbols to rename, use this. It is more efficient than calling set_symbol_name multiple times.
+
+        Use this for symbols, not variables in functions.
+        """
+
+        outputs: List[Dict[str, str]] = []
+        for old_name, new_name in new_names.items():
+            outputs.append(self.set_symbol_name(new_name, old_name))
+        return outputs
+
 
     def set_symbol_name(self, new_name: str, old_name_or_address: str) -> Dict[str, str]:
         """
@@ -394,3 +413,92 @@ class RevaSetComment(RevaRemoteTool):
         except grpc.RpcError as e:
             raise RevaToolException(f"Failed to set comment: {e}")
         return "Set comment successfully"
+
+@register_tool
+class RevaData(RevaRemoteTool):
+    """
+    A tool for getting and setting data
+    """
+
+    def __init__(self, project: AssistantProject, llm: BaseLanguageModel) -> None:
+        super().__init__(project, llm)
+        self.description = "Used for getting and setting data"
+
+        self.tool_functions = [
+            self.list_strings,
+            self.list_data,
+            self.get_data,
+        ]
+
+    def list_strings(self) -> List[Dict[str, Union[str, List[str]]]]:
+        """
+        Return a list of defined strings in the program.
+        """
+        from ..protocol import RevaData_pb2_grpc, RevaData_pb2
+        stub = RevaData_pb2_grpc.RevaDataServiceStub(self.channel)
+
+        request = RevaData_pb2.RevaStringListRequest()
+
+        defined_strings: List[Dict[str, Union[str, List[str]]]] = []
+        for string in stub.getStringList(request):
+            defined_strings.append({
+                "address": string.address,
+                "symbol": string.symbol,
+                "value": string.value,
+                "incoming_references": list(string.incoming_references),
+                "outgoing_references": list(string.outgoing_references),
+            })
+
+        return defined_strings
+
+    def list_data(self) -> List[Dict[str, Union[str, List[str]]]]:
+        """
+        Return a list of defined data in the program.
+        This is not all data, only the data that has been defined in the Ghidra database.
+        """
+
+        from ..protocol import RevaData_pb2_grpc, RevaData_pb2
+        stub = RevaData_pb2_grpc.RevaDataServiceStub(self.channel)
+
+        request = RevaData_pb2.RevaDataListRequest()
+
+        defined_data: List[Dict[str, Union[str, List[str]]]] = []
+        for data in stub.getListData(request):
+            defined_data.append({
+                "address": data.address,
+                "symbol": data.symbol,
+                "type": data.type,
+                "size": data.size,
+                "incoming_references": list(data.incoming_references),
+                "outgoing_references": list(data.outgoing_references),
+            })
+
+        return defined_data
+
+    def get_data(self, address_or_symbol: str, size: Optional[int] = None) -> Dict[str, Union[str, List[str], int]]:
+        """
+        Return information about the data at the given address or with the given symbol.
+        """
+        from ..protocol import RevaData_pb2_grpc, RevaData_pb2
+        stub = RevaData_pb2_grpc.RevaDataServiceStub(self.channel)
+        request = RevaData_pb2.RevaGetDataAtAddressRequest()
+
+        try:
+            request.address = hex(int(address_or_symbol, 16))
+        except ValueError:
+            request.symbol = address_or_symbol
+
+        if size:
+            request.size = size
+
+        response = stub.getDataAtAddress(request)
+
+        return {
+            "address": response.address,
+            "symbol": response.symbol,
+            "type": response.type,
+            "size": len(response.data),
+            "data": b2a_hex(response.data).decode("utf-8"),
+            "incoming_references": list(response.incoming_references),
+            "outgoing_references": list(response.outgoing_references),
+        }

@@ -223,7 +223,8 @@ class RevaGetSymbols(RevaRemoteTool):
             self.get_symbols,
             self.get_symbol,
             self.get_function_count,
-            self.get_functions,
+            # self.get_functions, # Disabled for now, crashes the chain of thought when the context is too small, see issue #GH-56
+            self.get_functions_paginated,
         ]
 
     def _get_symbol_list(self) -> List[str]:

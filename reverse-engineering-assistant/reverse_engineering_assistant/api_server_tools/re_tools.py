@@ -256,10 +256,23 @@ class RevaGetSymbols(RevaRemoteTool):
         """
         return len(self._get_function_list())
 
+    def get_functions_paginated(self, page: int = 1, page_size: int = 50) -> List[Dict[str, Union[str, List[str]]]]:
+        """
+        Return a paginated list of functions in the program.
+        Use get_function_count to get the total number of functions.
+        page is 1 indexed. To get the first page, set page to 1. Do not set page to 0.
+        """
+        functions = self.get_functions()
+        start = (page - 1) * page_size
+        end = start + page_size
+        return functions[start:end]
+
+
     def get_functions(self) -> List[Dict[str, Union[str, List[str]]]]:
         """
         Return a list of functions in the program.
         Please check the total number of functions with get_function_count before calling this.
+        If the function count is high, consider using get_functions_paginated.
         """
 
         function_list = self._get_function_list()

@@ -18,8 +18,9 @@ from langchain.agents.conversational_chat.base import ConversationalChatAgent
 from langchain.agents.structured_chat.base import StructuredChatAgent
 from langchain_core.agents import AgentAction, AgentFinish
 from langchain_core.callbacks.base import BaseCallbackHandler, BaseCallbackManager
-from langchain.llms.base import BaseLLM
-from langchain.chat_models.base import BaseChatModel
+from langchain_core.language_models.base import BaseLanguageModel
+
+from langchain_core.language_models.chat_models import BaseChatModel
 from langchain.memory import ConversationTokenBufferMemory, ChatMessageHistory, ConversationBufferMemory
 from langchain.memory.chat_memory import BaseMemory
 from langchain_community.chat_message_histories import SQLChatMessageHistory
@@ -76,7 +77,7 @@ class RevaTool(ABC):
     """
     project: AssistantProject
 
-    llm: BaseLLM | BaseChatModel
+    llm: BaseLanguageModel | BaseChatModel
 
     tool_name: str
     description: str
@@ -86,7 +87,7 @@ class RevaTool(ABC):
     def __str__(self) -> str:
         return f"{self.tool_name}"
 
-    def __init__(self, project: AssistantProject, llm: BaseLLM | BaseChatModel) -> None:
+    def __init__(self, project: AssistantProject, llm: BaseLanguageModel | BaseChatModel) -> None:
         self.project = project
         self.llm = llm
 
@@ -120,7 +121,7 @@ class AskUserTool(RevaTool):
     tool_name = "AskUser"
     description = "Ask the user for input."
 
-    def __init__(self, project: AssistantProject, llm: BaseLLM | BaseChatModel) -> None:
+    def __init__(self, project: AssistantProject, llm: BaseLanguageModel | BaseChatModel) -> None:
         super().__init__(project, llm)
         self.tool_functions = [
             self.ask_user
@@ -224,13 +225,14 @@ class ReverseEngineeringAssistant(object):
     """
 
     logger: logging.Logger
+    log_path: Path
     project: AssistantProject
 
     query_engine: Optional[Chain] = None
 
     tools: List[RevaTool]
 
-    llm: BaseLLM | BaseChatModel
+    llm: BaseChatModel | BaseLanguageModel
 
     model_memory: BaseMemory
 
@@ -265,7 +267,7 @@ class ReverseEngineeringAssistant(object):
     def __init__(self,
                 project: str | AssistantProject,
                 model_type: Optional[ModelType] = None,
-                model: Optional[BaseLLM | BaseChatModel] = None,
+                model: Optional[BaseLanguageModel | BaseChatModel] = None,
                 langchain_callbacks: Optional[List[BaseCallbackHandler]] = None
         ) -> None:
         """
@@ -282,7 +284,8 @@ class ReverseEngineeringAssistant(object):
             self.project = project
 
         self.logger = logging.getLogger(f"reverse_engineering_assistant.ReverseEngineeringAssistant.{self.project.project}")
-        self.logger.addHandler(logging.FileHandler(self.project.project_path / "reva.log"))
+        self.log_path = self.project.project_path / "reva.log"
+        self.logger.addHandler(logging.FileHandler(self.log_path))
 
         self.langchain_callbacks = langchain_callbacks or []
 
@@ -388,12 +391,30 @@ class ReverseEngineeringAssistant(object):
         except json.JSONDecodeError as e:
             self.logger.exception(f"Failed to parse JSON response from query engine: {e.doc}")
             return "Failed to parse JSON response from query engine"
-        except ValueError as e:
-            self.logger.exception(f"Failed to query engine: {e}")
-            return "Failed to query engine... Try again?"
         except Exception as e:
             self.logger.exception(f"Failed to query engine: {e}")
-            return "Failed to query engine... Try again?"
+            import traceback
+
+            try:
+                # Let's try to explain the exception
+                # We need to take away the tools, so she doesn't try to answer
+                # by reverse engineering the program...
+                answer = self.llm.invoke(
+                    f"You are ReVa, the reverse engineering assisstant. During your execution you threw an exception. Your logs are located in the file {self.log_path} Can you explain the error: {e}\n\n{traceback.format_exc()}"
+                )
+                return f"""## **ReVa could not complete your request.**
+Logs have been saved to `{self.log_path}`.
+> She has examined the exception:
+```
+{e}
+{traceback.format_exc()}
+```
+## ReVa's debugging notes:
+ {str(answer.content)}
+                """
+            except Exception as e:
+                self.logger.exception(f"Failed to query engine: {e}")
+                return f"Failed to query engine... Try again?\n```{traceback.format_exc()}```\nLogs have been saved to `{self.log_path}`"
 
 def get_thinking_emoji() -> str:
     """

@@ -87,9 +87,8 @@ public class RevaGetDecompilation extends RevaDecompilationServiceImplBase {
 
             if (function == null) {
                 // There was nothing there...
-                response.setErrorMessage("No function found at address " + request.getAddress());
-                responseObserver.onNext(response.build());
-                responseObserver.onCompleted();
+                Status status = Status.NOT_FOUND.withDescription("No function found at address " + request.getAddress());
+                responseObserver.onError(status.asRuntimeException());
                 return;
             }
 
@@ -99,15 +98,17 @@ public class RevaGetDecompilation extends RevaDecompilationServiceImplBase {
 
             if (function == null) {
                 // There was nothing there...
-                response.setErrorMessage("No function found with name " + request.getFunction());
-                responseObserver.onNext(response.build());
-                responseObserver.onCompleted();
+
+                Status status = Status.NOT_FOUND.withDescription("No function found with name " + request.getFunction());
+                responseObserver.onError(status.asRuntimeException());
                 return;
             }
         }
 
         if (function == null) {
-            throw new IllegalStateException("Function was null, but we should have caught this earlier");
+            Status status = Status.NOT_FOUND.withDescription("No function found");
+            responseObserver.onError(status.asRuntimeException());
+            return;
         }
 
         for (Function caller : function.getCallingFunctions(monitor)) {
@@ -117,7 +118,8 @@ public class RevaGetDecompilation extends RevaDecompilationServiceImplBase {
         for (Function callee : function.getCalledFunctions(monitor)) {
             response.addOutgoingCalls(callee.getName(true));
         }
-        response.setAddress(function.getEntryPoint().getUnsignedOffset());
+
+        response.setAddress(function.getEntryPoint().toString());
         response.setFunction(function.getName(true));
         response.setFunctionSignature(function.getPrototypeString(true, true));
 
@@ -138,15 +140,23 @@ public class RevaGetDecompilation extends RevaDecompilationServiceImplBase {
                 if (isThunk) {
                     // If the thing is a thunk, we cannot decompile it (no implementation)
                     // and we need to tell the LLM about it so it does not try again.
-                    response.setErrorMessage("Failed to decompile function " + function.getName() + " is a thunk");
+                    Status status = Status.INVALID_ARGUMENT.withDescription("Failed to decompile function " + function.getName() + " is a thunk");
+                    responseObserver.onError(status.asRuntimeException());
+                    return;
                 }
-                responseObserver.onNext(response.build());
-                responseObserver.onCompleted();
+                Status status = Status.INVALID_ARGUMENT.withDescription("Failed to decompile function " + function.getName());
+                responseObserver.onError(status.asRuntimeException());
                 return;
             }
+
+            // MARK: Build decompilation
             DecompiledFunction decompiledFunction = decompiled.getDecompiledFunction();
             Iterator<ClangToken> tokenIterator = decompiled.getCCodeMarkup().tokenIterator(true);
             String decompilationString = "";
+
+            // Here we manually process the tokens to insert addresses into the decompilation
+            // this helps ReVa connect the decompilation to the listing view so she can place
+            // comments and other things.
             Address lastMinAddress = null;
             while (tokenIterator.hasNext()) {
                 ClangToken token = tokenIterator.next();
@@ -159,9 +169,9 @@ public class RevaGetDecompilation extends RevaDecompilationServiceImplBase {
                 }
             }
 
-            // response.decompilation = decompiledFunction.getC();
             response.setDecompilation(decompilationString);
 
+            // MARK: Process local variables
             LocalSymbolMap symbolMap = decompiled.getHighFunction().getLocalSymbolMap();
             Iterator<HighSymbol> symbolIterator = symbolMap.getSymbols();
             while (symbolIterator.hasNext()) {
@@ -185,11 +195,14 @@ public class RevaGetDecompilation extends RevaDecompilationServiceImplBase {
                 response.setDecompilation(decompiler.decompile(function));
 
             } catch (Exception e) {
-                response.setErrorMessage("Failed to decompile function " + function.getName());
                 Msg.error(this, "Failed to decompile function " + function.getName(), e);
+                Status status = Status.INVALID_ARGUMENT.withDescription("Failed to decompile function " + function.getName());
+                responseObserver.onError(status.asRuntimeException());
+                return;
             }
         }
 
+        // MARK: Add the decompilation to the tracker
         // Load the decompilation into the tracker so the user
         // can follow ReVa.
         RevaAction action = new RevaAction.Builder()

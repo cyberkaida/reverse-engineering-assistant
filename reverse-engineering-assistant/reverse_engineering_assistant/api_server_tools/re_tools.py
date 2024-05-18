@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from binascii import a2b_base64, a2b_hex, b2a_hex
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import grpc
 
@@ -20,14 +20,75 @@ from ..reva_exceptions import RevaToolException
 
 from ..protocol import RevaGetDecompilation_pb2_grpc, RevaGetDecompilation_pb2
 
-
 import logging
 
-# TODO: I think the word tool is used too much in the project... It's a bit confusing...
 class RevaRemoteTool(RevaTool):
+    logger: logging.Logger
+
+    def __init__(self, project: AssistantProject, llm: BaseLanguageModel) -> None:
+        self.logger = logging.getLogger(f"reverse_engineering_assistant.RevaRemoteTool.{self.__class__.__name__}")
+        self.logger.addHandler(logging.FileHandler(project.project_path / "reva.log"))
+        super().__init__(project, llm)
+
     @property
     def channel(self):
         return get_channel()
+
+    def resolve_to_address_and_symbol(self, thing: str) -> Tuple[str, str]:
+        """
+        Resolve a string to an address and symbol.
+        If it is an address it can be a namespaced address or a plain hex address.
+
+        This helps reduce hallucinations and catch issues with symbols and namespaces early.
+
+        Returns a tuple of (address, symbol).
+        """
+        self.logger.debug(f"Resolving {thing} to address and symbol")
+        assert thing is not None
+        address: Optional[str] = None
+        symbol: Optional[str] = None
+        try:
+            # This is a plain address in the main namespace
+            address = hex(int(thing, 16))
+            self.logger.debug(f"Resolved {thing} to address: {address}")
+        except ValueError:
+            # This could also be a Ghidra namespaced address, so let's check that too!
+            if "::" in thing:
+                last_part = thing.split("::")[-1]
+                try:
+                    hex(int(last_part, 16))
+                    # If the last part of the address is a hex number, then we can assume it is an address
+                    address = thing
+                except ValueError:
+                    # Otherwise, it is a symbol
+                    symbol = thing
+            else:
+                # This is a symbol
+                symbol = thing
+
+        # We can check if it is a symbol
+        from ..protocol import RevaGetSymbols_pb2_grpc, RevaGetSymbols_pb2
+        stub = RevaGetSymbols_pb2_grpc.RevaToolSymbolServiceStub(self.channel)
+        request = RevaGetSymbols_pb2.RevaSymbolRequest()
+        if address:
+            request.address = address
+        if symbol:
+            request.name = symbol
+
+        self.logger.debug(f"Getting symbol for {thing} request: {request}")
+        response = stub.GetSymbol(request)
+        self.logger.debug(f"Got symbol for {thing} response: {response}")
+
+        if response.name:
+            symbol = response.name
+        if response.address:
+            address = response.address
+
+        if address is None and symbol is None:
+            raise RevaToolException(message=f"Could not resolve {thing} to an address or symbol. Double check your symbol or address is correct.")
+        self.logger.debug(f"Resolved {thing} to address: {address}, symbol: {symbol}")
+        assert address is not None and symbol is not None # Keep the pylance happy
+        return address, symbol
 
 
 @register_tool
@@ -50,7 +111,7 @@ class RevaDecompilationIndex(RevaRemoteTool):
             #self.get_defined_function_count,
         ]
 
-    def get_decompilation_for_function(self, function_name_or_address: str | int) -> Dict[str, str]:
+    def get_decompilation_for_function(self, function_name_or_address: str) -> Dict[str, str]:
         """
         Return the decompilation for the given function. The function can be specified by name or address.
         Hint: It is too slow to decompile _all_ functions, so use get_defined_function_list_paginated to get a list of functions
@@ -58,18 +119,7 @@ class RevaDecompilationIndex(RevaRemoteTool):
         """
 
         # First normalise the argument
-        address: Optional[int] = None
-        name: Optional[str] = None
-        if isinstance(function_name_or_address, int):
-            address = function_name_or_address
-        elif isinstance(function_name_or_address, str):
-            name = function_name_or_address
-
-        if address is None and name is None:
-            raise RevaToolException("function_name_or_address must be an address or function name")
-
-        if address and address <= 0:
-            raise RevaToolException("function_name_or_address must be a positive integer or a function name")
+        address, name = self.resolve_to_address_and_symbol(function_name_or_address)
 
         # Now we can create the message and call over the RPC
         from ..protocol import RevaGetDecompilation_pb2_grpc, RevaGetDecompilation_pb2
@@ -91,30 +141,13 @@ class RevaDecompilationIndex(RevaRemoteTool):
         return {
             "function": response.function,
             "function_signature": response.function_signature,
-            "address": hex(response.address),
+            "address": response.address,
             "decompilation": response.decompilation,
             "listing": response.listing,
             "variables": response.variables, #type: ignore # We can ignore this because it can be serialised to a dict
             "incoming_calls": response.incoming_calls,
             "outgoing_calls": response.outgoing_calls,
         }
-
-
-    def get_defined_function_list_paginated(self, page: int, page_size: int = 20) -> List[str]:
-        """
-        Return a paginated list of functions in the index. Use get_defined_function_count to get the total number of functions.
-        page is 1 indexed. To get the first page, set page to 1. Do not set page to 0.
-        """
-        raise NotImplementedError("This function is not implemented yet")
-        return response.function_list
-
-    def get_defined_function_count(self) -> int:
-        """
-        Return the total number of defined functions in the program.
-        """
-
-        raise NotImplementedError("This function is not implemented yet")
-        return response.function_count
 
 @register_tool
 class RevaRenameFunctionVariable(RevaRemoteTool):
@@ -159,7 +192,9 @@ class RevaRenameFunctionVariable(RevaRemoteTool):
         request = RevaGetDecompilation_pb2.RevaRenameFunctionVariableRequest()
         request.new_name = new_name
         request.old_name = old_name
-        request.function_name = containing_function
+
+        address, symbol = self.resolve_to_address_and_symbol(containing_function)
+        request.function_name = symbol
 
         try:
             response: RevaGetDecompilation_pb2.RevaRenameFunctionVariableResponse = stub.RenameFunctionVariable(request)
@@ -317,11 +352,8 @@ class RevaGetSymbols(RevaRemoteTool):
         stub = RevaGetSymbols_pb2_grpc.RevaToolSymbolServiceStub(self.channel)
 
         request = RevaGetSymbols_pb2.RevaSymbolRequest()
-        try:
-
-            request.address = hex(int(address_or_name, 16))
-        except ValueError:
-            request.name = address_or_name
+        # TODO: This is not efficient, we are calling the same RPC two times
+        request.address, request.name = self.resolve_to_address_and_symbol(address_or_name)
 
         self.logger.debug(f"Getting symbol {address_or_name} request: {request}")
         try:
@@ -383,7 +415,7 @@ class RevaSetSymbolName(RevaRemoteTool):
 
         request = RevaGetSymbols_pb2.RevaSetSymbolNameRequest()
         request.new_name = new_name
-        request.old_name_or_address = old_name_or_address
+        request.old_address, request.old_name = self.resolve_to_address_and_symbol(old_name_or_address)
 
         try:
             response: RevaGetSymbols_pb2.RevaSetSymbolNameResponse = stub.SetSymbolName(request)
@@ -391,7 +423,7 @@ class RevaSetSymbolName(RevaRemoteTool):
             raise RevaToolException(f"Failed to set symbol name: {e}")
 
         return {
-            "old_name": old_name_or_address,
+            "old_name": request.old_name,
             "new_name": new_name,
         }
 
@@ -420,7 +452,7 @@ class RevaSetComment(RevaRemoteTool):
 
         request = RevaComment_pb2.RevaSetCommentRequest()
         request.comment = comment
-        request.symbol_or_address = address_or_symbol
+        request.address, request.symbol = self.resolve_to_address_and_symbol(address_or_symbol)
 
         try:
             response: RevaComment_pb2.RevaSetCommentResponse = stub.SetComment(request)
@@ -497,10 +529,7 @@ class RevaData(RevaRemoteTool):
         stub = RevaData_pb2_grpc.RevaDataServiceStub(self.channel)
         request = RevaData_pb2.RevaGetDataAtAddressRequest()
 
-        try:
-            request.address = hex(int(address_or_symbol, 16))
-        except ValueError:
-            request.symbol = address_or_symbol
+        request.address, request.symbol = self.resolve_to_address_and_symbol(address_or_symbol)
 
         if size:
             request.size = size

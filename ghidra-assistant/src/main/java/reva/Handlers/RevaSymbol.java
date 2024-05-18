@@ -78,7 +78,7 @@ public class RevaSymbol extends RevaToolSymbolServiceImplBase {
 
         FlatProgramAPI api = new FlatProgramAPI(currentProgram);
 
-        Address address = this.plugin.addressFromAddressOrSymbol(request.getOldNameOrAddress());
+        Address address = currentProgram.getAddressFactory().getAddress(request.getOldAddress());
 
         RevaAction action = new RevaAction.Builder()
             .setPlugin(this.plugin)
@@ -124,13 +124,39 @@ public class RevaSymbol extends RevaToolSymbolServiceImplBase {
     public void getSymbol(RevaSymbolRequest request, StreamObserver<RevaSymbolResponse> responseObserver) {
         RevaSymbolResponse.Builder response = RevaSymbolResponse.newBuilder();
         Program currentProgram = this.plugin.getCurrentProgram();
+        Address address = null;
 
-        Address address = currentProgram.getAddressFactory().getAddress(request.getAddress());
+        if (!request.getAddress().isEmpty()) {
+            address = currentProgram.getAddressFactory().getAddress(request.getAddress());
+        }
+
+        if (address == null && !request.getName().isEmpty()) {
+            // We have a symbol name
+            SymbolIterator symbols = currentProgram.getSymbolTable().getDefinedSymbols();
+            while (symbols.hasNext()) {
+                Symbol symbol = symbols.next();
+
+                // If we get an exact match we stop
+                if (symbol.getName(true).equals(request.getName())) {
+                    address = symbol.getAddress();
+                    break;
+                }
+
+                // If we get a partial match we keep going
+                if (symbol.getName().equals(request.getName())) {
+                    address = symbol.getAddress();
+                }
+            }
+        }
+
+        // If we do have an address, let's try to resolve it to a symbol
         if (address != null) {
             Symbol symbol = currentProgram.getSymbolTable().getPrimarySymbol(address);
             if (symbol != null) {
                 response.setName(symbol.getName(true));
                 response.setAddress(symbol.getAddress().toString());
+                // Replace the requested address with the fully resolved address
+                address = symbol.getAddress();
 
                 if (symbol.getSymbolType() == SymbolType.FUNCTION) {
                     response.setType(reva.protocol.RevaGetSymbols.SymbolType.FUNCTION);
@@ -138,6 +164,13 @@ public class RevaSymbol extends RevaToolSymbolServiceImplBase {
                     response.setType(reva.protocol.RevaGetSymbols.SymbolType.LABEL);
                 }
             }
+        }
+
+
+        if (address == null) {
+            Msg.warn(this, "Symbol not found: " + request.toString());
+            responseObserver.onError(Status.NOT_FOUND.withDescription("Symbol not found: " + request.toString()).asRuntimeException());
+            return;
         }
 
         Function function = currentProgram.getFunctionManager().getFunctionContaining(address);

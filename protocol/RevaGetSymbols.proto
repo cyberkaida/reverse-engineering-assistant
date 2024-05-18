@@ -37,8 +37,9 @@ message RevaGetSymbolsResponse {
 }
 
 message RevaSetSymbolNameRequest {
-  string old_name_or_address = 1;
-  string new_name = 2;
+  string old_name = 1;
+  string old_address = 2;
+  string new_name = 3;
 }
 
 message RevaGetNewSymbolNameRequest {

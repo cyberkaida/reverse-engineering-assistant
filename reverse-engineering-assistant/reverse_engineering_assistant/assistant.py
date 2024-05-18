@@ -84,12 +84,19 @@ class RevaTool(ABC):
 
     tool_functions: List[Callable]
 
+    logger: logging.Logger
+    log_path: Path
+
     def __str__(self) -> str:
         return f"{self.tool_name}"
 
     def __init__(self, project: AssistantProject, llm: BaseLanguageModel | BaseChatModel) -> None:
         self.project = project
         self.llm = llm
+        self.log_path = self.project.project_path / "reva.log"
+        if not self.logger:
+            self.logger = logging.getLogger(f"reverse_engineering_assistant.RevaTool.{self.tool_name}")
+            self.logger.addHandler(logging.FileHandler(self.log_path))
 
     @cache
     def as_tools(self) -> List[BaseTool]:

@@ -8,8 +8,9 @@ service RevaCommentService {
 }
 
 message RevaSetCommentRequest {
-    string symbol_or_address = 1;
-    string comment = 2;
+    string address = 1;
+    string symbol = 2;
+    string comment = 3;
 }
 
 message RevaSetCommentResponse {

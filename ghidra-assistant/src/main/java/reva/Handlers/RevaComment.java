@@ -2,6 +2,7 @@ package reva.Handlers;
 
 import ghidra.program.flatapi.FlatProgramAPI;
 import ghidra.program.model.address.Address;
+import ghidra.program.model.listing.Program;
 import io.grpc.Status;
 import io.grpc.stub.StreamObserver;
 import reva.RevaPlugin;
@@ -20,9 +21,10 @@ public class RevaComment extends RevaCommentServiceImplBase {
 
     @Override
     public void setComment(RevaSetCommentRequest request, StreamObserver<RevaSetCommentResponse> responseObserver) {
-        Address address = plugin.addressFromAddressOrSymbol(request.getSymbolOrAddress());
-        String comment = request.getComment();
 
+        Program currentProgram = plugin.getCurrentProgram();
+        Address address = currentProgram.getAddressFactory().getAddress(request.getAddress());
+        String comment = request.getComment();
         RevaSetCommentResponse response = RevaSetCommentResponse.newBuilder().build();
         // Create an action to comment
         RevaAction action = new RevaAction.Builder()
@@ -31,10 +33,10 @@ public class RevaComment extends RevaCommentServiceImplBase {
             .setName("Comment")
             .setDescription("Comment: " + comment)
             .setOnAccepted(() -> {
-                FlatProgramAPI api = new FlatProgramAPI(plugin.getCurrentProgram());
-                int transactionId = plugin.getCurrentProgram().startTransaction("Set Comment at " + address);
+                FlatProgramAPI api = new FlatProgramAPI(currentProgram);
+                int transactionId = currentProgram.startTransaction("Set Comment at " + address);
                 api.setPlateComment(address, comment);
-                plugin.getCurrentProgram().endTransaction(transactionId, true);
+                currentProgram.endTransaction(transactionId, true);
                 responseObserver.onNext(response);
                 responseObserver.onCompleted();
             })

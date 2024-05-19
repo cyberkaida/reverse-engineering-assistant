@@ -246,7 +246,7 @@ public class RevaPlugin extends ProgramPlugin {
         server.addService(new RevaGetDecompilation(this));
         server.addService(new RevaSymbol(this));
         server.addService(new RevaComment(this));
-        // server.addService(new RevaGetCursor(this));
+        server.addService(new RevaGetCursor(this));
         server.addService(new RevaHeartbeat(this));
         server.addService(new RevaData(this));
         serverHandle = server.build();

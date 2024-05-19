@@ -545,3 +545,32 @@ class RevaData(RevaRemoteTool):
             "incoming_references": list(response.incoming_references),
             "outgoing_references": list(response.outgoing_references),
         }
+
+@register_tool
+class RevaGetCursor(RevaRemoteTool):
+
+    def __init__(self, project: AssistantProject, llm: BaseLanguageModel) -> None:
+        super().__init__(project, llm)
+        self.description = "Used for getting and setting the cursor"
+
+        self.tool_functions = [
+            self.get_cursor,
+        ]
+
+    def get_cursor(self) -> Dict[str, Union[str, int]]:
+        """
+        Return the current location the user is looking at in the program.
+        Use this to find the current function, symbol or address.
+        """
+        from ..protocol import RevaGetCursor_pb2, RevaGetCursor_pb2_grpc
+        stub = RevaGetCursor_pb2_grpc.RevaGetCursorStub(self.channel)
+
+        request = RevaGetCursor_pb2.RevaGetCursorRequest()
+
+        response = stub.getCursor(request)
+
+        return {
+            "address": response.address,
+            "symbol": response.symbol,
+            "function": response.function,
+        }

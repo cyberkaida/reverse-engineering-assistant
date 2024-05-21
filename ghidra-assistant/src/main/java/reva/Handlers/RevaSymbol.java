@@ -163,6 +163,9 @@ public class RevaSymbol extends RevaToolSymbolServiceImplBase {
                 } else if (symbol.getSymbolType() == SymbolType.LABEL) {
                     response.setType(reva.protocol.RevaGetSymbols.SymbolType.LABEL);
                 }
+            } else {
+                // Try to resolve a label
+                Msg.info(this, "Symbol not found: " + request.toString());
             }
         }
 
@@ -176,14 +179,15 @@ public class RevaSymbol extends RevaToolSymbolServiceImplBase {
         Function function = currentProgram.getFunctionManager().getFunctionContaining(address);
         if (function != null) {
             response.setName(function.getName(true));
-            response.setAddress(function.getEntryPoint().toString());
+            // Do _not_ set the address to the start of the function.
+            // If you do this, tools like setComment will break. They will
+            // try to set a comment at the start of the function.
             response.setType(reva.protocol.RevaGetSymbols.SymbolType.FUNCTION);
         }
 
         Data data = currentProgram.getListing().getDataContaining(address);
         if (data != null) {
             response.setName(data.getLabel());
-            response.setAddress(data.getMinAddress().toString());
             response.setType(reva.protocol.RevaGetSymbols.SymbolType.DATA);
         }
 

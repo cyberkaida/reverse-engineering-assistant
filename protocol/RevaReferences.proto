@@ -1,0 +1,18 @@
+syntax = "proto3";
+package RevaProtocol;
+option java_package = "reva.protocol";
+
+service RevaReferenceService {
+  rpc get_references(RevaGetReferencesRequest) returns (RevaGetReferencesResponse) {}
+}
+
+message RevaGetReferencesRequest {
+  string address = 1;
+}
+
+// TODO: Add type details
+
+message RevaGetReferencesResponse {
+  repeated string outgoing_references = 1;
+  repeated string incoming_references = 2;
+}

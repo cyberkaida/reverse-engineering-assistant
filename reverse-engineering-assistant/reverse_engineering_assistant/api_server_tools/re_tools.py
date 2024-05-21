@@ -34,7 +34,7 @@ class RevaRemoteTool(RevaTool):
     def channel(self):
         return get_channel()
 
-    def resolve_to_address_and_symbol(self, thing: str) -> Tuple[str, str]:
+    def resolve_to_address_and_symbol(self, thing: str) -> Tuple[str, Optional[str]]:
         """
         Resolve a string to an address and symbol.
         If it is an address it can be a namespaced address or a plain hex address.
@@ -87,7 +87,7 @@ class RevaRemoteTool(RevaTool):
         if address is None and symbol is None:
             raise RevaToolException(message=f"Could not resolve {thing} to an address or symbol. Double check your symbol or address is correct.")
         self.logger.debug(f"Resolved {thing} to address: {address}, symbol: {symbol}")
-        assert address is not None and symbol is not None # Keep the pylance happy
+        assert address is not None
         return address, symbol
 
 
@@ -194,6 +194,8 @@ class RevaRenameFunctionVariable(RevaRemoteTool):
         request.old_name = old_name
 
         address, symbol = self.resolve_to_address_and_symbol(containing_function)
+        if symbol is None:
+            raise RevaToolException(f"Could not find function {containing_function}")
         request.function_name = symbol
 
         try:
@@ -203,8 +205,7 @@ class RevaRenameFunctionVariable(RevaRemoteTool):
 
         return f"Renamed {old_name} to {new_name} in {containing_function}"
 
-#TODO: This tool is not implemented yet
-#@register_tool
+@register_tool
 class RevaCrossReferenceTool(RevaRemoteTool):
     """
     An tool to retrieve cross references, to and from, addresses.
@@ -216,29 +217,53 @@ class RevaCrossReferenceTool(RevaRemoteTool):
 
         self.tool_functions = [
             self.get_references,
+            self.get_references_to,
+            self.get_references_from,
         ]
 
-    def get_references(self, address_or_symbol: str) -> Optional[Dict[str, List[str]]]:
+    def get_references(self, address_or_symbol: str) -> Dict[str, Union[str, List[str]]]:
         """
         Return a list of references to and from the given address or symbol.
         These might be calls from/to other functions, or data references from/to this address.
         """
-        from ..protocol import RevaGetReferences_pb2_grpc, RevaGetReferences_pb2
+        from ..protocol import RevaReferences_pb2_grpc, RevaReferences_pb2
 
-        stub = RevaGetReferences_pb2_grpc.RevaGetReferencesServiceStub(self.channel)
+        stub = RevaReferences_pb2_grpc.RevaReferenceServiceStub(self.channel)
 
-        request = RevaGetReferences_pb2.RevaGetReferencesRequest()
-        request.address_or_symbol = address_or_symbol
+        request = RevaReferences_pb2.RevaGetReferencesRequest()
+
+        address, symbol = self.resolve_to_address_and_symbol(address_or_symbol)
+        request.address = address
 
         try:
-            response: RevaGetReferences_pb2.RevaGetReferencesResponse = stub.GetReferences(request)
+            response: RevaReferences_pb2.RevaGetReferencesResponse = stub.get_references(request)
         except grpc.RpcError as e:
             raise RevaToolException(f"Failed to get references: {e}")
 
-        return {
-            "references_to": response.references_to,
-            "references_from": response.references_from,
+        result: Dict[str, Union[str, List[str]]] = {
+            "address": address,
+            "incoming_references": list(response.incoming_references),
+            "outgoing_references": list(response.outgoing_references),
         }
+
+        if symbol:
+            result["symbol"] = symbol
+
+        return result
+
+    def get_references_to(self, address_or_symbol: str) -> List[str]:
+        """
+        Return a list of references to the given address or symbol.
+        """
+        references = self.get_references(address_or_symbol)
+        return references.get("incoming_references", []) # type: ignore
+
+    def get_references_from(self, address_or_symbol: str) -> List[str]:
+        """
+        Return a list of references from the given address or symbol.
+        """
+        references = self.get_references(address_or_symbol)
+        return references.get("outgoing_references", []) # type: ignore
 
 @register_tool
 class RevaGetSymbols(RevaRemoteTool):
@@ -353,7 +378,11 @@ class RevaGetSymbols(RevaRemoteTool):
 
         request = RevaGetSymbols_pb2.RevaSymbolRequest()
         # TODO: This is not efficient, we are calling the same RPC two times
-        request.address, request.name = self.resolve_to_address_and_symbol(address_or_name)
+        address, name = self.resolve_to_address_and_symbol(address_or_name)
+        if address:
+            request.address = address
+        if name:
+            request.name = name
 
         self.logger.debug(f"Getting symbol {address_or_name} request: {request}")
         try:
@@ -415,7 +444,11 @@ class RevaSetSymbolName(RevaRemoteTool):
 
         request = RevaGetSymbols_pb2.RevaSetSymbolNameRequest()
         request.new_name = new_name
-        request.old_address, request.old_name = self.resolve_to_address_and_symbol(old_name_or_address)
+        old_address, old_name = self.resolve_to_address_and_symbol(old_name_or_address)
+        if old_name:
+            request.old_name = old_name
+        if old_address:
+            request.old_address = old_address
 
         try:
             response: RevaGetSymbols_pb2.RevaSetSymbolNameResponse = stub.SetSymbolName(request)
@@ -452,7 +485,12 @@ class RevaSetComment(RevaRemoteTool):
 
         request = RevaComment_pb2.RevaSetCommentRequest()
         request.comment = comment
-        request.address, request.symbol = self.resolve_to_address_and_symbol(address_or_symbol)
+        address, symbol = self.resolve_to_address_and_symbol(address_or_symbol)
+
+        if address:
+            request.address = address
+        if symbol:
+            request.symbol = symbol
 
         try:
             response: RevaComment_pb2.RevaSetCommentResponse = stub.SetComment(request)
@@ -501,6 +539,8 @@ class RevaData(RevaRemoteTool):
         """
         Return a list of defined data in the program.
         This is not all data, only the data that has been defined in the Ghidra database.
+
+        This function returns a list of dictionaries with the keys "address", "symbol", "type", "size", "incoming_references", and "outgoing_references".
         """
 
         from ..protocol import RevaData_pb2_grpc, RevaData_pb2
@@ -524,6 +564,8 @@ class RevaData(RevaRemoteTool):
     def get_data(self, address_or_symbol: str, size: Optional[int] = None) -> Dict[str, Union[str, List[str], int]]:
         """
         Return information about the data at the given address or with the given symbol.
+
+        This function returns a dictionary with the keys "address", "symbol", "type", "size", "data", "incoming_references", and "outgoing_references".
         """
         from ..protocol import RevaData_pb2_grpc, RevaData_pb2
         stub = RevaData_pb2_grpc.RevaDataServiceStub(self.channel)
@@ -551,7 +593,7 @@ class RevaGetCursor(RevaRemoteTool):
 
     def __init__(self, project: AssistantProject, llm: BaseLanguageModel) -> None:
         super().__init__(project, llm)
-        self.description = "Used for getting and setting the cursor"
+        self.description = "Used for getting and setting the cursor or when the user mentions 'this'"
 
         self.tool_functions = [
             self.get_cursor,
@@ -560,7 +602,12 @@ class RevaGetCursor(RevaRemoteTool):
     def get_cursor(self) -> Dict[str, Union[str, int]]:
         """
         Return the current location the user is looking at in the program.
-        Use this to find the current function, symbol or address.
+        Use this to find the current function, symbol or address. When the user mentions "this",
+        you should find the current location using this function.
+
+        This method returns a dictionary with the keys "address", "symbol", and "function".
+        Use other tools to gather context around this location. For example, decompile
+        the function to find the exact code at this location in the listing or decompilation.
         """
         from ..protocol import RevaGetCursor_pb2, RevaGetCursor_pb2_grpc
         stub = RevaGetCursor_pb2_grpc.RevaGetCursorStub(self.channel)

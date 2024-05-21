@@ -2,6 +2,7 @@ package reva.Handlers;
 import ghidra.program.model.listing.Function;
 import ghidra.program.model.symbol.Symbol;
 import ghidra.program.util.ProgramLocation;
+import ghidra.program.util.ProgramSelection;
 import io.grpc.stub.StreamObserver;
 import reva.RevaPlugin;
 import reva.Actions.RevaAction;
@@ -20,6 +21,7 @@ public class RevaGetCursor extends RevaGetCursorImplBase {
     public void getCursor(RevaGetCursorRequest request, StreamObserver<RevaGetCursorResponse> responseObserver) {
         RevaGetCursorResponse.Builder response = RevaGetCursorResponse.newBuilder();
         ProgramLocation location = this.plugin.getProgramLocation();
+        ProgramSelection selection = this.plugin.getProgramSelection();
 
         RevaAction action = new RevaAction.Builder()
             .setPlugin(this.plugin)

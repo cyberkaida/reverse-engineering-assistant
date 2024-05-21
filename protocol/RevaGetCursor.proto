@@ -14,4 +14,5 @@ message RevaGetCursorResponse {
     string address = 1;
     string symbol = 2;
     string function = 3;
+    string selection = 4;
 }

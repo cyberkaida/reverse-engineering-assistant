@@ -7,6 +7,7 @@ service RevaDecompilationService {
     rpc GetDecompilation(RevaGetDecompilationRequest) returns (RevaGetDecompilationResponse) {}
     rpc RenameFunctionVariable(RevaRenameFunctionVariableRequest) returns (RevaRenameFunctionVariableResponse) {}
     rpc GetFunctionList(RevaGetFunctionListRequest) returns (stream RevaGetFunctionListResponse) {}
+    rpc SetFunctionVariableDataType(RevaSetFunctionVariableDataTypeRequest) returns (RevaSetFunctionVariableDataTypeResponse) {}
 }
 
 message RevaGetDecompilationRequest {
@@ -44,4 +45,14 @@ message RevaGetFunctionListResponse {
     string entry_point = 3;
     repeated string incoming_calls = 4;
     repeated string outgoing_calls = 5;
+}
+
+
+message RevaSetFunctionVariableDataTypeRequest {
+    string address = 1;
+    string variable_name = 2;
+    string data_type = 3;
+}
+
+message RevaSetFunctionVariableDataTypeResponse {
 }

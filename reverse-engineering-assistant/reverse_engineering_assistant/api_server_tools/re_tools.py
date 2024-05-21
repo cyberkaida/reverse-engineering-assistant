@@ -185,6 +185,8 @@ class RevaRenameFunctionVariable(RevaRemoteTool):
         """
         Change the name of the variable with the name `old_name` in `containing_function` to `new_name`.
         If the thing you want to rename is not in a function, you should use rename symbol instead,
+
+        Use this to clean up the decompilation and make it more readable and easier for you to analyse.
         """
         from ..protocol import RevaGetDecompilation_pb2_grpc, RevaGetDecompilation_pb2
         stub = RevaGetDecompilation_pb2_grpc.RevaDecompilationServiceStub(self.channel)
@@ -204,6 +206,64 @@ class RevaRenameFunctionVariable(RevaRemoteTool):
             raise RevaToolException(f"Failed to rename variable: {e}")
 
         return f"Renamed {old_name} to {new_name} in {containing_function}"
+
+@register_tool
+class RevaRetypeFunctionVariable(RevaRemoteTool):
+    """
+    A tool for changing the type of variables used in functions
+    """
+
+    def __init__(self, project: AssistantProject, llm: BaseLanguageModel) -> None:
+        super().__init__(project, llm)
+        self.description = "Used for changing the type of variables used in functions"
+        self.tool_functions = [
+            self.retype_multiple_variables_in_function,
+            self.retype_variable_in_function,
+        ]
+
+    def retype_multiple_variables_in_function(self, new_types: Dict[str, str], containing_function: str) -> List[str]:
+        """
+        Change the types of multiple variables in the function `containing_function` to the new types specified in `new_types`.
+        `new_types` is a dictionary where the keys are the variable names and the values are the new types.
+
+        If there are many variables to retype in a function, use this. It is more efficient than calling retype_variable_in_function multiple times.
+        After calling this, you can confirm the changes by decompiling the function again.
+        If there is a failure, retrying the operation will not help.
+        """
+        outputs: List[str] = []
+        for variable_name, new_type in new_types.items():
+            outputs.append(self.retype_variable_in_function(variable_name, new_type, containing_function))
+        return outputs
+
+    def retype_variable_in_function(self, variable_name: str, new_type: str, containing_function: str):
+        """
+        Change the type of the variable with the name `variable_name` in `containing_function` to `new_type`.
+        `new_type` must be a string that can be passed to the "Set Data Type" dialog in Ghidra.
+        Something like `int`, `char`, `long`, `unsigned int`, `char[0x10]` or `char[16]`, or `int*` should work,
+        but you can use custom types from the program too.
+
+        Use this to clean up the decompilation and make it more readable and easier for you to analyse.
+
+        You can't define a _new_ data type here, only use existing ones.
+        """
+        from ..protocol import RevaGetDecompilation_pb2_grpc, RevaGetDecompilation_pb2
+        stub = RevaGetDecompilation_pb2_grpc.RevaDecompilationServiceStub(self.channel)
+
+        request = RevaGetDecompilation_pb2.RevaSetFunctionVariableDataTypeRequest()
+        request.data_type = new_type
+        request.variable_name = variable_name
+
+        address, symbol = self.resolve_to_address_and_symbol(containing_function)
+        if symbol is None:
+            raise RevaToolException(f"Could not find function {containing_function}")
+        request.address = address
+
+        try:
+            response: RevaGetDecompilation_pb2.RevaSetFunctionVariableDataTypeResponse = stub.SetFunctionVariableDataType(request)
+        except grpc.RpcError as e:
+            raise RevaToolException(f"Failed to retype variable: {e}")
+
+        return f"Retyped {variable_name} to {new_type} in {containing_function}"
 
 @register_tool
 class RevaCrossReferenceTool(RevaRemoteTool):

@@ -92,10 +92,9 @@ class RevaRemoteTool(RevaTool):
 
 
 @register_tool
-class RevaDecompilationIndex(RevaRemoteTool):
+class RevaDecompilation(RevaRemoteTool):
     """
-    An index of decompiled functions available to the
-    reverse engineering assistant.
+    A tool for interacting with the decompilation service.
     """
     index_name = "decompilation"
     description = "Used for retrieving decompiled functions"
@@ -103,12 +102,15 @@ class RevaDecompilationIndex(RevaRemoteTool):
 
     def __init__(self, project: AssistantProject, llm: BaseLanguageModel) -> None:
         super().__init__(project, llm)
-        self.description = "Used for retrieveing decompiled functions"
+        self.description = "Used for decompiling functions and interacting with the decompilation."
         self.tool_functions = [
             self.get_decompilation_for_function,
-            # TODO: Implement these functions
-            #self.get_defined_function_list_paginated,
-            #self.get_defined_function_count,
+            #self.rename_multiple_variables_in_function,
+            #self.rename_variable_in_function,
+            #self.retype_multiple_variables_in_function,
+            #self.retype_variable_in_function,
+            self.update_multiple_variables_in_function,
+            self.update_variable_in_function,
         ]
 
     def get_decompilation_for_function(self, function_name_or_address: str) -> Dict[str, str]:
@@ -149,22 +151,46 @@ class RevaDecompilationIndex(RevaRemoteTool):
             "outgoing_calls": response.outgoing_calls,
         }
 
-@register_tool
-class RevaRenameFunctionVariable(RevaRemoteTool):
-    """
-    A tool for renaming variables used in functions
-    """
+    def update_multiple_variables_in_function(self, updates: List[Dict[str, str]], containing_function: str) -> List[str]:
+        """
+        Update the names and types of multiple variables in the function `containing_function`.
+        `updates` is a list of dictionaries where each dictionary has the keys "old_name", "new_name", and "new_type".
 
-    description = "Used for renaming variables used in functions"
-    logger = logging.getLogger("reverse_engineering_assistant.RevaRenameFunctionVariable")
+        If there are many variables to update in a function, use this. It is more efficient than calling update_variable_in_function multiple times.
+        After calling this, you can confirm the changes by decompiling the function again.
+        If there is a failure, retrying the operation will not help.
 
-    def __init__(self, project: AssistantProject, llm: BaseLanguageModel | BaseChatModel) -> None:
-        super().__init__(project, llm)
-        self.description = "Used for renaming variables used in functions"
-        self.tool_functions = [
-            self.rename_multiple_variables_in_function,
-            self.rename_variable_in_function
-        ]
+        `new_type` must be a string that can be passed to the "Set Data Type" dialog in Ghidra.
+        Something like `int`, `char`, `long`, `unsigned int`, `char[0x10]` or `char[16]`, or `int*` should work,
+        but you can use custom types from the program too.
+
+        Use this to clean up the decompilation and make it more readable and easier for you to analyse.
+
+        You can't define a _new_ data type here, only use existing ones.
+        """
+        outputs: List[str] = []
+        for update in updates:
+            if "old_name" not in update or "new_name" not in update or "new_type" not in update:
+                raise RevaToolException("Each update must have the keys 'old_name', 'new_name', and 'new_type'")
+            outputs.append(self.update_variable_in_function(update["old_name"], update["new_name"], update["new_type"], containing_function))
+        return outputs
+
+    def update_variable_in_function(self, variable_name: str, new_name: str, new_type: str,  containing_function: str) -> str:
+        """
+        Update the name and type of a variable in a function.
+
+        `new_type` must be a string that can be passed to the "Set Data Type" dialog in Ghidra.
+        Something like `int`, `char`, `long`, `unsigned int`, `char[0x10]` or `char[16]`, or `int*` should work,
+        but you can use custom types from the program too.
+
+        Use this to clean up the decompilation and make it more readable and easier for you to analyse.
+
+        You can't define a _new_ data type here, only use existing ones.
+        """
+        self.rename_variable_in_function(new_name, variable_name, containing_function)
+        self.retype_variable_in_function(new_name, new_type, containing_function)
+        return f"Updated {variable_name} to {new_name} with type {new_type} in {containing_function}"
+
 
     def rename_multiple_variables_in_function(self, new_names: Dict[str, str], containing_function: str) -> List[str]:
         """
@@ -206,20 +232,6 @@ class RevaRenameFunctionVariable(RevaRemoteTool):
             raise RevaToolException(f"Failed to rename variable: {e}")
 
         return f"Renamed {old_name} to {new_name} in {containing_function}"
-
-@register_tool
-class RevaRetypeFunctionVariable(RevaRemoteTool):
-    """
-    A tool for changing the type of variables used in functions
-    """
-
-    def __init__(self, project: AssistantProject, llm: BaseLanguageModel) -> None:
-        super().__init__(project, llm)
-        self.description = "Used for changing the type of variables used in functions"
-        self.tool_functions = [
-            self.retype_multiple_variables_in_function,
-            self.retype_variable_in_function,
-        ]
 
     def retype_multiple_variables_in_function(self, new_types: Dict[str, str], containing_function: str) -> List[str]:
         """

@@ -1,0 +1,27 @@
+syntax = "proto3";
+package RevaProtocol;
+
+option java_package = "reva.protocol";
+
+service RevaBookmark {
+    rpc add_bookmark(RevaAddBookmarkRequest) returns (RevaAddBookmarkResponse) {}
+    rpc get_bookmarks(RevaGetBookmarksRequest) returns (stream RevaGetbookmarksResponse) {}
+}
+
+message RevaAddBookmarkRequest {
+    string category = 1;
+    string description = 2;
+    string address = 3;
+}
+
+message RevaAddBookmarkResponse {
+}
+
+message RevaGetBookmarksRequest {
+}
+
+message RevaGetbookmarksResponse {
+    string category = 1;
+    string description = 2;
+    string address = 3;
+}

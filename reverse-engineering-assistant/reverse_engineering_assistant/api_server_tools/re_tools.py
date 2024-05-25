@@ -139,12 +139,19 @@ class RevaDecompilation(RevaRemoteTool):
         except grpc.RpcError as e:
             raise RevaToolException(f"Failed to get decompilation: {e}")
 
+        cleaned_decompilation = ""
+        for line in response.decompilation.splitlines():
+            # Remove this warning, this scares the large language model
+            if line.strip().startswith("/* WARNING:") and line.strip().endswith("*/"):
+                continue
+            cleaned_decompilation += line + "\n"
+
         # Finally we can return the response
         return {
             "function": response.function,
             "function_signature": response.function_signature,
             "address": response.address,
-            "decompilation": response.decompilation,
+            "decompilation": cleaned_decompilation,
             "listing": response.listing,
             "variables": response.variables, #type: ignore # We can ignore this because it can be serialised to a dict
             "incoming_calls": response.incoming_calls,
@@ -544,9 +551,23 @@ class RevaSetComment(RevaRemoteTool):
 
         self.tool_functions = [
             self.set_comment,
+            self.set_multiple_comments,
         ]
 
-    def set_comment(self, comment: str, address_or_symbol: str) -> str:
+    def set_multiple_comments(self, comments: Dict[str, str]) -> List[str]:
+        """
+        Set multiple comments at the same time.
+        Keys are addresses or symbols, values are the comments to set at that location.
+        This is more efficient than calling set_comment multiple times.
+        """
+        outputs: List[str] = []
+
+        for address_or_symbol, comment in comments.items():
+            outputs.append(self.set_comment(address_or_symbol=address_or_symbol, comment=comment))
+
+        return outputs
+
+    def set_comment(self, address_or_symbol: str, comment: str) -> str:
         """
         Set the comment at the given address, function or symbol to `comment`.
         Use this when you want to add an explanation or note to a specific part
@@ -693,3 +714,53 @@ class RevaGetCursor(RevaRemoteTool):
             "symbol": response.symbol,
             "function": response.function,
         }
+
+@register_tool
+class RevaBookmarks(RevaRemoteTool):
+
+    def __init__(self, project: AssistantProject, llm: BaseLanguageModel) -> None:
+        super().__init__(project, llm)
+        self.description = "Used for managing bookmarks in the program"
+
+        self.tool_functions = [
+            self.get_bookmarks,
+            self.add_bookmark,
+        ]
+
+    def get_bookmarks(self) -> List[Dict[str, str]]:
+        """
+        Return a list of Ghidra bookmarks in the program.
+        Use this to keep track of important locations in the program the user
+        has marked.
+        """
+        from ..protocol import RevaBookmark_pb2, RevaBookmark_pb2_grpc
+        stub = RevaBookmark_pb2_grpc.RevaBookmarkStub(self.channel)
+
+        request = RevaBookmark_pb2.RevaGetBookmarksRequest()
+
+        bookmarks: List[Dict[str, str]] = []
+        for bookmark in stub.get_bookmarks(request):
+            bookmarks.append({
+                "address": bookmark.address,
+                "category": bookmark.category,
+                "description": bookmark.description,
+            })
+        return bookmarks
+
+    def add_bookmark(self, address_or_symbol: str, category: str, description: str) -> str:
+        """
+        Add a Ghidra bookmark at the given address or symbol with the given category and description.
+        If the category does not exist, it will be created. Use a category to group bookmarks together.
+        Make sure your category is descriptive and useful to the user.
+        """
+        from ..protocol import RevaBookmark_pb2, RevaBookmark_pb2_grpc
+        stub = RevaBookmark_pb2_grpc.RevaBookmarkStub(self.channel)
+
+        request = RevaBookmark_pb2.RevaAddBookmarkRequest()
+        request.category = f"ReVa.{category}"
+        request.description = description
+        request.address, _ = self.resolve_to_address_and_symbol(address_or_symbol)
+
+        response = stub.add_bookmark(request)
+
+        return "Added bookmark successfully"

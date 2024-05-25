@@ -250,6 +250,7 @@ public class RevaPlugin extends ProgramPlugin {
         server.addService(new RevaHeartbeat(this));
         server.addService(new RevaData(this));
         server.addService(new RevaReferences(this));
+        server.addService(new RevaBookmarks(this));
         serverHandle = server.build();
 
         options = tool.getOptions("ReVa");
@@ -281,6 +282,7 @@ public class RevaPlugin extends ProgramPlugin {
         installRevaActionTable();
         installActionRenameSymbol();
         installActionRenameFunctionVariable();
+        installActionRetypeFunctionVariable();
 
         startInferenceServer();
         saveConnectionInfo();
@@ -353,7 +355,7 @@ public class RevaPlugin extends ProgramPlugin {
 
     void installMagicRECommand() {
         new ActionBuilder("Examine here", "ReVa")
-                .menuPath("ReVa", "Examine here")
+                .menuPath("ReVa", "Analyse current location")
                 .onAction((event) -> {
                     // Here we'll grab the current location and ask ReVa to
                     // RE the program from here
@@ -368,9 +370,7 @@ public class RevaPlugin extends ProgramPlugin {
 
                     builder.setMessage(
                             String.format(
-                                    "Please examine the program in detail from the `%s` function. Set important comments, remame va\n"
-                                            + //
-                                            "riables and functions as you go.",
+                                    "Examine the program at the address `%s`.",
                                     currentLocation.getAddress().toString()));
                     builder.setProgramName(currentProgram.getName());
                     builder.setProject(tool.getProject().getName());
@@ -402,7 +402,6 @@ public class RevaPlugin extends ProgramPlugin {
     }
 
     private void installActionRenameSymbol() {
-        tool = this.tool;
         new ActionBuilder("ReVa Rename", getName())
                 .description("Rename the selection")
                 .popupMenuPath("ReVa", "Rename")
@@ -423,8 +422,8 @@ public class RevaPlugin extends ProgramPlugin {
 
                     builder.setMessage(
                             String.format(
-                                    "Please rename the symbol `%s` to something more meaningful. Remember to use your tools to gather context if you are not sure!",
-                                    symbol.getName()));
+                                    "Please examnine `%s` in context and rename the symbol `%s` to something more meaningful.",
+                                    symbol.getName(),symbol.getName()));
                     builder.setProgramName(currentProgram.getName());
                     builder.setProject(tool.getProject().getName());
                     StreamObserver<RevaChatMessageResponse> responseStream = new StreamObserver<RevaChat.RevaChatMessageResponse>() {
@@ -458,7 +457,6 @@ public class RevaPlugin extends ProgramPlugin {
      * @param tool
      */
     private void installActionRenameFunctionVariable() {
-        tool = this.tool;
         new ActionBuilder("ReVa Rename", getName())
                 .description("Rename the selection")
                 .popupMenuPath("ReVa", "Rename")
@@ -482,7 +480,63 @@ public class RevaPlugin extends ProgramPlugin {
 
                     builder.setMessage(
                             String.format(
-                                    "Please rename the variable `%s` in the function `%s` to something more meaningful. Remember to use your tools to gather context if you are not sure!",
+                                    "Examine the context and rename the variable `%s` in the function `%s` to something more meaningful.",
+                                    highVariable.getName(),
+                                    highVariable.getHighFunction().getFunction().getName(true)));
+
+                    builder.setProgramName(currentProgram.getName());
+                    builder.setProject(tool.getProject().getName());
+                    StreamObserver<RevaChatMessageResponse> responseStream = new StreamObserver<RevaChat.RevaChatMessageResponse>() {
+                        @Override
+                        public void onNext(RevaChatMessageResponse value) {
+                            Msg.info(this, "ReVa response: " + value.getMessage());
+                        }
+
+                        @Override
+                        public void onError(Throwable t) {
+                            Msg.error(this, "ReVa error: " + t.getMessage());
+                        }
+
+                        @Override
+                        public void onCompleted() {
+                            Msg.info(this, "ReVa completed.");
+                        }
+                    };
+
+                    chatStub.chat(builder.build(), responseStream);
+                })
+                .enabledWhen(context -> {
+                    return context instanceof DecompilerActionContext;
+                })
+                .buildAndInstall(tool);
+    }
+
+    private void installActionRetypeFunctionVariable() {
+        tool = this.tool;
+        new ActionBuilder("ReVa ReType", getName())
+                .description("Retype the selection")
+                .popupMenuPath("ReVa", "Retype")
+                .popupMenuGroup("ReVa")
+                .onAction(context -> {
+                    RevaChatServiceStub chatStub = reva.protocol.RevaChatServiceGrpc.newStub(this.inferenceChannel);
+                    RevaChatMessage.Builder builder = RevaChatMessage.newBuilder();
+
+                    DecompilerActionContext decompilerContext = (DecompilerActionContext) context;
+                    DecompilerPanel panel = decompilerContext.getDecompilerPanel();
+
+                    ProgramLocation location = panel.getCurrentLocation();
+                    var token = panel.getTokenAtCursor();
+
+                    Msg.info(this, "Renaming " + token.getText());
+                    HighVariable highVariable = token.getHighVariable();
+                    if (highVariable == null) {
+                        Msg.error(this, "No high variable found, we can't rename this yet.");
+                        return;
+                    }
+
+                    builder.setMessage(
+                            String.format(
+                                    "Examine the context and retype the variable `%s` in the function `%s`.",
                                     highVariable.getName(),
                                     highVariable.getHighFunction().getFunction().getName(true)));
 

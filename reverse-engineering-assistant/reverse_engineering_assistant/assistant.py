@@ -12,6 +12,8 @@ import tempfile
 from typing import Any, Callable, Dict, List, Optional, Sequence, Type, Union
 from uuid import UUID
 
+from pydantic import ValidationError
+
 from langchain.chains.base import Chain
 from langchain.agents.agent import Agent, AgentExecutor
 from langchain.agents.conversational_chat.base import ConversationalChatAgent
@@ -395,6 +397,9 @@ class ReverseEngineeringAssistant(object):
             #import pdb; pdb.set_trace()
 
             return str(answer["output"])
+        except ValidationError as e:
+            self.logger.exception(f"Failed to validate response from LLM: {e}")
+            return "Failed to validate response from query engine"
         except json.JSONDecodeError as e:
             self.logger.exception(f"Failed to parse JSON response from query engine: {e.doc}")
             return "Failed to parse JSON response from query engine"
@@ -409,7 +414,9 @@ class ReverseEngineeringAssistant(object):
                 answer = self.llm.invoke(
                     f"You are ReVa, the reverse engineering assisstant. During your execution you threw an exception. Your logs are located in the file {self.log_path} Can you explain the error: {e}\n\n{traceback.format_exc()}"
                 )
-                return f"""## **ReVa could not complete your request.**
+                if isinstance(answer, dict):
+                    answer = answer["output"]
+                analysis = f"""## **ReVa could not complete your request.**
 Logs have been saved to `{self.log_path}`.
 > She has examined the exception:
 ```
@@ -417,8 +424,14 @@ Logs have been saved to `{self.log_path}`.
 {traceback.format_exc()}
 ```
 ## ReVa's debugging notes:
- {str(answer.content)}
+{str(answer)}
                 """
+                date = datetime.datetime.now().strftime("%Y-%m-%d-%H%M%S")
+                crash_path = self.project.project_path / "crash"
+                crash_path.mkdir(exist_ok=True)
+                crash_dump_path = crash_path / f"reva-crash-{date}.log.md"
+                crash_dump_path.write_text(analysis)
+                return analysis
             except Exception as e:
                 self.logger.exception(f"Failed to query engine: {e}")
                 return f"Failed to query engine... Try again?\n```{traceback.format_exc()}```\nLogs have been saved to `{self.log_path}`"

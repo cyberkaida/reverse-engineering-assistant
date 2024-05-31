@@ -11,6 +11,9 @@ from functools import cache
 _channel: Optional[Channel] = None
 @cache
 def get_channel() -> Channel:
+    """
+    Get the global gRPC channel to the extension.
+    """
     global _channel
     if not _channel:
         raise ValueError("Channel not set")

@@ -157,3 +157,8 @@ class RevaChat(RevaChatServiceServicer):
                     done = True
                 yield response
             t.join()
+
+    def shutdown(self, request, context):
+        self.logger.warning("Shutting down")
+        import sys
+        sys.exit(0)

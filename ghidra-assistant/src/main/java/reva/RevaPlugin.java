@@ -1,5 +1,8 @@
 package reva;
 
+import ghidra.framework.cmd.BackgroundCommand;
+import ghidra.framework.model.DomainFile;
+import ghidra.framework.model.DomainObject;
 import ghidra.framework.options.OptionType;
 import ghidra.framework.options.Options;
 import ghidra.framework.plugintool.PluginInfo;
@@ -20,6 +23,7 @@ import ghidra.app.decompiler.component.DecompilerPanel;
 import ghidra.app.plugin.PluginCategoryNames;
 import ghidra.util.Msg;
 import ghidra.util.task.CancelledListener;
+import ghidra.util.task.Task;
 import ghidra.util.task.TaskBuilder;
 import ghidra.util.task.TaskMonitor;
 import ghidra.util.task.TaskMonitorAdapter;
@@ -33,6 +37,9 @@ import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.net.ServerSocket;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.Semaphore;
 
 import docking.action.builder.ActionBuilder;
 import reva.Actions.RevaAction;
@@ -41,6 +48,8 @@ import reva.Handlers.*;
 import reva.protocol.RevaChat;
 import reva.protocol.RevaChat.RevaChatMessage;
 import reva.protocol.RevaChat.RevaChatMessageResponse;
+import reva.protocol.RevaChat.RevaChatShutdown;
+import reva.protocol.RevaChat.RevaChatShutdownResponse;
 import reva.protocol.RevaChatServiceGrpc.RevaChatServiceStub;
 import reva.protocol.RevaVariableOuterClass.RevaVariable;
 
@@ -50,9 +59,11 @@ import reva.protocol.RevaVariableOuterClass.RevaVariable;
         shortDescription = "Reverse Engineering Assistant",
         description = "An AI companion for your Ghidra project",
         servicesRequired = {},
-        servicesProvided = {}
+        servicesProvided = {
+            RevaChatService.class,
+        }
     )
-public class RevaPlugin extends ProgramPlugin {
+public class RevaPlugin extends ProgramPlugin implements RevaChatService {
     TaskMonitor serviceMonitor;
     Server serverHandle;
     RevaActionTableComponentProvider actionTableProvider;
@@ -124,6 +135,27 @@ public class RevaPlugin extends ProgramPlugin {
         // Stop the service
         Msg.info(this, "Stopping ReVa service for " + program.getName());
         serviceMonitor.cancel();
+
+        RevaChatServiceStub chatStub = reva.protocol.RevaChatServiceGrpc.newStub(this.inferenceChannel);
+        RevaChatShutdown shutdown = RevaChatShutdown.newBuilder().build();
+        StreamObserver<RevaChatShutdownResponse> responseStream = new StreamObserver<RevaChat.RevaChatShutdownResponse>() {
+            @Override
+            public void onNext(RevaChatShutdownResponse value) {
+                Msg.info(this, "ReVa shutdown");
+            }
+
+            @Override
+            public void onError(Throwable t) {
+                Msg.info(this, "ReVa shutdown");
+            }
+
+            @Override
+            public void onCompleted() {
+                Msg.info(this, "ReVa shutdown.");
+            }
+        };
+
+        chatStub.shutdown(shutdown, responseStream);
     }
 
     public String inferenceHostname;
@@ -357,45 +389,17 @@ public class RevaPlugin extends ProgramPlugin {
         new ActionBuilder("Examine here", "ReVa")
                 .menuPath("ReVa", "Analyse current location")
                 .onAction((event) -> {
-                    // Here we'll grab the current location and ask ReVa to
-                    // RE the program from here
-                    RevaChatServiceStub chatStub = reva.protocol.RevaChatServiceGrpc.newStub(this.inferenceChannel);
-                    RevaChatMessage.Builder builder = RevaChatMessage.newBuilder();
-
                     // Create a monitor to display progress
                     TaskMonitor monitor = new TaskMonitorAdapter();
                     monitor.setIndeterminate(true);
                     monitor.setMessage("ReVa is examining the program...");
                     monitor.setShowProgressValue(true);
 
-                    builder.setMessage(
+                    revaChat(
                             String.format(
                                     "Examine the program at the address `%s`.",
                                     currentLocation.getAddress().toString()));
-                    builder.setProgramName(currentProgram.getName());
-                    builder.setProject(tool.getProject().getName());
-                    StreamObserver<RevaChatMessageResponse> responseStream = new StreamObserver<RevaChat.RevaChatMessageResponse>() {
-                        @Override
-                        public void onNext(RevaChatMessageResponse value) {
-                            Msg.info(this, "ReVa response: " + value.getMessage());
-                            monitor.setMessage(value.getMessage());
-                            monitor.incrementProgress();
-                        }
 
-                        @Override
-                        public void onError(Throwable t) {
-                            Msg.error(this, "ReVa error: " + t.getMessage());
-                            monitor.cancel();
-                        }
-
-                        @Override
-                        public void onCompleted() {
-                            Msg.info(this, "ReVa completed.");
-                            monitor.setMessage("ReVa completed.");
-                        }
-                    };
-
-                    chatStub.chat(builder.build(), responseStream);
                 })
                 .enabledWhen((context) -> this.inferenceChannel != null)
                 .buildAndInstall(tool);
@@ -407,43 +411,35 @@ public class RevaPlugin extends ProgramPlugin {
                 .popupMenuPath("ReVa", "Rename")
                 .popupMenuGroup("ReVa")
                 .onAction(context -> {
-                    RevaChatServiceStub chatStub = reva.protocol.RevaChatServiceGrpc.newStub(this.inferenceChannel);
-                    RevaChatMessage.Builder builder = RevaChatMessage.newBuilder();
-
-                    ListingActionContext listingContext = (ListingActionContext) context;
-
-                    ProgramLocation location = listingContext.getLocation();
-                    Symbol symbol = listingContext.getProgram().getSymbolTable()
-                            .getPrimarySymbol(location.getAddress());
-                    if (symbol == null) {
-                        Msg.error(this, "No symbol found, we can't rename this yet.");
-                        return;
-                    }
-
-                    builder.setMessage(
-                            String.format(
-                                    "Please examnine `%s` in context and rename the symbol `%s` to something more meaningful.",
-                                    symbol.getName(),symbol.getName()));
-                    builder.setProgramName(currentProgram.getName());
-                    builder.setProject(tool.getProject().getName());
-                    StreamObserver<RevaChatMessageResponse> responseStream = new StreamObserver<RevaChat.RevaChatMessageResponse>() {
+                    TaskMonitor serviceMonitor = new TaskMonitorAdapter();
+                    serviceMonitor.initialize(100, "ReVa is examining the program...");
+                    BackgroundCommand task = new BackgroundCommand() {
                         @Override
-                        public void onNext(RevaChatMessageResponse value) {
-                            Msg.info(this, "ReVa response: " + value.getMessage());
-                        }
+                        public boolean applyTo(DomainObject domainObject, TaskMonitor monitor) {
+                            if (domainObject instanceof Program) {
+                                Program program = (Program) domainObject;
+                                // We need to get the current location
+                                // (which is the address of the symbol we want to rename
+                                ProgramLocation location = currentLocation;
+                                Symbol symbol = program.getSymbolTable().getPrimarySymbol(location.getAddress());
+                                if (symbol == null) {
+                                    Msg.error(this, "No symbol found, we can't rename this yet.");
+                                    return false;
+                                }
 
-                        @Override
-                        public void onError(Throwable t) {
-                            Msg.error(this, "ReVa error: " + t.getMessage());
-                        }
-
-                        @Override
-                        public void onCompleted() {
-                            Msg.info(this, "ReVa completed.");
+                                revaChat(
+                                        String.format(
+                                                "Please examine `%s` in context and rename the symbol `%s` to something more meaningful.",
+                                                symbol.getName(),symbol.getName()));
+                                return true;
+                            }
+                            monitor.setProgress(100);
+                            return false;
                         }
                     };
 
-                    chatStub.chat(builder.build(), responseStream);
+                    //this.tool.executeBackgroundCommand(task, currentProgram);
+                    this.tool.scheduleFollowOnCommand(task, currentProgram);
                 })
                 .enabledWhen(context -> {
                     return context instanceof ListingActionContext;
@@ -462,9 +458,6 @@ public class RevaPlugin extends ProgramPlugin {
                 .popupMenuPath("ReVa", "Rename")
                 .popupMenuGroup("ReVa")
                 .onAction(context -> {
-                    RevaChatServiceStub chatStub = reva.protocol.RevaChatServiceGrpc.newStub(this.inferenceChannel);
-                    RevaChatMessage.Builder builder = RevaChatMessage.newBuilder();
-
                     DecompilerActionContext decompilerContext = (DecompilerActionContext) context;
                     DecompilerPanel panel = decompilerContext.getDecompilerPanel();
 
@@ -478,32 +471,13 @@ public class RevaPlugin extends ProgramPlugin {
                         return;
                     }
 
-                    builder.setMessage(
+                    revaChat(
                             String.format(
                                     "Examine the context and rename the variable `%s` in the function `%s` to something more meaningful.",
                                     highVariable.getName(),
                                     highVariable.getHighFunction().getFunction().getName(true)));
 
-                    builder.setProgramName(currentProgram.getName());
-                    builder.setProject(tool.getProject().getName());
-                    StreamObserver<RevaChatMessageResponse> responseStream = new StreamObserver<RevaChat.RevaChatMessageResponse>() {
-                        @Override
-                        public void onNext(RevaChatMessageResponse value) {
-                            Msg.info(this, "ReVa response: " + value.getMessage());
-                        }
 
-                        @Override
-                        public void onError(Throwable t) {
-                            Msg.error(this, "ReVa error: " + t.getMessage());
-                        }
-
-                        @Override
-                        public void onCompleted() {
-                            Msg.info(this, "ReVa completed.");
-                        }
-                    };
-
-                    chatStub.chat(builder.build(), responseStream);
                 })
                 .enabledWhen(context -> {
                     return context instanceof DecompilerActionContext;
@@ -512,14 +486,11 @@ public class RevaPlugin extends ProgramPlugin {
     }
 
     private void installActionRetypeFunctionVariable() {
-        tool = this.tool;
         new ActionBuilder("ReVa ReType", getName())
                 .description("Retype the selection")
                 .popupMenuPath("ReVa", "Retype")
                 .popupMenuGroup("ReVa")
                 .onAction(context -> {
-                    RevaChatServiceStub chatStub = reva.protocol.RevaChatServiceGrpc.newStub(this.inferenceChannel);
-                    RevaChatMessage.Builder builder = RevaChatMessage.newBuilder();
 
                     DecompilerActionContext decompilerContext = (DecompilerActionContext) context;
                     DecompilerPanel panel = decompilerContext.getDecompilerPanel();
@@ -534,32 +505,10 @@ public class RevaPlugin extends ProgramPlugin {
                         return;
                     }
 
-                    builder.setMessage(
-                            String.format(
-                                    "Examine the context and retype the variable `%s` in the function `%s`.",
-                                    highVariable.getName(),
-                                    highVariable.getHighFunction().getFunction().getName(true)));
-
-                    builder.setProgramName(currentProgram.getName());
-                    builder.setProject(tool.getProject().getName());
-                    StreamObserver<RevaChatMessageResponse> responseStream = new StreamObserver<RevaChat.RevaChatMessageResponse>() {
-                        @Override
-                        public void onNext(RevaChatMessageResponse value) {
-                            Msg.info(this, "ReVa response: " + value.getMessage());
-                        }
-
-                        @Override
-                        public void onError(Throwable t) {
-                            Msg.error(this, "ReVa error: " + t.getMessage());
-                        }
-
-                        @Override
-                        public void onCompleted() {
-                            Msg.info(this, "ReVa completed.");
-                        }
-                    };
-
-                    chatStub.chat(builder.build(), responseStream);
+                    this.revaChat(String.format(
+                        "Examine the context and retype the variable `%s` in the function `%s`.",
+                        highVariable.getName(),
+                        highVariable.getHighFunction().getFunction().getName(true)));
                 })
                 .enabledWhen(context -> {
                     return context instanceof DecompilerActionContext;
@@ -602,4 +551,64 @@ public class RevaPlugin extends ProgramPlugin {
     public boolean revaFollowEnabled() {
         return options.getBoolean("Follow ReVa", false);
     }
+
+    @Override
+    public String revaChat(String message) {
+        this.blockUntilConnected();
+
+        RevaChatServiceStub chatStub = reva.protocol.RevaChatServiceGrpc.newStub(this.inferenceChannel);
+        RevaChatMessage.Builder builder = RevaChatMessage.newBuilder();
+
+        builder.setMessage(message);
+        builder.setProgramName(currentProgram.getName());
+        builder.setProject(tool.getProject().getName());
+
+        Semaphore semaphore = new Semaphore(0);
+        List<String> responses = new ArrayList<>();
+
+        StreamObserver<RevaChatMessageResponse> responseStream = new StreamObserver<RevaChat.RevaChatMessageResponse>() {
+            @Override
+            public void onNext(RevaChatMessageResponse value) {
+                Msg.info(this, "ReVa response: " + value.getMessage());
+                responses.add(value.getMessage());
+            }
+
+            @Override
+            public void onError(Throwable t) {
+                Msg.error(this, "ReVa error: " + t.getMessage());
+                semaphore.release();
+            }
+
+            @Override
+            public void onCompleted() {
+                Msg.info(this, "ReVa completed.");
+                semaphore.release();
+            }
+        };
+
+        chatStub.chat(builder.build(), responseStream);
+
+        try {
+            semaphore.acquire();
+            int lastIndex = responses.size() - 1;
+            if (lastIndex >= 0) {
+                return responses.get(lastIndex);
+            }
+        } catch (InterruptedException e) {
+            Msg.error(this, "Error waiting for ReVa chat: " + e.getMessage());
+        }
+        return "No response from ReVa";
+    }
+
+    @Override
+    public void blockUntilConnected() {
+        while (this.inferenceChannel == null) {
+            try {
+                Thread.sleep(500);
+            } catch (InterruptedException e) {
+                Msg.error(this, "Error waiting for connection: " + e.getMessage());
+            }
+        }
+    }
+
 }

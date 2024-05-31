@@ -10,6 +10,8 @@ service RevaChatService {
     rpc chatResponseStream(RevaChatMessage) returns (stream RevaChatMessageResponse) {}
     // Multi turn chat with history and chain of thought included
     rpc chatStream(stream RevaChatMessage) returns (stream RevaChatMessageResponse) {}
+    // Shutdown the chat service
+    rpc shutdown(RevaChatShutdown) returns (RevaChatShutdownResponse) {}
 }
 
 message RevaChatMessage {
@@ -28,4 +30,10 @@ message RevaChatMessageResponse {
     string thought = 2;
     // A conclusion from ReVa, derived from thoughts
     string message = 3;
+}
+
+message RevaChatShutdown {
+}
+
+message RevaChatShutdownResponse {
 }

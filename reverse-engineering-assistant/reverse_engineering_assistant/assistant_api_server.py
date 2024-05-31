@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 
 """
-Here we start the gRPC server.
+Here we start the gRPC server. This part is started by the Ghidra
+extension.
 """
 
 from ast import parse
@@ -23,6 +24,9 @@ from .protocol import RevaHandshake_pb2_grpc, RevaHandshake_pb2
 from .protocol import RevaChat_pb2_grpc
 from .protocol import RevaHeartbeat_pb2_grpc, RevaHeartbeat_pb2
 
+from langchain_core.language_models.base import BaseLanguageModel
+from langchain_core.language_models.chat_models import BaseChatModel
+
 from .api_server_tools.llm_tools import RevaChat
 from .api_server_tools.connection import get_channel, connect_to_extension
 
@@ -36,14 +40,13 @@ import os
 import logging
 # Get the appropriate temp directory depending on the OS
 temp_dir = os.getenv('TEMP') if os.name == 'nt' else '/tmp'
+assert temp_dir is not None, "Could not find a temp directory. Please file a bug report."
 log_file = os.path.join(temp_dir, 'reva-chat.log')
 logging.basicConfig(
     filename=log_file, level=logging.DEBUG,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
 )
 logger = logging.getLogger("reva-server")
-
-
 
 import socket
 def get_unused_port() -> int:
@@ -125,8 +128,8 @@ def main():
     openai_group.add_argument('--openai-api-key', type=str, help="The OpenAI API key")
 
     ollama_group = parser.add_argument_group("Ollama")
-    ollama_group.add_argument('--ollama-model', type=str, help="The Ollama model to use. Must be pulled into ollama.")
-    ollama_group.add_argument('--ollama-server-url', type=str, help="The Ollama server URL")
+    ollama_group.add_argument('--ollama-model', default='llama3', type=str, help="The Ollama model to use. Must be pulled into ollama.")
+    ollama_group.add_argument('--ollama-server-url', default='http://127.0.0.1:11434', type=str, help="The Ollama server URL")
 
     args = parser.parse_args()
 

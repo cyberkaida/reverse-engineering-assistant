@@ -4,14 +4,21 @@ import io.grpc.Status;
 
 import com.google.protobuf.ByteString;
 
+import ghidra.app.services.DataTypeQueryService;
 import ghidra.program.model.address.Address;
+import ghidra.program.model.data.DataType;
+import ghidra.program.model.data.InvalidDataTypeException;
 import ghidra.program.model.listing.Data;
 import ghidra.program.model.listing.Program;
 import ghidra.program.model.mem.MemoryAccessException;
 import ghidra.program.model.symbol.Reference;
 import ghidra.program.model.symbol.Symbol;
 import ghidra.program.model.symbol.SymbolIterator;
+import ghidra.program.model.util.CodeUnitInsertionException;
 import ghidra.util.Msg;
+import ghidra.util.data.DataTypeParser;
+import ghidra.util.data.DataTypeParser.AllowedDataTypes;
+import ghidra.util.exception.CancelledException;
 import io.grpc.stub.StreamObserver;
 import reva.RevaPlugin;
 import reva.Actions.RevaAction;
@@ -19,6 +26,8 @@ import reva.protocol.RevaData.RevaDataListRequest;
 import reva.protocol.RevaData.RevaDataListResponse;
 import reva.protocol.RevaData.RevaGetDataAtAddressRequest;
 import reva.protocol.RevaData.RevaGetDataAtAddressResponse;
+import reva.protocol.RevaData.RevaSetGlobalDataTypeRequest;
+import reva.protocol.RevaData.RevaSetGlobalDataTypeResponse;
 import reva.protocol.RevaData.RevaStringListRequest;
 import reva.protocol.RevaData.RevaStringListResponse;
 import reva.protocol.RevaDataServiceGrpc.RevaDataServiceImplBase;
@@ -63,7 +72,7 @@ public class RevaData extends RevaDataServiceImplBase {
         RevaAction action = new RevaAction.Builder()
                 .setPlugin(this.plugin)
                 .setLocation(requestedAddress)
-                .setDescription("Get data at " + address.toString())
+                .setDescription(String.format("Get data at %s - %d bytes", address.toString(), request.getSize()))
                 .setName("Get Data")
                 .setOnAccepted(() -> {
                     response.setAddress(requestedAddress.toString());
@@ -94,7 +103,16 @@ public class RevaData extends RevaDataServiceImplBase {
                         try {
                             if (response.getData() == null) {
                                 // If we didn't get the data above
-                                response.setData(ByteString.copyFrom(data.getBytes()));
+                                byte b[] = data.getBytes();
+                                if (b == null) {
+                                    // If the data has no bytes, let's try to get between this and the next thing
+                                    Data nextData = currentProgram.getListing().getDataAfter(data.getMaxAddress());
+                                    int size = (int)nextData.getMinAddress().subtract(data.getMinAddress());
+                                    Msg.info(this, String.format("Reading %d bytes from %s", size, data.getMinAddress()));
+                                    b = new byte[size];
+                                    currentProgram.getMemory().getBytes(data.getMinAddress(), b);
+                                }
+                                response.setData(ByteString.copyFrom(b));
                             }
                         } catch (MemoryAccessException e) {
                             Msg.error(this, "Error reading memory at " + requestedAddress.toString());
@@ -213,5 +231,62 @@ public class RevaData extends RevaDataServiceImplBase {
 
         responseObserver.onCompleted();
     }
+
+    @Override
+    public void setGlobalDataType(RevaSetGlobalDataTypeRequest request,
+            StreamObserver<RevaSetGlobalDataTypeResponse> responseObserver) {
+        Program currentProgram = this.plugin.getCurrentProgram();
+        RevaSetGlobalDataTypeResponse.Builder response = RevaSetGlobalDataTypeResponse.newBuilder();
+        Address address = currentProgram.getAddressFactory().getAddress(request.getAddress());
+        DataTypeQueryService dataTypeQueryService = this.plugin.getTool().getService(DataTypeQueryService.class);
+        DataTypeParser dataTypeParser = new DataTypeParser(dataTypeQueryService, AllowedDataTypes.STRINGS_AND_FIXED_LENGTH);
+
+        RevaAction action = new RevaAction.Builder()
+                .setPlugin(this.plugin)
+                .setDescription(String.format("Set global data type to %s", request.getDataType()))
+                .setName("Set Global Data Type")
+                .setLocation(address)
+                .setOnAccepted(() -> {
+                    // First get the new data type
+                    DataType dataType;
+                    try {
+                        dataType = dataTypeParser.parse(request.getDataType());
+                    } catch (InvalidDataTypeException | CancelledException e) {
+                        String error = "Failed to parse data type: " + e.getMessage();
+                        Status status = Status.INVALID_ARGUMENT.withDescription(error);
+                        responseObserver.onError(status.asRuntimeException());
+                        return;
+                    }
+
+                    int transactionId = currentProgram.startTransaction("Set Global Data Type");
+                    Data data = currentProgram.getListing().getDataAt(address);
+                    if (data != null) {
+                        currentProgram.getListing().clearCodeUnits(data.getMinAddress(), data.getMaxAddress(), false);
+                    }
+
+
+                    // We'll create the data
+                    try {
+                        data = currentProgram.getListing().createData(address, dataType);
+                        currentProgram.endTransaction(transactionId, true);
+                        responseObserver.onNext(response.build());
+                    } catch (CodeUnitInsertionException e) {
+                        currentProgram.endTransaction(transactionId, false);
+                        String error = "Failed to create data: " + e.getMessage();
+                        Status status = Status.INTERNAL.withDescription(error);
+                        responseObserver.onError(status.asRuntimeException());
+                    }
+                    responseObserver.onCompleted();
+                })
+                .setOnRejected(() -> {
+                    Status status = Status.CANCELLED.withDescription("User rejected the action");
+                    responseObserver.onError(status.asRuntimeException());
+                })
+                .build();
+        plugin.addAction(action);
+    }
+
+
+
 
 }

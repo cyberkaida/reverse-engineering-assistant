@@ -40,8 +40,8 @@ def get_llm_ollama(base_url: Optional[str] = None, model: str = "llama3") -> Bas
     logger.info(f"Loading Ollama - {model} from {base_url}")
 
     llm = Ollama(
-            model=model,
-            base_url=base_url,
+        model=model,
+        base_url=base_url,
     )
 
     return llm

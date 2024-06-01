@@ -23,10 +23,9 @@ from langchain_core.callbacks.base import BaseCallbackHandler, BaseCallbackManag
 from langchain_core.language_models.base import BaseLanguageModel
 
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain.memory import ConversationTokenBufferMemory, ChatMessageHistory, ConversationBufferMemory
+from langchain.memory import ConversationTokenBufferMemory, ConversationBufferMemory
 from langchain.memory.chat_memory import BaseMemory
-from langchain_community.chat_message_histories import SQLChatMessageHistory
-from langchain.tools.base import BaseTool, StructuredTool, Tool
+from langchain_community.chat_message_histories import ChatMessageHistory, SQLChatMessageHistory
 from prompt_toolkit import PromptSession
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
@@ -42,9 +41,11 @@ from langchain_core.messages import (
 )
 
 from .documents import AssistantDocument, CrossReferenceDocument, DecompiledFunctionDocument
-from .model import ModelType, get_model
+from .model import ModelType, get_model, RevaModel
 from .tool import AssistantProject
 from .reva_exceptions import RevaToolException
+from langchain_core.tools import BaseTool, StructuredTool, Tool
+
 console = Console(record=True)
 
 logger = logging.getLogger('reverse_engineering_assistant')
@@ -79,7 +80,7 @@ class RevaTool(ABC):
     """
     project: AssistantProject
 
-    llm: BaseLanguageModel | BaseChatModel
+    llm: RevaModel
 
     tool_name: str
     description: str
@@ -92,13 +93,20 @@ class RevaTool(ABC):
     def __str__(self) -> str:
         return f"{self.tool_name}"
 
-    def __init__(self, project: AssistantProject, llm: BaseLanguageModel | BaseChatModel) -> None:
+    def __repr__(self) -> str:
+        return f"{self.tool_name}"
+
+    def __init__(self, project: AssistantProject, llm: RevaModel) -> None:
         self.project = project
         self.llm = llm
         self.log_path = self.project.project_path / "reva.log"
         if not self.logger:
             self.logger = logging.getLogger(f"reverse_engineering_assistant.RevaTool.{self.tool_name}")
             self.logger.addHandler(logging.FileHandler(self.log_path))
+        try:
+            _  = self.tool_name
+        except AttributeError:
+            self.tool_name = self.__class__.__name__
 
     @cache
     def as_tools(self) -> List[BaseTool]:
@@ -130,7 +138,7 @@ class AskUserTool(RevaTool):
     tool_name = "AskUser"
     description = "Ask the user for input."
 
-    def __init__(self, project: AssistantProject, llm: BaseLanguageModel | BaseChatModel) -> None:
+    def __init__(self, project: AssistantProject, llm: RevaModel) -> None:
         super().__init__(project, llm)
         self.tool_functions = [
             self.ask_user
@@ -241,7 +249,7 @@ class ReverseEngineeringAssistant(object):
 
     tools: List[RevaTool]
 
-    llm: BaseChatModel | BaseLanguageModel
+    llm: RevaModel
 
     model_memory: BaseMemory
 
@@ -276,7 +284,7 @@ class ReverseEngineeringAssistant(object):
     def __init__(self,
                 project: str | AssistantProject,
                 model_type: Optional[ModelType] = None,
-                model: Optional[BaseLanguageModel | BaseChatModel] = None,
+                model: Optional[RevaModel] = None,
                 langchain_callbacks: Optional[List[BaseCallbackHandler]] = None
         ) -> None:
         """

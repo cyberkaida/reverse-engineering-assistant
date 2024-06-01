@@ -4,8 +4,7 @@ from typing import List
 from reverse_engineering_assistant.reva_exceptions import RevaToolException
 from reverse_engineering_assistant.tool import AssistantProject
 from reverse_engineering_assistant.assistant import RevaTool
-from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.language_models.base import BaseLanguageModel
+from reverse_engineering_assistant.model import RevaModel
 from reverse_engineering_assistant.api_server_tools.connection import get_channel
 from typing import Optional, Tuple
 import logging
@@ -26,7 +25,7 @@ def register_message_handler(cls: RevaMessageHandler):
 class RevaRemoteTool(RevaTool):
     logger: logging.Logger
 
-    def __init__(self, project: AssistantProject, llm: BaseLanguageModel) -> None:
+    def __init__(self, project: AssistantProject, llm: RevaModel) -> None:
         self.logger = logging.getLogger(f"reverse_engineering_assistant.RevaRemoteTool.{self.__class__.__name__}")
         self.logger.addHandler(logging.FileHandler(project.project_path / "reva.log"))
         super().__init__(project, llm)

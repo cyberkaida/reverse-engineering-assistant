@@ -563,6 +563,27 @@ public class RevaPlugin extends ProgramPlugin implements RevaChatService {
         builder.setProgramName(currentProgram.getName());
         builder.setProject(tool.getProject().getName());
 
+        // Set the current model from settings. This allows us to change the model
+        // in settings without restarting the server.
+        RevaInferenceType inferenceType = options.getEnum("Inference type", RevaInferenceType.OpenAI);
+        if (inferenceType == RevaInferenceType.OpenAI) {
+            RevaChat.OpenAIConfig.Builder openAiConfig = RevaChat.OpenAIConfig.newBuilder();
+            openAiConfig.setModel(options.getOptions("OpenAI").getString("OpenAI Model", "gpt-4o"));
+            openAiConfig.setToken(options.getOptions("OpenAI").getString("OpenAI API Key", "OPENAI_API_KEY"));
+            builder.setOpenai(openAiConfig);
+        } else if (inferenceType == RevaInferenceType.Ollama) {
+            RevaChat.OllamaConfig.Builder ollamaConfig = RevaChat.OllamaConfig.newBuilder();
+            ollamaConfig.setUrl(options.getOptions("Ollama").getString("Ollama inference URL", "http://localhost:11434"));
+            ollamaConfig.setModel(options.getOptions("Ollama").getString("Ollama Model", "llama3"));
+            builder.setOllama(ollamaConfig);
+        } else {
+            Msg.error(this, "Unknown inference type: " + inferenceType);
+            throw new RuntimeException("Please file a bug. Unknown inference type: " + inferenceType);
+        }
+
+        // We must have a model
+        assert builder.getOpenai() != null || builder.getOllama() != null;
+
         Semaphore semaphore = new Semaphore(0);
         List<String> responses = new ArrayList<>();
 

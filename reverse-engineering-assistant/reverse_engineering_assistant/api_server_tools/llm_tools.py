@@ -18,8 +18,9 @@ module_logger = logging.getLogger("reva-server")
 from langchain_core.callbacks.base import BaseCallbackHandler
 from langchain_core.agents import AgentAction, AgentFinish
 
-from langchain_core.language_models.base import BaseLanguageModel
-from langchain_core.language_models.chat_models import BaseChatModel
+from reverse_engineering_assistant.model import RevaModel
+from reverse_engineering_assistant.model import get_llm_ollama, get_llm_openai
+
 
 class RevaActionCollector(BaseCallbackHandler):
     """
@@ -60,16 +61,22 @@ class RevaActionCollector(BaseCallbackHandler):
 
 class RevaChat(RevaChatServiceServicer):
     logger = logging.getLogger("reva-server.RevaChat")
-    llm: BaseLanguageModel | BaseChatModel
 
-    def __init__(self, llm: BaseLanguageModel | BaseChatModel) -> None:
-        self.llm = llm
+    def _model_from_request(self, request) -> RevaModel:
+        """
+        Given a request, return the model associated with the request.
+        """
+        if request.ollama:
+            return get_llm_ollama(base_url=request.ollama.url, model=request.ollama.model)
+        if request.openai:
+            return get_llm_openai(model=request.openai.model, api_key=request.openai.token)
+        raise ValueError("No model specified in request. Please file a bug.")
 
     def chat(self, request, context):
         self.logger.info(f"Received request: {request}")
         assistant = ReverseEngineeringAssistant(
             request.project,
-            model=self.llm
+            model=self._model_from_request(request)
         )
         self.logger.info(f"Assistant: {assistant}")
         llm_response = assistant.query(request.message)
@@ -95,7 +102,7 @@ class RevaChat(RevaChatServiceServicer):
 
         assistant = ReverseEngineeringAssistant(
             request.project,
-            model=self.llm,
+            model=self._model_from_request(request),
             langchain_callbacks=[RevaActionCollector(callback)]
         )
         self.logger.info(f"Assistant: {assistant}")
@@ -133,7 +140,7 @@ class RevaChat(RevaChatServiceServicer):
             if not assistant:
                 assistant = ReverseEngineeringAssistant(
                     request.project,
-                    model=self.llm,
+                    model=self._model_from_request(request),
                     langchain_callbacks=[RevaActionCollector(callback)]
                 )
             self.logger.info(f"Received request: {request}")

@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-from typing import Optional
+from typing import Optional, TypeAlias, Union
 from pathlib import Path
 
 from pydantic import SecretStr
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.language_models.base import BaseLanguageModel
-from langchain_community.llms import Ollama
+from langchain_community.chat_models import ChatOllama
+from langchain_experimental.llms.ollama_functions import OllamaFunctions
 from langchain_openai import ChatOpenAI
 
 import os
@@ -24,7 +25,9 @@ class ModelType(Enum):
     OpenAI = "openai"
     Ollama = "ollama"
 
-def get_llm_openai(model: str = "gpt-4o", api_key: Optional[str] = None) -> BaseChatModel:
+type RevaModel = Union[ChatOpenAI, OllamaFunctions, ChatOllama]
+
+def get_llm_openai(model: str = "gpt-4o", api_key: Optional[str] = None) -> ChatOpenAI:
     if not api_key or api_key == 'null' or api_key == "OPENAI_API_KEY":
         api_key = os.environ.get("OPENAI_API_KEY")
 
@@ -36,17 +39,18 @@ def get_llm_openai(model: str = "gpt-4o", api_key: Optional[str] = None) -> Base
     )
     return llm
 
-def get_llm_ollama(base_url: Optional[str] = None, model: str = "llama3") -> BaseLanguageModel:
+def get_llm_ollama(base_url: Optional[str] = None, model: str = "llama3") -> OllamaFunctions | ChatOllama:
     logger.info(f"Loading Ollama - {model} from {base_url}")
-
-    llm = Ollama(
+    if not base_url:
+        base_url = 'http://127.0.0.1:11434'
+    llm = ChatOllama(
         model=model,
         base_url=base_url,
     )
 
     return llm
 
-def get_model(model_type: ModelType = ModelType.OpenAI) -> BaseChatModel | BaseLanguageModel:
+def get_model(model_type: ModelType = ModelType.OpenAI) -> RevaModel:
     """
     Returns a ServiceContext object for the specified model type.
 

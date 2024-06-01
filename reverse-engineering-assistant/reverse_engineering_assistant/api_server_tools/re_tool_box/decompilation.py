@@ -7,8 +7,7 @@ from reverse_engineering_assistant.tool import AssistantProject
 from reverse_engineering_assistant.assistant import AssistantProject, register_tool
 from reverse_engineering_assistant.reva_exceptions import RevaToolException
 from reverse_engineering_assistant.api_server_tools import RevaRemoteTool
-from langchain_core.language_models.base import BaseLanguageModel
-
+from reverse_engineering_assistant.model import RevaModel
 from reverse_engineering_assistant.protocol import RevaGetDecompilation_pb2_grpc, RevaGetDecompilation_pb2
 
 
@@ -21,7 +20,7 @@ class RevaDecompilation(RevaRemoteTool):
     description = "Used for retrieving decompiled functions"
     logger = logging.getLogger("reverse_engineering_assistant.RevaDecompilationIndex")
 
-    def __init__(self, project: AssistantProject, llm: BaseLanguageModel) -> None:
+    def __init__(self, project: AssistantProject, llm: RevaModel) -> None:
         super().__init__(project, llm)
         self.description = "Used for decompiling functions and interacting with the decompilation."
         self.tool_functions = [

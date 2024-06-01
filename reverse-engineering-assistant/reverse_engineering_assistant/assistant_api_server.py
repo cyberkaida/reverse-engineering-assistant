@@ -79,7 +79,7 @@ def start_serving(
     serve_port = server.add_insecure_port(f"{serve_host}:{serve_port}")
 
     # Register handlers
-    RevaChat_pb2_grpc.add_RevaChatServiceServicer_to_server(RevaChat(model), server)
+    RevaChat_pb2_grpc.add_RevaChatServiceServicer_to_server(RevaChat(), server)
 
     # Start the service threads
     logger.info(f"Starting server - {serve_host}:{serve_port}")

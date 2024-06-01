@@ -7,8 +7,7 @@ from reverse_engineering_assistant.tool import AssistantProject
 from reverse_engineering_assistant.assistant import AssistantProject, register_tool
 from reverse_engineering_assistant.reva_exceptions import RevaToolException
 from reverse_engineering_assistant.api_server_tools import RevaRemoteTool
-from langchain_core.language_models.base import BaseLanguageModel
-
+from reverse_engineering_assistant.model import RevaModel
 from reverse_engineering_assistant.protocol import RevaGetSymbols_pb2_grpc, RevaGetSymbols_pb2
 from reverse_engineering_assistant.protocol import RevaGetSymbols_pb2_grpc, RevaGetSymbols_pb2
 from reverse_engineering_assistant.protocol import RevaGetDecompilation_pb2_grpc, RevaGetDecompilation_pb2
@@ -23,7 +22,7 @@ class RevaGetSymbols(RevaRemoteTool):
     logger = logging.getLogger("reverse_engineering_assistant.RevaGetSymbols")
 
 
-    def __init__(self, project: AssistantProject, llm: BaseLanguageModel) -> None:
+    def __init__(self, project: AssistantProject, llm: RevaModel) -> None:
         super().__init__(project, llm)
         self.description = "Used for retrieving symbols in the program"
 
@@ -157,7 +156,7 @@ class RevaSetSymbolName(RevaRemoteTool):
     This could be a function name, or a global variable name.
     """
 
-    def __init__(self, project: AssistantProject, llm: BaseLanguageModel) -> None:
+    def __init__(self, project: AssistantProject, llm: RevaModel) -> None:
         super().__init__(project, llm)
         self.description = "Used for setting names for global symbols"
 

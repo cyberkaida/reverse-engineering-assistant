@@ -14,6 +14,16 @@ service RevaChatService {
     rpc shutdown(RevaChatShutdown) returns (RevaChatShutdownResponse) {}
 }
 
+message OllamaConfig {
+    string url = 1;
+    string model = 2;
+}
+
+message OpenAIConfig {
+    string model = 1;
+    string token = 2;
+}
+
 message RevaChatMessage {
     string chatId = 1;
     // Message from the human
@@ -22,6 +32,9 @@ message RevaChatMessage {
     string project = 3;
     // The program being discussed
     string programName = 4;
+
+    OllamaConfig ollama = 5;
+    OpenAIConfig openai = 6;
 }
 
 message RevaChatMessageResponse {

@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "reverse-engineering-assistant"
 readme = "README.md"
-version = "2.9.2"
+version = "2.9.3"
 authors = [
     {name="サイバーカイダ (cyberkaida)"},
 ]
@@ -29,6 +29,7 @@ dependencies = [
     "grpcio",
     "protobuf",
     "flask",
+    "langchain-experimental",
 ]
 
 [project.scripts]

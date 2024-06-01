@@ -7,14 +7,14 @@ from reverse_engineering_assistant.tool import AssistantProject
 from reverse_engineering_assistant.assistant import AssistantProject, register_tool
 from reverse_engineering_assistant.reva_exceptions import RevaToolException
 from reverse_engineering_assistant.api_server_tools import RevaRemoteTool
-from langchain_core.language_models.base import BaseLanguageModel
+from reverse_engineering_assistant.model import RevaModel
 from reverse_engineering_assistant.protocol import RevaGetCursor_pb2, RevaGetCursor_pb2_grpc
 
 
 @register_tool
 class RevaGetCursor(RevaRemoteTool):
 
-    def __init__(self, project: AssistantProject, llm: BaseLanguageModel) -> None:
+    def __init__(self, project: AssistantProject, llm: RevaModel) -> None:
         super().__init__(project, llm)
         self.description = "Used for getting and setting the cursor or when the user mentions 'this'"
 

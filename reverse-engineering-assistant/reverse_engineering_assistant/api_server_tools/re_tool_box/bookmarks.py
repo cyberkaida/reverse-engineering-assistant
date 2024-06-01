@@ -10,11 +10,13 @@ from reverse_engineering_assistant.api_server_tools import RevaRemoteTool
 from langchain_core.language_models.base import BaseLanguageModel
 from reverse_engineering_assistant.protocol import RevaBookmark_pb2, RevaBookmark_pb2_grpc
 
+from reverse_engineering_assistant.model import RevaModel
+
 
 @register_tool
 class RevaBookmarks(RevaRemoteTool):
 
-    def __init__(self, project: AssistantProject, llm: BaseLanguageModel) -> None:
+    def __init__(self, project: AssistantProject, llm: RevaModel) -> None:
         super().__init__(project, llm)
         self.description = "Used for managing bookmarks in the program"
 

@@ -7,15 +7,14 @@ from reverse_engineering_assistant.tool import AssistantProject
 from reverse_engineering_assistant.assistant import AssistantProject, register_tool
 from reverse_engineering_assistant.reva_exceptions import RevaToolException
 from reverse_engineering_assistant.api_server_tools import RevaRemoteTool
-from langchain_core.language_models.base import BaseLanguageModel
-
+from reverse_engineering_assistant.model import RevaModel
 
 @register_tool
 class RevaCrossReferenceTool(RevaRemoteTool):
     """
     An tool to retrieve cross references, to and from, addresses.
     """
-    def __init__(self, project: AssistantProject, llm: BaseLanguageModel) -> None:
+    def __init__(self, project: AssistantProject, llm: RevaModel) -> None:
         super().__init__(project, llm)
         self.description = "Used for retrieving cross references to and from addresses"
 

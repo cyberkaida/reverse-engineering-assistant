@@ -7,11 +7,11 @@ from reverse_engineering_assistant.tool import AssistantProject
 from reverse_engineering_assistant.assistant import AssistantProject, register_tool
 from reverse_engineering_assistant.reva_exceptions import RevaToolException
 from reverse_engineering_assistant.api_server_tools import RevaRemoteTool
-from langchain_core.language_models.base import BaseLanguageModel
 
 from reverse_engineering_assistant.protocol import RevaGetDecompilation_pb2_grpc, RevaGetDecompilation_pb2
 from reverse_engineering_assistant.protocol import RevaComment_pb2_grpc, RevaComment_pb2
 
+from reverse_engineering_assistant.model import RevaModel
 
 @register_tool
 class RevaSetComment(RevaRemoteTool):
@@ -19,7 +19,7 @@ class RevaSetComment(RevaRemoteTool):
     A tool for setting comments on addresses, functions and symbols.
     """
 
-    def __init__(self, project: AssistantProject, llm: BaseLanguageModel) -> None:
+    def __init__(self, project: AssistantProject, llm: RevaModel) -> None:
         super().__init__(project, llm)
         self.description = "Used for setting comments on addresses, functions and symbols"
 

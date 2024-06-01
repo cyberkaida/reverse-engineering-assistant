@@ -8,8 +8,7 @@ from reverse_engineering_assistant.tool import AssistantProject
 from reverse_engineering_assistant.assistant import AssistantProject, register_tool
 from reverse_engineering_assistant.reva_exceptions import RevaToolException
 from reverse_engineering_assistant.api_server_tools import RevaRemoteTool
-from langchain_core.language_models.base import BaseLanguageModel
-
+from reverse_engineering_assistant.model import RevaModel
 from reverse_engineering_assistant.protocol import RevaGetDecompilation_pb2_grpc, RevaGetDecompilation_pb2
 from reverse_engineering_assistant.protocol import RevaData_pb2_grpc, RevaData_pb2, RevaGetSymbols_pb2, RevaGetSymbols_pb2_grpc
 
@@ -20,7 +19,7 @@ class RevaData(RevaRemoteTool):
     A tool for getting and setting data
     """
 
-    def __init__(self, project: AssistantProject, llm: BaseLanguageModel) -> None:
+    def __init__(self, project: AssistantProject, llm: RevaModel) -> None:
         super().__init__(project, llm)
         self.description = "Used for getting and setting data"
 

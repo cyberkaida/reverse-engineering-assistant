@@ -66,9 +66,9 @@ class RevaChat(RevaChatServiceServicer):
         """
         Given a request, return the model associated with the request.
         """
-        if request.ollama:
+        if request.ollama.model:
             return get_llm_ollama(base_url=request.ollama.url, model=request.ollama.model)
-        if request.openai:
+        if request.openai.model:
             return get_llm_openai(model=request.openai.model, api_key=request.openai.token)
         raise ValueError("No model specified in request. Please file a bug.")
 

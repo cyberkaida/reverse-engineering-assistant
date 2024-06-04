@@ -20,7 +20,8 @@ sys.path.append(str(Path(__file__).parent.joinpath('protocol')))
 
 import grpc
 from .protocol.RevaChat_pb2_grpc import RevaChatServiceStub
-from .protocol.RevaChat_pb2 import RevaChatMessage, RevaChatMessageResponse
+from .protocol.RevaChat_pb2 import RevaChatMessage, RevaChatMessageResponse, OllamaConfig, OpenAIConfig
+
 
 from .protocol.RevaHeartbeat_pb2_grpc import RevaHeartbeatStub
 from .protocol.RevaHeartbeat_pb2 import RevaHeartbeatRequest, RevaHeartbeatResponse
@@ -88,10 +89,31 @@ def main():
     parser.add_argument("--project", required=False, help="The project to connect to")
     parser.add_argument("--program", required=False, help="The program to connect to")
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
+
+    import os
+    openai_key = os.environ.get("OPENAI_API_KEY")
+
+    provider_settings = parser.add_argument_group("Provider Settings")
+    provider_settings.add_argument("--provider", default="openai" if openai_key else "ollama", choices=["openai", "ollama"], help="The inference provider to use")
+    provider_settings.add_argument("--openai-api-key", default=openai_key, type=str, required=False, help="The OpenAI API key to use")
+    provider_settings.add_argument("--ollama-url", default="http://127.0.0.1:11434", type=str, required=False, help="The Ollama URL to use")
+    provider_settings.add_argument("--model", type=str, required=False, help="The model name to use")
     args = parser.parse_args()
+
     if args.debug:
         logger.setLevel(logging.DEBUG)
         logger.addHandler(logging.StreamHandler(sys.stdout))
+
+    if not args.model:
+        match args.provider:
+            case "openai":
+                args.model = "gpt-4o"
+            case "ollama":
+                args.model = "llama3"
+            case _:
+                parser.error(f"Invalid provider: {args.provider}")
+        logger.info(f"--model was not specified. Selecting default model for {args.provider}: {args.model}")
+
     console = Console(record=True)
     if not args.port:
         connectable_extensions: List[RevaHeartbeatResponse] = []
@@ -154,6 +176,7 @@ def main():
 
 
     console.print("[bold]Welcome to Reva Chat![/bold]")
+    console.print(f"[gray]Using {args.provider} with model {args.model}[/gray]")
     history_file = FileHistory(str(history_file_path))
     prompt_session = PromptSession(history=history_file)
 
@@ -176,7 +199,21 @@ def main():
             query: str = prompt_session.prompt("> ")
             try:
                 console.print(f"[green]{query}[/green]")
-                chat_message = RevaChatMessage(chatId=chat_id, project=args.project, message=query)
+
+                chat_message = RevaChatMessage(
+                    chatId=chat_id,
+                    project=args.project,
+                    message=query,
+                )
+                match args.provider:
+                    case "openai":
+                        chat_message.openai.model = args.model
+                        chat_message.openai.token = args.openai_api_key
+                    case "ollama":
+                        chat_message.ollama.model = args.model
+                        chat_message.ollama.url = args.ollama_url
+                    case _:
+                        raise ValueError(f"Invalid provider: {args.provider}")
                 logger.info(f"Sending message: {chat_message}")
                 send_queue.put(chat_message)
                 while True:

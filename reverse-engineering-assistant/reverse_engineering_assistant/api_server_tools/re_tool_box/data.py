@@ -1,5 +1,5 @@
 from typing import Dict, List, Optional, Union
-from binascii import b2a_hex
+from binascii import a2b_hex, b2a_hex, a2b_base64
 import logging
 
 import grpc
@@ -28,6 +28,8 @@ class RevaData(RevaRemoteTool):
             self.list_data,
             self.get_data,
             self.set_global_data_type,
+            self.xor_data,
+            self.base64_decode_string,
         ]
 
     def list_strings(self) -> List[Dict[str, Union[str, List[str]]]]:
@@ -134,3 +136,19 @@ class RevaData(RevaRemoteTool):
 
         # TODO: Should we return truth to reduce hallucinations?
         return f"{address_or_symbol} has been updated successfully"
+
+    def xor_data(self, hex_string: str, key_byte: str) -> str:
+        """
+        Given a data buffer and a key buffer, return the result of XORing the data with the key.
+        Returns a hex string.
+        """
+        # TODO: Should we expose cyberchef recipes?
+        data = bytes.fromhex(hex_string)
+        key = int(key_byte, 16)
+        return b2a_hex(bytes([byte ^ key for byte in data])).decode("utf-8")
+
+    def base64_decode_string(self, base64_string: str) -> str:
+        """
+        Given a base64 encoded string, return the decoded string.
+        """
+        return a2b_base64(base64_string).decode("utf-8")

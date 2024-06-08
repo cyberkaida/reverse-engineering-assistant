@@ -21,6 +21,7 @@ dependencies = [
     "langchain-core",
     "langchain-openai",
     "langchain-community",
+    "langgraph",
     "prompt_toolkit",
     "sentence_transformers",
     "PyYAML",

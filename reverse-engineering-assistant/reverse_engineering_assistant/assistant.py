@@ -40,6 +40,11 @@ from langchain_core.messages import (
     HumanMessage,
 )
 
+from langgraph.checkpoint.sqlite import SqliteSaver
+from langgraph.graph import END, MessageGraph
+from langgraph.graph.graph import CompiledGraph
+from langgraph.prebuilt.tool_node import ToolNode
+
 from .documents import AssistantDocument, CrossReferenceDocument, DecompiledFunctionDocument
 from .model import ModelType, get_model, RevaModel
 from .tool import AssistantProject
@@ -245,7 +250,7 @@ class ReverseEngineeringAssistant(object):
     log_path: Path
     project: AssistantProject
 
-    query_engine: Optional[Chain] = None
+    query_engine: Optional[CompiledGraph] = None
 
     tools: List[RevaTool]
 
@@ -318,7 +323,7 @@ class ReverseEngineeringAssistant(object):
         self.tools = [ tool_type(self.project, self.llm) for tool_type in _reva_tool_list]
         self.logger.debug(f"Loaded tools: {[ x for x in self.tools]}")
 
-    def create_query_engine(self) -> Chain:
+    def create_query_engine(self) -> CompiledGraph:
         """
         Updates the embeddings for the reverse engineering assistant.
         """
@@ -341,32 +346,34 @@ class ReverseEngineeringAssistant(object):
         callbacks.extend(self.langchain_callbacks)
         callback_manager = RevaActionLoggerManager(handlers=callbacks, inheritable_handlers=callbacks)
 
-        agent =  StructuredChatAgent.from_llm_and_tools(
-            llm=self.llm,
-            tools=base_tools,
-            system_message=self.system_prompt,
-            verbose=False,
-            handle_parsing_errors=self.handle_reva_tool_error,
-            stop_words=["\nObservation", "\nThought"],
-            callback_manager=callback_manager,
-            prefix=self.system_prompt,
-        )
-        # TODO: Switch to this thing https://python.langchain.com/docs/expression_language/get_started
-        executor = AgentExecutor.from_agent_and_tools(
-            agent=agent,
-            tools=base_tools,
-            verbose=False,
-            handle_parsing_errors=self.handle_reva_tool_error,
-            memory=self.model_memory,
-            callbacks=callbacks,
-            max_iterations=None
-        )
 
-        self.query_engine = executor
+        workflow = MessageGraph()
+        model = self.llm.bind_tools(base_tools)
+        workflow.add_node("agent", model)
+        workflow.add_node("action", ToolNode(base_tools))
+
+        # Define the function that determines whether to continue or not
+        def should_continue(messages):
+            last_message = messages[-1]
+            # If there is no function call, then we finish
+            if not last_message.tool_calls:
+                return END
+            else:
+                return "action"
+        workflow.set_entry_point("agent")
+        workflow.add_conditional_edges("agent", should_continue)
+        workflow.add_edge("action", "agent")
+
+        memory = SqliteSaver.from_conn_string(":memory:")
+
+        app = workflow.compile(checkpointer=memory)
+
+        self.query_engine = app
+
         self.logger.info(f"Query engine created")
-        return executor
+        return app
 
-    def query(self, query: str) -> str:
+    def query(self, query: str, retries: int = 3) -> str:
         """
         Queries the reverse engineering assistant with the given query.
 
@@ -381,22 +388,27 @@ class ReverseEngineeringAssistant(object):
         if not self.query_engine:
             raise Exception("No query engine available")
         try:
-
             if Path(self.project.project_path / "chat.txt").exists():
                 with open(self.project.project_path / "chat.txt", "r") as f:
                     self.chat_history = f.read()
 
-            query_engine_input =  {
+            query_engine_input = {
                     "input": query,
                     # TODO: Does t actually work?
-                    "history": self.chat_history,
+                    #"history": self.chat_history,
                 }
+            configuration = {
+                "configurable": {"thread_id": "4",}
+            }
 
             self.logger.debug(f"Query: {query}")
 
-            answer = self.query_engine.invoke(
-               input=query_engine_input,
+            steps: List[BaseMessage] = self.query_engine.invoke(
+               input=query,
+               config=configuration,
             )
+            assert len(steps) > 0
+            answer = steps[-1]
 
             with open(self.project.project_path / "chat.txt", "w") as f:
                 f.write(f"{self.model_memory.buffer_as_str}")
@@ -404,7 +416,7 @@ class ReverseEngineeringAssistant(object):
 
             #import pdb; pdb.set_trace()
 
-            return str(answer["output"])
+            return str(answer.content)
         except ValidationError as e:
             self.logger.exception(f"Failed to validate response from LLM: {e}")
             return "Failed to validate response from query engine"
@@ -419,11 +431,20 @@ class ReverseEngineeringAssistant(object):
                 # Let's try to explain the exception
                 # We need to take away the tools, so she doesn't try to answer
                 # by reverse engineering the program...
-                answer = self.llm.invoke(
+                answer: BaseMessage = self.llm.invoke(
                     f"You are ReVa, the reverse engineering assisstant. During your execution you threw an exception. Your logs are located in the file {self.log_path} Can you explain the error: {e}\n\n{traceback.format_exc()}"
                 )
-                if isinstance(answer, dict):
-                    answer = answer["output"]
+                answer_content: str
+                if isinstance(answer, str):
+                    # This only happened in older versions of langchain
+                    answer_content = answer
+                elif isinstance(answer, dict):
+                    answer_content = answer["output"]
+                elif isinstance(answer, BaseMessage):
+                    answer_content = str(answer.content)
+                else:
+                    raise ValueError(f"Unexpected answer type: {type(answer)}")
+
                 analysis = f"""## **ReVa could not complete your request.**
 Logs have been saved to `{self.log_path}`.
 > She has examined the exception:
@@ -432,7 +453,7 @@ Logs have been saved to `{self.log_path}`.
 {traceback.format_exc()}
 ```
 ## ReVa's debugging notes:
-{str(answer)}
+{answer_content}
                 """
                 date = datetime.datetime.now().strftime("%Y-%m-%d-%H%M%S")
                 crash_path = self.project.project_path / "crash"

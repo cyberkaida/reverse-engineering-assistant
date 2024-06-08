@@ -4,12 +4,13 @@ from __future__ import annotations
 import datetime
 import json
 import logging
+import operator
 import random
 from abc import ABC, abstractmethod
 from functools import cache, cached_property
 from pathlib import Path
 import tempfile
-from typing import Any, Callable, Dict, List, Optional, Sequence, Type, Union
+from typing import Annotated, Any, Callable, Dict, List, Optional, Sequence, Tuple, Type, TypedDict, Union
 from uuid import UUID
 
 from pydantic import ValidationError
@@ -21,7 +22,7 @@ from langchain.agents.structured_chat.base import StructuredChatAgent
 from langchain_core.agents import AgentAction, AgentFinish
 from langchain_core.callbacks.base import BaseCallbackHandler, BaseCallbackManager
 from langchain_core.language_models.base import BaseLanguageModel
-
+from langchain_core.prompts.chat import ChatPromptTemplate
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain.memory import ConversationTokenBufferMemory, ConversationBufferMemory
 from langchain.memory.chat_memory import BaseMemory
@@ -44,6 +45,7 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, MessageGraph
 from langgraph.graph.graph import CompiledGraph
 from langgraph.prebuilt.tool_node import ToolNode
+from langchain_core.pydantic_v1 import BaseModel, Field
 
 from .documents import AssistantDocument, CrossReferenceDocument, DecompiledFunctionDocument
 from .model import ModelType, get_model, RevaModel
@@ -133,32 +135,6 @@ class RevaTool(ABC):
             tools.append(tool)
         return tools
 
-
-# TODO: Re-enable this when the AI is not so lazy
-#@register_tool
-class AskUserTool(RevaTool):
-    """
-    A tool that asks the user for input.
-    """
-    tool_name = "AskUser"
-    description = "Ask the user for input."
-
-    def __init__(self, project: AssistantProject, llm: RevaModel) -> None:
-        super().__init__(project, llm)
-        self.tool_functions = [
-            self.ask_user
-        ]
-
-    def ask_user(self, question: str) -> str:
-        """
-        Asks the user a question and returns the response. This should be used only if you cannot answer a question any other way.
-        """
-        console.print("ReVa would like to ask you a question:")
-        console.print(f"🙋‍♀️ [bold]{question}[/bold]")
-        console.bell()
-        return PromptSession().prompt("> ")
-
-
 class RevaActionLoggerManager(BaseCallbackManager):
     """
     This class manages the action logging for Reva. Langchain has a callback system that allows us to
@@ -232,6 +208,34 @@ class RevaActionLogger(BaseCallbackHandler):
         console.print(Markdown(f"{get_thinking_emoji()} {action.log}"))
         console.print(Markdown('---'))
 
+class ReverseEngineeringPlanState(TypedDict):
+    """
+    The current state of our reverse engineering plan
+    """
+    input: str
+    """Input from the user"""
+    plan: List[str]
+    """The current steps of our Reverse Engineering plan"""
+    past_steps: Annotated[List[Tuple], operator.add]
+    """The steps we have completed"""
+    response: str
+    """The final response"""
+
+
+class ReverseEngineeringPlan(BaseModel):
+    """Plan to follow in future"""
+
+    steps: List[str] = Field(
+        description="different steps to follow, should be in sorted order"
+    )
+
+class ReverseEngineeringResponse(BaseModel):
+    """Response to the user"""
+
+    response: str = Field(
+        description="The final response"
+    )
+
 class ReverseEngineeringAssistant(object):
     """
     A class representing the Reverse Engineering Assistant.
@@ -256,8 +260,6 @@ class ReverseEngineeringAssistant(object):
 
     llm: RevaModel
 
-    model_memory: BaseMemory
-
     chat_history: str
 
     langchain_callbacks: List[BaseCallbackHandler]
@@ -276,14 +278,17 @@ class ReverseEngineeringAssistant(object):
         """
         return AssistantProject.get_projects()
 
-
-    def handle_reva_tool_error(self, e: RevaToolException) -> str:
+    def handle_reva_tool_error(self, e: Exception) -> str:
         """
         This method is passed to the LLM as a callback when the LLM encounters an exception
         from one of the Reva tools. We then return output to the LLM to help it fix its problem.
         """
         if isinstance(e, RevaToolException):
             return f"RevaToolException: {e}"
+        if isinstance(e, ValidationError):
+            return f"ValidationError: {e}"
+        if isinstance(e, json.JSONDecodeError):
+            return f"JSONDecodeError: {e}"
         raise e
 
     def __init__(self,
@@ -335,17 +340,9 @@ class ReverseEngineeringAssistant(object):
             for function in tool.as_tools():
                 base_tools.append(function)
 
-        # TODO: This is deadlocking the process, this is probably a bug in langchain
-        # I would like to scream. 🫠
-        # We should base our memory on CoversationBufferMemory
-        # self.model_memory = RevaMemory(self.project)
-        self.model_memory = ConversationBufferMemory()
-        self.logger.info(f"Memory created")
-
         callbacks: List[BaseCallbackHandler] = [RevaActionLogger()]
         callbacks.extend(self.langchain_callbacks)
         callback_manager = RevaActionLoggerManager(handlers=callbacks, inheritable_handlers=callbacks)
-
 
         workflow = MessageGraph()
         model = self.llm.bind_tools(base_tools)
@@ -388,17 +385,12 @@ class ReverseEngineeringAssistant(object):
         if not self.query_engine:
             raise Exception("No query engine available")
         try:
-            if Path(self.project.project_path / "chat.txt").exists():
-                with open(self.project.project_path / "chat.txt", "r") as f:
-                    self.chat_history = f.read()
 
             query_engine_input = {
                     "input": query,
-                    # TODO: Does t actually work?
-                    #"history": self.chat_history,
                 }
             configuration = {
-                "configurable": {"thread_id": "4",}
+                "configurable": {"thread_id": "4",} # TODO: This is from the example, I don't know what it does.
             }
 
             self.logger.debug(f"Query: {query}")
@@ -409,10 +401,6 @@ class ReverseEngineeringAssistant(object):
             )
             assert len(steps) > 0
             answer = steps[-1]
-
-            with open(self.project.project_path / "chat.txt", "w") as f:
-                f.write(f"{self.model_memory.buffer_as_str}")
-            self.logger.debug(f"Answer: {answer}")
 
             #import pdb; pdb.set_trace()
 

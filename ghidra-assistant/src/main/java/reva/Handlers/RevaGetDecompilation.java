@@ -3,6 +3,7 @@ import java.util.Iterator;
 
 import ghidra.app.decompiler.ClangToken;
 import ghidra.app.decompiler.DecompInterface;
+import ghidra.app.decompiler.DecompileOptions;
 import ghidra.app.decompiler.DecompileResults;
 import ghidra.app.decompiler.DecompiledFunction;
 import ghidra.app.decompiler.flatapi.FlatDecompilerAPI;
@@ -137,6 +138,12 @@ public class RevaGetDecompilation extends RevaDecompilationServiceImplBase {
         }
 
         DecompInterface decompilerInterface = decompiler.getDecompiler();
+        DecompileOptions options = new DecompileOptions();
+        options.setEliminateUnreachable(false);
+        options.setWARNCommentIncluded(false);
+        options.setMaxWidth(180);
+        options.setRespectReadOnly(false);
+        decompilerInterface.setOptions(options);
         if (decompilerInterface != null) {
             Msg.info(this, "Using decompiler interface");
             DecompileResults decompiled = decompilerInterface.decompileFunction(function, 60, monitor);

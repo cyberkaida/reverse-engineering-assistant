@@ -3,7 +3,6 @@ package reva.Actions;
 import javax.swing.JComponent;
 
 import docking.ComponentProvider;
-import ghidra.framework.plugintool.PluginTool;
 import reva.RevaPlugin;
 
 public class RevaActionTableComponentProvider extends ComponentProvider {

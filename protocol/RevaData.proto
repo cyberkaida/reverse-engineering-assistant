@@ -6,6 +6,7 @@ service RevaDataService {
     rpc getDataAtAddress(RevaGetDataAtAddressRequest) returns (RevaGetDataAtAddressResponse) {}
     rpc getListData(RevaDataListRequest) returns (stream RevaDataListResponse) {}
     rpc getStringList(RevaStringListRequest) returns (stream RevaStringListResponse) {}
+    rpc setGlobalDataType(RevaSetGlobalDataTypeRequest) returns (RevaSetGlobalDataTypeResponse) {}
 }
 
 message RevaGetDataAtAddressRequest {
@@ -45,4 +46,12 @@ message RevaStringListResponse {
     string value = 3;
     repeated string incoming_references = 4;
     repeated string outgoing_references = 5;
+}
+
+message RevaSetGlobalDataTypeRequest {
+    string address = 1;
+    string data_type = 2;
+}
+
+message RevaSetGlobalDataTypeResponse {
 }

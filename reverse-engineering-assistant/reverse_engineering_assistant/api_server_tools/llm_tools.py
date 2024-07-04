@@ -4,6 +4,7 @@ from ast import Call
 import queue
 import threading
 from typing import Callable, Dict, Optional
+from uuid import uuid4
 from venv import logger
 
 from ..protocol.RevaChat_pb2_grpc import RevaChatServiceServicer
@@ -20,44 +21,6 @@ from langchain_core.agents import AgentAction, AgentFinish
 
 from reverse_engineering_assistant.model import RevaModel
 from reverse_engineering_assistant.model import get_llm_ollama, get_llm_openai
-
-
-class RevaActionCollector(BaseCallbackHandler):
-    """
-    A callback handler for logging agent actions in the reverse engineering assistant.
-
-    This class logs agent actions and calls a callback. This is what prints the green
-    thoughts from the model to the console. This is very useful for the analyst to understand
-    what the model is doing (and is arguably the most important part of the assistant output!)
-
-    Attributes:
-        callback (Callable[[str], None]): The callback function to call when an agent action is performed.
-        logger (logging.Logger): The logger instance for the reverse_engineering_assistant.RevaActionLogger class.
-    """
-
-    callback: Callable[[str], None]
-    def __init__(self, callback: Callable[[str], None]) -> None:
-        super().__init__()
-        self.callback = callback
-
-    logger = logging.getLogger("reverse_engineering_assistant.RevaActionLogger")
-
-    def on_agent_action(self, action: AgentAction, **kwargs) -> None:
-        """
-        Callback method called when an agent action is performed.
-
-        Args:
-            action (AgentAction): The agent action that was performed.
-            **kwargs: Additional keyword arguments.
-
-        Returns:
-            None
-        """
-        logger.debug(f"Agent action: {action} {kwargs}")
-        # TODO: Should this be AgentAction?
-        # TODO: Is `.action` still a thing?
-        self.callback(str(action.log))
-
 
 class RevaChat(RevaChatServiceServicer):
     logger = logging.getLogger("reva-server.RevaChat")
@@ -103,7 +66,7 @@ class RevaChat(RevaChatServiceServicer):
         assistant = ReverseEngineeringAssistant(
             request.project,
             model=self._model_from_request(request),
-            langchain_callbacks=[RevaActionCollector(callback)]
+            logging_callbacks=[callback],
         )
         self.logger.info(f"Assistant: {assistant}")
 
@@ -141,7 +104,7 @@ class RevaChat(RevaChatServiceServicer):
                 assistant = ReverseEngineeringAssistant(
                     request.project,
                     model=self._model_from_request(request),
-                    langchain_callbacks=[RevaActionCollector(callback)]
+                    logging_callbacks=[callback],
                 )
             self.logger.info(f"Received request: {request}")
             def run_query(query: str):

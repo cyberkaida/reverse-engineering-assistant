@@ -49,6 +49,9 @@ class RevaBookmarks(RevaRemoteTool):
         Add a Ghidra bookmark at the given address or symbol with the given category and description.
         If the category does not exist, it will be created. Use a category to group bookmarks together.
         Make sure your category is descriptive and useful to the user.
+
+        Use this tool to keep note of anything important enough you want to look at it
+        again.
         """
         stub = RevaBookmark_pb2_grpc.RevaBookmarkStub(self.channel)
 

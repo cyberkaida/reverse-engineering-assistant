@@ -34,18 +34,24 @@ from rich.console import Console
 from rich.logging import RichHandler
 from rich.prompt import Prompt
 from rich.markdown import Markdown
+from rich.pretty import Pretty, pretty_repr
 from langchain_core.chat_history import BaseChatMessageHistory
 from langchain_core.messages import (
     AIMessage,
     BaseMessage,
     HumanMessage,
+    ToolMessage,
 )
 
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, MessageGraph
 from langgraph.graph.graph import CompiledGraph
+from langgraph.pregel import StreamMode
+from langgraph.pregel.retry import RetryPolicy, default_retry_on
+from langgraph.checkpoint import Checkpoint
 from langgraph.prebuilt.tool_node import ToolNode
 from langchain_core.pydantic_v1 import BaseModel, Field
+from langchain_core.runnables import RunnableConfig
 
 from .documents import AssistantDocument, CrossReferenceDocument, DecompiledFunctionDocument
 from .model import ModelType, get_model, RevaModel
@@ -254,7 +260,7 @@ class ReverseEngineeringAssistant(object):
     log_path: Path
     project: AssistantProject
 
-    query_engine: Optional[CompiledGraph] = None
+    compiled_graph: Optional[CompiledGraph] = None
 
     tools: List[RevaTool]
 
@@ -262,7 +268,7 @@ class ReverseEngineeringAssistant(object):
 
     chat_history: str
 
-    langchain_callbacks: List[BaseCallbackHandler]
+    callbacks: List[Callable[[str], None]]
     system_prompt = '''You are ReVa, the Reverse Engineering Assistant. Your primary task is to annotate the database during reverse engineering processes, ensuring that all elements are clearly and accurately labeled. As you gather contextual information, prioritize setting informative comments and renaming any elements with default or unclear names to enhance user comprehension and productivity. Remember, your work is a collaborative effort with the user. Utilize your tools effectively to accomplish these tasks and support the user's understanding by annotating their database.'''
 
     def __repr__(self) -> str:
@@ -295,7 +301,7 @@ class ReverseEngineeringAssistant(object):
                 project: str | AssistantProject,
                 model_type: Optional[ModelType] = None,
                 model: Optional[RevaModel] = None,
-                langchain_callbacks: Optional[List[BaseCallbackHandler]] = None
+                logging_callbacks: Optional[List[Callable[[str], None]]] = None
         ) -> None:
         """
         Initializes a new instance of the ReverseEngineeringAssistant class.
@@ -314,7 +320,7 @@ class ReverseEngineeringAssistant(object):
         self.log_path = self.project.project_path / "reva.log"
         self.logger.addHandler(logging.FileHandler(self.log_path))
 
-        self.langchain_callbacks = langchain_callbacks or []
+        self.callbacks = logging_callbacks or []
 
         if model:
             self.llm = model
@@ -340,10 +346,6 @@ class ReverseEngineeringAssistant(object):
             for function in tool.as_tools():
                 base_tools.append(function)
 
-        callbacks: List[BaseCallbackHandler] = [RevaActionLogger()]
-        callbacks.extend(self.langchain_callbacks)
-        callback_manager = RevaActionLoggerManager(handlers=callbacks, inheritable_handlers=callbacks)
-
         workflow = MessageGraph()
         model = self.llm.bind_tools(base_tools)
         workflow.add_node("agent", model)
@@ -364,8 +366,18 @@ class ReverseEngineeringAssistant(object):
         memory = SqliteSaver.from_conn_string(":memory:")
 
         app = workflow.compile(checkpointer=memory)
+        def should_retry(exc: Exception) -> bool:
+            if isinstance(exc, (
+                ValidationError,
+                json.JSONDecodeError,
+                RevaToolException,
+            )):
+                return True
+            else:
+                return default_retry_on(exc)
+        app.retry_policy = RetryPolicy(retry_on=should_retry)
 
-        self.query_engine = app
+        self.compiled_graph = app
 
         self.logger.info(f"Query engine created")
         return app
@@ -380,31 +392,86 @@ class ReverseEngineeringAssistant(object):
         Returns:
             str: The result of the query.
         """
-        if not self.query_engine:
-            self.query_engine = self.create_query_engine()
-        if not self.query_engine:
+        if not self.compiled_graph:
+            self.compiled_graph = self.create_query_engine()
+        if not self.compiled_graph:
             raise Exception("No query engine available")
         try:
 
             query_engine_input = {
                     "input": query,
                 }
-            configuration = {
-                "configurable": {"thread_id": "4",} # TODO: This is from the example, I don't know what it does.
-            }
+
+            self.logger.debug(f"Callback handlers: {self.callbacks}")
+            configuration: RunnableConfig = RunnableConfig(
+                configurable={"thread_id": "4",}, # TODO: Set the thread ID based on the program ID
+            )
 
             self.logger.debug(f"Query: {query}")
 
-            steps: List[BaseMessage] = self.query_engine.invoke(
+            stream_mode: StreamMode = "debug"
+
+            steps: List[BaseMessage] = self.compiled_graph.invoke(
                input=query,
                config=configuration,
-            )
-            assert len(steps) > 0
+               stream_mode=stream_mode,
+            ) # type: ignore
+
+            assert isinstance(steps, list)
+            assert isinstance(steps[-1], dict)
+            assert "payload" in steps[-1]
+            assert "values" in steps[-1]["payload"]
+
+            # TODO: This only happens _after_ we finish the graph. I would
+            # like it to happen _while_ we run the graph.
+            # See issue #GH-66
+            for step in steps[-1]["payload"]["values"]: # type: ignore
+                for callback in self.callbacks:
+                    # NOTE: Here we call the callbacks, but we need to get the right
+                    # message out to be logged to the user.
+                    if isinstance(step, HumanMessage):
+                        callback(str(step.content))
+                    elif isinstance(step, AIMessage):
+                        content = step.content
+                        if not content:
+                            continue
+                        callback(str(content))
+                    elif isinstance(step, ToolMessage):
+                        content = step.content
+                        try:
+                            if isinstance(content, str):
+                                content = json.loads(content)
+                        except json.JSONDecodeError:
+                            pass
+
+                        callback(
+                            f"# {step.name}\n```\n{pretty_repr(content, expand_all=True)}\n```"
+                        )
+                    elif isinstance(step, BaseMessage):
+                        self.logger.warning(f"Unknown step type: {type(step)} - {step}")
+                        callback(str(step.content))
+                    elif isinstance(step, dict):
+                        callback(json.dumps(step, indent=2))
+                    elif isinstance(step, str):
+                        callback(step)
+                    else:
+                        self.logger.warning(f"Unknown step type: {type(step)} - {step}")
+                        callback(str(step))
+
+            # The final answer is here, we need to get it depending on
+            # what type is returned.
+            # It is unfortunate that we can't know what the return type is...
             answer = steps[-1]
+            if isinstance(answer, BaseMessage):
+                return str(answer.content)
+            elif isinstance(answer, str):
+                return answer
+            elif isinstance(answer, dict):
+                return str(answer)
+            else:
+                raise ValueError(f"Unexpected answer type: {type(answer)}")
 
-            #import pdb; pdb.set_trace()
-
-            return str(answer.content)
+        # Now if there is a failure we can handle it
         except ValidationError as e:
             self.logger.exception(f"Failed to validate response from LLM: {e}")
             return "Failed to validate response from query engine"
@@ -412,6 +479,10 @@ class ReverseEngineeringAssistant(object):
             self.logger.exception(f"Failed to parse JSON response from query engine: {e.doc}")
             return "Failed to parse JSON response from query engine"
         except Exception as e:
+            # NOTE: In this block we will try to diagnose our own failure
+            # we should not hit this case unless there is a bad error and we
+            # will use the LLM to format a message and save a crash log.
+            # TODO: Move this to its own function! #GH-67
             self.logger.exception(f"Failed to query engine: {e}")
             import traceback
 

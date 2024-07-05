@@ -10,6 +10,7 @@ gradle
 LATEST_BUILD=$(ls dist/*.zip | tail -n 1)
 GHIDRA_BUILD=$(basename ${GHIDRA_INSTALL_DIR})
 rm -rf "${HOME}/.ghidra/.${GHIDRA_BUILD}/Extensions/${NAME}"
+mkdir -p "${HOME}/.ghidra/.${GHIDRA_BUILD}/Extensions/"
 unzip "${LATEST_BUILD}" -d "${HOME}/.ghidra/.${GHIDRA_BUILD}/Extensions/"
 
 ls -la "${HOME}/.ghidra/.${GHIDRA_BUILD}/Extensions"

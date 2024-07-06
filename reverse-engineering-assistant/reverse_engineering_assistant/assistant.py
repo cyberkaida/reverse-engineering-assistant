@@ -404,7 +404,7 @@ class ReverseEngineeringAssistant(object):
 
             self.logger.debug(f"Callback handlers: {self.callbacks}")
             configuration: RunnableConfig = RunnableConfig(
-                configurable={"thread_id": "4",}, # TODO: Set the thread ID based on the program ID
+                configurable={"thread_id": self.project.project,}, # TODO: Set the thread ID based on the program ID
             )
 
             self.logger.debug(f"Query: {query}")
@@ -425,7 +425,9 @@ class ReverseEngineeringAssistant(object):
             # TODO: This only happens _after_ we finish the graph. I would
             # like it to happen _while_ we run the graph.
             # See issue #GH-66
+            answer = None
             for step in steps[-1]["payload"]["values"]: # type: ignore
+                answer = step
                 for callback in self.callbacks:
                     # NOTE: Here we call the callbacks, but we need to get the right
                     # message out to be logged to the user.
@@ -461,8 +463,9 @@ class ReverseEngineeringAssistant(object):
             # The final answer is here, we need to get it depending on
             # what type is returned.
             # It is unfortunate that we can't know what the return type is...
-            answer = steps[-1]
-            if isinstance(answer, BaseMessage):
+            if isinstance(answer, AIMessage):
+                return str(answer.content)
+            elif isinstance(answer, BaseMessage):
                 return str(answer.content)
             elif isinstance(answer, str):
                 return answer
@@ -470,59 +473,9 @@ class ReverseEngineeringAssistant(object):
                 return str(answer)
             else:
                 raise ValueError(f"Unexpected answer type: {type(answer)}")
-
-        # Now if there is a failure we can handle it
-        except ValidationError as e:
-            self.logger.exception(f"Failed to validate response from LLM: {e}")
-            return "Failed to validate response from query engine"
-        except json.JSONDecodeError as e:
-            self.logger.exception(f"Failed to parse JSON response from query engine: {e.doc}")
-            return "Failed to parse JSON response from query engine"
         except Exception as e:
-            # NOTE: In this block we will try to diagnose our own failure
-            # we should not hit this case unless there is a bad error and we
-            # will use the LLM to format a message and save a crash log.
-            # TODO: Move this to its own function! #GH-67
-            self.logger.exception(f"Failed to query engine: {e}")
-            import traceback
-
-            try:
-                # Let's try to explain the exception
-                # We need to take away the tools, so she doesn't try to answer
-                # by reverse engineering the program...
-                answer: BaseMessage = self.llm.invoke(
-                    f"You are ReVa, the reverse engineering assisstant. During your execution you threw an exception. Your logs are located in the file {self.log_path} Can you explain the error: {e}\n\n{traceback.format_exc()}"
-                )
-                answer_content: str
-                if isinstance(answer, str):
-                    # This only happened in older versions of langchain
-                    answer_content = answer
-                elif isinstance(answer, dict):
-                    answer_content = answer["output"]
-                elif isinstance(answer, BaseMessage):
-                    answer_content = str(answer.content)
-                else:
-                    raise ValueError(f"Unexpected answer type: {type(answer)}")
-
-                analysis = f"""## **ReVa could not complete your request.**
-Logs have been saved to `{self.log_path}`.
-> She has examined the exception:
-```
-{e}
-{traceback.format_exc()}
-```
-## ReVa's debugging notes:
-{answer_content}
-                """
-                date = datetime.datetime.now().strftime("%Y-%m-%d-%H%M%S")
-                crash_path = self.project.project_path / "crash"
-                crash_path.mkdir(exist_ok=True)
-                crash_dump_path = crash_path / f"reva-crash-{date}.log.md"
-                crash_dump_path.write_text(analysis)
-                return analysis
-            except Exception as e:
-                self.logger.exception(f"Failed to query engine: {e}")
-                return f"Failed to query engine... Try again?\n```{traceback.format_exc()}```\nLogs have been saved to `{self.log_path}`"
+            from crash_dump import crash_dump
+            return crash_dump()
 
 def get_thinking_emoji() -> str:
     """

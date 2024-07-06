@@ -79,6 +79,8 @@ def find_connectable_extensions() -> Generator[Tuple[Path, str, str], None, None
             if len(content) == 2:
                 yield file, content[0], content[1]
             else:
+                # If the connection string is the wrong format, we will remove it
+                # this is to clean anything that dropped bad content in the directory
                 logger.warning(f"Invalid connection string: {connection_string}. Cleaning.")
                 file.unlink()
 
@@ -119,16 +121,25 @@ def main():
         connectable_extensions: List[RevaHeartbeatResponse] = []
         for file, host, port in find_connectable_extensions():
             # First try a heartbeat to see if the connection is still alive
-            try:
-                channel = grpc.insecure_channel(f"{host}:{port}")
-                stub = RevaHeartbeatStub(channel)
-                response = stub.heartbeat(RevaHeartbeatRequest())
-                connectable_extensions.append(response)
-                logger.info(f"Found connectable extension: {response}")
-            except grpc.RpcError as e:
-                # If we can't connect, clean it up
-                logger.debug(f"Removing invalid connection file: {file}")
-                file.unlink()
+            retries = 10
+            for _ in range(2):
+                try:
+                    channel = grpc.insecure_channel(f"{host}:{port}")
+                    stub = RevaHeartbeatStub(channel)
+                    response = stub.heartbeat(RevaHeartbeatRequest())
+                    connectable_extensions.append(response)
+                    logger.info(f"Found connectable extension: {response}")
+                    break
+                except grpc.RpcError as e:
+                    if retries > 0:
+                        import time
+                        retries -= 1
+                        logger.warning(f"Failed to connect to {host}:{port}. Retrying in 1 second.")
+                        time.sleep(1)
+                    else:
+                        # If we can't connect, clean it up
+                        logger.debug(f"Removing old connection file: {file}")
+                        file.unlink()
         if len(connectable_extensions) == 0:
             logger.error("No connectable extensions found. Is Ghidra running? Is the extension enabled?")
             parser.error("No connectable extensions found. Is Ghidra running? Is the extension enabled?")

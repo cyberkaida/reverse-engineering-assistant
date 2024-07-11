@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "reverse-engineering-assistant"
 readme = "README.md"
-version = "2.9.3"
+version = "2.9.4"
 authors = [
     {name="サイバーカイダ (cyberkaida)"},
 ]
@@ -21,6 +21,7 @@ dependencies = [
     "langchain-core",
     "langchain-openai",
     "langchain-community",
+    "langchain-experimental",
     "langgraph",
     "prompt_toolkit",
     "sentence_transformers",
@@ -30,7 +31,6 @@ dependencies = [
     "grpcio",
     "protobuf",
     "flask",
-    "langchain-experimental",
 ]
 
 [project.scripts]

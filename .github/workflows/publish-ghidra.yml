@@ -7,7 +7,7 @@ jobs:
   build:
     strategy:
       matrix:
-        os: [macos-latest, windows-latest, ubuntu-latest]
+        os: [ubuntu-latest]
     name: Build distribution 📦
     runs-on: ${{ matrix.os }}
     steps:
@@ -22,4 +22,4 @@ jobs:
       with:
         version: "11.1.2"
     - name: Compile ReVa
-      run: gradlew
+      run: gradle

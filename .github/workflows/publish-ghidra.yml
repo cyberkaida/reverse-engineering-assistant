@@ -1,0 +1,52 @@
+name: Publish Ghidra 🐉 distribution
+on: push
+defaults:
+  run:
+    working-directory: ./ghidra-assistant
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [ubuntu-latest]
+        ghidra-version: [
+            "11.1.2",
+            "11.1.1",
+            "11.1",
+        ]
+    name: Build distribution 📦
+    runs-on: ${{ matrix.os }}
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Java 🍵
+      uses: actions/setup-java@v4
+      with:
+        java-version: "17"
+        distribution: "microsoft"
+    - name: Install Ghidra 🐉
+      uses: er28-0652/setup-ghidra@master
+      with:
+        version: ${{ matrix.ghidra-version }}
+    - name: Compile ReVa 👩‍💻✨
+      run: gradle buildExtension
+    - name: Store the distribution packages
+      uses: actions/upload-artifact@v3
+      with:
+        name: ghidra-distributions
+        path: ghidra-assistant/dist/
+        if-no-files-found: error
+  github-release:
+    name: >-
+      Sign the Ghidra 🐉 distribution 📦 with Sigstore
+      and upload them to GitHub Release
+    needs:
+    - build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # IMPORTANT: mandatory for making GitHub Releases
+      id-token: write  # IMPORTANT: mandatory for sigstore
+    steps:
+    - name: Download all the dists
+      uses: actions/download-artifact@v3
+      with:
+        name: ghidra-distributions
+        path: dist/

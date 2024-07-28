@@ -1,0 +1,26 @@
+name: Publish Ghidra 🐉 distribution
+on: push
+defaults:
+  run:
+    working-directory: ./ghidra-assistant
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [macos-latest, windows-latest, ubuntu-latest]
+    name: Build distribution 📦
+    runs-on: ${{ matrix.os }}
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Java 🍵
+      uses: actions/setup-java@v4
+      with:
+        java-version: "17"
+        distribution: "adopt"
+    - name: Install Ghidra 🐉
+      uses: er28-0652/setup-ghidra@master
+      with:
+        version: "latest"
+    - name: Compile ReVa
+      run: gradle
+      working-directory: ./ghidra-assistant

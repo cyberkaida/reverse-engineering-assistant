@@ -8,6 +8,11 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest]
+        ghidra-version: [
+            "11.1.2",
+            "11.1.1",
+            "11.1.0",
+        ]
     name: Build distribution 📦
     runs-on: ${{ matrix.os }}
     steps:
@@ -20,6 +25,6 @@ jobs:
     - name: Install Ghidra 🐉
       uses: er28-0652/setup-ghidra@master
       with:
-        version: "11.1.2"
-    - name: Compile ReVa
+        version: ${{ matrix.ghidra-version }}
+    - name: Compile ReVa 👩‍💻✨
       run: gradle

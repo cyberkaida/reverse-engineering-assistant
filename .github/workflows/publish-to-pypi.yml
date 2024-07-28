@@ -68,7 +68,6 @@ jobs:
       with:
         name: python-package-distributions
         path: dist/
-        if-no-files-found: error
     - name: Sign the dists with Sigstore
       uses: sigstore/gh-action-sigstore-python@v1.2.3
       with:

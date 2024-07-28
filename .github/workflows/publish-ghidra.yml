@@ -27,7 +27,13 @@ jobs:
       with:
         version: ${{ matrix.ghidra-version }}
     - name: Compile ReVa 👩‍💻✨
-      run: gradle
+      run: gradle buildExtension
+    - name: Store the distribution packages
+      uses: actions/upload-artifact@v3
+      with:
+        name: ghidra-distributions
+        path: ghidra-assistant/dist/
+        if-no-files-found: error
   github-release:
     name: >-
       Sign the Ghidra 🐉 distribution 📦 with Sigstore

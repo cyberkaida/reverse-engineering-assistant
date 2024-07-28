@@ -32,7 +32,7 @@ jobs:
       uses: actions/upload-artifact@v3
       with:
         name: ghidra-distributions
-        path: ghidra-assistant/dist/
+        path: dist/
         if-no-files-found: error
   github-release:
     name: >-

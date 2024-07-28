@@ -16,11 +16,10 @@ jobs:
       uses: actions/setup-java@v4
       with:
         java-version: "17"
-        distribution: "adopt"
+        distribution: "microsoft"
     - name: Install Ghidra 🐉
       uses: er28-0652/setup-ghidra@master
       with:
-        version: "latest"
+        version: "11.1.2"
     - name: Compile ReVa
-      run: gradle
-      working-directory: ./ghidra-assistant
+      run: gradlew

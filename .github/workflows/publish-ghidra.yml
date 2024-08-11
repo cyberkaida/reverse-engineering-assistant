@@ -7,7 +7,10 @@ jobs:
   build:
     strategy:
       matrix:
-        os: [ubuntu-latest]
+        # The extension is Java only, so it should work on all platforms
+        # but there have been issues with building on Windows (#73, #72)
+        # that are related to protobufs, so we will build on all platforms
+        os: [ubuntu-latest, windows-latest, macos-latest]
         ghidra-version: [
             "11.1.2",
             "11.1.1",

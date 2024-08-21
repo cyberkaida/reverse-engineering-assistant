@@ -41,6 +41,7 @@ def crash_dump(
     crash_dump_name = f"reva-crash-{date}.log.md"
     crash_dump_chat_log_name = f"reva-crash-{date}.chat.log"
 
+    # Begin building the crash report content
     analysis = textwrap.dedent(
             f"""
             ## **ReVa could not complete your request.**
@@ -49,6 +50,7 @@ def crash_dump(
             Time: {date}
         """)
     if e:
+        # If we have an exception, add it to the crash report
         analysis += textwrap.dedent(f"""
             ### Exception:
             ```
@@ -62,8 +64,10 @@ def crash_dump(
             {traceback.format_exc()}
             ```
         """)
+
     if assistant:
         # Get details about the assistant for debugging
+        # also save the chat log
         analysis += textwrap.dedent(f"""
             ### Assistant details:
             - RevaModel: {assistant.llm}
@@ -75,11 +79,18 @@ def crash_dump(
 
     if assistant:
         try:
-            # Let's try to explain the exception
+            # Let's try to explain the exception using the model
+            # loaded in the assistant.
             # We need to take away the tools, so she doesn't try to answer
             # by reverse engineering the program...
             answer: BaseMessage = assistant.llm.invoke(
-                f"You are ReVa, the reverse engineering assisstant. During your execution you threw an exception. Your logs are located in the file {self.log_path} Can you explain the error: {e}\n\n{traceback.format_exc()}"
+                textwrap.dedent(f"""
+                    You are ReVa, the reverse engineering assisstant. During your execution you threw an exception.
+                    Your logs are located in the file {crash_path / crash_dump_name}.
+                    {f"Can you explain the error: {e}" if e else ""}
+                    A traceback of the error is:
+                    {traceback.format_exc()}
+                """)
             )
             answer_content: str
             if isinstance(answer, str):
@@ -95,7 +106,8 @@ def crash_dump(
                 # ReVa's analysis:
                 > She has examined the exception:
                 ```
-                {e}
+                {e if e else "No exception provided"}
+
                 {traceback.format_exc()}
                 ```
                 ## ReVa's debugging notes:

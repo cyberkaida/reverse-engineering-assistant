@@ -35,8 +35,8 @@ def crash_dump(
         crash_path = assistant.project.project_path / "crash"
     else:
          crash_path = generic_crash_path
-    crash_path.mkdir(exist_ok=True)
-    generic_crash_path.mkdir(exist_ok=True)
+    crash_path.mkdir(parents=True, exist_ok=True)
+    generic_crash_path.mkdir(parents=True, exist_ok=True)
 
     crash_dump_name = f"reva-crash-{date}.log.md"
     crash_dump_chat_log_name = f"reva-crash-{date}.chat.log"

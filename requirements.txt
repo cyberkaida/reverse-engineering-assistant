@@ -3,3 +3,22 @@ grpcio-tools
 langchain-community
 langchain-core
 langchain-openai
+
+# For the type checker
+mypy
+lxml-stubs
+pandas-stubs
+types-Pillow
+types-PyYAML
+types-Pygments
+types-beautifulsoup4
+types-jsonschema
+types-protobuf
+types-psutil
+types-redis
+types-regex
+types-requests
+types-tqdm
+types-tree-sitter
+types-tree-sitter-languages
+types-xmltodict

@@ -1,0 +1,31 @@
+syntax = "proto3";
+package RevaProtocol;
+option java_package = "reva.protocol";
+
+// Allow the LLM to create and run scripts as a single action
+// The LLM will write the script and run it, we return the output
+
+// TODO: Add a way to save the script for later use? Maybe cache them?
+// TODO: Let the LLM search existing scripts?
+// TODO: Add a documentation lookup function? Will this make the LLM constantly look things up?
+
+service RevaScriptService {
+  rpc run_script(RevaScriptRequest) returns (RevaScriptResponse) {}
+}
+
+enum RevaScriptType {
+    GHIDRA_PYTHON = 0;
+    GHIDRA_JAVA = 1;
+}
+
+message RevaScriptRequest {
+  string name = 1;
+  string description = 2;
+  RevaScriptType type = 3;
+  string category = 4;
+  string content = 5;
+}
+
+message RevaScriptResponse {
+    string output = 1;
+}

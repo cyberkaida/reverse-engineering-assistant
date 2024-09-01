@@ -34,7 +34,7 @@ from .api_server_tools.connection import get_channel, connect_to_extension
 # poor ReVa won't know about her tools and she can't help you.
 from .api_server_tools.re_tools import *
 
-from .model import get_llm_ollama, get_llm_openai
+from .model import RevaModel, get_llm_ollama, get_llm_openai
 
 import os
 import logging
@@ -71,7 +71,7 @@ def heartbeat():
 
 def start_serving(
         connect_host: str, connect_port: int,
-        model: BaseChatModel | BaseLanguageModel = None,
+        model: BaseChatModel | BaseLanguageModel,
         serve_host: str = 'localhost', serve_port: Optional[int] = None
         ):
     if not serve_port:
@@ -133,6 +133,8 @@ def main():
 
     args = parser.parse_args()
 
+    model: Optional[RevaModel] = None
+
     if args.openai_api_key == "OPENAI_API_KEY":
         args.openai_api_key = None
 
@@ -150,6 +152,8 @@ def main():
     else:
         raise ValueError(f"Incorrect provider specified {args.provider}")
 
+    # The model should always be set by the provider, the arg should have a default value
+    assert model is not None
     start_serving(
         connect_host=args.connect_host,
         connect_port=args.connect_port,

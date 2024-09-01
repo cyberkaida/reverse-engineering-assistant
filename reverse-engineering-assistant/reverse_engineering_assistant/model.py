@@ -8,8 +8,7 @@ from pydantic import SecretStr
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.language_models.base import BaseLanguageModel
-from langchain_community.chat_models import ChatOllama
-from langchain_experimental.llms.ollama_functions import OllamaFunctions
+from langchain_ollama import ChatOllama
 from langchain_openai import ChatOpenAI
 
 import os
@@ -25,7 +24,7 @@ class ModelType(Enum):
     OpenAI = "openai"
     Ollama = "ollama"
 
-type RevaModel = Union[ChatOpenAI, OllamaFunctions, ChatOllama]
+type RevaModel = Union[ChatOpenAI, ChatOllama]
 
 def get_llm_openai(model: str = "gpt-4o", api_key: Optional[str] = None) -> ChatOpenAI:
     if not api_key or api_key == 'null' or api_key == "OPENAI_API_KEY":
@@ -39,7 +38,7 @@ def get_llm_openai(model: str = "gpt-4o", api_key: Optional[str] = None) -> Chat
     )
     return llm
 
-def get_llm_ollama(base_url: Optional[str] = None, model: str = "llama3") -> OllamaFunctions | ChatOllama:
+def get_llm_ollama(base_url: Optional[str] = None, model: str = "llama3") -> ChatOllama:
     logger.info(f"Loading Ollama - {model} from {base_url}")
     if not base_url:
         base_url = 'http://127.0.0.1:11434'

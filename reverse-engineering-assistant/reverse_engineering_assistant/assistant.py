@@ -53,7 +53,6 @@ from langgraph.prebuilt.tool_node import ToolNode
 from langchain_core.pydantic_v1 import BaseModel, Field
 from langchain_core.runnables import RunnableConfig
 
-from .documents import AssistantDocument, CrossReferenceDocument, DecompiledFunctionDocument
 from .model import ModelType, get_model, RevaModel
 from .tool import AssistantProject
 from .reva_exceptions import RevaToolException

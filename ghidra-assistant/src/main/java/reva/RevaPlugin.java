@@ -1,7 +1,6 @@
 package reva;
 
 import ghidra.framework.cmd.BackgroundCommand;
-import ghidra.framework.model.DomainFile;
 import ghidra.framework.model.DomainObject;
 import ghidra.framework.options.OptionType;
 import ghidra.framework.options.Options;
@@ -10,7 +9,6 @@ import ghidra.framework.plugintool.PluginTool;
 import ghidra.app.plugin.ProgramPlugin;
 import ghidra.app.plugin.core.decompile.DecompilerActionContext;
 import ghidra.framework.plugintool.util.PluginStatus;
-import ghidra.framework.task.gui.GProgressBar;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.Program;
@@ -22,8 +20,6 @@ import ghidra.app.context.ListingActionContext;
 import ghidra.app.decompiler.component.DecompilerPanel;
 import ghidra.app.plugin.PluginCategoryNames;
 import ghidra.util.Msg;
-import ghidra.util.task.CancelledListener;
-import ghidra.util.task.Task;
 import ghidra.util.task.TaskBuilder;
 import ghidra.util.task.TaskMonitor;
 import ghidra.util.task.TaskMonitorAdapter;
@@ -51,7 +47,6 @@ import reva.protocol.RevaChat.RevaChatMessageResponse;
 import reva.protocol.RevaChat.RevaChatShutdown;
 import reva.protocol.RevaChat.RevaChatShutdownResponse;
 import reva.protocol.RevaChatServiceGrpc.RevaChatServiceStub;
-import reva.protocol.RevaVariableOuterClass.RevaVariable;
 
 @PluginInfo(status = PluginStatus.STABLE, // probably a lie
         packageName = "ReVa",

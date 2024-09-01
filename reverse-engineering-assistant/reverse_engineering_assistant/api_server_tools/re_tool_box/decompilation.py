@@ -33,7 +33,7 @@ class RevaDecompilation(RevaRemoteTool):
             self.update_variable_in_function,
         ]
 
-    def get_decompilation_for_function(self, function_name_or_address: str) -> Dict[str, str]:
+    def get_decompilation_for_function(self, function_name_or_address: str) -> Dict[str, str | List[str]]:
         """
         Return the decompilation for the given function. The function can be specified by name or address.
         Hint: It is too slow to decompile _all_ functions, so use get_defined_function_list_paginated to get a list of functions

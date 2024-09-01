@@ -20,9 +20,10 @@ dependencies = [
     "langchain",
     "langchain-core",
     "langchain-openai",
+    "langchain-ollama",
     "langchain-community",
     "langchain-experimental",
-    "langgraph",
+    "langgraph == 0.2.3",
     "prompt_toolkit",
     "sentence_transformers",
     "PyYAML",
@@ -36,3 +37,6 @@ dependencies = [
 [project.scripts]
 reva-server = "reverse_engineering_assistant.assistant_api_server:main"
 reva-chat = "reverse_engineering_assistant.chat_client:main"
+
+[tool.mypy]
+mypy_path = ["reverse_engineering_assistant/protocol"]

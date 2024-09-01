@@ -33,7 +33,8 @@ python: protocol
 	$(VENV_PATH)/bin/mypy --install-types $(REVA_PYTHON_PATH)
 
 mypy: .venv
-	$(VENV_PATH)/bin/mypy --install-types $(REVA_PYTHON_PATH)
+	$(VENV_PATH)/bin/python3 -m pip install -r $(MAKEFILE_PATH)/requirements.txt
+	cd $(REVA_PYTHON_PATH) && $(VENV_PATH)/bin/mypy .
 
 .venv:
 	python3 -m venv $(VENV_PATH)
@@ -47,6 +48,8 @@ protocol: .venv create_protocol
 		--pyi_out=$(REVA_PYTHON_PATH)/protocol/ \
 		--grpc_python_out=$(REVA_PYTHON_PATH)/protocol/ \
 		$(MAKEFILE_PATH)/protocol/*.proto
+# --mypy_out=$(REVA_PYTHON_PATH)/protocol/
+	touch $(REVA_PYTHON_PATH)/protocol/__init__.py
 
 create_protocol:
 ifeq ($(OS),Windows_NT)

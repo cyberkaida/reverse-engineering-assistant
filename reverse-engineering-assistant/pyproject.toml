@@ -37,3 +37,6 @@ dependencies = [
 [project.scripts]
 reva-server = "reverse_engineering_assistant.assistant_api_server:main"
 reva-chat = "reverse_engineering_assistant.chat_client:main"
+
+[tool.mypy]
+mypy_path = ["reverse_engineering_assistant/protocol"]

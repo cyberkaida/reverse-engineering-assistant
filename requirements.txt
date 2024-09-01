@@ -3,6 +3,11 @@ grpcio-tools
 langchain-community
 langchain-core
 langchain-openai
+langchain-ollama
+rich
+prompt-toolkit
+langgraph == 0.2.3
+mypy-protobuf
 
 # For the type checker
 mypy
@@ -22,3 +27,5 @@ types-tqdm
 types-tree-sitter
 types-tree-sitter-languages
 types-xmltodict
+grpc-stubs
+types-openpyxl

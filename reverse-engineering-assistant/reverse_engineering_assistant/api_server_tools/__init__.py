@@ -1,6 +1,6 @@
 
 
-from typing import List
+from typing import List, Type
 from reverse_engineering_assistant.reva_exceptions import RevaToolException
 from reverse_engineering_assistant.tool import AssistantProject
 from reverse_engineering_assistant.assistant import RevaTool
@@ -11,7 +11,7 @@ import logging
 
 
 class RevaMessageHandler(object):
-    handles_type = None
+    handles_type: Optional[Type] = None
 
 _global_message_handlers: List[RevaMessageHandler] = []
 

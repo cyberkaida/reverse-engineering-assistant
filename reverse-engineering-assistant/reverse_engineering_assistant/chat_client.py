@@ -37,6 +37,10 @@ import os
 import logging
 # Get the appropriate temp directory depending on the OS
 temp_dir = os.getenv('TEMP') if os.name == 'nt' else '/tmp'
+if not temp_dir:
+    import tempfile
+    temp_dir = tempfile.gettempdir()
+# TODO: We should move this log somewhere better
 log_file = os.path.join(temp_dir, 'reva-chat.log')
 logging.basicConfig(
     filename=log_file, level=logging.DEBUG,
@@ -232,8 +236,8 @@ def main():
 
     chat_id: str = str(uuid4())
 
-    send_queue = queue.Queue()
-    receive_queue = queue.Queue()
+    send_queue: queue.Queue = queue.Queue()
+    receive_queue: queue.Queue = queue.Queue()
 
     def get_message_from_queue():
         while True:

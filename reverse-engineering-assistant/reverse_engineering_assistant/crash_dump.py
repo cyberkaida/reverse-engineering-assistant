@@ -1,7 +1,7 @@
 import logging
 import traceback
 from typing import Optional
-from assistant import ReverseEngineeringAssistant
+from .assistant import ReverseEngineeringAssistant
 import datetime
 from pathlib import Path
 

@@ -24,6 +24,8 @@ dependencies = [
     "langchain-community",
     "langchain-experimental",
     "langgraph == 0.2.3",
+    "langgraph-checkpoint-sqlite",
+    "langgraph-checkpoint",
     "prompt_toolkit",
     "sentence_transformers",
     "PyYAML",

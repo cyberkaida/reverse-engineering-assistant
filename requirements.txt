@@ -6,7 +6,9 @@ langchain-openai
 langchain-ollama
 rich
 prompt-toolkit
-langgraph == 0.2.3
+langgraph>=0.2.3
+langgraph-checkpoint-sqlite
+langgraph-checkpoint
 mypy-protobuf
 
 # For the type checker

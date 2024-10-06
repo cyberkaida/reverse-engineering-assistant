@@ -25,7 +25,7 @@ from langchain_core.language_models.base import BaseLanguageModel
 from langchain_core.prompts.chat import ChatPromptTemplate
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain.memory import ConversationTokenBufferMemory, ConversationBufferMemory
-from langchain.memory.chat_memory import BaseMemory
+from langchain_core.memory import BaseMemory
 from langchain_community.chat_message_histories import ChatMessageHistory, SQLChatMessageHistory
 from prompt_toolkit import PromptSession
 from prompt_toolkit.history import FileHistory
@@ -44,11 +44,12 @@ from langchain_core.messages import (
 )
 
 from langgraph.checkpoint.sqlite import SqliteSaver
+from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, MessageGraph
 from langgraph.graph.graph import CompiledGraph
 from langgraph.pregel import StreamMode
-from langgraph.pregel.retry import RetryPolicy, default_retry_on
-from langgraph.checkpoint import Checkpoint
+from langgraph.pregel.types import RetryPolicy, default_retry_on
+from langgraph.checkpoint.base import Checkpoint
 from langgraph.prebuilt.tool_node import ToolNode
 from langchain_core.pydantic_v1 import BaseModel, Field
 from langchain_core.runnables import RunnableConfig
@@ -362,7 +363,9 @@ class ReverseEngineeringAssistant(object):
         workflow.add_conditional_edges("agent", should_continue)
         workflow.add_edge("action", "agent")
 
-        memory = SqliteSaver.from_conn_string(":memory:")
+        # TODO: Switch to a persistent store
+        # memory = SqliteSaver.from_conn_string(":memory:")
+        memory = MemorySaver()
 
         app = workflow.compile(checkpointer=memory)
         def should_retry(exc: Exception) -> bool:
@@ -473,7 +476,7 @@ class ReverseEngineeringAssistant(object):
             else:
                 raise ValueError(f"Unexpected answer type: {type(answer)}")
         except Exception as e:
-            from crash_dump import crash_dump
+            from .crash_dump import crash_dump
             return crash_dump()
 
 def get_thinking_emoji() -> str:

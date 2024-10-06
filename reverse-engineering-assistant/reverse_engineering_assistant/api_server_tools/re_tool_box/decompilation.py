@@ -73,8 +73,8 @@ class RevaDecompilation(RevaRemoteTool):
             "decompilation": cleaned_decompilation,
             "listing": response.listing,
             "variables": response.variables, #type: ignore # We can ignore this because it can be serialised to a dict
-            "incoming_calls": response.incoming_calls,
-            "outgoing_calls": response.outgoing_calls,
+            "incoming_calls": list(response.incoming_calls),
+            "outgoing_calls": list(response.outgoing_calls),
         }
 
     def update_multiple_variables_in_function(self, updates: List[Dict[str, str]], containing_function: str) -> List[str]:

@@ -7,7 +7,7 @@ from typing import Generator, List, Optional, Tuple
 from uuid import uuid4
 from prompt_toolkit import PromptSession
 import prompt_toolkit
-from prompt_toolkit.history import FileHistory
+from prompt_toolkit.history import FileHistory, History
 import rich
 import argparse
 from pathlib import Path
@@ -231,8 +231,8 @@ def main():
 
     console.print("[bold]Welcome to Reva Chat![/bold]")
     console.print(f"[gray]Using {args.provider} with model {args.model}[/gray]")
-    history_file = FileHistory(str(history_file_path))
-    prompt_session = PromptSession(history=history_file)
+    history_file: History = FileHistory(str(history_file_path))
+    prompt_session: PromptSession = PromptSession(history=history_file)
 
     chat_id: str = str(uuid4())
 

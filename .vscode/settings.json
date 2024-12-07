@@ -8,5 +8,7 @@
     "python.analysis.completeFunctionParens": true,
     "github.gitProtocol": "ssh",
     "editor.insertSpaces": true,
-    "editor.tabSize": 4
+    "editor.tabSize": 4,
+    "mypy-type-checker.preferDaemon": true,
+    "mypy-type-checker.reportingScope": "workspace"
 }

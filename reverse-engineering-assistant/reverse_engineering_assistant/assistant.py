@@ -47,8 +47,7 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, MessageGraph
 from langgraph.graph.graph import CompiledGraph
 from langgraph.pregel import StreamMode
-from langgraph.pregel.retry import RetryPolicy, default_retry_on
-from langgraph.checkpoint import Checkpoint
+from langgraph.types import RetryPolicy, default_retry_on
 from langgraph.prebuilt.tool_node import ToolNode
 from langchain_core.pydantic_v1 import BaseModel, Field
 from langchain_core.runnables import RunnableConfig

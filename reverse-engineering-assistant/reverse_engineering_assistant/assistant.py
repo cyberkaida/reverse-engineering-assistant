@@ -9,6 +9,7 @@ import random
 from abc import ABC, abstractmethod
 from functools import cache, cached_property
 from pathlib import Path
+import sqlite3
 import tempfile
 from typing import Annotated, Any, Callable, Dict, List, Optional, Sequence, Tuple, Type, TypedDict, Union
 from uuid import UUID
@@ -25,7 +26,7 @@ from langchain_core.language_models.base import BaseLanguageModel
 from langchain_core.prompts.chat import ChatPromptTemplate
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain.memory import ConversationTokenBufferMemory, ConversationBufferMemory
-from langchain.memory.chat_memory import BaseMemory
+from langchain.memory.chat_memory import BaseChatMemory
 from langchain_community.chat_message_histories import ChatMessageHistory, SQLChatMessageHistory
 from prompt_toolkit import PromptSession
 from prompt_toolkit.history import FileHistory
@@ -49,7 +50,7 @@ from langgraph.graph.graph import CompiledGraph
 from langgraph.pregel import StreamMode
 from langgraph.types import RetryPolicy, default_retry_on
 from langgraph.prebuilt.tool_node import ToolNode
-from langchain_core.pydantic_v1 import BaseModel, Field
+from pydantic import BaseModel, Field
 from langchain_core.runnables import RunnableConfig
 
 from .documents import AssistantDocument, CrossReferenceDocument, DecompiledFunctionDocument
@@ -362,7 +363,8 @@ class ReverseEngineeringAssistant(object):
         workflow.add_conditional_edges("agent", should_continue)
         workflow.add_edge("action", "agent")
 
-        memory = SqliteSaver.from_conn_string(":memory:")
+        sqlite_conn = sqlite3.connect(":memory:", check_same_thread=False)
+        memory = SqliteSaver(sqlite_conn)
 
         app = workflow.compile(checkpointer=memory)
         def should_retry(exc: Exception) -> bool:

@@ -113,7 +113,7 @@ class RevaChat(RevaChatServiceServicer):
                 llm_response = assistant.query(query)
                 self.logger.info(f"LLM Response: {llm_response}")
                 response = RevaChatMessageResponse()
-                response.message = llm_response
+                response.message = str(llm_response)
                 response_queue.put(response)
 
             t = threading.Thread(target=run_query, args=[request.message])

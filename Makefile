@@ -28,13 +28,13 @@ ghidra: protocol
 	gradle -b $(MAKEFILE_PATH)/ghidra-assistant/build.gradle
 
 python: protocol
-	python -m pip install build
-	python -m build reverse-engineering-assistant
+	python3 -m pip install build
+	python3 -m build reverse-engineering-assistant
 
 # Generate Python code from proto file
 protocol: create_protocol
-	python -m pip install -r "$(MAKEFILE_PATH)/requirements.txt"
-	python -m grpc_tools.protoc \
+	python3 -m pip install -r "$(MAKEFILE_PATH)/requirements.txt"
+	python3 -m grpc_tools.protoc \
 		--proto_path="$(MAKEFILE_PATH)/protocol/" \
 		--python_out="$(REVA_PYTHON_PATH)/protocol/" \
 		--pyi_out="$(REVA_PYTHON_PATH)/protocol/" \

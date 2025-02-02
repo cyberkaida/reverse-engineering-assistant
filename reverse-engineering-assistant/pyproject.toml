@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "reverse-engineering-assistant"
+version = "4.0.0"
+description = "An assistant for reverse engineering tasks."
+authors = [
+    {name = "サイバーかいだ"}
+]
+dependencies = [
+    "mcp[cli]", # Model Control Protocol
+    # pip install ${GHIDRA_INSTALL_DIR}/Ghidra/Features/PyGhidra/pypkg
+    "pyghidra", # Ghidra 11.3+ Python3 support
+    "ghidra-stubs",
+]
+
+[project.scripts]
+reva-server = "reverse_engineering_assistant.reva_server:main"
+
+[tool.setuptools]
+packages = ["reverse_engineering_assistant"]
+

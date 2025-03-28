@@ -4,7 +4,7 @@ dist/
 *.egg-info
 *.pyc
 .venv
-.vscode
 .vim/
 .DS_Store
 .mypy_cache/
+__pycache__

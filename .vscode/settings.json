@@ -6,9 +6,14 @@
     "java.compile.nullAnalysis.mode": "automatic",
     "java.jdt.ls.vmargs": "-XX:+UseParallelGC -XX:GCTimeRatio=4 -XX:AdaptiveSizePolicyWeight=90 -Dsun.zip.disableMemoryMapping=true -Xmx2G -Xms100m -Xlog:disable",
     "python.analysis.completeFunctionParens": true,
-    "github.gitProtocol": "ssh",
     "editor.insertSpaces": true,
     "editor.tabSize": 4,
     "mypy-type-checker.preferDaemon": true,
-    "mypy-type-checker.reportingScope": "workspace"
+    "mypy-type-checker.reportingScope": "workspace",
+    "mypy-type-checker.path": [
+        "${env:GHIDRA_INSTALL_DIR}/docs/ghidra_stubs/"
+    ],
+    "python.autoComplete.extraPaths": [
+        "${env:GHIDRA_INSTALL_DIR}/docs/ghidra_stubs/"
+    ],
 }

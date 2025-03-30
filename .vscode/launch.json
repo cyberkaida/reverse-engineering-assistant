@@ -1,0 +1,55 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "java",
+      "name": "Ghidra",
+      "request": "launch",
+      "mainClass": "ghidra.Ghidra",
+      "args": "ghidra.GhidraRun",
+      "classPaths": [
+        "${env:GHIDRA_INSTALL_DIR}/Ghidra/Framework/Utility/lib/Utility.jar"
+      ],
+      "vmArgs": [
+        "-Dghidra.external.modules=${workspaceFolder}",
+        "-Djava.system.class.loader=ghidra.GhidraClassLoader",
+        "-Dfile.encoding=UTF8",
+        "-Duser.country=US",
+        "-Duser.language=en",
+        "-Duser.variant=",
+        "-Dsun.java2d.opengl=false",
+        "-Djdk.tls.client.protocols=TLSv1.2,TLSv1.3",
+        "-Dcpu.core.limit=",
+        "-Dcpu.core.override=",
+        "-Dfont.size.override=",
+        "-Dpython.console.encoding=UTF-8",
+        "-Xshare:off",
+        "-Declipse.filelock.disable=true",
+        "-Dapple.laf.useScreenMenuBar=false",
+        "-Dapple.awt.application.appearance=system"
+      ]
+    },
+    {
+      "type": "debugpy",
+      "name": "PyGhidra",
+      "request": "launch",
+      "module": "pyghidra.ghidra_launch",
+      "args": [
+        "--install-dir",
+        "${env:GHIDRA_INSTALL_DIR}",
+        "-g",
+        "ghidra.GhidraRun"
+      ],
+      "env": {
+        "PYGHIDRA_DEBUG": "1"
+      }
+    },
+    {
+      "type": "java",
+      "name": "Ghidra Attach",
+      "request": "attach",
+      "hostName": "localhost",
+      "port": 18001
+    }
+  ]
+}

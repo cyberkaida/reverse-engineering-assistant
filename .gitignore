@@ -1,6 +1,7 @@
 .gradle
 build/
 dist/
+bin/
 *.egg-info
 *.pyc
 .venv

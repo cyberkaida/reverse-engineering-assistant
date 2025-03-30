@@ -39,7 +39,7 @@ else if (project.hasProperty("GHIDRA_INSTALL_DIR")) {
 	ghidraInstallDir = project.getProperty("GHIDRA_INSTALL_DIR")
 }
 else {
-	ghidraInstallDir = "/Users/kaida/.local/opt/ghidra_11.3_PUBLIC"
+	throw new GradleException("GHIDRA_INSTALL_DIR is not set. Please set it as an environment variable or Gradle project property.")
 }
 
 task distributeExtension {
@@ -62,7 +62,7 @@ dependencies {
 	// Any external dependencies added here will automatically be copied to the lib/ directory when
 	// this extension is built.
 	implementation platform("io.modelcontextprotocol.sdk:mcp-bom:0.8.1")
-	implementation platform("io.modelcontextprotocol.sdk:mcp")
+	implementation "io.modelcontextprotocol.sdk:mcp"
 }
 
 // Exclude additional files from the built extension

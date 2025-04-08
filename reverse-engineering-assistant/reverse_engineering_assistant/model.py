@@ -8,7 +8,7 @@ from pydantic import SecretStr
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.language_models.base import BaseLanguageModel
-from langchain_community.chat_models import ChatOllama
+from langchain_ollama import ChatOllama
 from langchain_experimental.llms.ollama_functions import OllamaFunctions
 from langchain_openai import ChatOpenAI
 

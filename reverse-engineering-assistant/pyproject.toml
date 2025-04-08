@@ -21,6 +21,7 @@ dependencies = [
     "langchain-core",
     "langchain-openai",
     "langchain-community",
+    "langgraph-checkpoint-sqlite",
     "langchain-experimental",
     "langgraph",
     "prompt_toolkit",

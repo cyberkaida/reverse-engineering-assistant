@@ -79,7 +79,7 @@ def crash_dump(
             # We need to take away the tools, so she doesn't try to answer
             # by reverse engineering the program...
             answer: BaseMessage = assistant.llm.invoke(
-                f"You are ReVa, the reverse engineering assisstant. During your execution you threw an exception. Your logs are located in the file {self.log_path} Can you explain the error: {e}\n\n{traceback.format_exc()}"
+                f"You are ReVa, the reverse engineering assisstant. During your execution you threw an exception. Your logs are located in the file {assistant.log_path} Can you explain the error: {e}\n\n{traceback.format_exc()}"
             )
             answer_content: str
             if isinstance(answer, str):

@@ -3,3 +3,4 @@ grpcio-tools
 langchain-community
 langchain-core
 langchain-openai
+langgraph-checkpoint-sqlite

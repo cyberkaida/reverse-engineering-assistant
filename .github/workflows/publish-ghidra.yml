@@ -26,7 +26,7 @@ jobs:
         java-version: "17"
         distribution: "microsoft"
     - name: Install Ghidra 🐉
-      uses: er28-0652/setup-ghidra@master
+      uses: antoniovazquezblanco/setup-ghidra@v2.0.6
       with:
         version: ${{ matrix.ghidra-version }}
     - name: Compile ReVa 👩‍💻✨

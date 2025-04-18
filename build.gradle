@@ -56,6 +56,12 @@ repositories {
 	// See https://docs.gradle.org/current/userguide/declaring_repositories.html for more info.
 	// Ex: mavenCentral()
 	mavenCentral()
+	maven { url 'https://repo.spring.io/milestone' }
+	maven { url 'https://repo.spring.io/snapshot' }
+	maven {
+		name = 'Central Portal Snapshots'
+		url = 'https://central.sonatype.com/repository/maven-snapshots/'
+	}
 }
 
 dependencies {
@@ -63,6 +69,7 @@ dependencies {
 	// this extension is built.
 	implementation platform("io.modelcontextprotocol.sdk:mcp-bom:0.8.1")
 	implementation "io.modelcontextprotocol.sdk:mcp"
+	implementation "jakarta.servlet:jakarta.servlet-api:5.0.0"
 }
 
 // Exclude additional files from the built extension

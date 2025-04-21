@@ -16,6 +16,8 @@
 package reva;
 
 import java.awt.BorderLayout;
+import java.util.ArrayList;
+import java.util.List;
 
 import javax.swing.*;
 
@@ -29,6 +31,7 @@ import ghidra.app.plugin.PluginCategoryNames;
 import ghidra.app.plugin.ProgramPlugin;
 import ghidra.framework.plugintool.*;
 import ghidra.framework.plugintool.util.PluginStatus;
+import ghidra.program.model.listing.Program;
 import ghidra.util.HelpLocation;
 import ghidra.util.Msg;
 import resources.Icons;
@@ -54,8 +57,11 @@ public class revaPlugin extends ProgramPlugin {
 	// TODO: Why do we define these?
 	private static final String MCP_MSG_ENDPOINT = "/mcp/message";
 	private static final String MCP_SSE_ENDPOINT = "/mcp/sse";
+	// TODO: Get these from plugin properties
 	private static final String MCP_SERVER_NAME = "ReVa";
 	private static final String MCP_SERVER_VERSION = "1.0.0";
+
+	private static List<Program> programs = new ArrayList<Program>();
 
 	MyProvider provider;
 
@@ -73,11 +79,29 @@ public class revaPlugin extends ProgramPlugin {
 			JSON, MCP_MSG_ENDPOINT, MCP_SSE_ENDPOINT);
 		// Construct a model context protocol server
 		// https://modelcontextprotocol.io/sdk/java/mcp-server
+		// https://github.com/codeboyzhou/mcp-java-sdk-examples/blob/main/mcp-server-filesystem/filesystem-native-sdk-example/src/main/java/com/github/mcp/examples/server/filesystem/McpSseServer.java
 
 		server = McpServer.sync(transportProvider)
 			.serverInfo(MCP_SERVER_NAME, MCP_SERVER_VERSION)
 			.capabilities(serverCapabilities)
 			.build();
+
+		// Use a ghidra.framework.cmd.BackgroundCommand to run the server in
+		// the background. Stop the BackgroundCommand whe the plugin is closed.
+	}
+
+	@Override
+	protected void programOpened(Program program) {
+		super.programOpened(program);
+	}
+
+	@Override
+	protected void programClosed(Program program) {
+		programs.remove(program);
+		super.programClosed(program);
+		if (programs.size() == 0) {
+			server.closeGracefully();
+		}
 	}
 
 	/**

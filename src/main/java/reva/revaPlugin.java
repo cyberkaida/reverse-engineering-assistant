@@ -19,11 +19,12 @@ import java.awt.BorderLayout;
 
 import javax.swing.*;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+
 import docking.ActionContext;
 import docking.ComponentProvider;
 import docking.action.DockingAction;
 import docking.action.ToolBarData;
-import ghidra.app.ExamplesPluginPackage;
 import ghidra.app.plugin.PluginCategoryNames;
 import ghidra.app.plugin.ProgramPlugin;
 import ghidra.framework.plugintool.*;
@@ -32,29 +33,62 @@ import ghidra.util.HelpLocation;
 import ghidra.util.Msg;
 import resources.Icons;
 
+import io.modelcontextprotocol.server.*;
+import io.modelcontextprotocol.server.transport.*;
+import io.modelcontextprotocol.spec.*;;
+
 /**
  * Provide class-level documentation that describes what this plugin does.
  */
 //@formatter:off
 @PluginInfo(
 	status = PluginStatus.STABLE,
-	packageName = ExamplesPluginPackage.NAME,
-	category = PluginCategoryNames.EXAMPLES,
+	packageName = "ReVa",
+	category = PluginCategoryNames.ANALYSIS,
 	shortDescription = "Plugin short description goes here.",
 	description = "Plugin long description goes here."
 )
 //@formatter:on
 public class revaPlugin extends ProgramPlugin {
+	private static final ObjectMapper JSON = new ObjectMapper();
+	// TODO: Why do we define these?
+	private static final String MCP_MSG_ENDPOINT = "/mcp/message";
+	private static final String MCP_SSE_ENDPOINT = "/mcp/sse";
+	private static final String MCP_SERVER_NAME = "ReVa";
+	private static final String MCP_SERVER_VERSION = "1.0.0";
 
 	MyProvider provider;
 
+	private static McpSyncServer server;
+
+	static {
+
+		McpSchema.ServerCapabilities serverCapabilities = McpSchema.ServerCapabilities.builder()
+			.prompts(true)
+			.resources(true, true)
+			.resources(true, true)
+			.build();
+
+		HttpServletSseServerTransportProvider transportProvider = new HttpServletSseServerTransportProvider(
+			JSON, MCP_MSG_ENDPOINT, MCP_SSE_ENDPOINT);
+		// Construct a model context protocol server
+		// https://modelcontextprotocol.io/sdk/java/mcp-server
+
+		server = McpServer.sync(transportProvider)
+			.serverInfo(MCP_SERVER_NAME, MCP_SERVER_VERSION)
+			.capabilities(serverCapabilities)
+			.build();
+	}
+
 	/**
 	 * Plugin constructor.
-	 * 
+	 *
 	 * @param tool The plugin tool that this plugin is added to.
 	 */
 	public revaPlugin(PluginTool tool) {
 		super(tool);
+
+		// Start the MCP server for this tool
 
 		// Customize provider (or remove if a provider is not desired)
 		String pluginName = getName();

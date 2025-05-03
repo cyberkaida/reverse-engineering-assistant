@@ -21,12 +21,17 @@ import java.util.List;
 
 import javax.swing.*;
 
+import org.eclipse.jetty.server.Server;
+import org.eclipse.jetty.servlet.ServletContextHandler;
+import org.eclipse.jetty.servlet.ServletHolder;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import docking.ActionContext;
 import docking.ComponentProvider;
 import docking.action.DockingAction;
 import docking.action.ToolBarData;
+import generic.concurrent.GThreadPool;
 import ghidra.app.plugin.PluginCategoryNames;
 import ghidra.app.plugin.ProgramPlugin;
 import ghidra.framework.plugintool.*;
@@ -38,7 +43,13 @@ import resources.Icons;
 
 import io.modelcontextprotocol.server.*;
 import io.modelcontextprotocol.server.transport.*;
-import io.modelcontextprotocol.spec.*;;
+import io.modelcontextprotocol.spec.*;
+import io.modelcontextprotocol.spec.McpSchema.Content;
+import io.modelcontextprotocol.spec.McpSchema.ReadResourceResult;
+import io.modelcontextprotocol.spec.McpSchema.Resource;
+import io.modelcontextprotocol.spec.McpSchema.ResourceContents;
+import io.modelcontextprotocol.spec.McpSchema.TextContent;
+import io.modelcontextprotocol.spec.McpSchema.TextResourceContents;;
 
 /**
  * Provide class-level documentation that describes what this plugin does.
@@ -67,7 +78,14 @@ public class revaPlugin extends ProgramPlugin {
 
 	private static McpSyncServer server;
 
+	private static final GThreadPool threadPool;
+
 	static {
+		// Debugging!
+		// npx @modelcontextprotocol/inspector
+		// Then connect to the server on http://localhost:8080/mcp/sse
+
+		threadPool = GThreadPool.getPrivateThreadPool("ReVa");
 
 		McpSchema.ServerCapabilities serverCapabilities = McpSchema.ServerCapabilities.builder()
 			.prompts(true)
@@ -86,12 +104,66 @@ public class revaPlugin extends ProgramPlugin {
 			.capabilities(serverCapabilities)
 			.build();
 
-		// Use a ghidra.framework.cmd.BackgroundCommand to run the server in
-		// the background. Stop the BackgroundCommand whe the plugin is closed.
+
+
+		McpServerFeatures.SyncResourceSpecification resourceSpecification =
+		new McpServerFeatures.SyncResourceSpecification(
+			new Resource("ghidra://programs", "open-programs", "Currently open programs", "text/plain", null),
+			(exchange, request) -> {
+				List<ResourceContents> resourceContents = new ArrayList<>();
+				for (Program program : programs) {
+
+					// TODO: Output JSON
+					String metaString = program.getMetadata().toString();
+
+					resourceContents.add(
+						new TextResourceContents(
+							"ghidra://programs/" + program.getName(),
+							"text/plain",
+							metaString
+						)
+					);
+				}
+				return new ReadResourceResult(
+					resourceContents
+				);
+			}
+		);
+		server.addResource(resourceSpecification);
+
+		// Run the transport provider in a runnable using the thread pool
+
+		ServletContextHandler servletContextHandler = new ServletContextHandler(ServletContextHandler.SESSIONS);
+		servletContextHandler.setContextPath("/");
+		ServletHolder servletHolder = new ServletHolder(transportProvider);
+		servletContextHandler.addServlet(servletHolder, "/*");
+
+		Server httpServer = new Server(8080);
+		httpServer.setHandler(servletContextHandler);
+
+		threadPool.submit(() -> {
+			try {
+				Msg.info(revaPlugin.class, "MCP server starting on port 8080");
+				httpServer.start();
+				Msg.info(revaPlugin.class, "MCP server started on port 8080");
+				httpServer.join();
+			}
+			catch (Exception e) {
+				Msg.error(revaPlugin.class, "Error starting MCP server", e);
+			}
+		});
+
+		// Register the base level resources
+		// These will be the open programs, the client can request
+		// resources from these programs
+
 	}
 
 	@Override
 	protected void programOpened(Program program) {
+		if (!programs.contains(program)) {
+			programs.add(program);
+		}
 		super.programOpened(program);
 	}
 
@@ -99,9 +171,6 @@ public class revaPlugin extends ProgramPlugin {
 	protected void programClosed(Program program) {
 		programs.remove(program);
 		super.programClosed(program);
-		if (programs.size() == 0) {
-			server.closeGracefully();
-		}
 	}
 
 	/**
@@ -122,6 +191,14 @@ public class revaPlugin extends ProgramPlugin {
 		String topicName = this.getClass().getPackage().getName();
 		String anchorName = "HelpAnchor";
 		provider.setHelpLocation(new HelpLocation(topicName, anchorName));
+	}
+
+	@Override
+	protected void cleanup() {
+		// Clean up our thread pool
+		server.closeGracefully();
+		threadPool.shutdownNow();
+		super.cleanup();
 	}
 
 	@Override

@@ -18,6 +18,7 @@ package reva;
 import java.awt.BorderLayout;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import javax.swing.*;
 
@@ -25,6 +26,7 @@ import org.eclipse.jetty.server.Server;
 import org.eclipse.jetty.servlet.ServletContextHandler;
 import org.eclipse.jetty.servlet.ServletHolder;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import docking.ActionContext;
@@ -36,6 +38,7 @@ import ghidra.app.plugin.PluginCategoryNames;
 import ghidra.app.plugin.ProgramPlugin;
 import ghidra.framework.plugintool.*;
 import ghidra.framework.plugintool.util.PluginStatus;
+import ghidra.program.flatapi.FlatProgramAPI;
 import ghidra.program.model.listing.Program;
 import ghidra.util.HelpLocation;
 import ghidra.util.Msg;
@@ -49,7 +52,8 @@ import io.modelcontextprotocol.spec.McpSchema.ReadResourceResult;
 import io.modelcontextprotocol.spec.McpSchema.Resource;
 import io.modelcontextprotocol.spec.McpSchema.ResourceContents;
 import io.modelcontextprotocol.spec.McpSchema.TextContent;
-import io.modelcontextprotocol.spec.McpSchema.TextResourceContents;;
+import io.modelcontextprotocol.spec.McpSchema.TextResourceContents;
+import io.modelcontextprotocol.spec.McpSchema.JsonSchema;
 
 /**
  * Provide class-level documentation that describes what this plugin does.
@@ -72,12 +76,13 @@ public class revaPlugin extends ProgramPlugin {
 	private static final String MCP_SERVER_NAME = "ReVa";
 	private static final String MCP_SERVER_VERSION = "1.0.0";
 
+
 	private static List<Program> programs = new ArrayList<Program>();
 
 	MyProvider provider;
 
 	private static McpSyncServer server;
-
+	private static Server httpServer;
 	private static final GThreadPool threadPool;
 
 	static {
@@ -90,7 +95,7 @@ public class revaPlugin extends ProgramPlugin {
 		McpSchema.ServerCapabilities serverCapabilities = McpSchema.ServerCapabilities.builder()
 			.prompts(true)
 			.resources(true, true)
-			.resources(true, true)
+			.tools(true)
 			.build();
 
 		HttpServletSseServerTransportProvider transportProvider = new HttpServletSseServerTransportProvider(
@@ -104,8 +109,49 @@ public class revaPlugin extends ProgramPlugin {
 			.capabilities(serverCapabilities)
 			.build();
 
+		// MARK: Add resources and tools
+		addResourceProgramList();
+		// Add the get-strings tool
+		addToolGetStrings();
 
+		// Run the transport provider in a runnable using the thread pool
+		startHosting(transportProvider);
 
+		// Register the base level resources
+		// These will be the open programs, the client can request
+		// resources from these programs
+
+	}
+
+	static void startHosting(HttpServletSseServerTransportProvider transportProvider) {
+		assert server != null;
+		assert transportProvider != null;
+		assert threadPool != null;
+
+		ServletContextHandler servletContextHandler = new ServletContextHandler(ServletContextHandler.SESSIONS);
+		servletContextHandler.setContextPath("/");
+		ServletHolder servletHolder = new ServletHolder(transportProvider);
+		servletContextHandler.addServlet(servletHolder, "/*");
+
+		httpServer = new Server(8080); // TODO: Configure port with Ghidra Option
+		httpServer.setHandler(servletContextHandler);
+
+		threadPool.submit(() -> {
+			try {
+				Msg.info(revaPlugin.class, "MCP server starting on port 8080");
+				httpServer.start();
+				Msg.info(revaPlugin.class, "MCP server started on port 8080");
+				httpServer.join();
+				Msg.warn(revaPlugin.class, "MCP server stopped");
+			}
+			catch (Exception e) {
+				Msg.error(revaPlugin.class, "Error starting MCP server", e);
+			}
+		});
+	}
+
+	static void addResourceProgramList() {
+		assert server != null;
 		McpServerFeatures.SyncResourceSpecification resourceSpecification =
 		new McpServerFeatures.SyncResourceSpecification(
 			new Resource("ghidra://programs", "open-programs", "Currently open programs", "text/plain", null),
@@ -130,33 +176,91 @@ public class revaPlugin extends ProgramPlugin {
 			}
 		);
 		server.addResource(resourceSpecification);
+	}
 
-		// Run the transport provider in a runnable using the thread pool
+	/***
+	 * Get strings from the selected program
+	 */
+	static void addToolGetStrings() {
+		assert server != null;
 
-		ServletContextHandler servletContextHandler = new ServletContextHandler(ServletContextHandler.SESSIONS);
-		servletContextHandler.setContextPath("/");
-		ServletHolder servletHolder = new ServletHolder(transportProvider);
-		servletContextHandler.addServlet(servletHolder, "/*");
+		// Create a JSON schema for the tool that requires a programPath parameter
 
-		Server httpServer = new Server(8080);
-		httpServer.setHandler(servletContextHandler);
 
-		threadPool.submit(() -> {
-			try {
-				Msg.info(revaPlugin.class, "MCP server starting on port 8080");
-				httpServer.start();
-				Msg.info(revaPlugin.class, "MCP server started on port 8080");
-				httpServer.join();
-			}
-			catch (Exception e) {
-				Msg.error(revaPlugin.class, "Error starting MCP server", e);
-			}
-		});
+		JsonSchema schema = new JsonSchema(
+			"object",
+			Map.of(
+				"programPath", Map.of(
+					"type", "string",
+					"description", "Path in the Ghidra Project to the program to get strings from"
+				)
+			),
+			List.of("programPath"),
+			false
+		);
 
-		// Register the base level resources
-		// These will be the open programs, the client can request
-		// resources from these programs
+		McpSchema.Tool tool = new McpSchema.Tool(
+			"get-strings",
+			"Get strings from the selected program",
+			schema
+		);
 
+		McpServerFeatures.SyncToolSpecification toolSpecification =
+			new McpServerFeatures.SyncToolSpecification(
+				tool,
+				(exchange, args) -> {
+					// Get the program path from the request
+					String programPath = (String) args.get("programPath");
+					if (programPath == null) {
+						return new McpSchema.CallToolResult(
+							List.of(new TextContent("No program path provided")),
+							true
+						);
+					}
+					// Get the program from the path
+					Program program = programs.stream()
+						.filter(p -> p.getDomainFile().getPathname().equals(programPath))
+						.findFirst()
+						.orElse(null);
+					if (program == null) {
+						return new McpSchema.CallToolResult(List.of(new TextContent("Failed to find Program")), true);
+					}
+
+					// Get the defined strings from the program
+					List<Map<String, Object>> stringData = new ArrayList<>();
+					FlatProgramAPI flatProgramAPI = new FlatProgramAPI(program);
+					program.getListing().getDefinedData(true)
+						.forEach(data -> {
+							if (data.getValue() instanceof String) {
+								String stringValue = (String) data.getValue();
+								Map<String, Object> stringInfo = Map.of(
+									"address", "0x" + data.getAddress().toString(true, true),
+									"content", stringValue,
+									"length", stringValue.length()
+								);
+								stringData.add(stringInfo);
+							}
+						});
+
+					try {
+						List<Content> contents = new ArrayList<>();
+						for (Map<String, Object> stringInfo : stringData) {
+							contents.add(new TextContent(JSON.writeValueAsString(stringInfo)));
+						}
+						return new McpSchema.CallToolResult(contents, false);
+					}
+					catch (Exception e) {
+						Msg.error(revaPlugin.class, "Error converting string data to JSON", e);
+						return new McpSchema.CallToolResult(
+							List.of(new TextContent("Error converting string data to JSON: " + e.getMessage())),
+							true
+						);
+					}
+				}
+			);
+
+		server.addTool(toolSpecification);
+		Msg.info(revaPlugin.class, "Added get-strings tool to MCP server");
 	}
 
 	@Override

@@ -16,6 +16,7 @@
 package reva;
 
 import java.awt.BorderLayout;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -37,7 +38,14 @@ import docking.action.ToolBarData;
 import generic.concurrent.GThreadPool;
 import ghidra.app.plugin.PluginCategoryNames;
 import ghidra.app.plugin.ProgramPlugin;
+import ghidra.app.plugin.core.progmgr.ProgramLocator;
+import ghidra.app.services.ProgramManager;
+import ghidra.app.util.task.ProgramOpener;
+import ghidra.framework.main.AppInfo;
+import ghidra.framework.model.DomainFile;
+import ghidra.framework.model.DomainObject;
 import ghidra.framework.model.Project;
+import ghidra.framework.model.ToolManager;
 import ghidra.framework.plugintool.*;
 import ghidra.framework.plugintool.util.PluginStatus;
 import ghidra.program.flatapi.FlatProgramAPI;
@@ -45,6 +53,10 @@ import ghidra.program.model.listing.Program;
 import ghidra.program.model.mem.MemoryAccessException;
 import ghidra.util.HelpLocation;
 import ghidra.util.Msg;
+import ghidra.util.exception.CancelledException;
+import ghidra.util.exception.VersionException;
+import ghidra.util.task.Task;
+import ghidra.util.task.TaskMonitor;
 import resources.Icons;
 
 import io.modelcontextprotocol.server.*;
@@ -59,28 +71,24 @@ import io.modelcontextprotocol.spec.McpSchema.TextResourceContents;
 import io.modelcontextprotocol.spec.McpSchema.JsonSchema;
 
 /**
- * Provide class-level documentation that describes what this plugin does.
+ * ReVa (Reverse Engineering Assistant) plugin for Ghidra.
+ * Provides a Model Context Protocol server for interacting with Ghidra.
  */
 //@formatter:off
 @PluginInfo(
 	status = PluginStatus.STABLE,
 	packageName = "ReVa",
 	category = PluginCategoryNames.ANALYSIS,
-	shortDescription = "Plugin short description goes here.",
-	description = "Plugin long description goes here."
+	shortDescription = "Reverse Engineering Assistant",
+	description = "Provides a Model Context Protocol server for interacting with Ghidra"
 )
 //@formatter:on
 public class revaPlugin extends ProgramPlugin {
 	private static final ObjectMapper JSON = new ObjectMapper();
-	// TODO: Why do we define these?
 	private static final String MCP_MSG_ENDPOINT = "/mcp/message";
 	private static final String MCP_SSE_ENDPOINT = "/mcp/sse";
-	// TODO: Get these from plugin properties
 	private static final String MCP_SERVER_NAME = "ReVa";
 	private static final String MCP_SERVER_VERSION = "1.0.0";
-
-
-	private static List<Program> programs = new ArrayList<Program>();
 
 	MyProvider provider;
 
@@ -121,11 +129,6 @@ public class revaPlugin extends ProgramPlugin {
 
 		// Run the transport provider in a runnable using the thread pool
 		startHosting(transportProvider);
-
-		// Register the base level resources
-		// These will be the open programs, the client can request
-		// resources from these programs
-
 	}
 
 	static void startHosting(HttpServletSseServerTransportProvider transportProvider) {
@@ -162,9 +165,10 @@ public class revaPlugin extends ProgramPlugin {
 			new Resource("ghidra://programs", "open-programs", "Currently open programs", "text/plain", null),
 			(exchange, request) -> {
 				List<ResourceContents> resourceContents = new ArrayList<>();
-				for (Program program : programs) {
 
-					// TODO: Output JSON
+				// Get programs directly from the plugin tool
+				List<Program> openPrograms = getOpenPrograms();
+				for (Program program : openPrograms) {
 					String metaString = program.getMetadata().toString();
 
 					resourceContents.add(
@@ -183,6 +187,69 @@ public class revaPlugin extends ProgramPlugin {
 		server.addResource(resourceSpecification);
 	}
 
+	/**
+	 * Get all currently open programs in any Ghidra tool
+	 * @return List of open programs
+	 */
+	private static List<Program> getOpenPrograms() {
+		List<Program> openPrograms = new ArrayList<>();
+
+		// Get all tools from the tool manager
+		ToolManager toolManager = AppInfo.getActiveProject().getToolManager();
+		if (toolManager != null) {
+			for (PluginTool pluginTool : toolManager.getRunningTools()) {
+				// Get program manager service from each tool
+				ProgramManager programManager = pluginTool.getService(ProgramManager.class);
+				if (programManager != null) {
+					// Get all open programs in the program manager
+					for (Program program : programManager.getAllOpenPrograms()) {
+						if (program != null && !openPrograms.contains(program)) {
+							openPrograms.add(program);
+						}
+					}
+				}
+			}
+		}
+
+		return openPrograms;
+	}
+
+	/**
+	 * Get a program by its path
+	 * @param programPath Path to the program
+	 * @return Program object or null if not found
+	 */
+	private static Program getProgramByPath(String programPath) {
+		List<Program> openPrograms = getOpenPrograms();
+
+		// First try to find among open programs
+		for (Program program : openPrograms) {
+			if (program.getDomainFile().getPathname().equals(programPath)) {
+				return program;
+			}
+		}
+
+		// Get the DomainFile for the program path
+		Project project = AppInfo.getActiveProject();
+		if (project == null) {
+			Msg.error(revaPlugin.class, "No project is currently open");
+			return null;
+		}
+
+		DomainFile domainFile = project.getProjectData().getRootFolder().getFile(programPath);
+		if (domainFile == null) {
+			Msg.error(revaPlugin.class, "Failed to find program: " + programPath);
+			return null;
+		}
+
+		// TODO: Tie the lifetime to a better object.
+		// TODO: This is a leak
+		ProgramOpener programOpener = new ProgramOpener(revaPlugin.class);
+		ProgramLocator locator = new ProgramLocator(domainFile);
+		Program program = programOpener.openProgram(locator, TaskMonitor.DUMMY);
+		return program;
+	}
+
 	/***
 	 * Get strings from the selected program
 	 */
@@ -190,8 +257,6 @@ public class revaPlugin extends ProgramPlugin {
 		assert server != null;
 
 		// Create a JSON schema for the tool that requires a programPath parameter
-
-
 		JsonSchema schema = new JsonSchema(
 			"object",
 			Map.of(
@@ -222,11 +287,9 @@ public class revaPlugin extends ProgramPlugin {
 							true
 						);
 					}
+
 					// Get the program from the path
-					Program program = programs.stream()
-						.filter(p -> p.getDomainFile().getPathname().equals(programPath))
-						.findFirst()
-						.orElse(null);
+					Program program = getProgramByPath(programPath);
 					if (program == null) {
 						return new McpSchema.CallToolResult(List.of(new TextContent("Failed to find Program")), true);
 					}
@@ -280,8 +343,13 @@ public class revaPlugin extends ProgramPlugin {
 					}
 				}
 			);
-
-		server.addTool(toolSpecification);
+		try {
+			server.addTool(toolSpecification);
+		} catch (McpError e) {
+			// This can happen when the tool is already added
+			Msg.error(revaPlugin.class, "Error adding tool to MCP server", e);
+			return;
+		}
 		Msg.info(revaPlugin.class, "Added get-strings tool to MCP server");
 	}
 
@@ -300,7 +368,7 @@ public class revaPlugin extends ProgramPlugin {
 		);
 
 		McpSchema.Tool tool = new McpSchema.Tool(
-			"list-programs",
+			"list-open-files",
 			"List all currently open programs in Ghidra",
 			schema
 		);
@@ -310,7 +378,9 @@ public class revaPlugin extends ProgramPlugin {
 				tool,
 				(exchange, args) -> {
 					List<Map<String, Object>> programsData = new ArrayList<>();
-					for (Program program : programs) {
+					List<Program> openPrograms = getOpenPrograms();
+
+					for (Program program : openPrograms) {
 						Map<String, Object> programInfo = Map.of(
 							"name", program.getName(),
 							"path", program.getDomainFile().getPathname(),
@@ -341,24 +411,588 @@ public class revaPlugin extends ProgramPlugin {
 				}
 			);
 
-		server.addTool(toolSpecification);
-		Msg.info(revaPlugin.class, "Added list-programs tool to MCP server");
+		try {
+			server.addTool(toolSpecification);
+		} catch (McpError e) {
+			// This can happen when the tool is already added
+			Msg.error(revaPlugin.class, "Error adding tool to MCP server", e);
+			return;
+		}
+		Msg.info(revaPlugin.class, "Added list-open-files tool to MCP server");
+	}
+
+	/***
+	 * List functions from the selected program
+	 */
+	static void addToolListFunctions() {
+		assert server != null;
+
+		// Create a JSON schema for the tool that requires a programPath parameter
+		JsonSchema schema = new JsonSchema(
+			"object",
+			Map.of(
+				"programPath", Map.of(
+					"type", "string",
+					"description", "Path in the Ghidra Project to the program to get functions from"
+				)
+			),
+			List.of("programPath"),
+			false
+		);
+
+		McpSchema.Tool tool = new McpSchema.Tool(
+			"get-functions",
+			"Get functions from the selected program",
+			schema
+		);
+
+		McpServerFeatures.SyncToolSpecification toolSpecification =
+			new McpServerFeatures.SyncToolSpecification(
+				tool,
+				(exchange, args) -> {
+					// Get the program path from the request
+					String programPath = (String) args.get("programPath");
+					if (programPath == null) {
+						return new McpSchema.CallToolResult(
+							List.of(new TextContent("No program path provided")),
+							true
+						);
+					}
+
+					// Get the program from the path
+					Program program = getProgramByPath(programPath);
+					if (program == null) {
+						return new McpSchema.CallToolResult(List.of(new TextContent("Failed to find Program")), true);
+					}
+
+					// Get the functions from the program
+					List<Map<String, Object>> functionData = new ArrayList<>();
+					FlatProgramAPI flatProgramAPI = new FlatProgramAPI(program);
+
+					// Iterate through all functions
+					program.getFunctionManager().getFunctions(true).forEach(function -> {
+						Map<String, Object> functionInfo = new HashMap<String, Object>();
+						functionInfo.put("name", function.getName());
+						functionInfo.put("address", "0x" + function.getEntryPoint().toString());
+
+						// Get the function's body to determine the end address and size
+						ghidra.program.model.address.AddressSetView body = function.getBody();
+						ghidra.program.model.address.Address startAddr = function.getEntryPoint();
+						ghidra.program.model.address.Address endAddr = body.getMaxAddress();
+
+						// Add end address and calculate size
+						functionInfo.put("endAddress", endAddr != null ? "0x" + endAddr.toString() : "unknown");
+
+						// Calculate size in bytes if both addresses are available
+						if (startAddr != null && endAddr != null) {
+							// Use offset to calculate size in bytes, add 1 because ranges are inclusive
+							long sizeInBytes = endAddr.getOffset() - startAddr.getOffset() + 1;
+							functionInfo.put("sizeInBytes", sizeInBytes);
+						} else {
+							functionInfo.put("sizeInBytes", 0);
+						}
+
+						functionInfo.put("signature", function.getSignature().toString());
+						functionInfo.put("returnType", function.getReturnType().toString());
+						functionInfo.put("isExternal", function.isExternal());
+						functionInfo.put("isThunk", function.isThunk());
+						functionInfo.put("bodySize", function.getBody().getNumAddresses());
+
+						// Add parameters info
+						List<Map<String, String>> parameters = new ArrayList<>();
+						for (int i = 0; i < function.getParameterCount(); i++) {
+							Map<String, String> paramInfo = new HashMap<>();
+							paramInfo.put("name", function.getParameter(i).getName());
+							paramInfo.put("dataType", function.getParameter(i).getDataType().toString());
+							parameters.add(paramInfo);
+						}
+						functionInfo.put("parameters", parameters);
+
+						functionData.add(functionInfo);
+					});
+
+					try {
+						List<Content> contents = new ArrayList<>();
+						for (Map<String, Object> functionInfo : functionData) {
+							contents.add(new TextContent(JSON.writeValueAsString(functionInfo)));
+						}
+						return new McpSchema.CallToolResult(contents, false);
+					}
+					catch (Exception e) {
+						Msg.error(revaPlugin.class, "Error converting function data to JSON", e);
+						return new McpSchema.CallToolResult(
+							List.of(new TextContent("Error converting function data to JSON: " + e.getMessage())),
+							true
+						);
+					}
+				}
+			);
+		try {
+			server.addTool(toolSpecification);
+		} catch (McpError e) {
+			// This can happen when the tool is already added
+			Msg.error(revaPlugin.class, "Error adding tool to MCP server", e);
+			return;
+		}
+		Msg.info(revaPlugin.class, "Added get-functions tool to MCP server");
+	}
+
+	/***
+	 * Get data at a specific address in a program
+	 */
+	static void addToolGetDataAtAddress() {
+		assert server != null;
+
+		// Create a JSON schema for the tool that requires programPath and address parameters
+		JsonSchema schema = new JsonSchema(
+			"object",
+			Map.of(
+				"programPath", Map.of(
+					"type", "string",
+					"description", "Path in the Ghidra Project to the program containing the data"
+				),
+				"address", Map.of(
+					"type", "string",
+					"description", "Address to get data from (e.g., '0x00400000')"
+				)
+			),
+			List.of("programPath", "address"),
+			false
+		);
+
+		McpSchema.Tool tool = new McpSchema.Tool(
+			"get-data-at-address",
+			"Get data at a specific address in a program",
+			schema
+		);
+
+		McpServerFeatures.SyncToolSpecification toolSpecification =
+			new McpServerFeatures.SyncToolSpecification(
+				tool,
+				(exchange, args) -> {
+					// Get the program path and address from the request
+					String programPath = (String) args.get("programPath");
+					String addressString = (String) args.get("address");
+
+					if (programPath == null) {
+						return new McpSchema.CallToolResult(
+							List.of(new TextContent("No program path provided")),
+							true
+						);
+					}
+
+					if (addressString == null) {
+						return new McpSchema.CallToolResult(
+							List.of(new TextContent("No address provided")),
+							true
+						);
+					}
+
+					// Get the program from the path
+					Program program = getProgramByPath(programPath);
+					if (program == null) {
+						return new McpSchema.CallToolResult(
+							List.of(new TextContent("Failed to find program: " + programPath)),
+							true
+						);
+					}
+
+					// Parse the address string
+					ghidra.program.model.address.Address address;
+					try {
+						// Handle hex addresses with or without 0x prefix
+						if (addressString.toLowerCase().startsWith("0x")) {
+							addressString = addressString.substring(2);
+						}
+						address = program.getAddressFactory().getDefaultAddressSpace().getAddress(
+							Long.parseUnsignedLong(addressString, 16));
+					} catch (Exception e) {
+						return new McpSchema.CallToolResult(
+							List.of(new TextContent("Invalid address format: " + addressString +
+								". Use hexadecimal format like '0x00400000'")),
+							true
+						);
+					}
+
+					// Get the listing
+					ghidra.program.model.listing.Listing listing = program.getListing();
+
+					// Get data at the address
+					ghidra.program.model.listing.Data data = listing.getDataContaining(address);
+					if (data == null) {
+						return new McpSchema.CallToolResult(
+							List.of(new TextContent("No data found at address: " + addressString)),
+							true
+						);
+					}
+
+					// Create result data
+					Map<String, Object> resultData = new HashMap<>();
+					resultData.put("address", "0x" + data.getAddress().toString());
+					resultData.put("dataType", data.getDataType().getName());
+					resultData.put("length", data.getLength());
+
+					// Get the bytes and convert to hex
+					StringBuilder hexString = new StringBuilder();
+					try {
+						byte[] bytes = data.getBytes();
+						for (byte b : bytes) {
+							hexString.append(String.format("%02x", b & 0xff));
+						}
+						resultData.put("hexBytes", hexString.toString());
+					} catch (MemoryAccessException e) {
+						resultData.put("hexBytesError", "Memory access error: " + e.getMessage());
+					}
+
+					// Get the string representation that would be shown in the listing
+					String representation = data.getDefaultValueRepresentation();
+					resultData.put("representation", representation);
+
+					// Get the value object
+					Object value = data.getValue();
+					if (value != null) {
+						resultData.put("valueType", value.getClass().getSimpleName());
+						resultData.put("value", value.toString());
+					} else {
+						resultData.put("value", null);
+					}
+
+					try {
+						List<Content> contents = new ArrayList<>();
+						contents.add(new TextContent(JSON.writeValueAsString(resultData)));
+						return new McpSchema.CallToolResult(contents, false);
+					} catch (Exception e) {
+						Msg.error(revaPlugin.class, "Error converting data to JSON", e);
+						return new McpSchema.CallToolResult(
+							List.of(new TextContent("Error converting data to JSON: " + e.getMessage())),
+							true
+						);
+					}
+				}
+			);
+
+		try {
+			server.addTool(toolSpecification);
+		} catch (McpError e) {
+			// This can happen when the tool is already added
+			Msg.error(revaPlugin.class, "Error adding tool to MCP server", e);
+			return;
+		}
+		Msg.info(revaPlugin.class, "Added get-data-at-address tool to MCP server");
+	}
+
+	/***
+	 * Get decompiled and disassembled code for a function
+	 */
+	static void addToolGetDecompiledFunction() {
+		assert server != null;
+
+		// Create a JSON schema for the tool that requires programPath and functionName parameters
+		JsonSchema schema = new JsonSchema(
+			"object",
+			Map.of(
+				"programPath", Map.of(
+					"type", "string",
+					"description", "Path in the Ghidra Project to the program containing the function"
+				),
+				"functionName", Map.of(
+					"type", "string",
+					"description", "Name of the function to decompile"
+				)
+			),
+			List.of("programPath", "functionName"),
+			false
+		);
+
+		McpSchema.Tool tool = new McpSchema.Tool(
+			"get-decompiled-function",
+			"Get decompiled and disassembled code for a function",
+			schema
+		);
+
+		McpServerFeatures.SyncToolSpecification toolSpecification =
+			new McpServerFeatures.SyncToolSpecification(
+				tool,
+				(exchange, args) -> {
+					// Get the program path and function name from the request
+					String programPath = (String) args.get("programPath");
+					String functionName = (String) args.get("functionName");
+
+					if (programPath == null) {
+						return new McpSchema.CallToolResult(
+							List.of(new TextContent("No program path provided")),
+							true
+						);
+					}
+
+					if (functionName == null) {
+						return new McpSchema.CallToolResult(
+							List.of(new TextContent("No function name provided")),
+							true
+						);
+					}
+
+					// Get the program from the path
+					Program program = getProgramByPath(programPath);
+					if (program == null) {
+						return new McpSchema.CallToolResult(
+							List.of(new TextContent("Failed to find program: " + programPath)),
+							true
+						);
+					}
+
+					Map<String, Object> resultData = new HashMap<>();
+					resultData.put("programName", program.getName());
+					resultData.put("functionName", functionName);
+
+					// Get the function by name
+					ghidra.program.model.listing.FunctionManager functionManager = program.getFunctionManager();
+					ghidra.program.model.listing.Function function = null;
+
+					// First try an exact match
+					ghidra.program.model.listing.FunctionIterator functions = functionManager.getFunctions(true);
+					while (functions.hasNext()) {
+						ghidra.program.model.listing.Function f = functions.next();
+						if (f.getName().equals(functionName)) {
+							function = f;
+							break;
+						}
+					}
+
+					// If no exact match, try case-insensitive
+					if (function == null) {
+						functions = functionManager.getFunctions(true);
+						while (functions.hasNext()) {
+							ghidra.program.model.listing.Function f = functions.next();
+							if (f.getName().equalsIgnoreCase(functionName)) {
+								function = f;
+								break;
+							}
+						}
+					}
+
+					if (function == null) {
+						return new McpSchema.CallToolResult(
+							List.of(new TextContent("Function not found: " + functionName + " in program " + program.getName())),
+							true
+						);
+					}
+
+					// Add function details
+					resultData.put("address", "0x" + function.getEntryPoint().toString());
+
+					// Get function metadata
+					Map<String, String> metadata = new HashMap<>();
+					metadata.put("signature", function.getSignature().toString());
+					metadata.put("returnType", function.getReturnType().toString());
+					metadata.put("callingConvention", function.getCallingConventionName());
+					metadata.put("isExternal", Boolean.toString(function.isExternal()));
+					metadata.put("isThunk", Boolean.toString(function.isThunk()));
+
+					// Get parameters info
+					List<Map<String, String>> parameters = new ArrayList<>();
+					for (int i = 0; i < function.getParameterCount(); i++) {
+						Map<String, String> paramInfo = new HashMap<>();
+						paramInfo.put("name", function.getParameter(i).getName());
+						paramInfo.put("dataType", function.getParameter(i).getDataType().toString());
+						paramInfo.put("ordinal", Integer.toString(i));
+						parameters.add(paramInfo);
+					}
+					metadata.put("parameterCount", Integer.toString(function.getParameterCount()));
+					resultData.put("metadata", metadata);
+					resultData.put("parameters", parameters);
+
+					// Get function bounds
+					ghidra.program.model.address.AddressSetView body = function.getBody();
+					resultData.put("startAddress", "0x" + function.getEntryPoint().toString());
+					resultData.put("endAddress", "0x" + body.getMaxAddress().toString());
+					resultData.put("sizeInBytes", body.getNumAddresses());
+
+					// Get disassembly
+					StringBuilder disassembly = new StringBuilder();
+					ghidra.program.model.listing.Listing listing = program.getListing();
+					ghidra.program.model.listing.InstructionIterator instructions =
+						listing.getInstructions(body, true);
+
+					while (instructions.hasNext()) {
+						ghidra.program.model.listing.Instruction instruction = instructions.next();
+						disassembly.append("0x").append(instruction.getAddress()).append(": ");
+						disassembly.append(instruction.toString()).append("\n");
+					}
+					resultData.put("disassembly", disassembly.toString());
+
+					// Get decompilation using DecompInterface
+					try {
+						ghidra.app.decompiler.DecompInterface decompiler = new ghidra.app.decompiler.DecompInterface();
+						decompiler.toggleCCode(true);
+						decompiler.toggleSyntaxTree(true);
+						decompiler.setSimplificationStyle("decompile");
+
+						// Initialize and open the decompiler on the current program
+						boolean decompInitialized = decompiler.openProgram(program);
+						if (!decompInitialized) {
+							resultData.put("decompilationError", "Failed to initialize decompiler");
+							resultData.put("decompilation", "");
+						} else {
+							// Decompile the function
+							ghidra.app.decompiler.DecompileResults decompileResults =
+								decompiler.decompileFunction(function, 0, TaskMonitor.DUMMY);
+
+							if (decompileResults.decompileCompleted()) {
+								// Get the decompiled code as C
+								ghidra.app.decompiler.DecompiledFunction decompiledFunction =
+									decompileResults.getDecompiledFunction();
+								String decompCode = decompiledFunction.getC();
+								resultData.put("decompilation", decompCode);
+
+								 // Get additional details like high-level function signature
+								resultData.put("decompSignature", decompiledFunction.getSignature());
+							} else {
+								resultData.put("decompilationError", "Decompilation failed: " +
+									decompileResults.getErrorMessage());
+								resultData.put("decompilation", "");
+							}
+
+							// Clean up
+							decompiler.dispose();
+						}
+					} catch (Exception e) {
+						Msg.error(revaPlugin.class, "Error during decompilation", e);
+						resultData.put("decompilationError", "Exception during decompilation: " + e.getMessage());
+						resultData.put("decompilation", "");
+					}
+
+					try {
+						List<Content> contents = new ArrayList<>();
+						contents.add(new TextContent(JSON.writeValueAsString(resultData)));
+						return new McpSchema.CallToolResult(contents, false);
+					} catch (Exception e) {
+						Msg.error(revaPlugin.class, "Error converting decompilation data to JSON", e);
+						return new McpSchema.CallToolResult(
+							List.of(new TextContent("Error converting decompilation data to JSON: " + e.getMessage())),
+							true
+						);
+					}
+				}
+			);
+
+		try {
+			server.addTool(toolSpecification);
+		} catch (McpError e) {
+			// This can happen when the tool is already added
+			Msg.error(revaPlugin.class, "Error adding tool to MCP server", e);
+			return;
+		}
+		Msg.info(revaPlugin.class, "Added get-decompiled-function tool to MCP server");
 	}
 
 	@Override
 	protected void programOpened(Program program) {
-		if (!programs.contains(program)) {
-			Msg.info(this, "Registering program: " + program.getName());
-			programs.add(program);
-		}
+		Msg.info(this, "Program opened: " + program.getName());
 		super.programOpened(program);
 	}
 
 	@Override
 	protected void programClosed(Program program) {
-		programs.remove(program);
-		Msg.info(this, "Unregistering program: " + program.getName());
+		Msg.info(this, "Program closed: " + program.getName());
 		super.programClosed(program);
+	}
+
+	/***
+	 * Open a domain file from the project
+	 */
+	private void addToolOpenProjectFile() {
+		assert server != null;
+
+		JsonSchema schema = new JsonSchema(
+			"object",
+			Map.of(
+				"filePath", Map.of(
+					"type", "string",
+					"description", "Path to the file in the project"
+				)
+			),
+			List.of("filePath"),
+			false
+		);
+
+		McpSchema.Tool mcpTool = new McpSchema.Tool(
+			"open-project-file",
+			"Open a program from the project",
+			schema
+		);
+
+		McpServerFeatures.SyncToolSpecification toolSpecification =
+			new McpServerFeatures.SyncToolSpecification(
+				mcpTool,
+				(exchange, args) -> {
+					String filePath = (String) args.get("filePath");
+					if (filePath == null) {
+						return new McpSchema.CallToolResult(
+							List.of(new TextContent("No file path provided")),
+							true
+						);
+					}
+
+						// Get the project and verify it's open
+					Project project = tool.getProject();
+					if (project == null) {
+						return new McpSchema.CallToolResult(
+							List.of(new TextContent("No project is currently open")),
+							true
+						);
+					}
+
+					DomainFile domainFile = project.getProjectData().getRootFolder().getFile(filePath);
+					if (domainFile == null) {
+						return new McpSchema.CallToolResult(
+							List.of(new TextContent("Failed to find file: " + filePath)),
+							true
+						);
+					}
+
+						// Get the program manager from the tool
+					ProgramManager programManager = tool.getService(ProgramManager.class);
+					if (programManager == null) {
+						return new McpSchema.CallToolResult(
+							List.of(new TextContent("Program Manager service not available")),
+							true
+						);
+					}
+
+						// Open the program using the program manager
+					try {
+						// Open the program in the tool
+						Program program = programManager.openProgram(domainFile);
+						if (program != null) {
+							Msg.info(this, "Opened program: " + program.getName());
+							return new McpSchema.CallToolResult(
+								List.of(new TextContent("Opened program: " + program.getName())),
+								false
+							);
+						} else {
+							return new McpSchema.CallToolResult(
+								List.of(new TextContent("Failed to open program: " + filePath)),
+								true
+							);
+						}
+					} catch (Exception e) {
+						Msg.error(this, "Error opening file: " + filePath, e);
+						return new McpSchema.CallToolResult(
+							List.of(new TextContent("Error opening file: " + filePath + ": " + e.getMessage())),
+							true
+						);
+					}
+				}
+			);
+		try {
+			server.addTool(toolSpecification);
+		} catch (McpError e) {
+			// This can happen when the tool is already added
+			Msg.error(this, "Error adding tool to MCP server", e);
+			return;
+		}
+		Msg.info(this, "Added open-project-file tool to MCP server");
 	}
 
 
@@ -438,27 +1072,24 @@ public class revaPlugin extends ProgramPlugin {
 				}
 			);
 
-		server.addTool(toolSpecification);
+		try {
+			server.addTool(toolSpecification);
+		} catch (McpError e) {
+			// This can happen when the tool is already added
+			Msg.error(this, "Error adding tool to MCP server", e);
+			return;
+		}
 		server.notifyToolsListChanged();
 		Msg.info(this, "Added list-project-files tool to MCP server");
 	}
 
-	/**
-	 * Helper method to recursively collect domain files from project folders
-	 *
-	 * @param folder The folder to collect domain files from
-	 * @param path The current path in the project
-	 * @param filesData The list to store file information in
-	 */
 	private void collectDomainFiles(ghidra.framework.model.DomainFolder folder, String path, List<Map<String, Object>> filesData) {
 		if (folder == null) return;
 
 		// Process all files in this folder
 		for (ghidra.framework.model.DomainFile file : folder.getFiles()) {
-			String filePath = path.isEmpty() ? file.getName() : path + "/" + file.getName();
 			Map<String, Object> fileInfo = Map.of(
-				"name", file.getName(),
-				"path", filePath,
+				"path", file.getPathname(),
 				"contentType", file.getContentType(),
 				"isVersioned", file.isVersioned() ? "true" : "false"
 			);
@@ -469,8 +1100,8 @@ public class revaPlugin extends ProgramPlugin {
 		for (ghidra.framework.model.DomainFolder subFolder : folder.getFolders()) {
 			String newPath = path.isEmpty() ? subFolder.getName() : path + "/" + subFolder.getName();
 			collectDomainFiles(subFolder, newPath, filesData);
+			}
 		}
-	}
 
 	/**
 	 * Plugin constructor.
@@ -480,7 +1111,15 @@ public class revaPlugin extends ProgramPlugin {
 	public revaPlugin(PluginTool tool) {
 		super(tool);
 
-		// Start the MCP server for this tool
+		// Register the list-project-files tool
+		addToolListProjectFiles();
+		addToolOpenProjectFile();
+		// Add tool to list functions
+		addToolListFunctions();
+		// Add tool to get decompiled function
+		addToolGetDecompiledFunction();
+		// Add tool to get data at a specific address
+		addToolGetDataAtAddress();
 
 		// Customize provider (or remove if a provider is not desired)
 		String pluginName = getName();
@@ -504,9 +1143,6 @@ public class revaPlugin extends ProgramPlugin {
 	public void init() {
 		super.init();
 		// Acquire services if necessary
-
-		// Register the list-project-files tool
-		addToolListProjectFiles();
 	}
 
 	// If provider is desired, it is recommended to move it to its own file

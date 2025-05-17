@@ -17,6 +17,7 @@ package reva;
 
 import java.awt.BorderLayout;
 import java.io.IOException;
+import java.net.URI;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -29,6 +30,7 @@ import org.eclipse.jetty.servlet.ServletContextHandler;
 import org.eclipse.jetty.servlet.ServletHolder;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import docking.ActionContext;
@@ -49,6 +51,7 @@ import ghidra.framework.model.ToolManager;
 import ghidra.framework.plugintool.*;
 import ghidra.framework.plugintool.util.PluginStatus;
 import ghidra.program.flatapi.FlatProgramAPI;
+import ghidra.program.model.listing.Data;
 import ghidra.program.model.listing.Program;
 import ghidra.program.model.mem.MemoryAccessException;
 import ghidra.util.HelpLocation;
@@ -211,6 +214,12 @@ public class revaPlugin extends ProgramPlugin {
 			}
 		}
 
+		// Now register all the resources inside the open programs
+		for (Program program : openPrograms) {
+			// Register the program strings resource
+			addResourceProgramStrings(program);
+		}
+
 		return openPrograms;
 	}
 
@@ -248,6 +257,109 @@ public class revaPlugin extends ProgramPlugin {
 		ProgramLocator locator = new ProgramLocator(domainFile);
 		Program program = programOpener.openProgram(locator, TaskMonitor.DUMMY);
 		return program;
+	}
+
+
+	static Map<String, Object> getStringInfo(Data data) {
+		// Get the defined strings from the program
+		if (data.getValue() instanceof String) {
+			Msg.debug(revaPlugin.class, "Found string: " + data.getValue());
+			String stringValue = (String) data.getValue();
+
+			Map<String, Object> stringInfo = new HashMap<String, Object>();
+			stringInfo.put("address", "0x" + data.getAddress().toString()); // TODO: Probably contains namespace
+			stringInfo.put("content", stringValue);
+			stringInfo.put("length", stringValue.length());
+
+			byte[] bytes = null;;
+			try {
+				bytes = data.getBytes();
+			} catch (MemoryAccessException e) {
+				bytes = null;
+			}
+
+			if (bytes != null) {
+				// Convert bytes to hex string
+				StringBuilder hexString = new StringBuilder();
+				for (byte b : bytes) {
+					hexString.append(String.format("%02x", b & 0xff));
+				}
+				stringInfo.put("bytes", hexString.toString());
+			}
+			return stringInfo;
+		}
+		return null;
+	}
+
+
+	static void addResourceProgramStrings(Program program) {
+		// First we iterate over all open programs and register a resource URI
+		// for each one (using the program's path).
+
+		// Then we register the callback to get the correct program from the list
+		// and get the strings and return them as Text Resorces.
+
+		assert server != null;
+
+		// TODO: There is a bug here, if we change the open program list
+		// the resource will not be updated.
+
+		String programPath = program.getDomainFile().getPathname();
+		String resourceUri = "ghidra://programs/" + programPath + "/strings";
+
+		// Create a resource for the program strings
+		Resource resource = new Resource(resourceUri, "program-strings", "Strings from " + program.getName(), "text/plain", null);
+
+		McpServerFeatures.SyncResourceSpecification resourceSpecification =
+			new McpServerFeatures.SyncResourceSpecification(
+				resource,
+				(exchange, request) -> {
+					// Get the program path from the URI in the request
+					// Split and strip off the "ghidra://programs/" prefix and the `/strings` suffix
+					String[] uriParts = request.uri().split("ghidra://programs/");
+					String programPathFromUri = null;
+
+					if (uriParts.length > 1) {
+						// Remove the "/strings" suffix if present
+						programPathFromUri = uriParts[1].replaceAll("/strings$", "");
+					}
+
+					if (programPathFromUri == null) {
+						Msg.error(revaPlugin.class, "Failed to parse program path from URI: " + request.uri());
+						return new ReadResourceResult(new ArrayList<>());
+					}
+
+					Program requestedProgram = getProgramByPath(programPathFromUri);
+					if (requestedProgram == null) {
+						Msg.error(revaPlugin.class, "Failed to find program for URI: " + request.uri());
+						return new ReadResourceResult(new ArrayList<>());
+					}
+
+					List<ResourceContents> contents = new ArrayList<>();
+					requestedProgram.getListing().getDefinedData(true)
+						.forEach(data -> {
+							if (data.getValue() instanceof String) {
+								Map<String, Object> stringInfo = getStringInfo(data);
+								try {
+									String json = JSON.writeValueAsString(stringInfo);
+									contents.add(new TextResourceContents(resourceUri, "text/json", json));
+
+								} catch (JsonProcessingException e) {
+									Msg.error(revaPlugin.class, "Failed to convert string value to JSON: " + stringInfo.toString());
+								}
+							}
+						});
+					return new ReadResourceResult(contents);
+				}
+			);
+
+		try {
+			server.addResource(resourceSpecification);
+		} catch (McpError e) {
+			// This can happen when the resource is already added
+			Msg.error(revaPlugin.class, "Error adding resource to MCP server", e);
+			return;
+		}
 	}
 
 	/***
@@ -301,28 +413,9 @@ public class revaPlugin extends ProgramPlugin {
 						.forEach(data -> {
 							if (data.getValue() instanceof String) {
 								Msg.debug(revaPlugin.class, "Found string: " + data.getValue());
-								String stringValue = (String) data.getValue();
 
-								Map<String, Object> stringInfo = new HashMap<String, Object>();
-								stringInfo.put("address", "0x" + data.getAddress().toString()); // TODO: Probably contains namespace
-								stringInfo.put("content", stringValue);
-								stringInfo.put("length", stringValue.length());
-
-								byte[] bytes = null;;
-								try {
-									bytes = data.getBytes();
-								} catch (MemoryAccessException e) {
-									bytes = null;
-								}
-
-								if (bytes != null) {
-									// Convert bytes to hex string
-									StringBuilder hexString = new StringBuilder();
-									for (byte b : bytes) {
-										hexString.append(String.format("%02x", b & 0xff));
-									}
-									stringInfo.put("bytes", hexString.toString());
-								}
+								Map<String, Object> stringInfo = getStringInfo(data);
+								assert stringInfo != null : "String info should not be null";
 								stringData.add(stringInfo);
 							}
 						});
@@ -538,9 +631,21 @@ public class revaPlugin extends ProgramPlugin {
 	}
 
 	/***
+	 * Get data at a specific address or by symbol name in a program
+	 */
+	static void addToolGetData() {
+		assert server != null;
+
+		// Add tool for getting data by address
+		addToolGetDataByAddress();
+		// Add tool for getting data by symbol name
+		addToolGetDataBySymbol();
+	}
+
+	/***
 	 * Get data at a specific address in a program
 	 */
-	static void addToolGetDataAtAddress() {
+	private static void addToolGetDataByAddress() {
 		assert server != null;
 
 		// Create a JSON schema for the tool that requires programPath and address parameters
@@ -614,60 +719,8 @@ public class revaPlugin extends ProgramPlugin {
 						);
 					}
 
-					// Get the listing
-					ghidra.program.model.listing.Listing listing = program.getListing();
-
-					// Get data at the address
-					ghidra.program.model.listing.Data data = listing.getDataContaining(address);
-					if (data == null) {
-						return new McpSchema.CallToolResult(
-							List.of(new TextContent("No data found at address: " + addressString)),
-							true
-						);
-					}
-
-					// Create result data
-					Map<String, Object> resultData = new HashMap<>();
-					resultData.put("address", "0x" + data.getAddress().toString());
-					resultData.put("dataType", data.getDataType().getName());
-					resultData.put("length", data.getLength());
-
-					// Get the bytes and convert to hex
-					StringBuilder hexString = new StringBuilder();
-					try {
-						byte[] bytes = data.getBytes();
-						for (byte b : bytes) {
-							hexString.append(String.format("%02x", b & 0xff));
-						}
-						resultData.put("hexBytes", hexString.toString());
-					} catch (MemoryAccessException e) {
-						resultData.put("hexBytesError", "Memory access error: " + e.getMessage());
-					}
-
-					// Get the string representation that would be shown in the listing
-					String representation = data.getDefaultValueRepresentation();
-					resultData.put("representation", representation);
-
-					// Get the value object
-					Object value = data.getValue();
-					if (value != null) {
-						resultData.put("valueType", value.getClass().getSimpleName());
-						resultData.put("value", value.toString());
-					} else {
-						resultData.put("value", null);
-					}
-
-					try {
-						List<Content> contents = new ArrayList<>();
-						contents.add(new TextContent(JSON.writeValueAsString(resultData)));
-						return new McpSchema.CallToolResult(contents, false);
-					} catch (Exception e) {
-						Msg.error(revaPlugin.class, "Error converting data to JSON", e);
-						return new McpSchema.CallToolResult(
-							List.of(new TextContent("Error converting data to JSON: " + e.getMessage())),
-							true
-						);
-					}
+					// Get data at the address using the shared helper method
+					return getDataAtAddressResult(program, address);
 				}
 			);
 
@@ -679,6 +732,186 @@ public class revaPlugin extends ProgramPlugin {
 			return;
 		}
 		Msg.info(revaPlugin.class, "Added get-data-at-address tool to MCP server");
+	}
+
+	/***
+	 * Get data by symbol name in a program
+	 */
+	private static void addToolGetDataBySymbol() {
+		assert server != null;
+
+		// Create a JSON schema for the tool that requires programPath and symbolName parameters
+		JsonSchema schema = new JsonSchema(
+			"object",
+			Map.of(
+				"programPath", Map.of(
+					"type", "string",
+					"description", "Path in the Ghidra Project to the program containing the symbol"
+				),
+				"symbolName", Map.of(
+					"type", "string",
+					"description", "Name of the symbol to lookup"
+				)
+			),
+			List.of("programPath", "symbolName"),
+			false
+		);
+
+		McpSchema.Tool tool = new McpSchema.Tool(
+			"get-data-by-symbol",
+			"Get data at a symbol location in a program",
+			schema
+		);
+
+		McpServerFeatures.SyncToolSpecification toolSpecification =
+			new McpServerFeatures.SyncToolSpecification(
+				tool,
+				(exchange, args) -> {
+					// Get the program path and symbol name from the request
+					String programPath = (String) args.get("programPath");
+					String symbolName = (String) args.get("symbolName");
+
+					if (programPath == null) {
+						return new McpSchema.CallToolResult(
+							List.of(new TextContent("No program path provided")),
+							true
+						);
+					}
+
+					if (symbolName == null) {
+						return new McpSchema.CallToolResult(
+							List.of(new TextContent("No symbol name provided")),
+							true
+						);
+					}
+
+					// Get the program from the path
+					Program program = getProgramByPath(programPath);
+					if (program == null) {
+						return new McpSchema.CallToolResult(
+							List.of(new TextContent("Failed to find program: " + programPath)),
+							true
+						);
+					}
+
+					// Look up the symbol
+					ghidra.program.model.symbol.SymbolTable symbolTable = program.getSymbolTable();
+					ghidra.program.model.symbol.Symbol symbol = null;
+
+					// First try to get symbols by exact name
+					ghidra.program.model.symbol.SymbolIterator symbolIterator = symbolTable.getSymbols(symbolName);
+
+					// Check if we found any symbols with the given name
+					if (!symbolIterator.hasNext()) {
+						// Try case-insensitive search
+						symbolIterator = symbolTable.getAllSymbols(true);
+						boolean found = false;
+						while (symbolIterator.hasNext() && !found) {
+							ghidra.program.model.symbol.Symbol currentSymbol = symbolIterator.next();
+							if (currentSymbol.getName().equalsIgnoreCase(symbolName)) {
+								symbol = currentSymbol;
+								found = true;
+							}
+						}
+
+						if (!found) {
+							return new McpSchema.CallToolResult(
+								List.of(new TextContent("Symbol not found: " + symbolName)),
+								true
+							);
+						}
+					} else {
+						// Use the first matching symbol from the exact match search
+						symbol = symbolIterator.next();
+					}
+
+					// Get the symbol's address and retrieve data
+					ghidra.program.model.address.Address address = symbol.getAddress();
+
+					// Get data at the symbol's address using the shared helper method
+					return getDataAtAddressResult(program, address);
+				}
+			);
+
+		try {
+			server.addTool(toolSpecification);
+		} catch (McpError e) {
+			// This can happen when the tool is already added
+			Msg.error(revaPlugin.class, "Error adding tool to MCP server", e);
+			return;
+		}
+		Msg.info(revaPlugin.class, "Added get-data-by-symbol tool to MCP server");
+	}
+
+	/***
+	 * Helper method to get data at a specific address and format the result
+	 * @param program The program to look up data in
+	 * @param address The address where to find data
+	 * @return Call tool result with data information
+	 */
+	private static McpSchema.CallToolResult getDataAtAddressResult(Program program, ghidra.program.model.address.Address address) {
+		// Get the listing
+		ghidra.program.model.listing.Listing listing = program.getListing();
+
+		// Get data at the address
+		ghidra.program.model.listing.Data data = listing.getDataContaining(address);
+		if (data == null) {
+			return new McpSchema.CallToolResult(
+				List.of(new TextContent("No data found at address: 0x" + address.toString())),
+				true
+			);
+		}
+
+		// Create result data
+		Map<String, Object> resultData = new HashMap<>();
+		resultData.put("address", "0x" + data.getAddress().toString());
+		resultData.put("dataType", data.getDataType().getName());
+		resultData.put("length", data.getLength());
+
+		// Check if the address is for a symbol
+		ghidra.program.model.symbol.SymbolTable symbolTable = program.getSymbolTable();
+		ghidra.program.model.symbol.Symbol primarySymbol = symbolTable.getPrimarySymbol(data.getAddress());
+		if (primarySymbol != null) {
+			resultData.put("symbolName", primarySymbol.getName());
+			resultData.put("symbolNamespace", primarySymbol.getParentNamespace().getName());
+		}
+
+		// Get the bytes and convert to hex
+		StringBuilder hexString = new StringBuilder();
+		try {
+			byte[] bytes = data.getBytes();
+			for (byte b : bytes) {
+				hexString.append(String.format("%02x", b & 0xff));
+			}
+			resultData.put("hexBytes", hexString.toString());
+		} catch (MemoryAccessException e) {
+			resultData.put("hexBytesError", "Memory access error: " + e.getMessage());
+		}
+
+		// Get the string representation that would be shown in the listing
+		String representation = data.getDefaultValueRepresentation();
+		resultData.put("representation", representation);
+
+		// Get the value object
+		Object value = data.getValue();
+		if (value != null) {
+			resultData.put("valueType", value.getClass().getSimpleName());
+			resultData.put("value", value.toString());
+		} else {
+			resultData.put("value", null);
+		}
+
+		try {
+			List<Content> contents = new ArrayList<>();
+			contents.add(new TextContent(JSON.writeValueAsString(resultData)));
+			return new McpSchema.CallToolResult(contents, false);
+		} catch (Exception e) {
+			Msg.error(revaPlugin.class, "Error converting data to JSON", e);
+			return new McpSchema.CallToolResult(
+				List.of(new TextContent("Error converting data to JSON: " + e.getMessage())),
+				true
+			);
+		}
 	}
 
 	/***
@@ -1118,8 +1351,8 @@ public class revaPlugin extends ProgramPlugin {
 		addToolListFunctions();
 		// Add tool to get decompiled function
 		addToolGetDecompiledFunction();
-		// Add tool to get data at a specific address
-		addToolGetDataAtAddress();
+		// Add tool to get data
+		addToolGetData();
 
 		// Customize provider (or remove if a provider is not desired)
 		String pluginName = getName();

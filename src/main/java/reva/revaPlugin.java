@@ -25,6 +25,7 @@ import java.util.Map;
 
 import javax.swing.*;
 
+import org.apache.commons.lang3.NotImplementedException;
 import org.eclipse.jetty.server.Server;
 import org.eclipse.jetty.servlet.ServletContextHandler;
 import org.eclipse.jetty.servlet.ServletHolder;
@@ -60,24 +61,37 @@ import ghidra.util.exception.CancelledException;
 import ghidra.util.exception.VersionException;
 import ghidra.util.task.Task;
 import ghidra.util.task.TaskMonitor;
+import groovyjarjarpicocli.CommandLine.Help.Ansi.Text;
 import resources.Icons;
 
 import io.modelcontextprotocol.server.*;
 import io.modelcontextprotocol.server.transport.*;
 import io.modelcontextprotocol.spec.*;
+import io.modelcontextprotocol.spec.McpSchema.ClientCapabilities;
 import io.modelcontextprotocol.spec.McpSchema.Content;
+import io.modelcontextprotocol.spec.McpSchema.CreateMessageRequest;
+import io.modelcontextprotocol.spec.McpSchema.CreateMessageResult;
 import io.modelcontextprotocol.spec.McpSchema.ReadResourceResult;
 import io.modelcontextprotocol.spec.McpSchema.Resource;
+import io.modelcontextprotocol.spec.McpSchema.ResourceTemplate;
+import io.modelcontextprotocol.spec.McpSchema.Role;
+import io.modelcontextprotocol.spec.McpSchema.SamplingMessage;
 import io.modelcontextprotocol.spec.McpSchema.ResourceContents;
 import io.modelcontextprotocol.spec.McpSchema.TextContent;
 import io.modelcontextprotocol.spec.McpSchema.TextResourceContents;
+import io.modelcontextprotocol.spec.McpSchema.ClientCapabilities.Sampling;
+import io.modelcontextprotocol.spec.McpSchema.CreateMessageRequest.ContextInclusionStrategy;
 import io.modelcontextprotocol.spec.McpSchema.JsonSchema;
+import io.modelcontextprotocol.spec.McpSchema.ModelPreferences;
+import io.modelcontextprotocol.spec.McpSchema.ReadResourceRequest;
 
 /**
  * ReVa (Reverse Engineering Assistant) plugin for Ghidra.
  * Provides a Model Context Protocol server for interacting with Ghidra.
  */
 //@formatter:off
+import java.util.concurrent.atomic.AtomicInteger;
+
 @PluginInfo(
 	status = PluginStatus.STABLE,
 	packageName = "ReVa",
@@ -118,17 +132,30 @@ public class revaPlugin extends ProgramPlugin {
 		// https://modelcontextprotocol.io/sdk/java/mcp-server
 		// https://github.com/codeboyzhou/mcp-java-sdk-examples/blob/main/mcp-server-filesystem/filesystem-native-sdk-example/src/main/java/com/github/mcp/examples/server/filesystem/McpSseServer.java
 
+
+		// Create the resource templates
+
+		ResourceTemplate programStringsTemplate = new ResourceTemplate("strings://{program_path}", "program-strings",
+					"Strings from a specific program", "text/plain", null);
+
 		server = McpServer.sync(transportProvider)
 			.serverInfo(MCP_SERVER_NAME, MCP_SERVER_VERSION)
 			.capabilities(serverCapabilities)
+			//.resourceTemplates(
+			//	programStringsTemplate
+			//)
 			.build();
 
 		// MARK: Add resources and tools
 		addResourceProgramList();
-		// Add the get-strings tool
-		addToolGetStrings();
-		// Add the list-programs tool
 		addToolListPrograms();
+		addToolGetSymbolsCount();
+		addToolGetSymbols();
+		addToolGetStringsCount();
+		addToolGetStrings();
+		addToolGetDecompiledFunction();
+		addToolGetDataBySymbol();
+		addToolGetDataByAddress();
 
 		// Run the transport provider in a runnable using the thread pool
 		startHosting(transportProvider);
@@ -214,12 +241,6 @@ public class revaPlugin extends ProgramPlugin {
 			}
 		}
 
-		// Now register all the resources inside the open programs
-		for (Program program : openPrograms) {
-			// Register the program strings resource
-			addResourceProgramStrings(program);
-		}
-
 		return openPrograms;
 	}
 
@@ -291,81 +312,10 @@ public class revaPlugin extends ProgramPlugin {
 		return null;
 	}
 
-
-	static void addResourceProgramStrings(Program program) {
-		// First we iterate over all open programs and register a resource URI
-		// for each one (using the program's path).
-
-		// Then we register the callback to get the correct program from the list
-		// and get the strings and return them as Text Resorces.
-
-		assert server != null;
-
-		// TODO: There is a bug here, if we change the open program list
-		// the resource will not be updated.
-
-		String programPath = program.getDomainFile().getPathname();
-		String resourceUri = "ghidra://programs/" + programPath + "/strings";
-
-		// Create a resource for the program strings
-		Resource resource = new Resource(resourceUri, "program-strings", "Strings from " + program.getName(), "text/plain", null);
-
-		McpServerFeatures.SyncResourceSpecification resourceSpecification =
-			new McpServerFeatures.SyncResourceSpecification(
-				resource,
-				(exchange, request) -> {
-					// Get the program path from the URI in the request
-					// Split and strip off the "ghidra://programs/" prefix and the `/strings` suffix
-					String[] uriParts = request.uri().split("ghidra://programs/");
-					String programPathFromUri = null;
-
-					if (uriParts.length > 1) {
-						// Remove the "/strings" suffix if present
-						programPathFromUri = uriParts[1].replaceAll("/strings$", "");
-					}
-
-					if (programPathFromUri == null) {
-						Msg.error(revaPlugin.class, "Failed to parse program path from URI: " + request.uri());
-						return new ReadResourceResult(new ArrayList<>());
-					}
-
-					Program requestedProgram = getProgramByPath(programPathFromUri);
-					if (requestedProgram == null) {
-						Msg.error(revaPlugin.class, "Failed to find program for URI: " + request.uri());
-						return new ReadResourceResult(new ArrayList<>());
-					}
-
-					List<ResourceContents> contents = new ArrayList<>();
-					requestedProgram.getListing().getDefinedData(true)
-						.forEach(data -> {
-							if (data.getValue() instanceof String) {
-								Map<String, Object> stringInfo = getStringInfo(data);
-								try {
-									String json = JSON.writeValueAsString(stringInfo);
-									contents.add(new TextResourceContents(resourceUri, "text/json", json));
-
-								} catch (JsonProcessingException e) {
-									Msg.error(revaPlugin.class, "Failed to convert string value to JSON: " + stringInfo.toString());
-								}
-							}
-						});
-					return new ReadResourceResult(contents);
-				}
-			);
-
-		try {
-			server.addResource(resourceSpecification);
-		} catch (McpError e) {
-			// This can happen when the resource is already added
-			Msg.error(revaPlugin.class, "Error adding resource to MCP server", e);
-			return;
-		}
-	}
-
 	/***
-	 * Get strings from the selected program
+	 * Get the count of symbols from the selected program
 	 */
-	static void addToolGetStrings() {
+	static void addToolGetSymbolsCount() {
 		assert server != null;
 
 		// Create a JSON schema for the tool that requires a programPath parameter
@@ -374,7 +324,17 @@ public class revaPlugin extends ProgramPlugin {
 			Map.of(
 				"programPath", Map.of(
 					"type", "string",
-					"description", "Path in the Ghidra Project to the program to get strings from"
+					"description", "Path in the Ghidra Project to the program to get symbol count from"
+				),
+				"includeExternal", Map.of(
+					"type", "boolean",
+					"description", "Whether to include external symbols in the count",
+					"default", false
+				),
+				"filterDefaultNames", Map.of(
+					"type", "boolean",
+					"description", "Whether to filter out default Ghidra generated names like FUN_, DAT_, etc.",
+					"default", true
 				)
 			),
 			List.of("programPath"),
@@ -382,8 +342,8 @@ public class revaPlugin extends ProgramPlugin {
 		);
 
 		McpSchema.Tool tool = new McpSchema.Tool(
-			"get-strings",
-			"Get strings from the selected program",
+			"get-symbols-count",
+			"Get the total count of symbols in the program (use this before calling get-symbols to plan pagination)",
 			schema
 		);
 
@@ -406,22 +366,448 @@ public class revaPlugin extends ProgramPlugin {
 						return new McpSchema.CallToolResult(List.of(new TextContent("Failed to find Program")), true);
 					}
 
-					// Get the defined strings from the program
-					List<Map<String, Object>> stringData = new ArrayList<>();
-					FlatProgramAPI flatProgramAPI = new FlatProgramAPI(program);
+					boolean includeExternal = (Boolean) args.getOrDefault("includeExternal", false);
+					boolean filterDefaultNames = (Boolean) args.getOrDefault("filterDefaultNames", true);
+
+					// Count symbols in the program
+					AtomicInteger symbolCount = new AtomicInteger(0);
+					ghidra.program.model.symbol.SymbolTable symbolTable = program.getSymbolTable();
+					symbolTable.getAllSymbols(true).forEach(symbol -> {
+						if (!includeExternal && symbol.isExternal()) {
+							return; // Skip external symbols if not requested
+						}
+						if (filterDefaultNames && isDefaultSymbolName(symbol.getName())) {
+							return; // Skip default Ghidra symbols if filtering is enabled
+						}
+						symbolCount.incrementAndGet();
+					});
+
+					Map<String, Object> countInfo = new HashMap<>();
+					countInfo.put("totalSymbolCount", symbolCount.get());
+					countInfo.put("recommendedChunkSize", 200); // Recommend a reasonable chunk size
+					countInfo.put("includeExternal", includeExternal);
+					countInfo.put("filterDefaultNames", filterDefaultNames);
+
+					try {
+						return new McpSchema.CallToolResult(
+							List.of(new TextContent(JSON.writeValueAsString(countInfo))),
+							false
+						);
+					} catch (Exception e) {
+						Msg.error(revaPlugin.class, "Error converting count data to JSON", e);
+						return new McpSchema.CallToolResult(
+							List.of(new TextContent("Error converting count data to JSON: " + e.getMessage())),
+							true
+						);
+					}
+				}
+			);
+		try {
+			server.addTool(toolSpecification);
+		} catch (McpError e) {
+			// This can happen when the tool is already added
+			Msg.error(revaPlugin.class, "Error adding tool to MCP server", e);
+			return;
+		}
+		Msg.info(revaPlugin.class, "Added get-symbols-count tool to MCP server");
+	}
+
+	/***
+	 * Get the list of symbols from the selected program with pagination
+	 */
+	static void addToolGetSymbols() {
+		assert server != null;
+		JsonSchema schema = new JsonSchema(
+			"object",
+			Map.of(
+				"programPath", Map.of(
+					"type", "string",
+					"description", "Path in the Ghidra Project to the program to get symbols from"
+				),
+				"includeExternal", Map.of(
+					"type", "boolean",
+					"description", "Whether to include external symbols in the result",
+					"default", false
+				),
+				"startIndex", Map.of(
+					"type", "integer",
+					"description", "Starting index for pagination (0-based)",
+					"default", 0
+				),
+				"maxCount", Map.of(
+					"type", "integer",
+					"description", "Maximum number of symbols to return (recommend using get-symbols-count first and using chunks of 200)",
+					"default", 200
+				),
+				"filterDefaultNames", Map.of(
+					"type", "boolean",
+					"description", "Whether to filter out default Ghidra generated names like FUN_, DAT_, etc.",
+					"default", true
+				)
+			),
+			List.of("programPath"),
+			false
+		);
+
+		McpSchema.Tool tool = new McpSchema.Tool(
+			"get-symbols",
+			"Get symbols from the selected program with pagination (use get-symbols-count first to determine total count)",
+			schema
+		);
+
+		McpServerFeatures.SyncToolSpecification toolSpecification =
+			new McpServerFeatures.SyncToolSpecification(
+				tool,
+				(exchange, args) -> {
+					// Get the program path from the request
+					String programPath = (String) args.get("programPath");
+					if (programPath == null) {
+						return new McpSchema.CallToolResult(
+							List.of(new TextContent("No program path provided")),
+							true
+						);
+					}
+
+					// Get pagination parameters
+					int startIndex = args.containsKey("startIndex") ? ((Number) args.get("startIndex")).intValue() : 0;
+					int maxCount = args.containsKey("maxCount") ? ((Number) args.get("maxCount")).intValue() : 200;
+
+					if (startIndex < 0) {
+						return new McpSchema.CallToolResult(
+							List.of(new TextContent("Invalid startIndex: must be >= 0")),
+							true
+						);
+					}
+
+					if (maxCount <= 0) {
+						return new McpSchema.CallToolResult(
+							List.of(new TextContent("Invalid maxCount: must be > 0")),
+							true
+						);
+					}
+
+					// Get the program from the path
+					Program program = getProgramByPath(programPath);
+					if (program == null) {
+						return new McpSchema.CallToolResult(List.of(new TextContent("Failed to find Program")), true);
+					}
+
+					boolean includeExternal = (Boolean) args.getOrDefault("includeExternal", false);
+					boolean filterDefaultNames = (Boolean) args.getOrDefault("filterDefaultNames", true);
+
+					// Get the defined symbols from the program with pagination
+					List<Map<String, Object>> symbolData = new ArrayList<>();
+
+					AtomicInteger currentIndex = new AtomicInteger(0);
+					AtomicInteger collectedCount = new AtomicInteger(0);
+
+					ghidra.program.model.symbol.SymbolTable symbolTable = program.getSymbolTable();
+					symbolTable.getAllSymbols(true).forEach(symbol -> {
+						if (collectedCount.get() >= maxCount) {
+							return; // Stop collecting once we reach maxCount
+						}
+
+						if (!includeExternal && symbol.isExternal()) {
+							return; // Skip external symbols if not requested
+						}
+
+						if (filterDefaultNames && isDefaultSymbolName(symbol.getName())) {
+							return; // Skip default Ghidra symbols if filtering is enabled
+						}
+
+						int index = currentIndex.getAndIncrement();
+
+						// Skip items before startIndex
+						if (index < startIndex) {
+							return;
+						}
+
+						Map<String, Object> symbolInfo = new HashMap<>();
+						symbolInfo.put("name", symbol.getName());
+						symbolInfo.put("address", "0x" + symbol.getAddress().toString());
+						symbolInfo.put("type", symbol.getSymbolType().toString());
+						symbolInfo.put("namespace", symbol.getParentNamespace().getName());
+						symbolData.add(symbolInfo);
+						collectedCount.incrementAndGet();
+					});
+
+					// Add pagination metadata
+					Map<String, Object> paginationInfo = new HashMap<>();
+					paginationInfo.put("startIndex", startIndex);
+					paginationInfo.put("count", symbolData.size());
+					paginationInfo.put("hasMore", currentIndex.get() > (startIndex + symbolData.size()));
+					paginationInfo.put("nextStartIndex", startIndex + symbolData.size());
+					paginationInfo.put("totalProcessed", currentIndex.get());
+					paginationInfo.put("includeExternal", includeExternal);
+					paginationInfo.put("filterDefaultNames", filterDefaultNames);
+
+					try {
+						// First add the pagination metadata
+						List<Content> contents = new ArrayList<>();
+						contents.add(new TextContent(JSON.writeValueAsString(paginationInfo)));
+
+						// Then add each symbol
+						for (Map<String, Object> symbolInfo : symbolData) {
+							contents.add(new TextContent(JSON.writeValueAsString(symbolInfo)));
+						}
+						return new McpSchema.CallToolResult(contents, false);
+					}
+					catch (Exception e) {
+						Msg.error(revaPlugin.class, "Error converting symbol data to JSON", e);
+						return new McpSchema.CallToolResult(
+							List.of(new TextContent("Error converting symbol data to JSON: " + e.getMessage())),
+							true
+						);
+					}
+				}
+			);
+
+		try {
+			server.addTool(toolSpecification);
+		} catch (McpError e) {
+			// This can happen when the tool is already added
+			Msg.error(revaPlugin.class, "Error adding tool to MCP server", e);
+			return;
+		}
+		Msg.info(revaPlugin.class, "Added get-symbols tool to MCP server");
+	}
+
+	/***
+	 * Get the count of strings from the selected program
+	 */
+	static void addToolGetStringsCount() {
+		assert server != null;
+
+		// Create a JSON schema for the tool that requires a programPath parameter
+		JsonSchema schema = new JsonSchema(
+			"object",
+			Map.of(
+				"programPath", Map.of(
+					"type", "string",
+					"description", "Path in the Ghidra Project to the program to get string count from"
+				)
+			),
+			List.of("programPath"),
+			false
+		);
+
+		McpSchema.Tool tool = new McpSchema.Tool(
+			"get-strings-count",
+			"Get the total count of strings in the program (use this before calling get-strings to plan pagination)",
+			schema
+		);
+
+		McpServerFeatures.SyncToolSpecification toolSpecification =
+			new McpServerFeatures.SyncToolSpecification(
+				tool,
+				(exchange, args) -> {
+					// Get the program path from the request
+					String programPath = (String) args.get("programPath");
+					if (programPath == null) {
+						return new McpSchema.CallToolResult(
+							List.of(new TextContent("No program path provided")),
+							true
+						);
+					}
+
+					// Get the program from the path
+					Program program = getProgramByPath(programPath);
+					if (program == null) {
+						return new McpSchema.CallToolResult(List.of(new TextContent("Failed to find Program")), true);
+					}
+
+					// Count the defined strings in the program
+					AtomicInteger stringCount = new AtomicInteger(0);
 					program.getListing().getDefinedData(true)
 						.forEach(data -> {
 							if (data.getValue() instanceof String) {
-								Msg.debug(revaPlugin.class, "Found string: " + data.getValue());
+								stringCount.incrementAndGet();
+							}
+						});
+
+					Map<String, Object> countInfo = new HashMap<>();
+					countInfo.put("totalStringCount", stringCount.get());
+					countInfo.put("recommendedChunkSize", 100); // Recommend a reasonable chunk size
+
+					try {
+						return new McpSchema.CallToolResult(
+							List.of(new TextContent(JSON.writeValueAsString(countInfo))),
+							false
+						);
+					} catch (Exception e) {
+						Msg.error(revaPlugin.class, "Error converting count data to JSON", e);
+						return new McpSchema.CallToolResult(
+							List.of(new TextContent("Error converting count data to JSON: " + e.getMessage())),
+							true
+						);
+					}
+				}
+			);
+		try {
+			server.addTool(toolSpecification);
+		} catch (McpError e) {
+			// This can happen when the tool is already added
+			Msg.error(revaPlugin.class, "Error adding tool to MCP server", e);
+			return;
+		}
+		Msg.info(revaPlugin.class, "Added get-strings-count tool to MCP server");
+	}
+
+	/***
+	 * Get strings from the selected program with pagination
+	 */
+	static void addToolGetStrings() {
+		assert server != null;
+
+		// Create a JSON schema for the tool that requires a programPath parameter and pagination parameters
+		JsonSchema schema = new JsonSchema(
+			"object",
+			Map.of(
+				"programPath", Map.of(
+					"type", "string",
+					"description", "Path in the Ghidra Project to the program to get strings from"
+				),
+				"startIndex", Map.of(
+					"type", "integer",
+					"description", "Starting index for pagination (0-based)",
+					"default", 0
+				),
+				"maxCount", Map.of(
+					"type", "integer",
+					"description", "Maximum number of strings to return (recommend using get-strings-count first and using chunks of 100)",
+					"default", 100
+				)
+			),
+			List.of("programPath"),
+			false
+		);
+
+		McpSchema.Tool tool = new McpSchema.Tool(
+			"get-strings",
+			"Get strings from the selected program with pagination (use get-strings-count first to determine total count)",
+			schema
+		);
+
+		McpServerFeatures.SyncToolSpecification toolSpecification =
+			new McpServerFeatures.SyncToolSpecification(
+				tool,
+				(exchange, args) -> {
+					// Get the program path from the request
+					String programPath = (String) args.get("programPath");
+					if (programPath == null) {
+						return new McpSchema.CallToolResult(
+							List.of(new TextContent("No program path provided")),
+							true
+						);
+					}
+
+					// Get pagination parameters
+					int startIndex = args.containsKey("startIndex") ? ((Number) args.get("startIndex")).intValue() : 0;
+					int maxCount = args.containsKey("maxCount") ? ((Number) args.get("maxCount")).intValue() : 100;
+
+					if (startIndex < 0) {
+						return new McpSchema.CallToolResult(
+							List.of(new TextContent("Invalid startIndex: must be >= 0")),
+							true
+						);
+					}
+
+					if (maxCount <= 0) {
+						return new McpSchema.CallToolResult(
+							List.of(new TextContent("Invalid maxCount: must be > 0")),
+							true
+						);
+					}
+
+					// Get the program from the path
+					Program program = getProgramByPath(programPath);
+					if (program == null) {
+						return new McpSchema.CallToolResult(List.of(new TextContent("Failed to find Program")), true);
+					}
+
+					// Get the defined strings from the program with pagination
+					List<Map<String, Object>> stringData = new ArrayList<>();
+
+					AtomicInteger currentIndex = new AtomicInteger(0);
+					AtomicInteger collectedCount = new AtomicInteger(0);
+
+					program.getListing().getDefinedData(true)
+						.forEach(data -> {
+							if (collectedCount.get() >= maxCount) {
+								return; // Stop collecting once we reach maxCount
+							}
+
+							if (data.getValue() instanceof String) {
+								int index = currentIndex.getAndIncrement();
+
+								// Skip items before startIndex
+								if (index < startIndex) {
+									return;
+								}
 
 								Map<String, Object> stringInfo = getStringInfo(data);
 								assert stringInfo != null : "String info should not be null";
 								stringData.add(stringInfo);
+								collectedCount.incrementAndGet();
 							}
 						});
 
+					// Add pagination metadata
+					Map<String, Object> paginationInfo = new HashMap<>();
+					paginationInfo.put("hasMore", currentIndex.get() > (startIndex + stringData.size()));
+					paginationInfo.put("nextStartIndex", startIndex + stringData.size());
+					paginationInfo.put("totalProcessed", currentIndex.get());
+
+					// Check if the MCP client supports the message requests API
+					ClientCapabilities capabilities = exchange.getClientCapabilities();
+					if (capabilities.sampling() != null) {
+						// If it does then use the LLM to filter the strings
+
+						// TODO: Implement the correct context for string filtering
+						// We need to find the goal from the user and pass this to the LLM.
+						List<SamplingMessage> samplingMessages = new ArrayList<SamplingMessage>();
+						try {
+							samplingMessages.add(new SamplingMessage(Role.USER, new TextContent(JSON.writeValueAsString(stringData))));
+						} catch (JsonProcessingException e) {
+							Msg.error(revaPlugin.class, "Error serializing string data to JSON", e);
+							return new McpSchema.CallToolResult(
+								List.of(new TextContent("Error serializing string data to JSON: " + e.getMessage())),
+								true
+							);
+						}
+
+						// Create a subconversation to filter the strings
+						// This is to avoid polluting the main context with all the strings
+						CreateMessageRequest createMessageRequest = CreateMessageRequest.builder()
+							// This context is actually the tools available, not the rest
+							// of the conversation
+							.includeContext(ContextInclusionStrategy.THIS_SERVER)
+							.modelPreferences(ModelPreferences.builder()
+								.speedPriority(2.0)
+								.intelligencePriority(1.0)
+								.build())
+							.messages(samplingMessages)
+							.systemPrompt("Here are the strings from the program. Please filter them to relevant ones.")
+							.build();
+
+						CreateMessageResult result = exchange.createMessage(createMessageRequest);
+						Content content = result.content();
+						if (content instanceof TextContent) {
+							TextContent textContent = (TextContent) content;
+							// Return the filtered content from the LLM
+							return new McpSchema.CallToolResult(
+								List.of(textContent),
+								false
+							);
+						}
+					}
+
 					try {
+						// First add the pagination metadata
 						List<Content> contents = new ArrayList<>();
+						contents.add(new TextContent(JSON.writeValueAsString(paginationInfo)));
+
+						// Then add each string
 						for (Map<String, Object> stringInfo : stringData) {
 							contents.add(new TextContent(JSON.writeValueAsString(stringInfo)));
 						}
@@ -527,6 +913,11 @@ public class revaPlugin extends ProgramPlugin {
 				"programPath", Map.of(
 					"type", "string",
 					"description", "Path in the Ghidra Project to the program to get functions from"
+				),
+				"filterDefaultNames", Map.of(
+					"type", "boolean",
+					"description", "Whether to filter out default Ghidra generated names like FUN_, DAT_, etc.",
+					"default", true
 				)
 			),
 			List.of("programPath"),
@@ -558,12 +949,19 @@ public class revaPlugin extends ProgramPlugin {
 						return new McpSchema.CallToolResult(List.of(new TextContent("Failed to find Program")), true);
 					}
 
+					// Get the filter parameter
+					boolean filterDefaultNames = (Boolean) args.getOrDefault("filterDefaultNames", true);
+
 					// Get the functions from the program
 					List<Map<String, Object>> functionData = new ArrayList<>();
-					FlatProgramAPI flatProgramAPI = new FlatProgramAPI(program);
 
 					// Iterate through all functions
 					program.getFunctionManager().getFunctions(true).forEach(function -> {
+						// Skip default Ghidra function names if filtering is enabled
+						if (filterDefaultNames && isDefaultSymbolName(function.getName())) {
+							return;
+						}
+
 						Map<String, Object> functionInfo = new HashMap<String, Object>();
 						functionInfo.put("name", function.getName());
 						functionInfo.put("address", "0x" + function.getEntryPoint().toString());
@@ -606,6 +1004,14 @@ public class revaPlugin extends ProgramPlugin {
 
 					try {
 						List<Content> contents = new ArrayList<>();
+
+						// Add metadata about the filtering
+						Map<String, Object> metadataInfo = new HashMap<>();
+						metadataInfo.put("count", functionData.size());
+						metadataInfo.put("filterDefaultNames", filterDefaultNames);
+						contents.add(new TextContent(JSON.writeValueAsString(metadataInfo)));
+
+						// Add function data
 						for (Map<String, Object> functionInfo : functionData) {
 							contents.add(new TextContent(JSON.writeValueAsString(functionInfo)));
 						}
@@ -930,7 +1336,7 @@ public class revaPlugin extends ProgramPlugin {
 				),
 				"functionName", Map.of(
 					"type", "string",
-					"description", "Name of the function to decompile"
+					"description", "Name of the function to decompile, this should be the name in Ghidra, not the mangled name."
 				)
 			),
 			List.of("programPath", "functionName"),
@@ -1006,7 +1412,7 @@ public class revaPlugin extends ProgramPlugin {
 
 					if (function == null) {
 						return new McpSchema.CallToolResult(
-							List.of(new TextContent("Function not found: " + functionName + " in program " + program.getName())),
+							List.of(new TextContent("Function not found: " + functionName + " in program " + program.getName() + ". Check you are not using the mangled name and the namespace is correct.")),
 							true
 						);
 					}
@@ -1417,5 +1823,26 @@ public class revaPlugin extends ProgramPlugin {
 		public JComponent getComponent() {
 			return panel;
 		}
+	}
+
+	/**
+	 * Check if a symbol name follows Ghidra's default naming patterns (FUN_, DAT_, etc.)
+	 * @param name The symbol name to check
+	 * @return True if the name appears to be a default Ghidra-generated name
+	 */
+	private static boolean isDefaultSymbolName(String name) {
+		if (name == null || name.isEmpty()) {
+			return false;
+		}
+
+		// Common Ghidra default naming patterns
+		return name.startsWith("FUN_") ||
+			   name.startsWith("DAT_") ||
+			   name.startsWith("LAB_") ||
+			   name.startsWith("PTR_") ||
+			   name.startsWith("SUB_") ||
+			   name.startsWith("EXTERNAL_") ||
+			   name.startsWith("thunk_") ||
+			   name.startsWith("switchTable_");
 	}
 }

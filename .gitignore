@@ -4,6 +4,7 @@ dist/
 bin/
 *.egg-info
 *.pyc
+*.class
 .venv
 .vim/
 .DS_Store

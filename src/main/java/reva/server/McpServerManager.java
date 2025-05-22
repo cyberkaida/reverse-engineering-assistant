@@ -42,6 +42,7 @@ import reva.tools.data.DataToolProvider;
 import reva.tools.decompiler.DecompilerToolProvider;
 import reva.tools.functions.FunctionToolProvider;
 import reva.tools.memory.MemoryToolProvider;
+import reva.tools.project.ProjectToolProvider;
 import reva.tools.strings.StringToolProvider;
 import reva.tools.symbols.SymbolToolProvider;
 import reva.util.ConfigManager;
@@ -129,6 +130,7 @@ public class McpServerManager {
         toolProviders.add(new DataToolProvider(server));
         toolProviders.add(new DecompilerToolProvider(server));
         toolProviders.add(new MemoryToolProvider(server));
+        toolProviders.add(new ProjectToolProvider(server));
 
         // Register all tools with the server
         for (ToolProvider provider : toolProviders) {

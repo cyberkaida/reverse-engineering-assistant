@@ -1,8 +1,8 @@
 # ReVA - Reverse Engineering Assistant
 
-> Updated demo coming soon!
+> Rewritten from scratch as a [Model Context Protocol (MCP)](https://modelcontextprotocol.io/faqs) server!
 
-The reverse engineering assistant (ReVA) is a project to build a disassembler agnostic AI assistant for
+The reverse engineering assistant (ReVA) is a project to build a model agnostic AI assistant for
 reverse engineering tasks. This includes both _offline_ and online inference and a simple architecture.
 
 ReVa is different from other efforts at building AI assistants for RE tasks because it uses a _tool driven approach_.
@@ -14,15 +14,17 @@ and to reduce hallucination by the LLM. We do this by providing the LLM with a s
 including descriptions that guide the LLM,and redirecting correctable mistakes back to the LLM, and including extra
 output to guide the next decision by the LLM.
 
-For example, when the LLM requests decompilation from your RE tool, we will accept a raw address in hex, a raw address
-in base 10, a symbol name with a namespace, or a symbol. If the LLM gives us bad input we report this to the LLM along
-with instructions to correct the input (maybe encouraging it to use the function list for example). To encourage exploration
-as a human would, we report additional context like the namespace and cross references along with the decompilation, this
+To encourage exploration as a human would, we report additional context like the namespace and cross references along with the decompilation, this
 is a small nudge to make the LLM explore the binary in the same way a human would.
 
 Using this technique you can ask general questions and get relevant answers. The model prioritises
 information from the tools, but when there is no information it can still respond to generic
 questions from its training.
+
+As an MCP server, ReVa can be used alongside other MCP servers to enrich its analysis.
+For example you can use the [GitHub MCP Server](https://github.com/github/github-mcp-server)
+to allow ReVa access to source code on GitHub, or the
+[Kagi MCP Server](https://github.com/kagisearch/kagimcp) to allow ReVa to search the web.
 
 You can ask questions like:
 - What are the interesting strings in this program?
@@ -34,10 +36,94 @@ You can ask questions like:
 - What does the function at address 0x80000 do?
 - This is a CTF problem. Write a pwntools script to get the flag.
 
-An important part of reverse engineering is the process. Many other tools simply ask a single question of the LLM,
-this means it is difficult to determine _why_ a thing happened. In ReVa we break all actions down into small parts
-and include the LLMs thoughts in the output. This allows the analyst to monitor the LLMs actions and reasoning, aborting
-and changing the prompt if required.
+# Installation
+
+> NOTE: ReVa only supports Ghidra 11.3 and above!
+
+ReVa is a Ghidra extension. To install it, you can download the release for your
+version of Ghidra from the releases page and install it using the Ghidra extension manager.
+
+Alternatively, you can build it from source. To do this, clone the repository and run the following command:
+
+```bash
+export GHIDRA_INSTALL_DIR=/path/to/ghidra
+gradle
+```
+
+Then install the extension (in `dist/`) using the Ghidra extension manager.
+
+## MCP configuration
+ReVa uses the [Model Context Protocol (MCP)](https://modelcontextprotocol.io/faqs) to communicate with the LLM.
+
+ReVa uses the [SSE MCP transport](https://modelcontextprotocol.io/docs/concepts/transports#server-sent-events-sse)
+and will listen on port `8080` by default, you can change this in the Ghidra settings.
+
+You will need to configure your MCP client to connect to ReVa, this depends on the client you are using.
+
+### Claude
+
+With Claude you can open your MCP configuration file by opening the Claude
+app, opening the settings and then the Developer tab. You can click `Edit Config` to
+locate the configuration file.
+
+Add a block to the `mcpServers` section of the configuration file:
+
+```json
+{
+  "mcpServers": [
+    {
+      "name": "ReVa",
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-remote",
+        "http://localhost:8080/mcp/sse"
+      ]
+    }
+  ]
+}
+```
+
+### VSCode
+
+> If you use Claude Desktop, there is an [automatic discovery feature in VSCode](https://code.visualstudio.com/docs/copilot/chat/mcp-servers#_automatic-discovery-of-mcp-servers)
+> that will automatically configure the MCP server for you.
+
+VSCode has a built in MCP client, instructions to configure it can be found
+in the [GitHub Copilot documentation](https://code.visualstudio.com/docs/copilot/chat/mcp-servers#_add-an-mcp-server-to-your-user-settings).
+
+Note that VSCode supports `sse` natively, so you do not need to use `mcp-remote`.
+```json
+{
+  "mcp": {
+    "servers": {
+      "ReVa": {
+        "type": "sse",
+        "url": "http://localhost:8080/mcp/sse"
+      }
+    }
+  }
+}
+```
+
+### oterm - Ollama
+
+[oterm](https://ggozad.github.io/oterm/) is a TUI interface for [Ollama](https://ollama.com) and works well locally with ReVa.
+
+For best results, use a reasoning model like `Qwen3`.
+
+See the [oterm documentation](https://ggozad.github.io/oterm/mcp/#sse-transport) for instructions on how to configure
+oterm to use ReVa.
+
+```json
+{
+  "mcpServers": {
+    "ReVa": {
+      "url": "http://localhost:8080/mcp/sse"
+    }
+  }
+}
+```
 
 # Support
 

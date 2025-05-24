@@ -1,9 +1,12 @@
 .gradle
 build/
 dist/
+bin/
 *.egg-info
 *.pyc
+*.class
 .venv
-.vscode
 .vim/
 .DS_Store
+.mypy_cache/
+__pycache__

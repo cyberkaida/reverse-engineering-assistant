@@ -22,7 +22,7 @@ import java.util.Map;
  * A simple service registry to allow components to locate each other at runtime.
  * This is a static registry that provides global access to core services.
  */
-public class ServiceRegistry {
+public class RevaInternalServiceRegistry {
     private static final Map<Class<?>, Object> services = new HashMap<>();
 
     /**

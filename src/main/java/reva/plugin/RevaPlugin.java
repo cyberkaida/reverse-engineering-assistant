@@ -27,7 +27,7 @@ import ghidra.util.Msg;
 
 import reva.server.McpServerManager;
 import reva.ui.RevaProvider;
-import reva.util.ServiceRegistry;
+import reva.util.RevaInternalServiceRegistry;
 
 /**
  * ReVa (Reverse Engineering Assistant) plugin for Ghidra.
@@ -54,7 +54,7 @@ public class RevaPlugin extends ProgramPlugin {
         Msg.info(this, "ReVa initializing...");
 
         // Register this plugin in the service registry so components can access it
-        ServiceRegistry.registerService(RevaPlugin.class, this);
+        RevaInternalServiceRegistry.registerService(RevaPlugin.class, this);
 
         // Initialize the MCP server
         serverManager = new McpServerManager(tool);
@@ -97,7 +97,7 @@ public class RevaPlugin extends ProgramPlugin {
         }
 
         // Clean up the service registry
-        ServiceRegistry.clearAllServices();
+        RevaInternalServiceRegistry.clearAllServices();
 
         super.cleanup();
     }

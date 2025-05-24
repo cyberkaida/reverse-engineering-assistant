@@ -47,7 +47,7 @@ import reva.tools.strings.StringToolProvider;
 import reva.tools.symbols.SymbolToolProvider;
 import reva.tools.xrefs.CrossReferencesToolProvider;
 import reva.util.ConfigManager;
-import reva.util.ServiceRegistry;
+import reva.util.RevaInternalServiceRegistry;
 
 /**
  * Manages the Model Context Protocol server.
@@ -77,10 +77,10 @@ public class McpServerManager {
     public McpServerManager(PluginTool pluginTool) {
         // Initialize configuration
         configManager = new ConfigManager(pluginTool);
-        ServiceRegistry.registerService(ConfigManager.class, configManager);
+        RevaInternalServiceRegistry.registerService(ConfigManager.class, configManager);
         // Initialize thread pool
         threadPool = GThreadPool.getPrivateThreadPool("ReVa");
-        ServiceRegistry.registerService(GThreadPool.class, threadPool);
+        RevaInternalServiceRegistry.registerService(GThreadPool.class, threadPool);
 
         // Initialize MCP transport provider
         transportProvider = new HttpServletSseServerTransportProvider(JSON, MCP_MSG_ENDPOINT, MCP_SSE_ENDPOINT);
@@ -99,7 +99,7 @@ public class McpServerManager {
             .build();
 
         // Make server available via service registry
-        ServiceRegistry.registerService(McpSyncServer.class, server);
+        RevaInternalServiceRegistry.registerService(McpSyncServer.class, server);
 
         // Create and register resource providers
         initializeResourceProviders();

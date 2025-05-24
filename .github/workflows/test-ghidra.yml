@@ -1,0 +1,101 @@
+name: Test Ghidra 🐉 Extension
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest]
+        ghidra-version: [
+            "11.3.2",
+            "11.3.1",
+            "11.3",
+        ]
+    name: Test on Ghidra ${{ matrix.ghidra-version }}
+    runs-on: ${{ matrix.os }}
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Java 🍵
+      uses: actions/setup-java@v4
+      with:
+        java-version: "21"
+        distribution: "microsoft"
+
+    - name: Install Ghidra 🐉
+      uses: er28-0652/setup-ghidra@master
+      with:
+        version: ${{ matrix.ghidra-version }}
+
+    - name: Cache Gradle dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.gradle/caches
+          ~/.gradle/wrapper
+        key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+        restore-keys: |
+          ${{ runner.os }}-gradle-
+
+    - name: Build Extension 🔨
+      run: gradle buildExtension
+
+    - name: Run Tests 🧪
+      run: gradle test --info
+
+    - name: Upload test results
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: test-results-${{ matrix.ghidra-version }}
+        path: |
+          build/reports/tests/
+          build/test-results/
+        if-no-files-found: ignore
+
+    - name: Publish Test Results 📊
+      uses: dorny/test-reporter@v1
+      if: always()
+      with:
+        name: Test Results (Ghidra ${{ matrix.ghidra-version }})
+        path: 'build/test-results/test/*.xml'
+        reporter: java-junit
+        fail-on-error: false
+
+  lint:
+    name: Lint and Check 🔍
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Java 🍵
+      uses: actions/setup-java@v4
+      with:
+        java-version: "21"
+        distribution: "microsoft"
+
+    - name: Install Ghidra 🐉
+      uses: er28-0652/setup-ghidra@master
+      with:
+        version: "11.3.2"
+
+    - name: Cache Gradle dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.gradle/caches
+          ~/.gradle/wrapper
+        key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+        restore-keys: |
+          ${{ runner.os }}-gradle-
+
+    - name: Check code compilation
+      run: gradle compileJava
+
+    - name: Check test compilation
+      run: gradle compileTestJava

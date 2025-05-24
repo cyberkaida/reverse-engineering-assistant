@@ -1,17 +1,18 @@
 name: Publish Ghidra 🐉 distribution
-on: push
-defaults:
-  run:
-    working-directory: ./ghidra-assistant
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
 jobs:
   build:
     strategy:
       matrix:
         os: [ubuntu-latest]
         ghidra-version: [
-            "11.1.2",
-            "11.1.1",
-            "11.1",
+            "11.3.2",
+            "11.3.1",
+            "11.3""
         ]
     name: Build distribution 📦
     runs-on: ${{ matrix.os }}
@@ -20,7 +21,7 @@ jobs:
     - name: Set up Java 🍵
       uses: actions/setup-java@v4
       with:
-        java-version: "17"
+        java-version: "21"
         distribution: "microsoft"
     - name: Install Ghidra 🐉
       uses: er28-0652/setup-ghidra@master
@@ -29,10 +30,10 @@ jobs:
     - name: Compile ReVa 👩‍💻✨
       run: gradle buildExtension
     - name: Store the distribution packages
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
-        name: ghidra-distributions
-        path: ghidra-assistant/dist/
+        name: ghidra-distributions-${{ matrix.ghidra-version }}
+        path: dist/
         if-no-files-found: error
   github-release:
     name: >-
@@ -46,7 +47,32 @@ jobs:
       id-token: write  # IMPORTANT: mandatory for sigstore
     steps:
     - name: Download all the dists
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
-        name: ghidra-distributions
+        pattern: ghidra-distributions-*
         path: dist/
+        merge-multiple: true
+
+    - name: Sign the dists with Sigstore
+      uses: sigstore/gh-action-sigstore-python@v2.1.1
+      with:
+        inputs: >-
+          ./dist/*.zip
+        upload-signing-artifacts: true
+
+    - name: Create GitHub Release
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+      run: >-
+        gh release create
+        '${{ github.ref_name }}'
+        --repo '${{ github.repository }}'
+        --notes ""
+
+    - name: Upload artifact signatures to GitHub Release
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+      run: >-
+        gh release upload
+        '${{ github.ref_name }}' ./dist/**
+        --repo '${{ github.repository }}'

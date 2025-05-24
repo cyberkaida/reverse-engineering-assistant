@@ -81,11 +81,14 @@ public class RevaProgramManager {
             return null;
         }
 
+        Msg.debug(RevaProgramManager.class, "Looking for program with path: " + programPath);
+
         // Check cache first
         if (programCache.containsKey(programPath)) {
             Program cachedProgram = programCache.get(programPath);
             // Ensure the program is still valid
             if (!cachedProgram.isClosed()) {
+                Msg.debug(RevaProgramManager.class, "Found program in cache: " + programPath);
                 return cachedProgram;
             } else {
                 // Remove invalid programs from cache
@@ -95,11 +98,27 @@ public class RevaProgramManager {
 
         // First try to find among open programs
         List<Program> openPrograms = getOpenPrograms();
+        Msg.debug(RevaProgramManager.class, "Checking " + openPrograms.size() + " open programs");
+
         for (Program program : openPrograms) {
-            if (program.getExecutablePath().equals(programPath) ||
-                program.getName().equals(programPath)) {
+            // Check the Ghidra project path first (most common case)
+            String domainPath = program.getDomainFile().getPathname();
+            Msg.debug(RevaProgramManager.class, "Comparing '" + programPath + "' with domain path '" + domainPath + "'");
+            if (domainPath.equals(programPath)) {
                 // Add to cache for future lookups
                 programCache.put(programPath, program);
+                Msg.debug(RevaProgramManager.class, "Found program by domain path: " + programPath);
+                return program;
+            }
+
+            // Also check executable path and name for backward compatibility
+            String executablePath = program.getExecutablePath();
+            String programName = program.getName();
+            Msg.debug(RevaProgramManager.class, "Also checking executable path '" + executablePath + "' and name '" + programName + "'");
+            if (executablePath.equals(programPath) || programName.equals(programPath)) {
+                // Add to cache for future lookups
+                programCache.put(programPath, program);
+                Msg.debug(RevaProgramManager.class, "Found program by executable path or name: " + programPath);
                 return program;
             }
         }

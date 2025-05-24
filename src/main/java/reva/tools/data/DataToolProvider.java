@@ -23,6 +23,7 @@ import java.util.Map;
 import com.fasterxml.jackson.core.JsonProcessingException;
 
 import ghidra.program.model.address.Address;
+import ghidra.program.model.data.DataType;
 import ghidra.program.model.listing.Data;
 import ghidra.program.model.listing.Listing;
 import ghidra.program.model.listing.Program;
@@ -37,6 +38,7 @@ import io.modelcontextprotocol.spec.McpSchema.Content;
 import io.modelcontextprotocol.spec.McpSchema.TextContent;
 import reva.plugin.RevaProgramManager;
 import reva.tools.AbstractToolProvider;
+import reva.util.DataTypeParserUtil;
 
 /**
  * Tool provider for accessing data at specific addresses or by symbol names in programs.
@@ -54,6 +56,8 @@ public class DataToolProvider extends AbstractToolProvider {
     public void registerTools() throws McpError {
         registerGetDataByAddressTool();
         registerGetDataBySymbolTool();
+        registerApplyDataTypeToSymbolTool();
+        registerCreateLabelTool();
     }
 
     /**
@@ -172,6 +176,243 @@ public class DataToolProvider extends AbstractToolProvider {
             Address address = symbol.getAddress();
 
             return getDataAtAddressResult(program, address);
+        });
+    }
+
+    /**
+     * Register a tool to apply a data type to a symbol
+     * @throws McpError if there's an error registering the tool
+     */
+    private void registerApplyDataTypeToSymbolTool() throws McpError {
+        // Define schema for the tool
+        Map<String, Object> properties = new HashMap<>();
+        properties.put("programPath", Map.of(
+            "type", "string",
+            "description", "Path in the Ghidra Project to the program containing the symbol"
+        ));
+        properties.put("symbolName", Map.of(
+            "type", "string",
+            "description", "Name of the symbol to apply the data type to"
+        ));
+        properties.put("dataTypeString", Map.of(
+            "type", "string",
+            "description", "String representation of the data type (e.g., 'char**', 'int[10]')"
+        ));
+        properties.put("archiveName", Map.of(
+            "type", "string",
+            "description", "Optional name of the data type archive to search in. If not provided, all archives will be searched.",
+            "default", ""
+        ));
+
+        List<String> required = List.of("programPath", "symbolName", "dataTypeString");
+
+        // Create the tool
+        McpSchema.Tool tool = new McpSchema.Tool(
+            "apply-data-type-to-symbol",
+            "Apply a data type to a symbol in a program",
+            createSchema(properties, required)
+        );
+
+        // Register the tool with a handler
+        registerTool(tool, (exchange, args) -> {
+            // Get the parameters from the request
+            String programPath = (String) args.get("programPath");
+            String symbolName = (String) args.get("symbolName");
+            String dataTypeString = (String) args.get("dataTypeString");
+            String archiveName = args.containsKey("archiveName") ? (String) args.get("archiveName") : "";
+
+            if (programPath == null) {
+                return createErrorResult("No program path provided");
+            }
+            if (symbolName == null) {
+                return createErrorResult("No symbol name provided");
+            }
+            if (dataTypeString == null || dataTypeString.isEmpty()) {
+                return createErrorResult("No data type string provided");
+            }
+
+            // Get the program from the path
+            Program program = RevaProgramManager.getProgramByPath(programPath);
+            if (program == null) {
+                return createErrorResult("Failed to find Program: " + programPath);
+            }
+
+            // Find the symbol
+            SymbolTable symbolTable = program.getSymbolTable();
+            List<Symbol> symbols = symbolTable.getLabelOrFunctionSymbols(symbolName, null);
+
+            if (symbols.isEmpty()) {
+                return createErrorResult("Symbol not found: " + symbolName);
+            }
+
+            // Use the first matching symbol
+            Symbol symbol = symbols.get(0);
+            Address symbolAddress = symbol.getAddress();
+
+            try {
+                // Try to parse the data type from the string and get the actual DataType object
+                DataType dataType;
+                try {
+                    dataType = DataTypeParserUtil.parseDataTypeObjectFromString(dataTypeString, archiveName);
+                    if (dataType == null) {
+                        return createErrorResult("Could not find data type: " + dataTypeString +
+                            ". Try using the get-data-type-archives and get-data-types tools to find available data types.");
+                    }
+                } catch (Exception e) {
+                    return createErrorResult("Error parsing data type: " + e.getMessage() +
+                        ". Try using the get-data-type-archives and get-data-types tools to find available data types.");
+                }
+
+                // Start a transaction to apply the data type
+                int transactionID = program.startTransaction("Apply Data Type to Symbol");
+                boolean success = false;
+
+                try {
+
+                    // Get the listing and apply the data type at the symbol's address
+                    Listing listing = program.getListing();
+
+                    // Clear any existing data at the address
+                    if (listing.getDataAt(symbolAddress) != null) {
+                        listing.clearCodeUnits(symbolAddress, symbolAddress.add(dataType.getLength() - 1), false);
+                    }
+
+                    // Create the data at the address with the specified data type
+                    Data createdData = listing.createData(symbolAddress, dataType);
+
+                    if (createdData == null) {
+                        throw new Exception("Failed to create data at address: " + symbolAddress);
+                    }
+
+                    success = true;
+
+                    // Create result data
+                    Map<String, Object> resultData = new HashMap<>();
+                    resultData.put("success", true);
+                    resultData.put("symbolName", symbol.getName());
+                    resultData.put("address", "0x" + symbolAddress.toString());
+                    resultData.put("dataType", dataType.getName());
+                    resultData.put("dataTypeDisplayName", dataType.getDisplayName());
+                    resultData.put("length", dataType.getLength());
+
+                    return createJsonResult(resultData);
+                } finally {
+                    // End transaction
+                    program.endTransaction(transactionID, success);
+                }
+            } catch (Exception e) {
+                return createErrorResult("Error applying data type to symbol: " + e.getMessage());
+            }
+        });
+    }
+
+    /**
+     * Register a tool to create a label at a specific address in a program
+     * @throws McpError if there's an error registering the tool
+     */
+    private void registerCreateLabelTool() throws McpError {
+        // Define schema for the tool
+        Map<String, Object> properties = new HashMap<>();
+        properties.put("programPath", Map.of(
+            "type", "string",
+            "description", "Path in the Ghidra Project to the program containing the address"
+        ));
+        properties.put("address", Map.of(
+            "type", "string",
+            "description", "Address to create label at (e.g., '0x00400000')"
+        ));
+        properties.put("labelName", Map.of(
+            "type", "string",
+            "description", "Name for the label to create"
+        ));
+        properties.put("setAsPrimary", Map.of(
+            "type", "boolean",
+            "description", "Whether to set this label as primary if other labels exist at the address",
+            "default", true
+        ));
+
+        List<String> required = List.of("programPath", "address", "labelName");
+
+        // Create the tool
+        McpSchema.Tool tool = new McpSchema.Tool(
+            "create-label",
+            "Create a label at a specific address in a program",
+            createSchema(properties, required)
+        );
+
+        // Register the tool with a handler
+        registerTool(tool, (exchange, args) -> {
+            // Get the parameters from the request
+            String programPath = (String) args.get("programPath");
+            String addressString = (String) args.get("address");
+            String labelName = (String) args.get("labelName");
+            boolean setAsPrimary = args.containsKey("setAsPrimary") ?
+                (Boolean) args.get("setAsPrimary") : true;
+
+            if (programPath == null) {
+                return createErrorResult("No program path provided");
+            }
+            if (addressString == null) {
+                return createErrorResult("No address provided");
+            }
+            if (labelName == null || labelName.isEmpty()) {
+                return createErrorResult("No label name provided");
+            }
+
+            // Get the program from the path
+            Program program = RevaProgramManager.getProgramByPath(programPath);
+            if (program == null) {
+                return createErrorResult("Failed to find Program: " + programPath);
+            }
+
+            // Parse the address
+            Address address;
+            if (addressString.toLowerCase().startsWith("0x")) {
+                addressString = addressString.substring(2);
+            }
+            try {
+                address = program.getAddressFactory().getAddress(addressString);
+            } catch (Exception e) {
+                return createErrorResult("Invalid address format: " + addressString);
+            }
+
+            // Start a transaction to create the label
+            int transactionID = program.startTransaction("Create Label");
+            boolean success = false;
+
+            try {
+                // Get the symbol table
+                SymbolTable symbolTable = program.getSymbolTable();
+
+                // Create the label
+                Symbol symbol = symbolTable.createLabel(address, labelName,
+                    program.getGlobalNamespace(), ghidra.program.model.symbol.SourceType.USER_DEFINED);
+
+                if (symbol == null) {
+                    throw new Exception("Failed to create label at address: " + address);
+                }
+
+                // Set the label as primary if requested
+                if (setAsPrimary && !symbol.isPrimary()) {
+                    symbol.setPrimary();
+                }
+
+                success = true;
+
+                // Create result data
+                Map<String, Object> resultData = new HashMap<>();
+                resultData.put("success", true);
+                resultData.put("labelName", labelName);
+                resultData.put("address", "0x" + address.toString());
+                resultData.put("isPrimary", symbol.isPrimary());
+
+                return createJsonResult(resultData);
+            } catch (Exception e) {
+                return createErrorResult("Error creating label: " + e.getMessage());
+            } finally {
+                // End transaction
+                program.endTransaction(transactionID, success);
+            }
         });
     }
 

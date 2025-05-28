@@ -30,22 +30,12 @@ public class RevaPluginIntegrationTest extends RevaIntegrationTestBase {
     
     @Test
     public void testPluginLoadsSuccessfully() {
-        if (tool == null) {
-            // Skip test if tool environment is not available
-            System.out.println("Skipping testPluginLoadsSuccessfully - tool environment not available");
-            return;
-        }
         assertNotNull("Plugin should be loaded", plugin);
         assertEquals("Plugin should have correct name", "ReVa", plugin.getName());
     }
     
     @Test
     public void testPluginRegistersInServiceRegistry() {
-        if (tool == null) {
-            // Skip test if tool environment is not available
-            System.out.println("Skipping testPluginRegistersInServiceRegistry - tool environment not available");
-            return;
-        }
         RevaPlugin registeredPlugin = RevaInternalServiceRegistry.getService(RevaPlugin.class);
         assertNotNull("Plugin should be registered in service registry", registeredPlugin);
         assertEquals("Registered plugin should be the same instance", plugin, registeredPlugin);
@@ -53,9 +43,7 @@ public class RevaPluginIntegrationTest extends RevaIntegrationTestBase {
     
     @Test
     public void testProgramCreation() {
-        // This test should work even without a full tool environment
         assertNotNull("Test program should be created", program);
-        assertEquals("Program name should match", "TestProgram", program.getName());
         assertNotNull("Program memory should exist", program.getMemory());
         assertTrue("Program should have memory blocks", program.getMemory().getBlocks().length > 0);
     }

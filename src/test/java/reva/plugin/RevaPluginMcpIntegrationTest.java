@@ -35,35 +35,23 @@ public class RevaPluginMcpIntegrationTest extends RevaIntegrationTestBase {
     private ConfigManager configManager;
     
     @Before
-    @Override
-    public void setUp() throws Exception {
-        super.setUp();
-        
-        if (tool != null) {
-            // Get the config manager from the tool
-            configManager = new ConfigManager(tool);
-            configManager.setServerEnabled(true);
-            configManager.setServerPort(8085); // Use a different port to avoid conflicts
-        }
+    public void setUpMcpTest() throws Exception {
+        // Get the config manager from the tool
+        configManager = new ConfigManager(tool);
+        configManager.setServerEnabled(true);
+        configManager.setServerPort(8085); // Use a different port to avoid conflicts
     }
     
     @After
-    @Override  
-    public void tearDown() throws Exception {
+    public void tearDownMcpTest() throws Exception {
         // Disable server before cleanup
         if (configManager != null) {
             configManager.setServerEnabled(false);
         }
-        super.tearDown();
     }
     
     @Test
     public void testMcpServerStarts() throws Exception {
-        if (configManager == null) {
-            System.out.println("Skipping testMcpServerStarts - tool environment not available");
-            return;
-        }
-        
         // Give the server time to start
         Thread.sleep(2000);
         
@@ -90,11 +78,6 @@ public class RevaPluginMcpIntegrationTest extends RevaIntegrationTestBase {
     
     @Test
     public void testServerConfiguration() {
-        if (configManager == null) {
-            System.out.println("Skipping testServerConfiguration - tool environment not available");
-            return;
-        }
-        
         assertTrue("Server should be enabled", configManager.isServerEnabled());
         assertEquals("Server port should match", 8085, configManager.getServerPort());
     }

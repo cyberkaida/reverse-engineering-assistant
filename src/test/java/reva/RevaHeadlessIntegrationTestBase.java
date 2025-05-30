@@ -33,15 +33,15 @@ import org.junit.Before;
  * This is a simpler alternative that just tests with programs directly.
  */
 public abstract class RevaHeadlessIntegrationTestBase extends AbstractGhidraHeadlessIntegrationTest {
-    
+
     protected Program program;
-    
+
     @Before
     public void setUp() throws Exception {
         // Create a test program
         program = createDefaultProgram();
     }
-    
+
     @After
     public void tearDown() throws Exception {
         if (program != null && program instanceof ProgramDB) {
@@ -49,11 +49,11 @@ public abstract class RevaHeadlessIntegrationTestBase extends AbstractGhidraHead
         }
         program = null;
     }
-    
+
     /**
      * Creates a default program for testing.
      * Subclasses can override this to customize the test program.
-     * 
+     *
      * @return A new Program instance
      * @throws Exception if program creation fails
      */
@@ -61,18 +61,18 @@ public abstract class RevaHeadlessIntegrationTestBase extends AbstractGhidraHead
         Language language = getLanguageService().getLanguage(new LanguageID("x86:LE:32:default"));
         CompilerSpec compilerSpec = language.getDefaultCompilerSpec();
         ProgramDB testProgram = new ProgramDB("TestProgram", language, compilerSpec, this);
-        
+
         // Add a memory block
         Memory memory = testProgram.getMemory();
         int txId = testProgram.startTransaction("Create Memory");
         try {
-            memory.createInitializedBlock("test", 
-                testProgram.getAddressFactory().getDefaultAddressSpace().getAddress(0x01000000), 
+            memory.createInitializedBlock("test",
+                testProgram.getAddressFactory().getDefaultAddressSpace().getAddress(0x01000000),
                 0x1000, (byte) 0, TaskMonitor.DUMMY, false);
         } finally {
             testProgram.endTransaction(txId, true);
         }
-        
+
         return testProgram;
     }
 }

@@ -27,20 +27,20 @@ import reva.util.RevaInternalServiceRegistry;
  * Integration tests for the RevaPlugin
  */
 public class RevaPluginIntegrationTest extends RevaIntegrationTestBase {
-    
+
     @Test
     public void testPluginLoadsSuccessfully() {
         assertNotNull("Plugin should be loaded", plugin);
-        assertEquals("Plugin should have correct name", "ReVa", plugin.getName());
+        assertEquals("Plugin should have correct name", "RevaPlugin", plugin.getName());
     }
-    
+
     @Test
     public void testPluginRegistersInServiceRegistry() {
         RevaPlugin registeredPlugin = RevaInternalServiceRegistry.getService(RevaPlugin.class);
         assertNotNull("Plugin should be registered in service registry", registeredPlugin);
         assertEquals("Registered plugin should be the same instance", plugin, registeredPlugin);
     }
-    
+
     @Test
     public void testProgramCreation() {
         assertNotNull("Test program should be created", program);

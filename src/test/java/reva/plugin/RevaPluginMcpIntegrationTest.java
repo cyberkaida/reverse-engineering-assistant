@@ -24,6 +24,7 @@ import org.junit.Test;
 import org.junit.Before;
 import org.junit.After;
 
+import reva.RevaHeadlessIntegrationTestBase;
 import reva.RevaIntegrationTestBase;
 import reva.util.ConfigManager;
 
@@ -31,54 +32,63 @@ import reva.util.ConfigManager;
  * Integration tests for the MCP server functionality in RevaPlugin
  */
 public class RevaPluginMcpIntegrationTest extends RevaIntegrationTestBase {
-    
+
     private ConfigManager configManager;
-    
+
     @Before
     public void setUpMcpTest() throws Exception {
-        // Get the config manager from the tool
-        configManager = new ConfigManager(tool);
-        configManager.setServerEnabled(true);
-        configManager.setServerPort(8085); // Use a different port to avoid conflicts
+        // Get the config manager from the plugin's server manager
+        // The plugin already has its own ConfigManager instance
+        configManager = reva.util.RevaInternalServiceRegistry.getService(ConfigManager.class);
+        assertNotNull("ConfigManager should be registered", configManager);
     }
-    
+
     @After
     public void tearDownMcpTest() throws Exception {
-        // Disable server before cleanup
-        if (configManager != null) {
-            configManager.setServerEnabled(false);
-        }
+        // No need to disable server - let the plugin manage its own lifecycle
     }
-    
+
     @Test
     public void testMcpServerStarts() throws Exception {
-        // Give the server time to start
-        Thread.sleep(2000);
-        
-        // Check if we can connect to the server
+        // The server starts asynchronously, so we need to give it more time
+        // and retry a few times
         int port = configManager.getServerPort();
         URL url = new URL("http://localhost:" + port + "/");
-        
-        try {
-            HttpURLConnection connection = (HttpURLConnection) url.openConnection();
-            connection.setRequestMethod("GET");
-            connection.setConnectTimeout(5000);
-            connection.setReadTimeout(5000);
-            
-            int responseCode = connection.getResponseCode();
-            
-            // The MCP server should respond with something (even if it's an error for GET)
-            // We're just checking that it's listening
-            assertTrue("Server should be responding", responseCode > 0);
-            
-        } catch (Exception e) {
-            fail("Should be able to connect to MCP server: " + e.getMessage());
+
+        boolean connected = false;
+        Exception lastException = null;
+
+        // Try to connect up to 10 times with 500ms delay between attempts
+        for (int i = 0; i < 10; i++) {
+            try {
+                HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+                connection.setRequestMethod("GET");
+                connection.setConnectTimeout(1000);
+                connection.setReadTimeout(1000);
+
+                int responseCode = connection.getResponseCode();
+
+                // The MCP server should respond with something (even if it's an error for GET)
+                // We're just checking that it's listening
+                if (responseCode > 0) {
+                    connected = true;
+                    break;
+                }
+            } catch (Exception e) {
+                lastException = e;
+                Thread.sleep(500); // Wait before retrying
+            }
         }
+
+        assertTrue("Should be able to connect to MCP server" +
+                   (lastException != null ? ": " + lastException.getMessage() : ""),
+                   connected);
     }
-    
+
     @Test
     public void testServerConfiguration() {
         assertTrue("Server should be enabled", configManager.isServerEnabled());
-        assertEquals("Server port should match", 8085, configManager.getServerPort());
+        // Check that the server is using the default port (8080)
+        assertEquals("Server port should be default", 8080, configManager.getServerPort());
     }
 }

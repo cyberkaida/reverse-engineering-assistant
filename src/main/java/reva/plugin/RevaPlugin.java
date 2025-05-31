@@ -51,24 +51,30 @@ public class RevaPlugin extends ProgramPlugin {
      */
     public RevaPlugin(PluginTool tool) {
         super(tool);
+        Msg.info(this, "[DEADLOCK-DEBUG] RevaPlugin constructor - Thread: " + Thread.currentThread().getName());
         Msg.info(this, "ReVa initializing...");
 
         // Register this plugin in the service registry so components can access it
         RevaInternalServiceRegistry.registerService(RevaPlugin.class, this);
 
-        // Initialize the MCP server
-        serverManager = new McpServerManager(tool);
+        // Initialize the MCP server (singleton)
+        Msg.info(this, "[DEADLOCK-DEBUG] Getting McpServerManager instance...");
+        serverManager = McpServerManager.getInstance(tool);
+        Msg.info(this, "[DEADLOCK-DEBUG] McpServerManager instance obtained");
     }
 
     @Override
     public void init() {
+        Msg.info(this, "[DEADLOCK-DEBUG] RevaPlugin.init() called - Thread: " + Thread.currentThread().getName());
         super.init();
 
         // Create the UI provider
         provider = new RevaProvider(this, getName());
 
         // Start the server
+        Msg.info(this, "[DEADLOCK-DEBUG] About to call serverManager.startServer()");
         serverManager.startServer();
+        Msg.info(this, "[DEADLOCK-DEBUG] serverManager.startServer() returned");
 
         Msg.info(this, "ReVa initialization complete");
     }
@@ -91,9 +97,12 @@ public class RevaPlugin extends ProgramPlugin {
 
     @Override
     protected void cleanup() {
+        Msg.info(this, "[DEADLOCK-DEBUG] RevaPlugin.cleanup() called - Thread: " + Thread.currentThread().getName());
         // Clean up all registered services
         if (serverManager != null) {
+            Msg.info(this, "[DEADLOCK-DEBUG] Calling serverManager.shutdown()");
             serverManager.shutdown();
+            Msg.info(this, "[DEADLOCK-DEBUG] serverManager.shutdown() returned");
         }
 
         // Clean up the service registry

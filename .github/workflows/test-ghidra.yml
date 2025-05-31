@@ -15,6 +15,7 @@ jobs:
             "11.3.2",
             "11.3.1",
             "11.3",
+            "latest",
         ]
     name: Test on Ghidra ${{ matrix.ghidra-version }}
     runs-on: ${{ matrix.os }}
@@ -28,9 +29,44 @@ jobs:
         distribution: "microsoft"
 
     - name: Install Ghidra 🐉
-      uses: er28-0652/setup-ghidra@master
+      uses: antoniovazquezblanco/setup-ghidra@v2.0.6
       with:
         version: ${{ matrix.ghidra-version }}
+
+    - name: Set up virtual display for headed tests
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y xvfb xauth x11-utils
+        # Kill any existing Xvfb processes
+        sudo pkill -f Xvfb || true
+        # Start Xvfb with proper configuration for Ghidra
+        Xvfb :99 -screen 0 1920x1080x24 -ac +extension GLX +extension RANDR +extension RENDER -nolisten tcp -dpi 96 &
+        XVFB_PID=$!
+        export DISPLAY=:99
+        echo "Started Xvfb with PID: $XVFB_PID"
+
+        # Wait for Xvfb to be ready with better detection
+        echo "Waiting for Xvfb to start..."
+        for i in {1..30}; do
+          if xdpyinfo -display :99 >/dev/null 2>&1; then
+            echo "Xvfb is ready on display :99"
+            break
+          fi
+          if [ $i -eq 30 ]; then
+            echo "Xvfb failed to start within 30 seconds"
+            ps aux | grep -i xvfb
+            exit 1
+          fi
+          echo "Waiting for Xvfb... ($i/30)"
+          sleep 1
+        done
+
+        # Verify display is working and show info
+        echo "Display information:"
+        xdpyinfo -display :99 | head -10
+        echo "DISPLAY environment variable: $DISPLAY"
+      env:
+        DISPLAY: :99
 
     - name: Cache Gradle dependencies
       uses: actions/cache@v3
@@ -44,9 +80,17 @@ jobs:
 
     - name: Build Extension 🔨
       run: gradle buildExtension
+      env:
+        DISPLAY: :99
+        # Java system properties to help with headless GUI operations
+        JAVA_OPTS: "-Djava.awt.headless=false -Duser.timezone=UTC -Djava.awt.Window.locationByPlatform=false -Djava.awt.GraphicsEnvironment=sun.awt.X11GraphicsEnvironment"
 
     - name: Run Tests 🧪
       run: gradle test --info
+      env:
+        DISPLAY: :99
+        # Java system properties to help with headless GUI operations
+        JAVA_OPTS: "-Djava.awt.headless=false -Duser.timezone=UTC -Djava.awt.Window.locationByPlatform=false"
 
     - name: Upload test results
       uses: actions/upload-artifact@v4
@@ -80,9 +124,44 @@ jobs:
         distribution: "microsoft"
 
     - name: Install Ghidra 🐉
-      uses: er28-0652/setup-ghidra@master
+      uses: antoniovazquezblanco/setup-ghidra@v2.0.6
       with:
-        version: "11.3.2"
+        version: "latest"
+
+    - name: Set up virtual display for compilation
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y xvfb xauth x11-utils
+        # Kill any existing Xvfb processes
+        sudo pkill -f Xvfb || true
+        # Start Xvfb with proper configuration for Ghidra
+        Xvfb :99 -screen 0 1920x1080x24 -ac +extension GLX +extension RANDR +extension RENDER -nolisten tcp -dpi 96 &
+        XVFB_PID=$!
+        export DISPLAY=:99
+        echo "Started Xvfb with PID: $XVFB_PID"
+
+        # Wait for Xvfb to be ready with better detection
+        echo "Waiting for Xvfb to start..."
+        for i in {1..30}; do
+          if xdpyinfo -display :99 >/dev/null 2>&1; then
+            echo "Xvfb is ready on display :99"
+            break
+          fi
+          if [ $i -eq 30 ]; then
+            echo "Xvfb failed to start within 30 seconds"
+            ps aux | grep -i xvfb
+            exit 1
+          fi
+          echo "Waiting for Xvfb... ($i/30)"
+          sleep 1
+        done
+
+        # Verify display is working and show info
+        echo "Display information:"
+        xdpyinfo -display :99 | head -10
+        echo "DISPLAY environment variable: $DISPLAY"
+      env:
+        DISPLAY: :99
 
     - name: Cache Gradle dependencies
       uses: actions/cache@v3
@@ -96,6 +175,14 @@ jobs:
 
     - name: Check code compilation
       run: gradle compileJava
+      env:
+        DISPLAY: :99
+        # Java system properties to help with compilation
+        JAVA_OPTS: "-Djava.awt.headless=false -Duser.timezone=UTC"
 
     - name: Check test compilation
       run: gradle compileTestJava
+      env:
+        DISPLAY: :99
+        # Java system properties to help with compilation
+        JAVA_OPTS: "-Djava.awt.headless=false -Duser.timezone=UTC"

@@ -39,6 +39,9 @@ import ghidra.util.task.TaskMonitor;
 public class RevaProgramManager {
     // Cache of opened programs by path to avoid repeatedly opening the same program
     private static final Map<String, Program> programCache = new HashMap<>();
+    
+    // Registry of directly opened programs (mainly for test environments)
+    private static final Map<String, Program> registeredPrograms = new HashMap<>();
 
     /**
      * Get all currently open programs in any Ghidra tool
@@ -70,6 +73,32 @@ public class RevaProgramManager {
 
         return openPrograms;
     }
+    
+    /**
+     * Register a program directly with the manager. This is useful in test environments
+     * or when programs are opened outside of the normal Ghidra tool system.
+     * @param program The program to register
+     */
+    public static void registerProgram(Program program) {
+        if (program != null && !program.isClosed()) {
+            String programPath = program.getDomainFile().getPathname();
+            registeredPrograms.put(programPath, program);
+            Msg.debug(RevaProgramManager.class, "Registered program: " + programPath);
+        }
+    }
+    
+    /**
+     * Unregister a program from the manager.
+     * @param program The program to unregister
+     */
+    public static void unregisterProgram(Program program) {
+        if (program != null) {
+            String programPath = program.getDomainFile().getPathname();
+            registeredPrograms.remove(programPath);
+            programCache.remove(programPath);
+            Msg.debug(RevaProgramManager.class, "Unregistered program: " + programPath);
+        }
+    }
 
     /**
      * Get a program by its path
@@ -83,7 +112,19 @@ public class RevaProgramManager {
 
         Msg.debug(RevaProgramManager.class, "Looking for program with path: " + programPath);
 
-        // Check cache first
+        // Check registered programs first (for test environments)
+        if (registeredPrograms.containsKey(programPath)) {
+            Program registeredProgram = registeredPrograms.get(programPath);
+            if (!registeredProgram.isClosed()) {
+                Msg.debug(RevaProgramManager.class, "Found program in registry: " + programPath);
+                return registeredProgram;
+            } else {
+                // Remove invalid programs from registry
+                registeredPrograms.remove(programPath);
+            }
+        }
+
+        // Check cache next
         if (programCache.containsKey(programPath)) {
             Program cachedProgram = programCache.get(programPath);
             // Ensure the program is still valid
@@ -160,5 +201,8 @@ public class RevaProgramManager {
             }
         }
         programCache.clear();
+        
+        // Clear registered programs (but don't release them as we didn't open them)
+        registeredPrograms.clear();
     }
 }

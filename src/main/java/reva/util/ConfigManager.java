@@ -56,7 +56,7 @@ public class ConfigManager {
     /**
      * Load options from the tool options
      */
-    private void loadOptions() {
+    protected void loadOptions() {
         Options options = tool.getOptions(SERVER_OPTIONS);
 
         // Register options with default values if they don't exist

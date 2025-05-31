@@ -72,7 +72,7 @@ public abstract class AbstractToolProvider implements ToolProvider {
      * @return A JsonSchema object
      */
     protected JsonSchema createSchema(Map<String, Object> properties, List<String> required) {
-        return new JsonSchema("object", properties, required, false);
+        return new JsonSchema("object", properties, required, false, null, null);
     }
 
     /**

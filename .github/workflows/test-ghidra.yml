@@ -32,6 +32,17 @@ jobs:
       with:
         version: ${{ matrix.ghidra-version }}
 
+    - name: Set up virtual display for headed tests
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y xvfb
+        # Start Xvfb on display :99
+        Xvfb :99 -screen 0 1024x768x24 > /dev/null 2>&1 &
+        # Give it time to start
+        sleep 3
+      env:
+        DISPLAY: :99
+
     - name: Cache Gradle dependencies
       uses: actions/cache@v3
       with:
@@ -44,9 +55,13 @@ jobs:
 
     - name: Build Extension 🔨
       run: gradle buildExtension
+      env:
+        DISPLAY: :99
 
     - name: Run Tests 🧪
       run: gradle test --info
+      env:
+        DISPLAY: :99
 
     - name: Upload test results
       uses: actions/upload-artifact@v4
@@ -84,6 +99,17 @@ jobs:
       with:
         version: "11.3.2"
 
+    - name: Set up virtual display for compilation
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y xvfb
+        # Start Xvfb on display :99
+        Xvfb :99 -screen 0 1024x768x24 > /dev/null 2>&1 &
+        # Give it time to start
+        sleep 3
+      env:
+        DISPLAY: :99
+
     - name: Cache Gradle dependencies
       uses: actions/cache@v3
       with:
@@ -96,6 +122,10 @@ jobs:
 
     - name: Check code compilation
       run: gradle compileJava
+      env:
+        DISPLAY: :99
 
     - name: Check test compilation
       run: gradle compileTestJava
+      env:
+        DISPLAY: :99

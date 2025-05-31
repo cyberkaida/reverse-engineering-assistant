@@ -1,0 +1,1 @@
+- To run the tests, don't use a gradle wrapper. You can do commands like `gradle test --info`.

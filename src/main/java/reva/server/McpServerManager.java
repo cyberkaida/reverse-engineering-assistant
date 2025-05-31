@@ -76,15 +76,19 @@ public class McpServerManager {
      * @param pluginTool The plugin tool, used for configuration
      */
     public McpServerManager(PluginTool pluginTool) {
+        Msg.info(this, "[DEADLOCK-DEBUG] McpServerManager constructor starting - Thread: " + Thread.currentThread().getName());
         // Initialize configuration
         configManager = new ConfigManager(pluginTool);
         RevaInternalServiceRegistry.registerService(ConfigManager.class, configManager);
         // Initialize thread pool
         threadPool = GThreadPool.getPrivateThreadPool("ReVa");
         RevaInternalServiceRegistry.registerService(GThreadPool.class, threadPool);
+        Msg.info(this, "[DEADLOCK-DEBUG] Thread pool created with size: " + threadPool.getMaxThreadCount());
 
-        // Initialize MCP transport provider
-        transportProvider = new HttpServletSseServerTransportProvider(JSON, MCP_MSG_ENDPOINT, MCP_SSE_ENDPOINT);
+        // Initialize MCP transport provider with baseUrl
+        int serverPort = configManager.getServerPort();
+        String baseUrl = "http://localhost:" + serverPort;
+        transportProvider = new HttpServletSseServerTransportProvider(JSON, baseUrl, MCP_MSG_ENDPOINT, MCP_SSE_ENDPOINT);
 
         // Configure server capabilities
         McpSchema.ServerCapabilities serverCapabilities = McpSchema.ServerCapabilities.builder()
@@ -94,10 +98,12 @@ public class McpServerManager {
             .build();
 
         // Initialize MCP server
+        Msg.info(this, "[DEADLOCK-DEBUG] Creating MCP server...");
         server = McpServer.sync(transportProvider)
             .serverInfo(MCP_SERVER_NAME, MCP_SERVER_VERSION)
             .capabilities(serverCapabilities)
             .build();
+        Msg.info(this, "[DEADLOCK-DEBUG] MCP server created");
 
         // Make server available via service registry
         RevaInternalServiceRegistry.registerService(McpSyncServer.class, server);
@@ -150,6 +156,7 @@ public class McpServerManager {
      * Start the MCP server
      */
     public void startServer() {
+        Msg.info(this, "[DEADLOCK-DEBUG] startServer() called - Thread: " + Thread.currentThread().getName());
         // Check if server is enabled in config
         if (!configManager.isServerEnabled()) {
             Msg.info(this, "MCP server is disabled in configuration. Not starting server.");
@@ -157,6 +164,7 @@ public class McpServerManager {
         }
 
         int serverPort = configManager.getServerPort();
+        Msg.info(this, "[DEADLOCK-DEBUG] Starting server on port " + serverPort);
 
         ServletContextHandler servletContextHandler = new ServletContextHandler(ServletContextHandler.SESSIONS);
         servletContextHandler.setContextPath("/");
@@ -166,16 +174,23 @@ public class McpServerManager {
         httpServer = new Server(serverPort);
         httpServer.setHandler(servletContextHandler);
 
+        Msg.info(this, "[DEADLOCK-DEBUG] Submitting server start task to thread pool...");
         threadPool.submit(() -> {
             try {
+                Msg.info(this, "[DEADLOCK-DEBUG] Server start task running - Thread: " + Thread.currentThread().getName());
                 Msg.info(this, "MCP server starting on port " + serverPort);
                 httpServer.start();
+                Msg.info(this, "[DEADLOCK-DEBUG] httpServer.start() completed");
                 Msg.info(this, "MCP server started on port " + serverPort);
+                Msg.info(this, "[DEADLOCK-DEBUG] About to call httpServer.join() - THIS MAY BLOCK");
                 httpServer.join();
+                Msg.info(this, "[DEADLOCK-DEBUG] httpServer.join() returned - THIS SHOULD NOT HAPPEN");
             } catch (Exception e) {
+                Msg.error(this, "[DEADLOCK-DEBUG] Error in server thread", e);
                 Msg.error(this, "Error starting MCP server", e);
             }
         });
+        Msg.info(this, "[DEADLOCK-DEBUG] Server start task submitted");
     }
 
     /**
@@ -210,6 +225,7 @@ public class McpServerManager {
      * Shut down the MCP server and clean up resources
      */
     public void shutdown() {
+        Msg.info(this, "[DEADLOCK-DEBUG] shutdown() called - Thread: " + Thread.currentThread().getName());
         // Notify all providers to clean up
         for (ResourceProvider provider : resourceProviders) {
             provider.cleanup();

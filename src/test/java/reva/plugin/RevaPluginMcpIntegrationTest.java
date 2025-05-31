@@ -19,10 +19,14 @@ import static org.junit.Assert.*;
 
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.util.List;
 
 import org.junit.Test;
 import org.junit.Before;
 import org.junit.After;
+
+import io.modelcontextprotocol.spec.McpSchema.ListToolsResult;
+import io.modelcontextprotocol.spec.McpSchema.Tool;
 
 import reva.RevaHeadlessIntegrationTestBase;
 import reva.RevaIntegrationTestBase;
@@ -90,5 +94,61 @@ public class RevaPluginMcpIntegrationTest extends RevaIntegrationTestBase {
         assertTrue("Server should be enabled", configManager.isServerEnabled());
         // Check that the server is using the default port (8080)
         assertEquals("Server port should be default", 8080, configManager.getServerPort());
+    }
+
+    @Test
+    public void testToolsAreRegistered() throws Exception {
+        System.out.println("[DEADLOCK-DEBUG] testToolsAreRegistered() starting - Thread: " + Thread.currentThread().getName());
+        // Wait a bit for server to fully initialize
+        Thread.sleep(1000);
+
+        try {
+            System.out.println("[DEADLOCK-DEBUG] Calling getAvailableTools()...");
+            ListToolsResult toolsResult = getAvailableTools();
+            System.out.println("[DEADLOCK-DEBUG] getAvailableTools() returned");
+            assertNotNull("Tools result should not be null", toolsResult);
+
+            List<Tool> tools = toolsResult.tools();
+            assertNotNull("Tools list should not be null", tools);
+            assertFalse("Should have at least one tool registered", tools.isEmpty());
+
+            // Print tool names for debugging
+            System.out.println("Found " + tools.size() + " tools:");
+            for (Tool tool : tools) {
+                System.out.println("  - " + tool.name());
+            }
+
+            // Verify that tools have required properties
+            for (Tool tool : tools) {
+                assertNotNull("Tool name should not be null", tool.name());
+                assertFalse("Tool name should not be empty", tool.name().trim().isEmpty());
+                assertNotNull("Tool description should not be null", tool.description());
+            }
+        } catch (Exception e) {
+            System.err.println("Error connecting to MCP server: " + e.getMessage());
+            e.printStackTrace();
+            throw e;
+        }
+    }
+
+    @Test
+    public void testExpectedToolsArePresent() throws Exception {
+        ListToolsResult toolsResult = getAvailableTools();
+        List<Tool> tools = toolsResult.tools();
+
+        // Convert to a list of tool names for easier checking
+        List<String> toolNames = tools.stream()
+            .map(Tool::name)
+            .collect(java.util.stream.Collectors.toList());
+
+        // Check for some expected tool categories - these should be present based on the tool providers
+        assertTrue("Should have memory-related tools",
+            toolNames.stream().anyMatch(name -> name.contains("memory")));
+        assertTrue("Should have function-related tools",
+            toolNames.stream().anyMatch(name -> name.contains("function")));
+        assertTrue("Should have string-related tools",
+            toolNames.stream().anyMatch(name -> name.contains("string")));
+        assertTrue("Should have symbol-related tools",
+            toolNames.stream().anyMatch(name -> name.contains("symbol")));
     }
 }

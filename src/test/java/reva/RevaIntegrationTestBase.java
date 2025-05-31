@@ -22,7 +22,10 @@ import ghidra.program.model.listing.Program;
 import ghidra.framework.plugintool.PluginTool;
 
 import org.junit.Before;
+import org.apache.commons.compress.harmony.pack200.NewAttributeBands.Call;
 import org.junit.After;
+
+import static org.junit.Assert.fail;
 
 import java.time.Duration;
 import java.util.Map;
@@ -475,6 +478,13 @@ public abstract class RevaIntegrationTestBase extends AbstractGhidraHeadedIntegr
             if (!client.closeGracefully()) {
                 throw new RuntimeException("Failed to close MCP client gracefully");
             }
+        }
+    }
+
+    public void assertMcpResultNotError(CallToolResult result, String message) {
+        if (result.isError()) {
+            String fullMessage = message + ": " + result.toString();
+            fail(fullMessage);
         }
     }
 

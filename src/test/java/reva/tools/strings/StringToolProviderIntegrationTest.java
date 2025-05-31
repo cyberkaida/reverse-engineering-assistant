@@ -130,7 +130,7 @@ public class StringToolProviderIntegrationTest extends RevaIntegrationTestBase {
             CallToolResult result = client.callTool(new CallToolRequest("get-strings-count", arguments));
             
             assertNotNull("Result should not be null", result);
-            assertNull("Result should not have error", result.isError());
+            assertMcpResultNotError(result, "Result get-strings-count should not be an error");
             assertNotNull("Result content should not be null", result.content());
             assertFalse("Result content should not be empty", result.content().isEmpty());
             
@@ -159,7 +159,7 @@ public class StringToolProviderIntegrationTest extends RevaIntegrationTestBase {
             CallToolResult result = client.callTool(new CallToolRequest("get-strings", arguments));
             
             assertNotNull("Result should not be null", result);
-            assertNull("Result should not have error", result.isError());
+            assertMcpResultNotError(result, "Result should not have error");
             assertNotNull("Result content should not be null", result.content());
             assertFalse("Result content should not be empty", result.content().isEmpty());
             
@@ -283,8 +283,8 @@ public class StringToolProviderIntegrationTest extends RevaIntegrationTestBase {
             CallToolResult result = client.callTool(new CallToolRequest("get-strings", arguments));
             
             assertNotNull("Result should not be null", result);
-            assertNull("Result should not have error", result.isError());
-            
+            assertMcpResultNotError(result, "Result should not have error");
+
             TextContent content = (TextContent) result.content().get(0);
             JsonNode json = parseJsonContent(content.text());
             

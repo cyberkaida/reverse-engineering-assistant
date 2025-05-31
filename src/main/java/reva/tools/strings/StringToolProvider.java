@@ -187,11 +187,11 @@ public class StringToolProvider extends AbstractToolProvider {
             paginationInfo.put("nextStartIndex", startIndex + stringData.size());
             paginationInfo.put("totalProcessed", currentIndex.get());
 
-            // Default return all strings
+            // Return as a single JSON array with pagination info first, then string data
             List<Object> resultData = new ArrayList<>();
             resultData.add(paginationInfo);
             resultData.addAll(stringData);
-            return createMultiJsonResult(resultData);
+            return createJsonResult(resultData);
         });
     }
 

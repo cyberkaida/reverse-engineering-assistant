@@ -15,6 +15,7 @@ jobs:
             "11.3.2",
             "11.3.1",
             "11.3",
+            "latest",
         ]
     name: Test on Ghidra ${{ matrix.ghidra-version }}
     runs-on: ${{ matrix.os }}
@@ -35,11 +36,22 @@ jobs:
     - name: Set up virtual display for headed tests
       run: |
         sudo apt-get update
-        sudo apt-get install -y xvfb
-        # Start Xvfb on display :99
-        Xvfb :99 -screen 0 1024x768x24 > /dev/null 2>&1 &
-        # Give it time to start
-        sleep 3
+        sudo apt-get install -y xvfb xauth
+        # Start Xvfb with better configuration for Ghidra
+        # Use larger screen resolution and add extension support
+        Xvfb :99 -screen 0 1920x1080x24 -ac +extension GLX +render -noreset > /dev/null 2>&1 &
+        export DISPLAY=:99
+        # Wait for Xvfb to be ready
+        for i in {1..30}; do
+          if xdpyinfo -display :99 >/dev/null 2>&1; then
+            echo "Xvfb is ready"
+            break
+          fi
+          echo "Waiting for Xvfb to start... ($i/30)"
+          sleep 1
+        done
+        # Verify display is working
+        xdpyinfo -display :99
       env:
         DISPLAY: :99
 
@@ -57,11 +69,15 @@ jobs:
       run: gradle buildExtension
       env:
         DISPLAY: :99
+        # Java system properties to help with headless GUI operations
+        JAVA_OPTS: "-Djava.awt.headless=false -Duser.timezone=UTC"
 
     - name: Run Tests 🧪
       run: gradle test --info
       env:
         DISPLAY: :99
+        # Java system properties to help with headless GUI operations
+        JAVA_OPTS: "-Djava.awt.headless=false -Duser.timezone=UTC -Djava.awt.Window.locationByPlatform=false"
 
     - name: Upload test results
       uses: actions/upload-artifact@v4
@@ -97,16 +113,27 @@ jobs:
     - name: Install Ghidra 🐉
       uses: antoniovazquezblanco/setup-ghidra@v2.0.6
       with:
-        version: "11.3.2"
+        version: "latest"
 
     - name: Set up virtual display for compilation
       run: |
         sudo apt-get update
-        sudo apt-get install -y xvfb
-        # Start Xvfb on display :99
-        Xvfb :99 -screen 0 1024x768x24 > /dev/null 2>&1 &
-        # Give it time to start
-        sleep 3
+        sudo apt-get install -y xvfb xauth
+        # Start Xvfb with better configuration for Ghidra
+        # Use larger screen resolution and add extension support
+        Xvfb :99 -screen 0 1920x1080x24 -ac +extension GLX +render -noreset > /dev/null 2>&1 &
+        export DISPLAY=:99
+        # Wait for Xvfb to be ready
+        for i in {1..30}; do
+          if xdpyinfo -display :99 >/dev/null 2>&1; then
+            echo "Xvfb is ready"
+            break
+          fi
+          echo "Waiting for Xvfb to start... ($i/30)"
+          sleep 1
+        done
+        # Verify display is working
+        xdpyinfo -display :99
       env:
         DISPLAY: :99
 
@@ -124,8 +151,12 @@ jobs:
       run: gradle compileJava
       env:
         DISPLAY: :99
+        # Java system properties to help with compilation
+        JAVA_OPTS: "-Djava.awt.headless=false -Duser.timezone=UTC"
 
     - name: Check test compilation
       run: gradle compileTestJava
       env:
         DISPLAY: :99
+        # Java system properties to help with compilation
+        JAVA_OPTS: "-Djava.awt.headless=false -Duser.timezone=UTC"

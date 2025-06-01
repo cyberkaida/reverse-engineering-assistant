@@ -248,7 +248,7 @@ public class StringToolProvider extends AbstractToolProvider {
 
         properties.put("searchString", Map.of(
             "type", "string",
-            "description", "String to compare against for similarity"
+            "description", "String to compare against for similarity (scored by longest common substring length between the search string and each string in the program)"
         ));
 
         properties.put("startIndex", Map.of(
@@ -262,7 +262,7 @@ public class StringToolProvider extends AbstractToolProvider {
             "default", 100
         ));
 
-        List<String> required = List.of("programPath");
+        List<String> required = List.of("programPath","searchString");
 
         // Create the tool
         McpSchema.Tool tool = new McpSchema.Tool(
@@ -316,19 +316,19 @@ public class StringToolProvider extends AbstractToolProvider {
             });
             Collections.sort(similarStringData, new StringSimilarityComparator(searchString));
             
-            List<Map<String, Object>> pagenatedStringData = similarStringData.subList(startIndex, Math.min(startIndex + maxCount, similarStringData.size()));
+            List<Map<String, Object>> paginatedStringData = similarStringData.subList(startIndex, Math.min(startIndex + maxCount, similarStringData.size()));
             // Create pagination metadata
             Map<String, Object> paginationInfo = new HashMap<>();
             paginationInfo.put("startIndex", startIndex);
             paginationInfo.put("requestedCount", maxCount);
-            paginationInfo.put("actualCount", pagenatedStringData.size());
-            paginationInfo.put("nextStartIndex", startIndex + pagenatedStringData.size());
-            paginationInfo.put("totalProcessed", startIndex + pagenatedStringData.size());
+            paginationInfo.put("actualCount", paginatedStringData.size());
+            paginationInfo.put("nextStartIndex", startIndex + paginatedStringData.size());
+            paginationInfo.put("totalProcessed", startIndex + paginatedStringData.size());
 
             // Default return all strings
             List<Object> resultData = new ArrayList<>();
             resultData.add(paginationInfo);
-            resultData.addAll(pagenatedStringData);
+            resultData.addAll(paginatedStringData);
             return createMultiJsonResult(resultData);
         });
     }

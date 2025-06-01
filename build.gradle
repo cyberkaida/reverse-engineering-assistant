@@ -50,6 +50,23 @@ task distributeExtension {
 }
 //----------------------END "DO NOT MODIFY" SECTION-------------------------------
 
+sourceSets {
+	integrationTest {
+		java {
+			srcDirs = ['src/test.slow/java']
+		}
+		resources {
+			srcDirs = ['src/test.slow/resources']
+		}
+		compileClasspath += main.output + test.output
+		runtimeClasspath += main.output + test.output
+	}
+}
+
+configurations {
+	integrationTestImplementation.extendsFrom testImplementation
+}
+
 repositories {
 	// Declare dependency repositories here.  This is not needed if dependencies are manually
 	// dropped into the lib/ directory.
@@ -83,12 +100,30 @@ dependencies {
 	testImplementation "org.hamcrest:hamcrest:2.2"
 	testImplementation "junit:junit:4.13.2"
 
-	// Integration test dependencies (uncomment if you have integration tests)
-	// integrationTestImplementation "org.hamcrest:hamcrest:2.2"
+	// Integration test dependencies inherit from testImplementation via configurations block
 
 	// PCode test dependencies (uncomment if you have PCode tests)
 	// pcodeTestImplementation "junit:junit:4.13.2"
 }
+
+task integrationTest(type: Test) {
+	group 'verification'
+	description 'Runs integration tests (tests that require GUI/headed environment)'
+	testClassesDirs = sourceSets.integrationTest.output.classesDirs
+	classpath = sourceSets.integrationTest.runtimeClasspath
+	
+	// Fork every test to prevent configuration conflicts
+	forkEvery 1
+	
+	// These tests require a GUI environment
+	systemProperty 'java.awt.headless', 'false'
+	
+	// Exclude suite classes
+	exclude '**/*Suite*'
+}
+
+// Make check depend on integrationTest
+check.dependsOn integrationTest
 
 // Exclude additional files from the built extension
 // Ex: buildExtension.exclude '.idea/**'

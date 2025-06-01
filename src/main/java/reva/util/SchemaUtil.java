@@ -110,7 +110,7 @@ public class SchemaUtil {
      * @return JsonSchema object
      */
     public static McpSchema.JsonSchema createSchema(Map<String, Object> properties, List<String> required) {
-        return new McpSchema.JsonSchema("object", properties, required, false);
+        return new McpSchema.JsonSchema("object", properties, required, false, null, null);
     }
 
     /**

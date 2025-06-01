@@ -56,8 +56,8 @@ public class RevaPlugin extends ProgramPlugin {
         // Register this plugin in the service registry so components can access it
         RevaInternalServiceRegistry.registerService(RevaPlugin.class, this);
 
-        // Initialize the MCP server
-        serverManager = new McpServerManager(tool);
+        // Initialize the MCP server (singleton)
+        serverManager = McpServerManager.getInstance(tool);
     }
 
     @Override

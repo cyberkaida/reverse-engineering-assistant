@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [ main, develop ]
 
+permissions:
+  contents: read
+  actions: read
+  checks: write
+
 jobs:
   test:
     strategy:
@@ -15,6 +20,7 @@ jobs:
             "11.3.2",
             "11.3.1",
             "11.3",
+            "latest",
         ]
     name: Test on Ghidra ${{ matrix.ghidra-version }}
     runs-on: ${{ matrix.os }}
@@ -28,9 +34,15 @@ jobs:
         distribution: "microsoft"
 
     - name: Install Ghidra 🐉
-      uses: er28-0652/setup-ghidra@master
+      uses: antoniovazquezblanco/setup-ghidra@v2.0.6
       with:
         version: ${{ matrix.ghidra-version }}
+
+    - name: Setup Xvfb for headless testing
+      run: |
+        sudo apt-get update && sudo apt-get install -y xvfb
+        Xvfb :99 -nolisten tcp &
+        echo "DISPLAY=:99" >> $GITHUB_ENV
 
     - name: Cache Gradle dependencies
       uses: actions/cache@v3
@@ -45,8 +57,15 @@ jobs:
     - name: Build Extension 🔨
       run: gradle buildExtension
 
-    - name: Run Tests 🧪
+    - name: Run Unit Tests 🧪
       run: gradle test --info
+      env:
+        _JAVA_OPTIONS: "-Djava.awt.headless=true"
+    
+    - name: Run Integration Tests 🖥️
+      run: gradle integrationTest --info
+      env:
+        DISPLAY: :99
 
     - name: Upload test results
       uses: actions/upload-artifact@v4
@@ -56,6 +75,8 @@ jobs:
         path: |
           build/reports/tests/
           build/test-results/
+          build/reports/integrationTest/
+          build/test-results/integrationTest/
         if-no-files-found: ignore
 
     - name: Publish Test Results 📊
@@ -63,7 +84,7 @@ jobs:
       if: always()
       with:
         name: Test Results (Ghidra ${{ matrix.ghidra-version }})
-        path: 'build/test-results/test/*.xml'
+        path: 'build/test-results/*/TEST-*.xml'
         reporter: java-junit
         fail-on-error: false
 
@@ -80,9 +101,15 @@ jobs:
         distribution: "microsoft"
 
     - name: Install Ghidra 🐉
-      uses: er28-0652/setup-ghidra@master
+      uses: antoniovazquezblanco/setup-ghidra@v2.0.6
       with:
-        version: "11.3.2"
+        version: "latest"
+
+    - name: Setup Xvfb for headless testing
+      run: |
+        sudo apt-get update && sudo apt-get install -y xvfb
+        Xvfb :99 -nolisten tcp &
+        echo "DISPLAY=:99" >> $GITHUB_ENV
 
     - name: Cache Gradle dependencies
       uses: actions/cache@v3

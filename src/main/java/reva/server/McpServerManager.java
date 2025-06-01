@@ -54,6 +54,7 @@ import reva.util.RevaInternalServiceRegistry;
  * Manages the Model Context Protocol server.
  * This class is responsible for initializing, configuring, and starting the MCP server,
  * as well as registering all resources and tools.
+ * Implements singleton pattern to ensure only one server instance exists.
  */
 public class McpServerManager {
     private static final ObjectMapper JSON = new ObjectMapper();
@@ -61,6 +62,9 @@ public class McpServerManager {
     private static final String MCP_SSE_ENDPOINT = "/mcp/sse";
     private static final String MCP_SERVER_NAME = "ReVa";
     private static final String MCP_SERVER_VERSION = "1.0.0";
+
+    private static volatile McpServerManager instance;
+    private static final Object instanceLock = new Object();
 
     private final McpSyncServer server;
     private final HttpServletSseServerTransportProvider transportProvider;
@@ -70,12 +74,29 @@ public class McpServerManager {
 
     private final List<ResourceProvider> resourceProviders = new ArrayList<>();
     private final List<ToolProvider> toolProviders = new ArrayList<>();
+    private volatile boolean serverReady = false;
 
     /**
-     * Constructor. Initializes the MCP server with all capabilities.
+     * Get the singleton instance of McpServerManager.
+     * @param pluginTool The plugin tool, used for configuration (only used on first call)
+     * @return The singleton instance
+     */
+    public static McpServerManager getInstance(PluginTool pluginTool) {
+        if (instance == null) {
+            synchronized (instanceLock) {
+                if (instance == null) {
+                    instance = new McpServerManager(pluginTool);
+                }
+            }
+        }
+        return instance;
+    }
+
+    /**
+     * Private constructor. Initializes the MCP server with all capabilities.
      * @param pluginTool The plugin tool, used for configuration
      */
-    public McpServerManager(PluginTool pluginTool) {
+    private McpServerManager(PluginTool pluginTool) {
         // Initialize configuration
         configManager = new ConfigManager(pluginTool);
         RevaInternalServiceRegistry.registerService(ConfigManager.class, configManager);
@@ -83,9 +104,15 @@ public class McpServerManager {
         threadPool = GThreadPool.getPrivateThreadPool("ReVa");
         RevaInternalServiceRegistry.registerService(GThreadPool.class, threadPool);
 
-        // Initialize MCP transport provider
-        transportProvider = new HttpServletSseServerTransportProvider(JSON, MCP_MSG_ENDPOINT, MCP_SSE_ENDPOINT);
-
+        // Initialize MCP transport provider with baseUrl
+        int serverPort = configManager.getServerPort();
+        String baseUrl = "http://localhost:" + serverPort;
+        transportProvider = HttpServletSseServerTransportProvider.builder()
+            .baseUrl(baseUrl)
+            .objectMapper(JSON)
+            .messageEndpoint(MCP_MSG_ENDPOINT)
+            .sseEndpoint(MCP_SSE_ENDPOINT)
+            .build();
         // Configure server capabilities
         McpSchema.ServerCapabilities serverCapabilities = McpSchema.ServerCapabilities.builder()
             .prompts(true)
@@ -99,8 +126,9 @@ public class McpServerManager {
             .capabilities(serverCapabilities)
             .build();
 
-        // Make server available via service registry
+        // Make server and server manager available via service registry
         RevaInternalServiceRegistry.registerService(McpSyncServer.class, server);
+        RevaInternalServiceRegistry.registerService(McpServerManager.class, this);
 
         // Create and register resource providers
         initializeResourceProviders();
@@ -156,7 +184,15 @@ public class McpServerManager {
             return;
         }
 
+        // Check if server is already running
+        if (httpServer != null && httpServer.isRunning()) {
+            Msg.warn(this, "MCP server is already running.");
+            return;
+        }
+
         int serverPort = configManager.getServerPort();
+        String baseUrl = "http://localhost:" + serverPort;
+        Msg.info(this, "Starting MCP server on port " + serverPort);
 
         ServletContextHandler servletContextHandler = new ServletContextHandler(ServletContextHandler.SESSIONS);
         servletContextHandler.setContextPath("/");
@@ -168,14 +204,41 @@ public class McpServerManager {
 
         threadPool.submit(() -> {
             try {
-                Msg.info(this, "MCP server starting on port " + serverPort);
                 httpServer.start();
-                Msg.info(this, "MCP server started on port " + serverPort);
+                Msg.info(this, "MCP server started successfully");
+
+                // Mark server as ready
+                serverReady = true;
+
+
+                // join() blocks until the server stops, which is expected behavior
                 httpServer.join();
             } catch (Exception e) {
                 Msg.error(this, "Error starting MCP server", e);
             }
         });
+
+        // Wait for server to be ready
+        int maxWaitTime = 10000; // 10 seconds
+        int waitInterval = 100; // 100ms
+        int totalWait = 0;
+
+        while (!serverReady && totalWait < maxWaitTime) {
+            try {
+                Thread.sleep(waitInterval);
+                totalWait += waitInterval;
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                Msg.warn(this, "Interrupted while waiting for server startup");
+                return;
+            }
+        }
+
+        if (serverReady) {
+        } else {
+            Msg.error(this, "Server failed to start within timeout");
+        }
+
     }
 
     /**
@@ -204,6 +267,14 @@ public class McpServerManager {
         for (ToolProvider provider : toolProviders) {
             provider.programClosed(program);
         }
+    }
+
+    /**
+     * Check if the server is ready to accept connections
+     * @return true if the server is ready
+     */
+    public boolean isServerReady() {
+        return httpServer.getState() == org.eclipse.jetty.server.Server.STARTED;
     }
 
     /**
@@ -237,5 +308,14 @@ public class McpServerManager {
         if (threadPool != null) {
             threadPool.shutdownNow();
         }
+
+        serverReady = false;
+        
+        // Reset singleton instance on shutdown
+        synchronized (instanceLock) {
+            instance = null;
+        }
+        
+        Msg.info(this, "MCP server shutdown complete");
     }
 }

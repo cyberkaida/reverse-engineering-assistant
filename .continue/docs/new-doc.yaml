@@ -1,0 +1,6 @@
+name: Model Context Protocol Java
+version: 0.0.1
+schema: v1
+docs:
+  - name: MCP
+    startUrl: https://modelcontextprotocol.io/sdk/java/mcp-overview

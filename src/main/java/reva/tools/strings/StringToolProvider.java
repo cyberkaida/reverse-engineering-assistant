@@ -234,12 +234,6 @@ public class StringToolProvider extends AbstractToolProvider {
         });
     }
 
-
-
-    private String lastProgramPath = null;
-    private String lastSearchString = null;
-    private List<Map<String, Object>> similarStringData = null;
-
     /**
      * Register a tool to get strings from a program with pagination, sorted by similarity.
      * @throws McpError if there's an error registering the tool
@@ -307,26 +301,21 @@ public class StringToolProvider extends AbstractToolProvider {
             DataIterator dataIterator = program.getListing().getDefinedData(true);
             AtomicInteger currentIndex = new AtomicInteger(0);
 
-            if(lastProgramPath == null || !lastProgramPath.equals(programPath) ||
-               lastSearchString == null || !lastSearchString.equals(searchString) ||
-               similarStringData == null) {
-                // Reset the search context if the program or search string has changed
-                lastProgramPath = programPath;
-                lastSearchString = searchString;
-                similarStringData = new ArrayList<>();
-                dataIterator.forEach(data -> {
-                    if (data.getValue() instanceof String) {
-                        int index = currentIndex.getAndIncrement();
+            List<Map<String, Object>> similarStringData = new ArrayList<>();
+            // Iterate through the data and collect strings
+            dataIterator.forEach(data -> {
+                if (data.getValue() instanceof String) {
+                    int index = currentIndex.getAndIncrement();
 
-                        // Collect string data
-                        Map<String, Object> stringInfo = getStringInfo(data);
-                        if (stringInfo != null) {
-                            similarStringData.add(stringInfo);
-                        }
+                    // Collect string data
+                    Map<String, Object> stringInfo = getStringInfo(data);
+                    if (stringInfo != null) {
+                        similarStringData.add(stringInfo);
                     }
-                });
-                Collections.sort(similarStringData, new StringSimilarityComparator(searchString));
-            }
+                }
+            });
+            Collections.sort(similarStringData, new StringSimilarityComparator(searchString));
+            
             List<Map<String, Object>> pagenatedStringData = similarStringData.subList(startIndex, Math.min(startIndex + maxCount, similarStringData.size()));
             // Create pagination metadata
             Map<String, Object> paginationInfo = new HashMap<>();

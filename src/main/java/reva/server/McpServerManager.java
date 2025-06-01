@@ -97,14 +97,12 @@ public class McpServerManager {
      * @param pluginTool The plugin tool, used for configuration
      */
     private McpServerManager(PluginTool pluginTool) {
-        Msg.info(this, "[DEADLOCK-DEBUG] McpServerManager constructor starting - Thread: " + Thread.currentThread().getName());
         // Initialize configuration
         configManager = new ConfigManager(pluginTool);
         RevaInternalServiceRegistry.registerService(ConfigManager.class, configManager);
         // Initialize thread pool
         threadPool = GThreadPool.getPrivateThreadPool("ReVa");
         RevaInternalServiceRegistry.registerService(GThreadPool.class, threadPool);
-        Msg.info(this, "[DEADLOCK-DEBUG] Thread pool created with size: " + threadPool.getMaxThreadCount());
 
         // Initialize MCP transport provider with baseUrl
         int serverPort = configManager.getServerPort();
@@ -123,12 +121,10 @@ public class McpServerManager {
             .build();
 
         // Initialize MCP server
-        Msg.info(this, "[DEADLOCK-DEBUG] Creating MCP server...");
         server = McpServer.sync(transportProvider)
             .serverInfo(MCP_SERVER_NAME, MCP_SERVER_VERSION)
             .capabilities(serverCapabilities)
             .build();
-        Msg.info(this, "[DEADLOCK-DEBUG] MCP server created");
 
         // Make server and server manager available via service registry
         RevaInternalServiceRegistry.registerService(McpSyncServer.class, server);
@@ -182,80 +178,47 @@ public class McpServerManager {
      * Start the MCP server
      */
     public void startServer() {
-        Msg.info(this, "[MCP-DEBUG] startServer() called - Thread: " + Thread.currentThread().getName());
         // Check if server is enabled in config
         if (!configManager.isServerEnabled()) {
-            Msg.info(this, "[MCP-DEBUG] MCP server is disabled in configuration. Not starting server.");
+            Msg.info(this, "MCP server is disabled in configuration. Not starting server.");
             return;
         }
 
         // Check if server is already running
         if (httpServer != null && httpServer.isRunning()) {
-            Msg.warn(this, "[MCP-DEBUG] MCP server is already running. Not starting again.");
+            Msg.warn(this, "MCP server is already running.");
             return;
         }
 
         int serverPort = configManager.getServerPort();
         String baseUrl = "http://localhost:" + serverPort;
-        Msg.info(this, "[MCP-DEBUG] Starting server on port " + serverPort + ", base URL: " + baseUrl);
-        Msg.info(this, "[MCP-DEBUG] Message endpoint: " + MCP_MSG_ENDPOINT);
-        Msg.info(this, "[MCP-DEBUG] SSE endpoint: " + MCP_SSE_ENDPOINT);
-        Msg.info(this, "[MCP-DEBUG] Transport provider base URL: " + transportProvider.toString());
+        Msg.info(this, "Starting MCP server on port " + serverPort);
 
         ServletContextHandler servletContextHandler = new ServletContextHandler(ServletContextHandler.SESSIONS);
         servletContextHandler.setContextPath("/");
         ServletHolder servletHolder = new ServletHolder(transportProvider);
         servletContextHandler.addServlet(servletHolder, "/*");
-        Msg.info(this, "[MCP-DEBUG] Servlet context handler configured with path: /");
-        Msg.info(this, "[MCP-DEBUG] Servlet holder configured for all paths: /*");
 
         httpServer = new Server(serverPort);
         httpServer.setHandler(servletContextHandler);
-        Msg.info(this, "[MCP-DEBUG] HTTP server created on port " + serverPort);
-        Msg.info(this, "[MCP-DEBUG] Server handler: " + servletContextHandler.getClass().getName());
-        Msg.info(this, "[MCP-DEBUG] Servlet holder path: /*");
 
-        Msg.info(this, "[MCP-DEBUG] Submitting server start task to thread pool...");
         threadPool.submit(() -> {
             try {
-                Msg.info(this, "[MCP-DEBUG] Server start task running - Thread: " + Thread.currentThread().getName());
-                Msg.info(this, "[MCP-DEBUG] About to call httpServer.start()...");
                 httpServer.start();
-                Msg.info(this, "[MCP-DEBUG] httpServer.start() completed successfully");
-                Msg.info(this, "[MCP-DEBUG] Server state: " + httpServer.getState());
-                Msg.info(this, "[MCP-DEBUG] Server is running: " + httpServer.isRunning());
-                Msg.info(this, "[MCP-DEBUG] Server is started: " + httpServer.isStarted());
+                Msg.info(this, "MCP server started successfully");
 
                 // Mark server as ready
                 serverReady = true;
-                Msg.info(this, "[MCP-DEBUG] Server marked as ready for connections");
 
-                // Log connector details
-                for (org.eclipse.jetty.server.Connector connector : httpServer.getConnectors()) {
-                    if (connector instanceof org.eclipse.jetty.server.ServerConnector) {
-                        org.eclipse.jetty.server.ServerConnector serverConnector = (org.eclipse.jetty.server.ServerConnector) connector;
-                        Msg.info(this, "[MCP-DEBUG] Server connector: " + serverConnector.getHost() + ":" + serverConnector.getLocalPort());
-                        Msg.info(this, "[MCP-DEBUG] Connector state: " + serverConnector.getState());
-                    }
-                }
 
-                Msg.info(this, "[MCP-DEBUG] About to call httpServer.join() - THIS WILL BLOCK INDEFINITELY");
-                // Note: join() blocks until the server stops, which is expected behavior
-                // The server should remain running to handle requests
+                // join() blocks until the server stops, which is expected behavior
                 httpServer.join();
-                Msg.info(this, "[MCP-DEBUG] httpServer.join() returned - Server has stopped");
             } catch (Exception e) {
-                Msg.error(this, "[MCP-DEBUG] Error in server thread", e);
-                Msg.error(this, "[MCP-DEBUG] Exception details: " + e.getClass().getName() + ": " + e.getMessage());
-                if (e.getCause() != null) {
-                    Msg.error(this, "[MCP-DEBUG] Caused by: " + e.getCause().getClass().getName() + ": " + e.getCause().getMessage());
-                }
+                Msg.error(this, "Error starting MCP server", e);
             }
         });
-        Msg.info(this, "[MCP-DEBUG] Server start task submitted to thread pool");
 
         // Wait for server to be ready
-        Msg.info(this, "[MCP-DEBUG] Waiting for server to be ready...");
         int maxWaitTime = 10000; // 10 seconds
         int waitInterval = 100; // 100ms
         int totalWait = 0;
@@ -266,18 +229,16 @@ public class McpServerManager {
                 totalWait += waitInterval;
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
-                Msg.warn(this, "[MCP-DEBUG] Interrupted while waiting for server startup");
+                Msg.warn(this, "Interrupted while waiting for server startup");
                 return;
             }
         }
 
         if (serverReady) {
-            Msg.info(this, "[MCP-DEBUG] Server is ready after " + totalWait + "ms");
         } else {
-            Msg.error(this, "[MCP-DEBUG] Server failed to become ready within " + maxWaitTime + "ms");
+            Msg.error(this, "Server failed to start within timeout");
         }
 
-        Msg.info(this, "[MCP-DEBUG] startServer() method returning");
     }
 
     /**
@@ -320,7 +281,6 @@ public class McpServerManager {
      * Shut down the MCP server and clean up resources
      */
     public void shutdown() {
-        Msg.info(this, "[DEADLOCK-DEBUG] shutdown() called - Thread: " + Thread.currentThread().getName());
         // Notify all providers to clean up
         for (ResourceProvider provider : resourceProviders) {
             provider.cleanup();
@@ -356,6 +316,6 @@ public class McpServerManager {
             instance = null;
         }
         
-        Msg.info(this, "[DEADLOCK-DEBUG] McpServerManager shutdown complete - Thread: " + Thread.currentThread().getName());
+        Msg.info(this, "MCP server shutdown complete");
     }
 }

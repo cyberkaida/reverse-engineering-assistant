@@ -98,25 +98,19 @@ public class RevaPluginMcpIntegrationTest extends RevaIntegrationTestBase {
 
     @Test
     public void testToolsAreRegistered() throws Exception {
-        System.out.println("[DEADLOCK-DEBUG] testToolsAreRegistered() starting - Thread: " + Thread.currentThread().getName());
         // Wait a bit for server to fully initialize
         Thread.sleep(1000);
 
         try {
-            System.out.println("[DEADLOCK-DEBUG] Calling getAvailableTools()...");
             ListToolsResult toolsResult = getAvailableTools();
-            System.out.println("[DEADLOCK-DEBUG] getAvailableTools() returned");
             assertNotNull("Tools result should not be null", toolsResult);
 
             List<Tool> tools = toolsResult.tools();
             assertNotNull("Tools list should not be null", tools);
             assertFalse("Should have at least one tool registered", tools.isEmpty());
 
-            // Print tool names for debugging
-            System.out.println("Found " + tools.size() + " tools:");
-            for (Tool tool : tools) {
-                System.out.println("  - " + tool.name());
-            }
+            // Verify we have tools registered
+            assertTrue("Should have multiple tools registered", tools.size() > 5);
 
             // Verify that tools have required properties
             for (Tool tool : tools) {
@@ -125,8 +119,7 @@ public class RevaPluginMcpIntegrationTest extends RevaIntegrationTestBase {
                 assertNotNull("Tool description should not be null", tool.description());
             }
         } catch (Exception e) {
-            System.err.println("Error connecting to MCP server: " + e.getMessage());
-            e.printStackTrace();
+            fail("Failed to connect to MCP server: " + e.getMessage());
             throw e;
         }
     }

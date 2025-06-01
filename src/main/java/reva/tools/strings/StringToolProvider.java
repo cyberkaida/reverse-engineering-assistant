@@ -19,6 +19,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Collections;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import ghidra.program.model.listing.Data;
@@ -30,6 +31,43 @@ import io.modelcontextprotocol.server.McpSyncServer;
 import io.modelcontextprotocol.spec.McpSchema;
 import reva.plugin.RevaProgramManager;
 import reva.tools.AbstractToolProvider;
+
+class StringSimilarityComparator implements java.util.Comparator<Map<String, Object>> {
+    private final String searchString;
+
+    public StringSimilarityComparator(String searchString) {
+        this.searchString = searchString.toLowerCase();
+    }
+
+    @Override
+    public int compare(Map<String, Object> o1, Map<String, Object> o2) {
+        String str1 = (String) o1.get("content");
+        String str2 = (String) o2.get("content");
+        return findLongestCommonSubstringLength(str2.toLowerCase(), searchString) -
+               findLongestCommonSubstringLength(str1.toLowerCase(), searchString);
+    }
+
+    private int findLongestCommonSubstringLength(String str1, String str2) {
+        int m = str1.length();
+        int n = str2.length();
+        int[][] dp = new int[m + 1][n + 1];
+        int maxLength = 0;
+
+        for (int i = 1; i <= m; i++) {
+            for (int j = 1; j <= n; j++) {
+                if (str1.charAt(i - 1) == str2.charAt(j - 1)) {
+                    dp[i][j] = 1 + dp[i - 1][j - 1];
+                    if (dp[i][j] > maxLength) {
+                        maxLength = dp[i][j];
+                    }
+                } else {
+                    dp[i][j] = 0; // Reset if characters don't match
+                }
+            }
+        }
+        return maxLength;   
+    }
+}
 
 /**
  * Tool provider for string-related operations.
@@ -47,6 +85,7 @@ public class StringToolProvider extends AbstractToolProvider {
     public void registerTools() throws McpError {
         registerStringsCountTool();
         registerStringsTool();
+        registerStringsBySimilarityTool();
     }
 
     /**
@@ -119,7 +158,7 @@ public class StringToolProvider extends AbstractToolProvider {
         ));
         properties.put("maxCount", Map.of(
             "type", "integer",
-            "description", "Maximum number of strings to return (recommend using get-strings-count first and using chunks of 100)",
+            "description", "Maximum number of strings to return (recommended to use get-strings-count first and request chunks of 100 at most)",
             "default", 100
         ));
 
@@ -192,6 +231,105 @@ public class StringToolProvider extends AbstractToolProvider {
             resultData.add(paginationInfo);
             resultData.addAll(stringData);
             return createJsonResult(resultData);
+        });
+    }
+
+    /**
+     * Register a tool to get strings from a program with pagination, sorted by similarity.
+     * @throws McpError if there's an error registering the tool
+     */
+    private void registerStringsBySimilarityTool() throws McpError {
+        // Define schema for the tool
+        Map<String, Object> properties = new HashMap<>();
+        properties.put("programPath", Map.of(
+            "type", "string",
+            "description", "Path in the Ghidra Project to the program to get strings from"
+        ));
+
+        properties.put("searchString", Map.of(
+            "type", "string",
+            "description", "String to compare against for similarity (scored by longest common substring length between the search string and each string in the program)"
+        ));
+
+        properties.put("startIndex", Map.of(
+            "type", "integer",
+            "description", "Starting index for pagination (0-based)",
+            "default", 0
+        ));
+        properties.put("maxCount", Map.of(
+            "type", "integer",
+            "description", "Maximum number of strings to return (recommended to use get-strings-count first and request chunks of 100 at most)",
+            "default", 100
+        ));
+
+        List<String> required = List.of("programPath","searchString");
+
+        // Create the tool
+        McpSchema.Tool tool = new McpSchema.Tool(
+            "get-strings-by-similarity",
+            "Get strings from the selected program with pagination, sorted by similarity to a given string (use get-strings-count first to determine total count)",
+            createSchema(properties, required)
+        );
+
+        // Register the tool with a handler
+        registerTool(tool, (exchange, args) -> {
+            // Get the program path from the request
+            String programPath = (String) args.get("programPath");
+            if (programPath == null) {
+                return createErrorResult("No program path provided");
+            }
+
+            // Get the search string from the request
+            String searchString = (String) args.get("searchString");
+            if (searchString == null || searchString.isEmpty()) {
+                return createErrorResult("No search string provided");
+            }
+
+            // Get pagination parameters
+            int startIndex = args.containsKey("startIndex") ?
+                ((Number) args.get("startIndex")).intValue() : 0;
+            int maxCount = args.containsKey("maxCount") ?
+                ((Number) args.get("maxCount")).intValue() : 100;
+
+            // Get the program from the path
+            Program program = RevaProgramManager.getProgramByPath(programPath);
+            if (program == null) {
+                return createErrorResult("Failed to find Program: " + programPath);
+            }
+
+            // Get strings with pagination
+            DataIterator dataIterator = program.getListing().getDefinedData(true);
+            AtomicInteger currentIndex = new AtomicInteger(0);
+
+            List<Map<String, Object>> similarStringData = new ArrayList<>();
+            // Iterate through the data and collect strings
+            dataIterator.forEach(data -> {
+                if (data.getValue() instanceof String) {
+                    int index = currentIndex.getAndIncrement();
+
+                    // Collect string data
+                    Map<String, Object> stringInfo = getStringInfo(data);
+                    if (stringInfo != null) {
+                        similarStringData.add(stringInfo);
+                    }
+                }
+            });
+            Collections.sort(similarStringData, new StringSimilarityComparator(searchString));
+            
+            List<Map<String, Object>> paginatedStringData = similarStringData.subList(startIndex, Math.min(startIndex + maxCount, similarStringData.size()));
+            // Create pagination metadata
+            Map<String, Object> paginationInfo = new HashMap<>();
+            paginationInfo.put("startIndex", startIndex);
+            paginationInfo.put("requestedCount", maxCount);
+            paginationInfo.put("actualCount", paginatedStringData.size());
+            paginationInfo.put("nextStartIndex", startIndex + paginatedStringData.size());
+            paginationInfo.put("totalProcessed", startIndex + paginatedStringData.size());
+
+            // Default return all strings
+            List<Object> resultData = new ArrayList<>();
+            resultData.add(paginationInfo);
+            resultData.addAll(paginatedStringData);
+            return createMultiJsonResult(resultData);
         });
     }
 

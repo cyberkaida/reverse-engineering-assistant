@@ -36,6 +36,7 @@ import ghidra.program.model.symbol.SourceType;
 import ghidra.program.model.pcode.HighFunction;
 import ghidra.program.model.pcode.HighFunctionDBUtil;
 import ghidra.program.model.pcode.HighSymbol;
+import ghidra.program.model.data.DataType;
 import ghidra.util.task.TaskMonitor;
 import ghidra.util.exception.DuplicateNameException;
 import ghidra.util.exception.InvalidInputException;
@@ -44,6 +45,7 @@ import io.modelcontextprotocol.server.McpSyncServer;
 import io.modelcontextprotocol.spec.McpSchema;
 import reva.plugin.RevaProgramManager;
 import reva.tools.AbstractToolProvider;
+import reva.util.DataTypeParserUtil;
 
 /**
  * Tool provider for function decompilation operations.
@@ -61,6 +63,7 @@ public class DecompilerToolProvider extends AbstractToolProvider {
     public void registerTools() throws McpError {
         registerGetDecompiledFunctionTool();
         registerRenameVariablesTool();
+        registerChangeVariableDataTypesTool();
     }
 
     /**
@@ -417,6 +420,247 @@ public class DecompilerToolProvider extends AbstractToolProvider {
                     resultData.put("decompilation", decompCode);
                 } else {
                     resultData.put("decompilationError", "Decompilation failed after renaming: " +
+                        newResults.getErrorMessage());
+                }
+            }
+            catch (Exception e) {
+                logError("Error during final decompilation", e);
+                resultData.put("decompilationError", "Exception during decompilation: " + e.getMessage());
+            }
+            finally {
+                newDecompiler.dispose();
+            }
+
+            return createJsonResult(resultData);
+        });
+    }
+
+    /**
+     * Register a tool to change variable data types in a decompiled function
+     * @throws McpError if there's an error registering the tool
+     */
+    private void registerChangeVariableDataTypesTool() throws McpError {
+        // Define schema for the tool
+        Map<String, Object> properties = new HashMap<>();
+        properties.put("programPath", Map.of(
+            "type", "string",
+            "description", "Path in the Ghidra Project to the program containing the function"
+        ));
+        properties.put("functionName", Map.of(
+            "type", "string",
+            "description", "Name of the function to change variable data types in"
+        ));
+        properties.put("datatypeMappings", Map.of(
+            "type", "object",
+            "description", "Mapping of variable names to new data type strings (e.g., 'char*', 'int[10]'). Only change the variables that need new data types.",
+            "additionalProperties", Map.of("type", "string")
+        ));
+        properties.put("archiveName", Map.of(
+            "type", "string",
+            "description", "Optional name of the data type archive to search for data types. If not provided, all archives will be searched.",
+            "default", ""
+        ));
+
+        List<String> required = List.of("programPath", "functionName", "datatypeMappings");
+
+        // Create the tool
+        McpSchema.Tool tool = new McpSchema.Tool(
+            "change-variable-datatypes",
+            "Change data types of variables in a decompiled function",
+            createSchema(properties, required)
+        );
+
+        // Register the tool with a handler
+        registerTool(tool, (exchange, args) -> {
+            // Get arguments from the request
+            String programPath = (String) args.get("programPath");
+            String functionName = (String) args.get("functionName");
+            @SuppressWarnings("unchecked")
+            Map<String, String> mappings = (Map<String, String>) args.get("datatypeMappings");
+            String archiveName = args.containsKey("archiveName") ?
+                (String) args.get("archiveName") : "";
+
+            // Validate arguments
+            if (programPath == null) {
+                return createErrorResult("No program path provided");
+            }
+            if (functionName == null) {
+                return createErrorResult("No function name provided");
+            }
+            if (mappings == null || mappings.isEmpty()) {
+                return createErrorResult("No datatype mappings provided");
+            }
+
+            // Get the program from the path
+            Program program = RevaProgramManager.getProgramByPath(programPath);
+            if (program == null) {
+                return createErrorResult("Failed to find program: " + programPath);
+            }
+
+            // Get the function by name
+            FunctionManager functionManager = program.getFunctionManager();
+            Function function = null;
+
+            // First try an exact match
+            FunctionIterator functions = functionManager.getFunctions(true);
+            while (functions.hasNext()) {
+                Function f = functions.next();
+                if (f.getName().equals(functionName)) {
+                    function = f;
+                    break;
+                }
+            }
+
+            // If no exact match, try case-insensitive
+            if (function == null) {
+                functions = functionManager.getFunctions(true);
+                while (functions.hasNext()) {
+                    Function f = functions.next();
+                    if (f.getName().equalsIgnoreCase(functionName)) {
+                        function = f;
+                        break;
+                    }
+                }
+            }
+
+            if (function == null) {
+                return createErrorResult("Function not found: " + functionName + " in program " + program.getName());
+            }
+
+            // Initialize the decompiler
+            DecompInterface decompiler = new DecompInterface();
+            decompiler.toggleCCode(true);
+            decompiler.toggleSyntaxTree(true);
+            decompiler.setSimplificationStyle("decompile");
+
+            boolean decompInitialized = decompiler.openProgram(program);
+            if (!decompInitialized) {
+                return createErrorResult("Failed to initialize decompiler");
+            }
+
+            // Decompile the function
+            DecompileResults decompileResults = decompiler.decompileFunction(function, 0, TaskMonitor.DUMMY);
+            if (!decompileResults.decompileCompleted()) {
+                decompiler.dispose();
+                return createErrorResult("Decompilation failed: " + decompileResults.getErrorMessage());
+            }
+
+            // Track if we actually changed any data types
+            boolean anyChanged = false;
+            List<String> errors = new ArrayList<>();
+
+            // Process variable mappings
+            int transactionId = program.startTransaction("Change Variable Data Types");
+            boolean transactionSuccess = false;
+            try {
+                // Get the high function from the decompile results
+                HighFunction highFunction = decompileResults.getHighFunction();
+
+                // Process local variables
+                Iterator<HighSymbol> localVars = highFunction.getLocalSymbolMap().getSymbols();
+                while (localVars.hasNext()) {
+                    HighSymbol symbol = localVars.next();
+                    String varName = symbol.getName();
+                    String newDataTypeString = mappings.get(varName);
+
+                    if (newDataTypeString != null) {
+                        try {
+                            // Parse the new data type string
+                            DataType newDataType = DataTypeParserUtil.parseDataTypeObjectFromString(
+                                newDataTypeString, archiveName);
+                            
+                            if (newDataType == null) {
+                                errors.add("Could not find data type: " + newDataTypeString + " for variable " + varName);
+                                continue;
+                            }
+
+                            // Update the variable data type in the database using HighFunctionDBUtil
+                            HighFunctionDBUtil.updateDBVariable(symbol, null, newDataType, SourceType.USER_DEFINED);
+                            anyChanged = true;
+                            logInfo("Changed data type of local variable " + varName + " to " + newDataTypeString);
+                        }
+                        catch (DuplicateNameException | InvalidInputException e) {
+                            errors.add("Failed to change data type of local variable " + varName + " to " + newDataTypeString + ": " + e.getMessage());
+                        }
+                        catch (Exception e) {
+                            errors.add("Error parsing data type " + newDataTypeString + " for variable " + varName + ": " + e.getMessage());
+                        }
+                    }
+                }
+
+                // Process global variables
+                Iterator<HighSymbol> globalVars = highFunction.getGlobalSymbolMap().getSymbols();
+                while (globalVars.hasNext()) {
+                    HighSymbol symbol = globalVars.next();
+                    String varName = symbol.getName();
+                    String newDataTypeString = mappings.get(varName);
+
+                    if (newDataTypeString != null) {
+                        try {
+                            // Parse the new data type string
+                            DataType newDataType = DataTypeParserUtil.parseDataTypeObjectFromString(
+                                newDataTypeString, archiveName);
+                            
+                            if (newDataType == null) {
+                                errors.add("Could not find data type: " + newDataTypeString + " for variable " + varName);
+                                continue;
+                            }
+
+                            // Update the variable data type in the database using HighFunctionDBUtil
+                            HighFunctionDBUtil.updateDBVariable(symbol, null, newDataType, SourceType.USER_DEFINED);
+                            anyChanged = true;
+                            logInfo("Changed data type of global variable " + varName + " to " + newDataTypeString);
+                        }
+                        catch (DuplicateNameException | InvalidInputException e) {
+                            errors.add("Failed to change data type of global variable " + varName + " to " + newDataTypeString + ": " + e.getMessage());
+                        }
+                        catch (Exception e) {
+                            errors.add("Error parsing data type " + newDataTypeString + " for variable " + varName + ": " + e.getMessage());
+                        }
+                    }
+                }
+
+                transactionSuccess = true;
+            }
+            catch (Exception e) {
+                logError("Error during variable data type changes", e);
+                return createErrorResult("Failed to change variable data types: " + e.getMessage());
+            }
+            finally {
+                program.endTransaction(transactionId, transactionSuccess);
+                decompiler.dispose();
+            }
+
+            if (!anyChanged && errors.isEmpty()) {
+                return createErrorResult("No matching variables found to change data types");
+            }
+
+            // Now get the updated decompilation
+            Map<String, Object> resultData = new HashMap<>();
+            resultData.put("programName", program.getName());
+            resultData.put("functionName", functionName);
+            resultData.put("address", "0x" + function.getEntryPoint().toString());
+            resultData.put("dataTypesChanged", anyChanged);
+            
+            if (!errors.isEmpty()) {
+                resultData.put("errors", errors);
+            }
+
+            // Get updated decompilation
+            DecompInterface newDecompiler = new DecompInterface();
+            newDecompiler.toggleCCode(true);
+            newDecompiler.toggleSyntaxTree(true);
+            newDecompiler.setSimplificationStyle("decompile");
+            newDecompiler.openProgram(program);
+
+            try {
+                DecompileResults newResults = newDecompiler.decompileFunction(function, 0, TaskMonitor.DUMMY);
+                if (newResults.decompileCompleted()) {
+                    DecompiledFunction decompiledFunction = newResults.getDecompiledFunction();
+                    String decompCode = decompiledFunction.getC();
+                    resultData.put("decompilation", decompCode);
+                } else {
+                    resultData.put("decompilationError", "Decompilation failed after changing data types: " +
                         newResults.getErrorMessage());
                 }
             }

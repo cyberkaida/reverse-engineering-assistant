@@ -38,6 +38,15 @@ public class SchemaUtil {
     }
 
     /**
+     * Create a string property schema (alias for consistency)
+     * @param description Description of the property
+     * @return Map representation of the property schema
+     */
+    public static Map<String, Object> createStringProperty(String description) {
+        return stringProperty(description);
+    }
+
+    /**
      * Create a string property schema with a default value
      * @param description Description of the property
      * @param defaultValue Default value for the property
@@ -52,6 +61,15 @@ public class SchemaUtil {
     }
 
     /**
+     * Create an optional string property schema (alias)
+     * @param description Description of the property
+     * @return Map representation of the property schema
+     */
+    public static Map<String, Object> createOptionalStringProperty(String description) {
+        return stringProperty(description);
+    }
+
+    /**
      * Create a boolean property schema
      * @param description Description of the property
      * @return Map representation of the property schema
@@ -61,6 +79,15 @@ public class SchemaUtil {
             "type", "boolean",
             "description", description
         );
+    }
+
+    /**
+     * Create an optional boolean property schema (alias)
+     * @param description Description of the property
+     * @return Map representation of the property schema
+     */
+    public static Map<String, Object> createOptionalBooleanProperty(String description) {
+        return booleanProperty(description);
     }
 
     /**
@@ -90,6 +117,24 @@ public class SchemaUtil {
     }
 
     /**
+     * Create a number property schema
+     * @param description Description of the property
+     * @return Map representation of the property schema
+     */
+    public static Map<String, Object> createNumberProperty(String description) {
+        return integerProperty(description);
+    }
+
+    /**
+     * Create an optional number property schema
+     * @param description Description of the property
+     * @return Map representation of the property schema
+     */
+    public static Map<String, Object> createOptionalNumberProperty(String description) {
+        return integerProperty(description);
+    }
+
+    /**
      * Create an integer property schema with a default value
      * @param description Description of the property
      * @param defaultValue Default value for the property
@@ -101,6 +146,20 @@ public class SchemaUtil {
             "description", description,
             "default", defaultValue
         );
+    }
+
+    /**
+     * Create an object property schema
+     * @param description Description of the property
+     * @param properties Properties of the object
+     * @return Map representation of the property schema
+     */
+    public static Map<String, Object> createOptionalObjectProperty(String description, Map<String, Object> properties) {
+        Map<String, Object> schema = new HashMap<>();
+        schema.put("type", "object");
+        schema.put("description", description);
+        schema.put("properties", properties);
+        return schema;
     }
 
     /**

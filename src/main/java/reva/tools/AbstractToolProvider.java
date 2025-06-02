@@ -157,4 +157,131 @@ public abstract class AbstractToolProvider implements ToolProvider {
     protected void logInfo(String message) {
         Msg.info(this, message);
     }
+
+    /**
+     * Get a required string parameter from arguments
+     * @param args The arguments map
+     * @param key The parameter key
+     * @return The string value
+     * @throws IllegalArgumentException if the parameter is missing or not a string
+     */
+    protected String getString(Map<String, Object> args, String key) {
+        Object value = args.get(key);
+        if (value == null) {
+            throw new IllegalArgumentException("Missing required parameter: " + key);
+        }
+        if (!(value instanceof String)) {
+            throw new IllegalArgumentException("Parameter '" + key + "' must be a string");
+        }
+        return (String) value;
+    }
+
+    /**
+     * Get an optional string parameter from arguments
+     * @param args The arguments map
+     * @param key The parameter key
+     * @param defaultValue The default value if not present
+     * @return The string value or default
+     */
+    protected String getOptionalString(Map<String, Object> args, String key, String defaultValue) {
+        Object value = args.get(key);
+        if (value == null) {
+            return defaultValue;
+        }
+        if (!(value instanceof String)) {
+            throw new IllegalArgumentException("Parameter '" + key + "' must be a string");
+        }
+        return (String) value;
+    }
+
+    /**
+     * Get a required integer parameter from arguments
+     * @param args The arguments map
+     * @param key The parameter key
+     * @return The integer value
+     * @throws IllegalArgumentException if the parameter is missing or not a number
+     */
+    protected int getInt(Map<String, Object> args, String key) {
+        Object value = args.get(key);
+        if (value == null) {
+            throw new IllegalArgumentException("Missing required parameter: " + key);
+        }
+        if (value instanceof Number) {
+            return ((Number) value).intValue();
+        }
+        throw new IllegalArgumentException("Parameter '" + key + "' must be a number");
+    }
+
+    /**
+     * Get an optional integer parameter from arguments
+     * @param args The arguments map
+     * @param key The parameter key
+     * @param defaultValue The default value if not present
+     * @return The integer value or default
+     */
+    protected int getOptionalInt(Map<String, Object> args, String key, int defaultValue) {
+        Object value = args.get(key);
+        if (value == null) {
+            return defaultValue;
+        }
+        if (value instanceof Number) {
+            return ((Number) value).intValue();
+        }
+        throw new IllegalArgumentException("Parameter '" + key + "' must be a number");
+    }
+
+    /**
+     * Get an optional integer parameter from arguments (can be null)
+     * @param args The arguments map
+     * @param key The parameter key
+     * @param defaultValue The default value if not present (can be null)
+     * @return The integer value, default, or null
+     */
+    protected Integer getOptionalInt(Map<String, Object> args, String key, Integer defaultValue) {
+        Object value = args.get(key);
+        if (value == null) {
+            return defaultValue;
+        }
+        if (value instanceof Number) {
+            return ((Number) value).intValue();
+        }
+        throw new IllegalArgumentException("Parameter '" + key + "' must be a number");
+    }
+
+    /**
+     * Get an optional boolean parameter from arguments
+     * @param args The arguments map
+     * @param key The parameter key
+     * @param defaultValue The default value if not present
+     * @return The boolean value or default
+     */
+    protected boolean getOptionalBoolean(Map<String, Object> args, String key, boolean defaultValue) {
+        Object value = args.get(key);
+        if (value == null) {
+            return defaultValue;
+        }
+        if (value instanceof Boolean) {
+            return (Boolean) value;
+        }
+        throw new IllegalArgumentException("Parameter '" + key + "' must be a boolean");
+    }
+
+    /**
+     * Get an optional map parameter from arguments
+     * @param args The arguments map
+     * @param key The parameter key
+     * @param defaultValue The default value if not present
+     * @return The map value or default
+     */
+    @SuppressWarnings("unchecked")
+    protected Map<String, Object> getOptionalMap(Map<String, Object> args, String key, Map<String, Object> defaultValue) {
+        Object value = args.get(key);
+        if (value == null) {
+            return defaultValue;
+        }
+        if (value instanceof Map) {
+            return (Map<String, Object>) value;
+        }
+        throw new IllegalArgumentException("Parameter '" + key + "' must be an object");
+    }
 }

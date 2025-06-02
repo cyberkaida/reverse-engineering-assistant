@@ -45,6 +45,7 @@ import reva.tools.functions.FunctionToolProvider;
 import reva.tools.memory.MemoryToolProvider;
 import reva.tools.project.ProjectToolProvider;
 import reva.tools.strings.StringToolProvider;
+import reva.tools.structures.StructureToolProvider;
 import reva.tools.symbols.SymbolToolProvider;
 import reva.tools.xrefs.CrossReferencesToolProvider;
 import reva.util.ConfigManager;
@@ -163,6 +164,7 @@ public class McpServerManager {
         toolProviders.add(new ProjectToolProvider(server));
         toolProviders.add(new CrossReferencesToolProvider(server));
         toolProviders.add(new DataTypeToolProvider(server));
+        toolProviders.add(new StructureToolProvider(server));
 
         // Register all tools with the server
         for (ToolProvider provider : toolProviders) {

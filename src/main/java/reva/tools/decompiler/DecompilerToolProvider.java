@@ -550,9 +550,9 @@ public class DecompilerToolProvider extends AbstractToolProvider {
             List<String> errors = new ArrayList<>();
 
             // Process variable mappings
+            int transactionId = program.startTransaction("Change Variable Data Types");
+            boolean transactionSuccess = false;
             try {
-                int transactionId = program.startTransaction("Change Variable Data Types");
-
                 // Get the high function from the decompile results
                 HighFunction highFunction = decompileResults.getHighFunction();
 
@@ -620,13 +620,14 @@ public class DecompilerToolProvider extends AbstractToolProvider {
                     }
                 }
 
-                program.endTransaction(transactionId, true);
+                transactionSuccess = true;
             }
             catch (Exception e) {
                 logError("Error during variable data type changes", e);
                 return createErrorResult("Failed to change variable data types: " + e.getMessage());
             }
             finally {
+                program.endTransaction(transactionId, transactionSuccess);
                 decompiler.dispose();
             }
 

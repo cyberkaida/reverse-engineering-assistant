@@ -314,7 +314,7 @@ public class StructureToolProvider extends AbstractToolProvider {
                 String structureName = getString(args, "structureName");
                 String fieldName = getString(args, "fieldName");
                 String dataTypeStr = getString(args, "dataType");
-                Integer offset = getOptionalInt(args, "offset", null);
+                Integer offset = getOptionalInteger(args, "offset", null);
                 String comment = getOptionalString(args, "comment", null);
                 Map<String, Object> bitfield = getOptionalMap(args, "bitfield", null);
 

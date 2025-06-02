@@ -231,13 +231,15 @@ public abstract class AbstractToolProvider implements ToolProvider {
     }
 
     /**
-     * Get an optional integer parameter from arguments (can be null)
+     * Get an optional integer parameter from arguments that can be null.
+     * Unlike getOptionalInt(), this method can return null when the parameter is not provided
+     * or when explicitly set to null, allowing distinction between "not provided" and "provided with default".
      * @param args The arguments map
      * @param key The parameter key
      * @param defaultValue The default value if not present (can be null)
-     * @return The integer value, default, or null
+     * @return The Integer value, default, or null
      */
-    protected Integer getOptionalInt(Map<String, Object> args, String key, Integer defaultValue) {
+    protected Integer getOptionalInteger(Map<String, Object> args, String key, Integer defaultValue) {
         Object value = args.get(key);
         if (value == null) {
             return defaultValue;

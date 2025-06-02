@@ -115,6 +115,7 @@ public class StringToolProviderIntegrationTest extends RevaIntegrationTestBase {
             // Look for our string tools
             boolean foundGetStringsCount = false;
             boolean foundGetStrings = false;
+            boolean foundSearchStringsRegex = false;
 
             for (Tool tool : tools.tools()) {
                 if ("get-strings-count".equals(tool.name())) {
@@ -129,10 +130,17 @@ public class StringToolProviderIntegrationTest extends RevaIntegrationTestBase {
                         "Get strings from the selected program with pagination (use get-strings-count first to determine total count)",
                         tool.description());
                 }
+                if ("search-strings-regex".equals(tool.name())) {
+                    foundSearchStringsRegex = true;
+                    assertEquals("search-strings-regex description should match",
+                        "Search for strings matching a regex pattern in the program",
+                        tool.description());
+                }
             }
 
             assertTrue("get-strings-count tool should be available", foundGetStringsCount);
             assertTrue("get-strings tool should be available", foundGetStrings);
+            assertTrue("search-strings-regex tool should be available", foundSearchStringsRegex);
         });
     }
 
@@ -357,5 +365,207 @@ public class StringToolProviderIntegrationTest extends RevaIntegrationTestBase {
         assertNotNull("String data should exist at stringAddress3", data3);
         assertTrue("Data should be a string", data3.getValue() instanceof String);
         assertEquals("String content should match", "Another String", (String) data3.getValue());
+    }
+
+    @Test
+    public void testSearchStringsRegexWithValidPattern() throws Exception {
+        withMcpClient(createMcpTransport(), client -> {
+            client.initialize();
+
+            // Search for strings containing "String"
+            Map<String, Object> arguments = new HashMap<>();
+            arguments.put("programPath", programPath);
+            arguments.put("regexPattern", ".*String.*");
+
+            CallToolResult result = client.callTool(new CallToolRequest("search-strings-regex", arguments));
+
+            assertNotNull("Result should not be null", result);
+            assertMcpResultNotError(result, "Result should not have error");
+            assertNotNull("Result content should not be null", result.content());
+            assertFalse("Result content should not be empty", result.content().isEmpty());
+
+            // Parse the JSON content
+            TextContent content = (TextContent) result.content().get(0);
+            JsonNode json = parseJsonContent(content.text());
+
+            // Should be an array with metadata first, then matching strings
+            assertTrue("Result should be an array", json.isArray());
+            assertTrue("Result should have at least metadata", json.size() >= 1);
+
+            // Check metadata (first element)
+            JsonNode metadata = json.get(0);
+            assertTrue("Metadata should have regexPattern", metadata.has("regexPattern"));
+            assertTrue("Metadata should have totalStringsProcessed", metadata.has("totalStringsProcessed"));
+            assertTrue("Metadata should have totalMatches", metadata.has("totalMatches"));
+            assertTrue("Metadata should have actualCount", metadata.has("actualCount"));
+
+            assertEquals("Regex pattern should match", ".*String.*", metadata.get("regexPattern").asText());
+            
+            int totalMatches = metadata.get("totalMatches").asInt();
+            int actualCount = metadata.get("actualCount").asInt();
+            
+            // Should find at least 2 strings: "Test String" and "Another String"
+            assertTrue("Should find at least 2 matches", totalMatches >= 2);
+            assertEquals("Should have metadata + matching strings", 1 + actualCount, json.size());
+
+            // Verify the matching strings contain "String"
+            for (int i = 1; i <= actualCount; i++) {
+                JsonNode stringEntry = json.get(i);
+                String content2 = stringEntry.get("content").asText();
+                assertTrue("String should contain 'String': " + content2, content2.contains("String"));
+            }
+        });
+    }
+
+    @Test
+    public void testSearchStringsRegexWithExactMatch() throws Exception {
+        withMcpClient(createMcpTransport(), client -> {
+            client.initialize();
+
+            // Search for exact match of "Hello World"
+            Map<String, Object> arguments = new HashMap<>();
+            arguments.put("programPath", programPath);
+            arguments.put("regexPattern", "^Hello World$");
+
+            CallToolResult result = client.callTool(new CallToolRequest("search-strings-regex", arguments));
+
+            assertNotNull("Result should not be null", result);
+            assertMcpResultNotError(result, "Result should not have error");
+
+            TextContent content = (TextContent) result.content().get(0);
+            JsonNode json = parseJsonContent(content.text());
+
+            JsonNode metadata = json.get(0);
+            int totalMatches = metadata.get("totalMatches").asInt();
+            int actualCount = metadata.get("actualCount").asInt();
+
+            // Should find exactly 1 match
+            assertEquals("Should find exactly 1 match", 1, totalMatches);
+            assertEquals("Actual count should be 1", 1, actualCount);
+
+            // Verify the match
+            if (actualCount > 0) {
+                JsonNode stringEntry = json.get(1);
+                assertEquals("String should be 'Hello World'", "Hello World", stringEntry.get("content").asText());
+            }
+        });
+    }
+
+    @Test
+    public void testSearchStringsRegexWithNoMatches() throws Exception {
+        withMcpClient(createMcpTransport(), client -> {
+            client.initialize();
+
+            // Search for pattern that won't match anything
+            Map<String, Object> arguments = new HashMap<>();
+            arguments.put("programPath", programPath);
+            arguments.put("regexPattern", "^NoMatchPattern12345$");
+
+            CallToolResult result = client.callTool(new CallToolRequest("search-strings-regex", arguments));
+
+            assertNotNull("Result should not be null", result);
+            assertMcpResultNotError(result, "Result should not have error");
+
+            TextContent content = (TextContent) result.content().get(0);
+            JsonNode json = parseJsonContent(content.text());
+
+            JsonNode metadata = json.get(0);
+            assertEquals("Total matches should be 0", 0, metadata.get("totalMatches").asInt());
+            assertEquals("Actual count should be 0", 0, metadata.get("actualCount").asInt());
+            assertEquals("Result should only have metadata", 1, json.size());
+        });
+    }
+
+    @Test
+    public void testSearchStringsRegexWithInvalidPattern() throws Exception {
+        withMcpClient(createMcpTransport(), client -> {
+            client.initialize();
+
+            // Invalid regex pattern
+            Map<String, Object> arguments = new HashMap<>();
+            arguments.put("programPath", programPath);
+            arguments.put("regexPattern", "[invalid(regex");
+
+            CallToolResult result = client.callTool(new CallToolRequest("search-strings-regex", arguments));
+
+            // Should return an error for invalid regex
+            assertNotNull("Result should not be null", result);
+            
+            // The tool should return an error result
+            TextContent content = (TextContent) result.content().get(0);
+            String text = content.text();
+            assertTrue("Should contain error about invalid regex", 
+                text.contains("Invalid regex pattern") || text.contains("error"));
+        });
+    }
+
+    @Test
+    public void testSearchStringsRegexWithPagination() throws Exception {
+        withMcpClient(createMcpTransport(), client -> {
+            client.initialize();
+
+            // Search with pagination - get only 1 result at a time
+            Map<String, Object> arguments = new HashMap<>();
+            arguments.put("programPath", programPath);
+            arguments.put("regexPattern", ".*");  // Match all strings
+            arguments.put("startIndex", 0);
+            arguments.put("maxCount", 1);
+
+            CallToolResult result = client.callTool(new CallToolRequest("search-strings-regex", arguments));
+
+            assertNotNull("Result should not be null", result);
+            assertMcpResultNotError(result, "Result should not have error");
+
+            TextContent content = (TextContent) result.content().get(0);
+            JsonNode json = parseJsonContent(content.text());
+
+            JsonNode metadata = json.get(0);
+            int totalMatches = metadata.get("totalMatches").asInt();
+            int actualCount = metadata.get("actualCount").asInt();
+
+            // Should return at most 1 match
+            assertTrue("Should return at most 1 match", actualCount <= 1);
+            
+            // If there are more matches, test second page
+            if (totalMatches > 1) {
+                arguments.put("startIndex", 1);
+                CallToolResult secondResult = client.callTool(new CallToolRequest("search-strings-regex", arguments));
+                
+                TextContent secondContent = (TextContent) secondResult.content().get(0);
+                JsonNode secondJson = parseJsonContent(secondContent.text());
+                
+                JsonNode secondMetadata = secondJson.get(0);
+                assertEquals("Second page start index should be 1", 1, secondMetadata.get("startIndex").asInt());
+                
+                // Verify we get different content on second page
+                if (secondJson.size() > 1 && json.size() > 1) {
+                    String firstPageString = json.get(1).get("content").asText();
+                    String secondPageString = secondJson.get(1).get("content").asText();
+                    assertNotEquals("Second page should have different string", firstPageString, secondPageString);
+                }
+            }
+        });
+    }
+
+    @Test
+    public void testSearchStringsRegexWithNoArguments() throws Exception {
+        verifyMcpToolFailsWithError("search-strings-regex", new HashMap<>(), "program");
+    }
+
+    @Test
+    public void testSearchStringsRegexWithMissingPattern() throws Exception {
+        Map<String, Object> arguments = new HashMap<>();
+        arguments.put("programPath", programPath);
+        
+        verifyMcpToolFailsWithError("search-strings-regex", arguments, "pattern");
+    }
+
+    @Test
+    public void testSearchStringsRegexWithInvalidProgramPath() throws Exception {
+        Map<String, Object> arguments = new HashMap<>();
+        arguments.put("programPath", "/invalid/path");
+        arguments.put("regexPattern", ".*");
+        
+        verifyMcpToolFailsWithError("search-strings-regex", arguments, "Program");
     }
 }

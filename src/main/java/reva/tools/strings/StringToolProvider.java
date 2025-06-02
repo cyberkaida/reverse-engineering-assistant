@@ -21,6 +21,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Collections;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.regex.Pattern;
+import java.util.regex.PatternSyntaxException;
 
 import ghidra.program.model.listing.Data;
 import ghidra.program.model.listing.DataIterator;
@@ -65,7 +67,7 @@ class StringSimilarityComparator implements java.util.Comparator<Map<String, Obj
                 }
             }
         }
-        return maxLength;   
+        return maxLength;
     }
 }
 
@@ -86,6 +88,7 @@ public class StringToolProvider extends AbstractToolProvider {
         registerStringsCountTool();
         registerStringsTool();
         registerStringsBySimilarityTool();
+        registerStringsRegexSearchTool();
     }
 
     /**
@@ -315,7 +318,7 @@ public class StringToolProvider extends AbstractToolProvider {
                 }
             });
             Collections.sort(similarStringData, new StringSimilarityComparator(searchString));
-            
+
             List<Map<String, Object>> paginatedStringData = similarStringData.subList(startIndex, Math.min(startIndex + maxCount, similarStringData.size()));
             // Create pagination metadata
             Map<String, Object> paginationInfo = new HashMap<>();
@@ -330,6 +333,130 @@ public class StringToolProvider extends AbstractToolProvider {
             resultData.add(paginationInfo);
             resultData.addAll(paginatedStringData);
             return createMultiJsonResult(resultData);
+        });
+    }
+
+    /**
+     * Register a tool to search strings using regex pattern
+     * @throws McpError if there's an error registering the tool
+     */
+    private void registerStringsRegexSearchTool() throws McpError {
+        // Define schema for the tool
+        Map<String, Object> properties = new HashMap<>();
+        properties.put("programPath", Map.of(
+            "type", "string",
+            "description", "Path in the Ghidra Project to the program to search strings in"
+        ));
+        properties.put("regexPattern", Map.of(
+            "type", "string",
+            "description", "Regular expression pattern to search for in strings"
+        ));
+        properties.put("startIndex", Map.of(
+            "type", "integer",
+            "description", "Starting index for pagination (0-based)",
+            "default", 0
+        ));
+        properties.put("maxCount", Map.of(
+            "type", "integer",
+            "description", "Maximum number of matching strings to return",
+            "default", 100
+        ));
+
+        List<String> required = List.of("programPath", "regexPattern");
+
+        // Create the tool
+        McpSchema.Tool tool = new McpSchema.Tool(
+            "search-strings-regex",
+            "Search for strings matching a regex pattern in the program",
+            createSchema(properties, required)
+        );
+
+        // Register the tool with a handler
+        registerTool(tool, (exchange, args) -> {
+            // Get the program path from the request
+            String programPath = (String) args.get("programPath");
+            if (programPath == null) {
+                return createErrorResult("No program path provided");
+            }
+
+            // Get the regex pattern from the request
+            String regexPattern = (String) args.get("regexPattern");
+            if (regexPattern == null || regexPattern.isEmpty()) {
+                return createErrorResult("No regex pattern provided");
+            }
+
+            // Compile the regex pattern
+            Pattern pattern;
+            try {
+                pattern = Pattern.compile(regexPattern);
+            } catch (PatternSyntaxException e) {
+                return createErrorResult("Invalid regex pattern: " + e.getMessage());
+            }
+
+            // Get pagination parameters
+            int startIndex = args.containsKey("startIndex") ?
+                ((Number) args.get("startIndex")).intValue() : 0;
+            int maxCount = args.containsKey("maxCount") ?
+                ((Number) args.get("maxCount")).intValue() : 100;
+
+            // Get the program from the path
+            Program program = RevaProgramManager.getProgramByPath(programPath);
+            if (program == null) {
+                return createErrorResult("Failed to find Program: " + programPath);
+            }
+
+            // Search strings matching the regex pattern
+            List<Map<String, Object>> matchingStrings = new ArrayList<>();
+            DataIterator dataIterator = program.getListing().getDefinedData(true);
+            AtomicInteger totalProcessed = new AtomicInteger(0);
+            AtomicInteger matchesFound = new AtomicInteger(0);
+            AtomicInteger matchesSkipped = new AtomicInteger(0);
+
+            dataIterator.forEach(data -> {
+                if (data.getValue() instanceof String) {
+                    totalProcessed.incrementAndGet();
+                    String stringValue = (String) data.getValue();
+                    
+                    // Check if string matches the regex pattern
+                    if (pattern.matcher(stringValue).find()) {
+                        int currentMatchIndex = matchesFound.getAndIncrement();
+                        
+                        // Skip matches before the start index
+                        if (currentMatchIndex < startIndex) {
+                            matchesSkipped.incrementAndGet();
+                            return;
+                        }
+                        
+                        // Stop after we've collected maxCount matches
+                        if (matchingStrings.size() >= maxCount) {
+                            return;
+                        }
+                        
+                        // Collect matching string data
+                        Map<String, Object> stringInfo = getStringInfo(data);
+                        if (stringInfo != null) {
+                            matchingStrings.add(stringInfo);
+                        }
+                    }
+                }
+            });
+
+            // Create result metadata
+            Map<String, Object> searchMetadata = new HashMap<>();
+            searchMetadata.put("regexPattern", regexPattern);
+            searchMetadata.put("totalStringsProcessed", totalProcessed.get());
+            searchMetadata.put("totalMatches", matchesFound.get());
+            searchMetadata.put("startIndex", startIndex);
+            searchMetadata.put("requestedCount", maxCount);
+            searchMetadata.put("actualCount", matchingStrings.size());
+            searchMetadata.put("skippedMatches", matchesSkipped.get());
+            searchMetadata.put("nextStartIndex", startIndex + matchingStrings.size());
+
+            // Return as a single JSON array with metadata first, then matching strings
+            List<Object> resultData = new ArrayList<>();
+            resultData.add(searchMetadata);
+            resultData.addAll(matchingStrings);
+            return createJsonResult(resultData);
         });
     }
 

@@ -1,0 +1,3 @@
+- When writing integration tests, make sure to set up the program, call the tool and then validate the output. If the tool modifies the program, validate the modification.
+- Don't write useless tests, make sure they have a purpose.
+- **CRITICAL**: Integration tests should validate actual Ghidra program state changes, not just MCP tool responses

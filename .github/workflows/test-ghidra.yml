@@ -82,7 +82,7 @@ jobs:
     - name: Test Summary
       uses: test-summary/action@v2
       with:
-        show: "all"
+        show: "fail, skip"
         paths: |
           build/test-results/*/TEST-*.xml
           build/test-results/integrationTest/TEST-*.xml

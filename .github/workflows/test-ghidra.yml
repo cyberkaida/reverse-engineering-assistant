@@ -84,8 +84,7 @@ jobs:
       with:
         show: "fail, skip"
         paths: |
-          build/test-results/*/TEST-*.xml
-          build/test-results/integrationTest/TEST-*.xml
+          build/test-results/**/TEST-*.xml
       if: always()
 
   lint:

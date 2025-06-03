@@ -51,7 +51,7 @@ public class FunctionToolProvider extends AbstractToolProvider {
     }
 
     /**
-     * Register a tool to list functions from a program
+     * Register a tool to count the functions in a program
      * @throws McpError if there's an error registering the tool
      */
     private void registerFunctionCountTool() throws McpError {

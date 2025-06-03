@@ -79,14 +79,13 @@ jobs:
           build/test-results/integrationTest/
         if-no-files-found: ignore
 
-    - name: Publish Test Results 📊
-      uses: dorny/test-reporter@v1
-      if: always()
+    - name: Test Summary
+      uses: test-summary/action@v2
       with:
-        name: Test Results (Ghidra ${{ matrix.ghidra-version }})
-        path: 'build/test-results/*/TEST-*.xml'
-        reporter: java-junit
-        fail-on-error: false
+        show: "fail, skip"
+        paths: |
+          build/test-results/**/TEST-*.xml
+      if: always()
 
   lint:
     name: Lint and Check 🔍

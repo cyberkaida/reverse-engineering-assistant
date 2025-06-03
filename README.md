@@ -70,9 +70,8 @@ Add a block to the `mcpServers` section of the configuration file:
 
 ```json
 {
-  "mcpServers": [
-    {
-      "name": "ReVa",
+  "mcpServers": {
+    "ReVa": {
       "command": "npx",
       "args": [
         "-y",
@@ -80,8 +79,9 @@ Add a block to the `mcpServers` section of the configuration file:
         "http://localhost:8080/mcp/sse"
       ]
     }
-  ]
+  }
 }
+
 ```
 
 ### VSCode

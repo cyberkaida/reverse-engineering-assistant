@@ -16,6 +16,7 @@
 package reva.tools.functions;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -30,6 +31,7 @@ import io.modelcontextprotocol.server.McpSyncServer;
 import io.modelcontextprotocol.spec.McpSchema;
 import reva.plugin.RevaProgramManager;
 import reva.tools.AbstractToolProvider;
+import reva.util.SimilarityComparator;
 import reva.util.SymbolUtil;
 
 /**
@@ -48,6 +50,7 @@ public class FunctionToolProvider extends AbstractToolProvider {
     public void registerTools() throws McpError {
         registerFunctionCountTool();
         registerFunctionsTool();
+        registerFunctionsBySimilarityTool();
     }
 
     /**
@@ -217,6 +220,131 @@ public class FunctionToolProvider extends AbstractToolProvider {
             List<Object> resultData = new ArrayList<>();
             resultData.add(metadataInfo);
             resultData.addAll(functionData);
+            return createMultiJsonResult(resultData);
+        });
+    }
+
+    /**
+     * Register a tool to get functions from a program with pagination, sorted by similarity to a given function name.
+     * @throws McpError if there's an error registering the tool
+     */
+    private void registerFunctionsBySimilarityTool() throws McpError {
+        // Define schema for the tool
+        Map<String, Object> properties = new HashMap<>();
+        properties.put("programPath", Map.of(
+            "type", "string",
+            "description", "Path in the Ghidra Project to the program to get functions from"
+        ));
+
+        properties.put("searchString", Map.of(
+            "type", "string",
+            "description", "Function name to compare against for similarity (scored by longest common substring length between the search string and each function name in the program)"
+        ));
+
+        properties.put("filterDefaultNames", Map.of(
+            "type", "boolean",
+            "description", "Whether to filter out default Ghidra generated names like FUN_, DAT_, etc.",
+            "default", true
+        ));
+
+        properties.put("startIndex", Map.of(
+            "type", "integer",
+            "description", "Starting index for pagination (0-based)",
+            "default", 0
+        ));
+        properties.put("maxCount", Map.of(
+            "type", "integer",
+            "description", "Maximum number of functions to return (recommended to use get-function-count first and request chunks of 100 at most)",
+            "default", 100
+        ));
+
+        List<String> required = List.of("programPath", "searchString");
+
+        // Create the tool
+        McpSchema.Tool tool = new McpSchema.Tool(
+            "get-functions-by-similarity",
+            "Get functions from the selected program with pagination, sorted by similarity to a given function name (use get-function-count first to determine total count)",
+            createSchema(properties, required)
+        );
+
+        // Register the tool with a handler
+        registerTool(tool, (exchange, args) -> {
+            // Get the program path from the request
+            String programPath = (String) args.get("programPath");
+            if (programPath == null) {
+                return createErrorResult("No program path provided");
+            }
+
+            // Get the search string from the request
+            String searchString = (String) args.get("searchString");
+            if (searchString == null || searchString.isEmpty()) {
+                return createErrorResult("No search string provided");
+            }
+
+            // Get pagination parameters
+            int startIndex = args.containsKey("startIndex") ?
+                ((Number) args.get("startIndex")).intValue() : 0;
+            int maxCount = args.containsKey("maxCount") ?
+                ((Number) args.get("maxCount")).intValue() : 100;
+
+            // Get the program from the path
+            Program program = RevaProgramManager.getProgramByPath(programPath);
+            if (program == null) {
+                return createErrorResult("Failed to find Program: " + programPath);
+            }
+
+            // Get the filter parameter
+            boolean filterDefaultNames = (Boolean) args.getOrDefault("filterDefaultNames", true);
+
+            // Get functions and collect them for similarity sorting
+            List<Map<String, Object>> similarFunctionData = new ArrayList<>();
+            AtomicInteger currentIndex = new AtomicInteger(0);
+
+            // Iterate through all functions and collect them
+            FunctionIterator functions = program.getFunctionManager().getFunctions(true);
+            functions.forEach(function -> {
+                // Skip default Ghidra function names if filtering is enabled
+                if (filterDefaultNames && SymbolUtil.isDefaultSymbolName(function.getName())) {
+                    return;
+                }
+
+                int index = currentIndex.getAndIncrement();
+
+                // Collect function data
+                Map<String, Object> functionInfo = createFunctionInfo(function);
+                if (functionInfo != null) {
+                    similarFunctionData.add(functionInfo);
+                }
+            });
+
+            // Sort functions by similarity to search string
+            Collections.sort(similarFunctionData, new SimilarityComparator<>(searchString, new SimilarityComparator.StringExtractor<Map<String, Object>>() {
+                @Override
+                public String extract(Map<String, Object> item) {
+                    return (String) item.get("name");
+                }
+            }));
+
+            // Apply pagination to sorted results
+            List<Map<String, Object>> paginatedFunctionData = similarFunctionData.subList(
+                startIndex, 
+                Math.min(startIndex + maxCount, similarFunctionData.size())
+            );
+
+            // Create pagination metadata
+            Map<String, Object> paginationInfo = new HashMap<>();
+            paginationInfo.put("searchString", searchString);
+            paginationInfo.put("startIndex", startIndex);
+            paginationInfo.put("requestedCount", maxCount);
+            paginationInfo.put("actualCount", paginatedFunctionData.size());
+            paginationInfo.put("nextStartIndex", startIndex + paginatedFunctionData.size());
+            paginationInfo.put("totalMatchingFunctions", similarFunctionData.size());
+            paginationInfo.put("filterDefaultNames", filterDefaultNames);
+
+            // Create combined result
+            List<Object> resultData = new ArrayList<>();
+            resultData.add(paginationInfo);
+            resultData.addAll(paginatedFunctionData);
             return createMultiJsonResult(resultData);
         });
     }

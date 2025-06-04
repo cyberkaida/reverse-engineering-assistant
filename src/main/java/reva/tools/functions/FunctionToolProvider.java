@@ -19,6 +19,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import ghidra.program.model.address.AddressSetView;
 import ghidra.program.model.listing.Function;
@@ -45,7 +46,75 @@ public class FunctionToolProvider extends AbstractToolProvider {
 
     @Override
     public void registerTools() throws McpError {
+        registerFunctionCountTool();
         registerFunctionsTool();
+    }
+
+    /**
+     * Register a tool to count the functions in a program
+     * @throws McpError if there's an error registering the tool
+     */
+    private void registerFunctionCountTool() throws McpError {
+        // Define schema for the tool
+        Map<String, Object> properties = new HashMap<>();
+        properties.put("programPath", Map.of(
+            "type", "string",
+            "description", "Path in the Ghidra Project to the program to get functions from"
+        ));
+        properties.put("filterDefaultNames", Map.of(
+            "type", "boolean",
+            "description", "Whether to filter out default Ghidra generated names like FUN_, DAT_, etc.",
+            "default", true
+        ));
+
+        List<String> required = List.of("programPath");
+
+        // Create the tool
+        McpSchema.Tool tool = new McpSchema.Tool(
+            "get-function-count",
+            "Get the total count of functions in the program (use this before calling get-functions to plan pagination)",
+            createSchema(properties, required)
+        );
+
+        // Register the tool with a handler
+        registerTool(tool, (exchange, args) -> {
+            // Get the program path from the request
+            String programPath = (String) args.get("programPath");
+            if (programPath == null) {
+                return createErrorResult("No program path provided");
+            }
+            
+            // Get the program from the path
+            Program program = RevaProgramManager.getProgramByPath(programPath);
+            if (program == null) {
+                return createErrorResult("Failed to find Program: " + programPath);
+            }
+
+            // Get the filter parameter
+            boolean filterDefaultNames = (Boolean) args.getOrDefault("filterDefaultNames", true);
+
+            // Get the functions from the program
+            List<Map<String, Object>> functionData = new ArrayList<>();
+
+            AtomicInteger count = new AtomicInteger(0);
+
+            // Iterate through all functions
+            FunctionIterator functions = program.getFunctionManager().getFunctions(true);
+            functions.forEach(function -> {
+                // Skip default Ghidra function names if filtering is enabled
+                if (filterDefaultNames && SymbolUtil.isDefaultSymbolName(function.getName())) {
+                    return;
+                }
+                
+                count.incrementAndGet();
+            });
+
+            // Create result data
+            Map<String, Object> countData = new HashMap<>();
+            countData.put("count", count.get());
+
+            return createJsonResult(countData);
+        });
     }
 
     /**
@@ -65,12 +134,23 @@ public class FunctionToolProvider extends AbstractToolProvider {
             "default", true
         ));
 
+        properties.put("startIndex", Map.of(
+            "type", "integer",
+            "description", "Starting index for pagination (0-based)",
+            "default", 0
+        ));
+        properties.put("maxCount", Map.of(
+            "type", "integer",
+            "description", "Maximum number of functions to return (recommended to use get-function-count first and request chunks of 100 at most)",
+            "default", 100
+        ));
+
         List<String> required = List.of("programPath");
 
         // Create the tool
         McpSchema.Tool tool = new McpSchema.Tool(
             "get-functions",
-            "Get functions from the selected program",
+            "Get functions from the selected program (use get-function-count to determine the total count)",
             createSchema(properties, required)
         );
 
@@ -81,6 +161,12 @@ public class FunctionToolProvider extends AbstractToolProvider {
             if (programPath == null) {
                 return createErrorResult("No program path provided");
             }
+
+            // Get pagination parameters
+            int startIndex = args.containsKey("startIndex") ?
+                ((Number) args.get("startIndex")).intValue() : 0;
+            int maxCount = args.containsKey("maxCount") ?
+                ((Number) args.get("maxCount")).intValue() : 100;
 
             // Get the program from the path
             Program program = RevaProgramManager.getProgramByPath(programPath);
@@ -94,11 +180,24 @@ public class FunctionToolProvider extends AbstractToolProvider {
             // Get the functions from the program
             List<Map<String, Object>> functionData = new ArrayList<>();
 
+            AtomicInteger currentIndex = new AtomicInteger(0);
+
             // Iterate through all functions
             FunctionIterator functions = program.getFunctionManager().getFunctions(true);
             functions.forEach(function -> {
                 // Skip default Ghidra function names if filtering is enabled
                 if (filterDefaultNames && SymbolUtil.isDefaultSymbolName(function.getName())) {
+                    return;
+                }
+                
+                int index = currentIndex.getAndIncrement();
+                // Skip strings before the start index
+                if (index < startIndex) {
+                    return;
+                }
+
+                // Stop after we've collected maxCount strings
+                if (functionData.size() >= maxCount) {
                     return;
                 }
 
@@ -107,7 +206,11 @@ public class FunctionToolProvider extends AbstractToolProvider {
 
             // Add metadata about the filtering
             Map<String, Object> metadataInfo = new HashMap<>();
-            metadataInfo.put("count", functionData.size());
+            metadataInfo.put("startIndex", startIndex);
+            metadataInfo.put("requestedCount", maxCount);
+            metadataInfo.put("actualCount", functionData.size());
+            metadataInfo.put("nextStartIndex", startIndex + functionData.size());
+            metadataInfo.put("totalProcessed", currentIndex.get());
             metadataInfo.put("filterDefaultNames", filterDefaultNames);
 
             // Create combined result

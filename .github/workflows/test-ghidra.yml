@@ -7,7 +7,7 @@ on:
     branches: [ main, develop ]
 
 permissions:
-  contents: read
+  contents: write
   actions: read
   checks: write
   security-events: write
@@ -56,7 +56,11 @@ jobs:
           ${{ runner.os }}-gradle-
 
     - name: Build Extension 🔨
-      run: gradle buildExtension
+      uses: gradle/gradle-build-action@v3
+      with:
+        arguments: buildExtension
+        dependency-graph: generate-and-submit
+        dependency-graph-continue-on-failure: true
 
     - name: Run Unit Tests 🧪
       run: gradle test --info
@@ -168,7 +172,9 @@ jobs:
           ${{ runner.os }}-gradle-
 
     - name: Build Extension for CodeQL Analysis 🔨
-      run: gradle buildExtension --no-daemon
+      uses: gradle/gradle-build-action@v3
+      with:
+        arguments: buildExtension
 
     - name: Perform CodeQL Analysis
       uses: github/codeql-action/analyze@v3

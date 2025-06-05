@@ -45,23 +45,16 @@ jobs:
         Xvfb :99 -nolisten tcp &
         echo "DISPLAY=:99" >> $GITHUB_ENV
 
-    - name: Cache Gradle dependencies
-      uses: actions/cache@v3
-      with:
-        path: |
-          ~/.gradle/caches
-          ~/.gradle/wrapper
-        key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
-        restore-keys: |
-          ${{ runner.os }}-gradle-
 
-    - name: Build Extension 🔨
-      uses: gradle/gradle-build-action@v3
+    - name: Setup Gradle 🔧
+      uses: gradle/actions/setup-gradle@v4
       with:
         gradle-version: "8.14"
-        arguments: buildExtension
         dependency-graph: generate-and-submit
         dependency-graph-continue-on-failure: true
+
+    - name: Build Extension 🔨
+      run: gradle buildExtension
 
     - name: Run Unit Tests 🧪
       run: gradle test --info
@@ -162,21 +155,14 @@ jobs:
       with:
         version: "latest"
 
-    - name: Cache Gradle dependencies
-      uses: actions/cache@v3
-      with:
-        path: |
-          ~/.gradle/caches
-          ~/.gradle/wrapper
-        key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
-        restore-keys: |
-          ${{ runner.os }}-gradle-
 
-    - name: Build Extension for CodeQL Analysis 🔨
-      uses: gradle/gradle-build-action@v3
+    - name: Setup Gradle for CodeQL 🔧
+      uses: gradle/actions/setup-gradle@v4
       with:
         gradle-version: "8.14"
-        arguments: buildExtension
+
+    - name: Build Extension for CodeQL Analysis 🔨
+      run: gradle buildExtension
 
     - name: Perform CodeQL Analysis
       uses: github/codeql-action/analyze@v3

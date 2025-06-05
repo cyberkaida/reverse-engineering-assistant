@@ -58,6 +58,7 @@ jobs:
     - name: Build Extension 🔨
       uses: gradle/gradle-build-action@v3
       with:
+        gradle-version: 8.14
         arguments: buildExtension
         dependency-graph: generate-and-submit
         dependency-graph-continue-on-failure: true
@@ -174,6 +175,7 @@ jobs:
     - name: Build Extension for CodeQL Analysis 🔨
       uses: gradle/gradle-build-action@v3
       with:
+        gradle-version: 8.14
         arguments: buildExtension
 
     - name: Perform CodeQL Analysis

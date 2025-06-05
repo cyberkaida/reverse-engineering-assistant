@@ -58,7 +58,7 @@ jobs:
     - name: Build Extension 🔨
       uses: gradle/gradle-build-action@v3
       with:
-        gradle-version: 8.14
+        gradle-version: "8.14"
         arguments: buildExtension
         dependency-graph: generate-and-submit
         dependency-graph-continue-on-failure: true
@@ -67,7 +67,7 @@ jobs:
       run: gradle test --info
       env:
         _JAVA_OPTIONS: "-Djava.awt.headless=true"
-    
+
     - name: Run Integration Tests 🖥️
       run: gradle integrationTest --info
       env:
@@ -140,7 +140,7 @@ jobs:
       actions: read
       contents: read
       security-events: write
-    
+
     steps:
     - uses: actions/checkout@v4
 
@@ -175,7 +175,7 @@ jobs:
     - name: Build Extension for CodeQL Analysis 🔨
       uses: gradle/gradle-build-action@v3
       with:
-        gradle-version: 8.14
+        gradle-version: "8.14"
         arguments: buildExtension
 
     - name: Perform CodeQL Analysis

@@ -276,7 +276,7 @@ public class McpServerManager {
      * @return true if the server is ready
      */
     public boolean isServerReady() {
-        return httpServer.getState() == org.eclipse.jetty.server.Server.STARTED;
+        return httpServer.getState().equals(org.eclipse.jetty.server.Server.STARTED);
     }
 
     /**

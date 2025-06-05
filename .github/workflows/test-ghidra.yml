@@ -7,9 +7,10 @@ on:
     branches: [ main, develop ]
 
 permissions:
-  contents: read
+  contents: write
   actions: read
   checks: write
+  security-events: write
 
 jobs:
   test:
@@ -44,15 +45,13 @@ jobs:
         Xvfb :99 -nolisten tcp &
         echo "DISPLAY=:99" >> $GITHUB_ENV
 
-    - name: Cache Gradle dependencies
-      uses: actions/cache@v3
+
+    - name: Setup Gradle 🔧
+      uses: gradle/actions/setup-gradle@v4
       with:
-        path: |
-          ~/.gradle/caches
-          ~/.gradle/wrapper
-        key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
-        restore-keys: |
-          ${{ runner.os }}-gradle-
+        gradle-version: "8.14"
+        dependency-graph: generate-and-submit
+        dependency-graph-continue-on-failure: true
 
     - name: Build Extension 🔨
       run: gradle buildExtension
@@ -61,7 +60,7 @@ jobs:
       run: gradle test --info
       env:
         _JAVA_OPTIONS: "-Djava.awt.headless=true"
-    
+
     - name: Run Integration Tests 🖥️
       run: gradle integrationTest --info
       env:
@@ -125,3 +124,46 @@ jobs:
 
     - name: Check test compilation
       run: gradle compileTestJava
+
+  codeql:
+    name: CodeQL Security Analysis 🔒
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Java 🍵
+      uses: actions/setup-java@v4
+      with:
+        java-version: "21"
+        distribution: "microsoft"
+
+    - name: Initialize CodeQL
+      uses: github/codeql-action/init@v3
+      with:
+        languages: java
+        # Use security-extended queries for more thorough analysis
+        queries: security-extended,security-and-quality
+
+    - name: Install Ghidra 🐉
+      uses: antoniovazquezblanco/setup-ghidra@v2.0.6
+      with:
+        version: "latest"
+
+
+    - name: Setup Gradle for CodeQL 🔧
+      uses: gradle/actions/setup-gradle@v4
+      with:
+        gradle-version: "8.14"
+
+    - name: Build Extension for CodeQL Analysis 🔨
+      run: gradle buildExtension
+
+    - name: Perform CodeQL Analysis
+      uses: github/codeql-action/analyze@v3
+      with:
+        category: "/language:java"

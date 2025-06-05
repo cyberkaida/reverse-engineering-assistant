@@ -89,7 +89,7 @@ dependencies {
 	implementation "jakarta.servlet:jakarta.servlet-api:6.1.0"
 	// Add Jetty for embedded servlet support
 	implementation "org.eclipse.jetty:jetty-server:11.0.16"
-	implementation "org.eclipse.jetty:jetty-servlet:11.0.16"
+	implementation "org.eclipse.jetty:jetty-servlet:11.0.25"
 
 	// Testing dependencies
 	testImplementation "org.mockito:mockito-core:4.11.0"

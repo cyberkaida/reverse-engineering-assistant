@@ -92,7 +92,7 @@ dependencies {
 	implementation "org.eclipse.jetty:jetty-servlet:11.0.16"
 
 	// Testing dependencies
-	testImplementation "org.mockito:mockito-core:4.11.0"
+	testImplementation "org.mockito:mockito-core:5.18.0"
 	testImplementation "org.mockito:mockito-inline:5.2.0"
 	testImplementation "com.fasterxml.jackson.core:jackson-databind:2.17.0"
 

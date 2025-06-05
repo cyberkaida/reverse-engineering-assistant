@@ -6,8 +6,9 @@ on:
   workflow_dispatch:
 jobs:
   build:
+    permissions:
+      contents: read
     strategy:
-      matrix:
         # The extension is Java only, so it should work on all platforms
         # but there have been issues with building on Windows (#73, #72)
         # that are related to protobufs, so we will build on all platforms

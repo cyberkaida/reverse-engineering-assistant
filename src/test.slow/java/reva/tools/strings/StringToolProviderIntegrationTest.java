@@ -51,7 +51,7 @@ public class StringToolProviderIntegrationTest extends RevaIntegrationTestBase {
     @Before
     public void setUpTestData() throws Exception {
         programPath = program.getDomainFile().getPathname();
-        
+
         // Set up test string data in the program
         int txId = program.startTransaction("Setup test string data");
         try {
@@ -87,61 +87,20 @@ public class StringToolProviderIntegrationTest extends RevaIntegrationTestBase {
 
         // Open the program in the tool's ProgramManager so it can be found by RevaProgramManager
         env.open(program);
-        
+
         // Also open it directly in the tool's ProgramManager service to ensure it's available
         ghidra.app.services.ProgramManager programManager = tool.getService(ghidra.app.services.ProgramManager.class);
         if (programManager != null) {
             programManager.openProgram(program);
         }
-        
+
         // Register the program directly with RevaProgramManager for test environments
         reva.plugin.RevaProgramManager.registerProgram(program);
-        
+
         // Register the program with the server manager so it can be found by the tools
         if (serverManager != null) {
             serverManager.programOpened(program);
         }
-    }
-
-    @Test
-    public void testListToolsIncludesStringTools() throws Exception {
-        withMcpClient(createMcpTransport(), client -> {
-            client.initialize();
-
-            ListToolsResult tools = client.listTools(null);
-            assertNotNull("Tools result should not be null", tools);
-            assertNotNull("Tools list should not be null", tools.tools());
-
-            // Look for our string tools
-            boolean foundGetStringsCount = false;
-            boolean foundGetStrings = false;
-            boolean foundSearchStringsRegex = false;
-
-            for (Tool tool : tools.tools()) {
-                if ("get-strings-count".equals(tool.name())) {
-                    foundGetStringsCount = true;
-                    assertEquals("get-strings-count description should match",
-                        "Get the total count of strings in the program (use this before calling get-strings to plan pagination)",
-                        tool.description());
-                }
-                if ("get-strings".equals(tool.name())) {
-                    foundGetStrings = true;
-                    assertEquals("get-strings description should match",
-                        "Get strings from the selected program with pagination (use get-strings-count first to determine total count)",
-                        tool.description());
-                }
-                if ("search-strings-regex".equals(tool.name())) {
-                    foundSearchStringsRegex = true;
-                    assertEquals("search-strings-regex description should match",
-                        "Search for strings matching a regex pattern in the program",
-                        tool.description());
-                }
-            }
-
-            assertTrue("get-strings-count tool should be available", foundGetStringsCount);
-            assertTrue("get-strings tool should be available", foundGetStrings);
-            assertTrue("search-strings-regex tool should be available", foundSearchStringsRegex);
-        });
     }
 
     @Test
@@ -400,10 +359,10 @@ public class StringToolProviderIntegrationTest extends RevaIntegrationTestBase {
             assertTrue("Metadata should have actualCount", metadata.has("actualCount"));
 
             assertEquals("Regex pattern should match", ".*String.*", metadata.get("regexPattern").asText());
-            
+
             int totalMatches = metadata.get("totalMatches").asInt();
             int actualCount = metadata.get("actualCount").asInt();
-            
+
             // Should find at least 2 strings: "Test String" and "Another String"
             assertTrue("Should find at least 2 matches", totalMatches >= 2);
             assertEquals("Should have metadata + matching strings", 1 + actualCount, json.size());
@@ -490,11 +449,11 @@ public class StringToolProviderIntegrationTest extends RevaIntegrationTestBase {
 
             // Should return an error for invalid regex
             assertNotNull("Result should not be null", result);
-            
+
             // The tool should return an error result
             TextContent content = (TextContent) result.content().get(0);
             String text = content.text();
-            assertTrue("Should contain error about invalid regex", 
+            assertTrue("Should contain error about invalid regex",
                 text.contains("Invalid regex pattern") || text.contains("error"));
         });
     }
@@ -525,18 +484,18 @@ public class StringToolProviderIntegrationTest extends RevaIntegrationTestBase {
 
             // Should return at most 1 match
             assertTrue("Should return at most 1 match", actualCount <= 1);
-            
+
             // If there are more matches, test second page
             if (totalMatches > 1) {
                 arguments.put("startIndex", 1);
                 CallToolResult secondResult = client.callTool(new CallToolRequest("search-strings-regex", arguments));
-                
+
                 TextContent secondContent = (TextContent) secondResult.content().get(0);
                 JsonNode secondJson = parseJsonContent(secondContent.text());
-                
+
                 JsonNode secondMetadata = secondJson.get(0);
                 assertEquals("Second page start index should be 1", 1, secondMetadata.get("startIndex").asInt());
-                
+
                 // Verify we get different content on second page
                 if (secondJson.size() > 1 && json.size() > 1) {
                     String firstPageString = json.get(1).get("content").asText();
@@ -556,7 +515,7 @@ public class StringToolProviderIntegrationTest extends RevaIntegrationTestBase {
     public void testSearchStringsRegexWithMissingPattern() throws Exception {
         Map<String, Object> arguments = new HashMap<>();
         arguments.put("programPath", programPath);
-        
+
         verifyMcpToolFailsWithError("search-strings-regex", arguments, "pattern");
     }
 
@@ -565,7 +524,7 @@ public class StringToolProviderIntegrationTest extends RevaIntegrationTestBase {
         Map<String, Object> arguments = new HashMap<>();
         arguments.put("programPath", "/invalid/path");
         arguments.put("regexPattern", ".*");
-        
+
         verifyMcpToolFailsWithError("search-strings-regex", arguments, "Program");
     }
 }

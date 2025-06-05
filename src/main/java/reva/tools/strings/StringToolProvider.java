@@ -33,43 +33,9 @@ import io.modelcontextprotocol.server.McpSyncServer;
 import io.modelcontextprotocol.spec.McpSchema;
 import reva.plugin.RevaProgramManager;
 import reva.tools.AbstractToolProvider;
+import reva.util.SimilarityComparator;
 
-class StringSimilarityComparator implements java.util.Comparator<Map<String, Object>> {
-    private final String searchString;
 
-    public StringSimilarityComparator(String searchString) {
-        this.searchString = searchString.toLowerCase();
-    }
-
-    @Override
-    public int compare(Map<String, Object> o1, Map<String, Object> o2) {
-        String str1 = (String) o1.get("content");
-        String str2 = (String) o2.get("content");
-        return findLongestCommonSubstringLength(str2.toLowerCase(), searchString) -
-               findLongestCommonSubstringLength(str1.toLowerCase(), searchString);
-    }
-
-    private int findLongestCommonSubstringLength(String str1, String str2) {
-        int m = str1.length();
-        int n = str2.length();
-        int[][] dp = new int[m + 1][n + 1];
-        int maxLength = 0;
-
-        for (int i = 1; i <= m; i++) {
-            for (int j = 1; j <= n; j++) {
-                if (str1.charAt(i - 1) == str2.charAt(j - 1)) {
-                    dp[i][j] = 1 + dp[i - 1][j - 1];
-                    if (dp[i][j] > maxLength) {
-                        maxLength = dp[i][j];
-                    }
-                } else {
-                    dp[i][j] = 0; // Reset if characters don't match
-                }
-            }
-        }
-        return maxLength;
-    }
-}
 
 /**
  * Tool provider for string-related operations.
@@ -317,7 +283,12 @@ public class StringToolProvider extends AbstractToolProvider {
                     }
                 }
             });
-            Collections.sort(similarStringData, new StringSimilarityComparator(searchString));
+            Collections.sort(similarStringData, new SimilarityComparator(searchString, new SimilarityComparator.StringExtractor<Map<String, Object>>() {
+                @Override
+                public String extract(Map<String, Object> item) {
+                    return (String) item.get("content");
+                }
+            }));
 
             List<Map<String, Object>> paginatedStringData = similarStringData.subList(startIndex, Math.min(startIndex + maxCount, similarStringData.size()));
             // Create pagination metadata
@@ -367,7 +338,7 @@ public class StringToolProvider extends AbstractToolProvider {
         // Create the tool
         McpSchema.Tool tool = new McpSchema.Tool(
             "search-strings-regex",
-            "Search for strings matching a regex pattern in the program",
+            "Search for strings matching a regex pattern in the program (use this only if you know the string is contained in the program, otherwise use get-strings-by-similarity)",
             createSchema(properties, required)
         );
 

@@ -95,7 +95,7 @@ public class CrossReferencesToolProvider extends AbstractToolProvider {
         // Create the tool
         McpSchema.Tool tool = new McpSchema.Tool(
             "get-references",
-            "Get all references to and from a specified address",
+            "Get all references to and from a specified address (use this to locate what uses a specific function, or string, or piece of data)",
             createSchema(properties, required)
         );
 
@@ -282,7 +282,7 @@ public class CrossReferencesToolProvider extends AbstractToolProvider {
         // Create the tool
         McpSchema.Tool tool = new McpSchema.Tool(
             "get-symbol-references",
-            "Get all references to and from a specified symbol",
+            "Get all references to and from a specified symbol (this is not for searching for a symbol, but for finding what uses a specific symbol)",
             createSchema(properties, required)
         );
 

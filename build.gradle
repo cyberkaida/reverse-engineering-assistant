@@ -86,7 +86,7 @@ dependencies {
 	// this extension is built.
 	implementation platform("io.modelcontextprotocol.sdk:mcp-bom:0.10.0")
 	implementation "io.modelcontextprotocol.sdk:mcp"
-	implementation "jakarta.servlet:jakarta.servlet-api:5.0.0"
+	implementation "jakarta.servlet:jakarta.servlet-api:6.1.0"
 	// Add Jetty for embedded servlet support
 	implementation "org.eclipse.jetty:jetty-server:11.0.16"
 	implementation "org.eclipse.jetty:jetty-servlet:11.0.16"

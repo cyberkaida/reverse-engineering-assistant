@@ -895,8 +895,8 @@ public class DecompilerToolProvider extends AbstractToolProvider {
                     Map<String, Object> lineInfo = new HashMap<>();
                     int lineNumber = i + 1;
 
-                    // Add decompiled line
-                    String decompLine = i < decompLines.length ? decompLines[i] : "";
+                    // Add decompiled line (endIdx is already constrained by decompLines.length)
+                    String decompLine = decompLines[i];
                     lineInfo.put("lineNumber", lineNumber);
                     lineInfo.put("decompilation", decompLine);
 
@@ -912,9 +912,8 @@ public class DecompilerToolProvider extends AbstractToolProvider {
                 // Just return ranged decompilation
                 StringBuilder rangedDecomp = new StringBuilder();
                 for (int i = startIdx; i < endIdx; i++) {
-                    if (i < decompLines.length) {
-                        rangedDecomp.append(String.format("%4d\t%s\n", i + 1, decompLines[i]));
-                    }
+                    // endIdx is already constrained by decompLines.length
+                    rangedDecomp.append(String.format("%4d\t%s\n", i + 1, decompLines[i]));
                 }
                 result.put("decompilation", rangedDecomp.toString());
             }
@@ -1006,9 +1005,8 @@ public class DecompilerToolProvider extends AbstractToolProvider {
 
         StringBuilder result = new StringBuilder();
         for (int i = startIdx; i < endIdx; i++) {
-            if (i < lines.length) {
-                result.append(String.format("%4d\t%s\n", i + 1, lines[i]));
-            }
+            // endIdx is already constrained by lines.length
+            result.append(String.format("%4d\t%s\n", i + 1, lines[i]));
         }
 
         return result.toString();

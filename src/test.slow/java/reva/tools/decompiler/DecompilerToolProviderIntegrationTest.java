@@ -108,6 +108,26 @@ public class DecompilerToolProviderIntegrationTest extends RevaIntegrationTestBa
         assertNotNull("Test function should be created", testFunction);
     }
 
+    /**
+     * Helper method to perform the forced read of decompilation required before modification tools
+     * @param client The MCP client
+     * @param functionName The function name to read decompilation for
+     * @return The result of the get-decompilation call
+     */
+    private CallToolResult performForcedDecompilationRead(io.modelcontextprotocol.client.McpSyncClient client, String functionName) {
+        try {
+            Map<String, Object> readArgs = new HashMap<>();
+            readArgs.put("programPath", programPath);
+            readArgs.put("functionNameOrAddress", functionName);
+            CallToolResult readResult = client.callTool(new CallToolRequest("get-decompilation", readArgs));
+            assertNotNull("Read result should not be null", readResult);
+            return readResult;
+        } catch (Exception e) {
+            fail("Failed to perform forced decompilation read: " + e.getMessage());
+            return null; // Never reached due to fail()
+        }
+    }
+
 
     @Test
     public void testGetDecompiledFunctionSuccess() throws Exception {
@@ -149,11 +169,7 @@ public class DecompilerToolProviderIntegrationTest extends RevaIntegrationTestBa
             client.initialize();
             
             // First, read the decompilation to satisfy the forced read requirement
-            Map<String, Object> readArgs = new HashMap<>();
-            readArgs.put("programPath", programPath);
-            readArgs.put("functionNameOrAddress", "testFunction");
-            CallToolResult readResult = client.callTool(new CallToolRequest("get-decompilation", readArgs));
-            assertNotNull("Read result should not be null", readResult);
+            performForcedDecompilationRead(client, "testFunction");
 
             // First, get the original variable data types from the program using Function API
             Variable[] originalParams = testFunction.getParameters();
@@ -266,11 +282,7 @@ public class DecompilerToolProviderIntegrationTest extends RevaIntegrationTestBa
             client.initialize();
             
             // First, read the decompilation to satisfy the forced read requirement
-            Map<String, Object> readArgs = new HashMap<>();
-            readArgs.put("programPath", programPath);
-            readArgs.put("functionNameOrAddress", "testFunction");
-            CallToolResult readResult = client.callTool(new CallToolRequest("get-decompilation", readArgs));
-            assertNotNull("Read result should not be null", readResult);
+            performForcedDecompilationRead(client, "testFunction");
 
             // First, get the original variable names from the program using Function API
             Variable[] originalParams = testFunction.getParameters();

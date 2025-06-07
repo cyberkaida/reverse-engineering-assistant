@@ -18,6 +18,7 @@ jobs:
             "11.3.2",
             "11.3.1",
             "11.3",
+            "latest",
         ]
     name: Build distribution 📦
     runs-on: ${{ matrix.os }}

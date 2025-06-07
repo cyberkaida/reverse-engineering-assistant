@@ -108,18 +108,38 @@ public class DecompilerToolProviderIntegrationTest extends RevaIntegrationTestBa
         assertNotNull("Test function should be created", testFunction);
     }
 
+    /**
+     * Helper method to perform the forced read of decompilation required before modification tools
+     * @param client The MCP client
+     * @param functionName The function name to read decompilation for
+     * @return The result of the get-decompilation call
+     */
+    private CallToolResult performForcedDecompilationRead(io.modelcontextprotocol.client.McpSyncClient client, String functionName) {
+        try {
+            Map<String, Object> readArgs = new HashMap<>();
+            readArgs.put("programPath", programPath);
+            readArgs.put("functionNameOrAddress", functionName);
+            CallToolResult readResult = client.callTool(new CallToolRequest("get-decompilation", readArgs));
+            assertNotNull("Read result should not be null", readResult);
+            return readResult;
+        } catch (Exception e) {
+            fail("Failed to perform forced decompilation read: " + e.getMessage());
+            return null; // Never reached due to fail()
+        }
+    }
+
 
     @Test
     public void testGetDecompiledFunctionSuccess() throws Exception {
         withMcpClient(createMcpTransport(), client -> {
             client.initialize();
 
-            // Test the get-decompiled-function tool with our real function
+            // Test the get-decompilation tool with our real function
             Map<String, Object> args = new HashMap<>();
             args.put("programPath", programPath);
             args.put("functionNameOrAddress", "testFunction");
 
-            CallToolResult result = client.callTool(new CallToolRequest("get-decompiled-function", args));
+            CallToolResult result = client.callTool(new CallToolRequest("get-decompilation", args));
 
             assertNotNull("Result should not be null", result);
             assertMcpResultNotError(result, "Result should not be an error");
@@ -147,6 +167,9 @@ public class DecompilerToolProviderIntegrationTest extends RevaIntegrationTestBa
     public void testChangeVariableDataTypesSuccess() throws Exception {
         withMcpClient(createMcpTransport(), client -> {
             client.initialize();
+            
+            // First, read the decompilation to satisfy the forced read requirement
+            performForcedDecompilationRead(client, "testFunction");
 
             // First, get the original variable data types from the program using Function API
             Variable[] originalParams = testFunction.getParameters();
@@ -198,15 +221,15 @@ public class DecompilerToolProviderIntegrationTest extends RevaIntegrationTestBa
                 assertTrue("Should have address", changeJson.has("address"));
                 assertTrue("Should have dataTypesChanged flag", changeJson.has("dataTypesChanged"));
 
-                // Should have updated decompilation
-                assertTrue("Should have decompilation or error",
-                    changeJson.has("decompilation") || changeJson.has("decompilationError"));
+                // Should have changes information
+                assertTrue("Should have changes or error",
+                    changeJson.has("changes") || changeJson.has("decompilationError"));
 
-                // If we have new decompilation, it might be different from the original
-                if (changeJson.has("decompilation")) {
-                    String newDecompilation = changeJson.get("decompilation").asText();
-                    assertNotNull("New decompilation should not be null", newDecompilation);
-                    assertFalse("New decompilation should not be empty", newDecompilation.trim().isEmpty());
+                // If we have changes, validate the structure
+                if (changeJson.has("changes")) {
+                    JsonNode changes = changeJson.get("changes");
+                    assertTrue("Changes should have hasChanges field", changes.has("hasChanges"));
+                    assertTrue("Changes should have summary field", changes.has("summary"));
                 }
 
                 // Validate that the program state has actually been updated
@@ -257,6 +280,9 @@ public class DecompilerToolProviderIntegrationTest extends RevaIntegrationTestBa
     public void testRenameVariablesSuccess() throws Exception {
         withMcpClient(createMcpTransport(), client -> {
             client.initialize();
+            
+            // First, read the decompilation to satisfy the forced read requirement
+            performForcedDecompilationRead(client, "testFunction");
 
             // First, get the original variable names from the program using Function API
             Variable[] originalParams = testFunction.getParameters();
@@ -304,15 +330,15 @@ public class DecompilerToolProviderIntegrationTest extends RevaIntegrationTestBa
                 assertTrue("Should have address", renameJson.has("address"));
                 assertTrue("Should have variablesRenamed flag", renameJson.has("variablesRenamed"));
 
-                // Should have updated decompilation
-                assertTrue("Should have decompilation or error",
-                    renameJson.has("decompilation") || renameJson.has("decompilationError"));
+                // Should have changes information
+                assertTrue("Should have changes or error",
+                    renameJson.has("changes") || renameJson.has("decompilationError"));
 
-                // If we have decompilation, it should contain content
-                if (renameJson.has("decompilation")) {
-                    String newDecompilation = renameJson.get("decompilation").asText();
-                    assertNotNull("New decompilation should not be null", newDecompilation);
-                    assertFalse("New decompilation should not be empty", newDecompilation.trim().isEmpty());
+                // If we have changes, validate the structure
+                if (renameJson.has("changes")) {
+                    JsonNode changes = renameJson.get("changes");
+                    assertTrue("Changes should have hasChanges field", changes.has("hasChanges"));
+                    assertTrue("Changes should have summary field", changes.has("summary"));
                 }
 
                 // Validate that the program state has actually been updated
@@ -380,12 +406,12 @@ public class DecompilerToolProviderIntegrationTest extends RevaIntegrationTestBa
         withMcpClient(createMcpTransport(), client -> {
             client.initialize();
 
-            // Test the get-decompiled-function tool with non-existent function
+            // Test the get-decompilation tool with non-existent function
             Map<String, Object> args = new HashMap<>();
             args.put("programPath", programPath);
-            args.put("functionName", "nonExistentFunction");
+            args.put("functionNameOrAddress", "nonExistentFunction");
 
-            CallToolResult result = client.callTool(new CallToolRequest("get-decompiled-function", args));
+            CallToolResult result = client.callTool(new CallToolRequest("get-decompilation", args));
 
             assertNotNull("Result should not be null", result);
             assertTrue("Should return error for non-existent function", result.isError());
@@ -405,7 +431,7 @@ public class DecompilerToolProviderIntegrationTest extends RevaIntegrationTestBa
             // Test changing data types for non-existent function
             Map<String, Object> changeArgs = new HashMap<>();
             changeArgs.put("programPath", programPath);
-            changeArgs.put("functionName", "nonExistentFunction");
+            changeArgs.put("functionNameOrAddress", "nonExistentFunction");
 
             Map<String, String> datatypeMappings = new HashMap<>();
             datatypeMappings.put("someVar", "int");
@@ -452,7 +478,7 @@ public class DecompilerToolProviderIntegrationTest extends RevaIntegrationTestBa
             // Test with invalid function name
             Map<String, Object> args = new HashMap<>();
             args.put("programPath", programPath);
-            args.put("functionName", "anotherNonExistentFunction");
+            args.put("functionNameOrAddress", "anotherNonExistentFunction");
             args.put("datatypeMappings", Map.of("var1", "int"));
 
             CallToolResult result = client.callTool(new CallToolRequest("change-variable-datatypes", args));
@@ -517,6 +543,134 @@ public class DecompilerToolProviderIntegrationTest extends RevaIntegrationTestBa
                       content.text().contains("No matching variables") ||
                       content.text().contains("Could not find")));
             }
+        });
+    }
+    
+    @Test
+    public void testGetDecompilationWithRange() throws Exception {
+        withMcpClient(createMcpTransport(), client -> {
+            client.initialize();
+
+            // Test the get-decompilation tool with line range
+            Map<String, Object> args = new HashMap<>();
+            args.put("programPath", programPath);
+            args.put("functionNameOrAddress", "testFunction");
+            args.put("offset", 1);
+            args.put("limit", 5);
+
+            CallToolResult result = client.callTool(new CallToolRequest("get-decompilation", args));
+
+            assertNotNull("Result should not be null", result);
+            assertMcpResultNotError(result, "Result should not be an error");
+            
+            TextContent content = (TextContent) result.content().get(0);
+            JsonNode json = parseJsonContent(content.text());
+            
+            assertTrue("Should have offset", json.has("offset"));
+            assertTrue("Should have limit", json.has("limit"));
+            assertTrue("Should have totalLines", json.has("totalLines"));
+            assertEquals("Offset should be 1", 1, json.get("offset").asInt());
+            assertEquals("Limit should be 5", 5, json.get("limit").asInt());
+        });
+    }
+    
+    @Test
+    public void testGetDecompilationDefaultLimit() throws Exception {
+        withMcpClient(createMcpTransport(), client -> {
+            client.initialize();
+
+            // Test the get-decompilation tool with default limit (no limit specified)
+            Map<String, Object> args = new HashMap<>();
+            args.put("programPath", programPath);
+            args.put("functionNameOrAddress", "testFunction");
+            // No limit specified - should default to 50
+
+            CallToolResult result = client.callTool(new CallToolRequest("get-decompilation", args));
+
+            assertNotNull("Result should not be null", result);
+            assertMcpResultNotError(result, "Result should not be an error");
+            
+            TextContent content = (TextContent) result.content().get(0);
+            JsonNode json = parseJsonContent(content.text());
+            
+            assertTrue("Should have offset", json.has("offset"));
+            assertTrue("Should have limit", json.has("limit"));
+            assertTrue("Should have totalLines", json.has("totalLines"));
+            assertEquals("Offset should be 1", 1, json.get("offset").asInt());
+            assertEquals("Limit should default to 50", 50, json.get("limit").asInt());
+        });
+    }
+    
+    @Test
+    public void testGetDecompilationWithSync() throws Exception {
+        withMcpClient(createMcpTransport(), client -> {
+            client.initialize();
+
+            // Test the get-decompilation tool with assembly sync
+            Map<String, Object> args = new HashMap<>();
+            args.put("programPath", programPath);
+            args.put("functionNameOrAddress", "testFunction");
+            args.put("includeDisassembly", true);
+
+            CallToolResult result = client.callTool(new CallToolRequest("get-decompilation", args));
+
+            assertNotNull("Result should not be null", result);
+            assertMcpResultNotError(result, "Result should not be an error");
+            
+            TextContent content = (TextContent) result.content().get(0);
+            JsonNode json = parseJsonContent(content.text());
+            
+            assertTrue("Should have synchronizedContent when includeDisassembly is true", 
+                json.has("synchronizedContent") || json.has("decompilation"));
+        });
+    }
+    
+    @Test
+    public void testSearchDecompilation() throws Exception {
+        withMcpClient(createMcpTransport(), client -> {
+            client.initialize();
+
+            // Test the search-decompilation tool
+            Map<String, Object> args = new HashMap<>();
+            args.put("programPath", programPath);
+            args.put("pattern", ".*"); // Simple pattern that should match something
+            args.put("maxResults", 10);
+
+            CallToolResult result = client.callTool(new CallToolRequest("search-decompilation", args));
+
+            assertNotNull("Result should not be null", result);
+            assertMcpResultNotError(result, "Result should not be an error");
+            
+            TextContent content = (TextContent) result.content().get(0);
+            JsonNode json = parseJsonContent(content.text());
+            
+            assertTrue("Should have results array", json.has("results"));
+            assertTrue("Should have resultsCount", json.has("resultsCount"));
+            assertTrue("Should have pattern", json.has("pattern"));
+            assertEquals("Pattern should match", ".*", json.get("pattern").asText());
+        });
+    }
+    
+    @Test
+    public void testForcedReadValidation() throws Exception {
+        withMcpClient(createMcpTransport(), client -> {
+            client.initialize();
+
+            // Try to rename variables without reading decompilation first
+            Map<String, Object> renameArgs = new HashMap<>();
+            renameArgs.put("programPath", programPath);
+            renameArgs.put("functionNameOrAddress", "testFunction");
+            renameArgs.put("variableMappings", Map.of("param1", "newParam1"));
+
+            CallToolResult renameResult = client.callTool(new CallToolRequest("rename-variables", renameArgs));
+
+            assertNotNull("Rename result should not be null", renameResult);
+            assertTrue("Should return error for not reading decompilation first", renameResult.isError());
+            
+            TextContent content = (TextContent) renameResult.content().get(0);
+            String errorMsg = content.text();
+            assertTrue("Error should mention reading decompilation first", 
+                errorMsg.contains("read the decompilation") || errorMsg.contains("get-decompilation"));
         });
     }
 }

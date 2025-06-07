@@ -25,6 +25,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import ghidra.program.model.listing.Program;
 import ghidra.util.Msg;
 import io.modelcontextprotocol.server.McpServerFeatures.SyncToolSpecification;
+import reva.plugin.RevaProgramManager;
 import io.modelcontextprotocol.server.McpSyncServer;
 import io.modelcontextprotocol.spec.McpError;
 import io.modelcontextprotocol.spec.McpSchema;
@@ -285,5 +286,29 @@ public abstract class AbstractToolProvider implements ToolProvider {
             return (Map<String, Object>) value;
         }
         throw new IllegalArgumentException("Parameter '" + key + "' must be an object");
+    }
+
+    /**
+     * Get a validated program by path. This method ensures the program exists and is in a valid state.
+     * @param programPath The path to the program
+     * @return A valid Program object
+     * @throws IllegalArgumentException if the program is not found
+     * @throws IllegalStateException if the program is in an invalid state (e.g., closed)
+     */
+    protected Program getValidatedProgram(String programPath) {
+        if (programPath == null || programPath.trim().isEmpty()) {
+            throw new IllegalArgumentException("Program path cannot be null or empty");
+        }
+
+        Program program = RevaProgramManager.getProgramByPath(programPath);
+        if (program == null) {
+            throw new IllegalArgumentException("Program not found: " + programPath);
+        }
+
+        if (program.isClosed()) {
+            throw new IllegalStateException("Program is closed: " + programPath);
+        }
+
+        return program;
     }
 }

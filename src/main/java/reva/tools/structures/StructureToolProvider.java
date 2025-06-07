@@ -91,9 +91,11 @@ public class StructureToolProvider extends AbstractToolProvider {
                 String cDefinition = getString(args, "cDefinition");
                 String category = getOptionalString(args, "category", "/");
 
-                Program program = RevaProgramManager.getProgramByPath(programPath);
-                if (program == null) {
-                    return createErrorResult("Program not found: " + programPath);
+                Program program;
+                try {
+                    program = getValidatedProgram(programPath);
+                } catch (IllegalArgumentException | IllegalStateException e) {
+                    return createErrorResult(e.getMessage());
                 }
 
                 DataTypeManager dtm = program.getDataTypeManager();
@@ -230,9 +232,11 @@ public class StructureToolProvider extends AbstractToolProvider {
                 boolean packed = getOptionalBoolean(args, "packed", false);
                 String description = getOptionalString(args, "description", null);
 
-                Program program = RevaProgramManager.getProgramByPath(programPath);
-                if (program == null) {
-                    return createErrorResult("Program not found: " + programPath);
+                Program program;
+                try {
+                    program = getValidatedProgram(programPath);
+                } catch (IllegalArgumentException | IllegalStateException e) {
+                    return createErrorResult(e.getMessage());
                 }
 
                 DataTypeManager dtm = program.getDataTypeManager();
@@ -318,9 +322,11 @@ public class StructureToolProvider extends AbstractToolProvider {
                 String comment = getOptionalString(args, "comment", null);
                 Map<String, Object> bitfield = getOptionalMap(args, "bitfield", null);
 
-                Program program = RevaProgramManager.getProgramByPath(programPath);
-                if (program == null) {
-                    return createErrorResult("Program not found: " + programPath);
+                Program program;
+                try {
+                    program = getValidatedProgram(programPath);
+                } catch (IllegalArgumentException | IllegalStateException e) {
+                    return createErrorResult(e.getMessage());
                 }
 
                 DataTypeManager dtm = program.getDataTypeManager();
@@ -434,9 +440,11 @@ public class StructureToolProvider extends AbstractToolProvider {
                 String programPath = getString(args, "programPath");
                 String structureName = getString(args, "structureName");
 
-                Program program = RevaProgramManager.getProgramByPath(programPath);
-                if (program == null) {
-                    return createErrorResult("Program not found: " + programPath);
+                Program program;
+                try {
+                    program = getValidatedProgram(programPath);
+                } catch (IllegalArgumentException | IllegalStateException e) {
+                    return createErrorResult(e.getMessage());
                 }
 
                 DataTypeManager dtm = program.getDataTypeManager();
@@ -484,9 +492,11 @@ public class StructureToolProvider extends AbstractToolProvider {
                 String nameFilter = getOptionalString(args, "nameFilter", null);
                 boolean includeBuiltIn = getOptionalBoolean(args, "includeBuiltIn", false);
 
-                Program program = RevaProgramManager.getProgramByPath(programPath);
-                if (program == null) {
-                    return createErrorResult("Program not found: " + programPath);
+                Program program;
+                try {
+                    program = getValidatedProgram(programPath);
+                } catch (IllegalArgumentException | IllegalStateException e) {
+                    return createErrorResult(e.getMessage());
                 }
 
                 DataTypeManager dtm = program.getDataTypeManager();
@@ -558,9 +568,11 @@ public class StructureToolProvider extends AbstractToolProvider {
                 String addressStr = getString(args, "address");
                 boolean clearExisting = getOptionalBoolean(args, "clearExisting", true);
 
-                Program program = RevaProgramManager.getProgramByPath(programPath);
-                if (program == null) {
-                    return createErrorResult("Program not found: " + programPath);
+                Program program;
+                try {
+                    program = getValidatedProgram(programPath);
+                } catch (IllegalArgumentException | IllegalStateException e) {
+                    return createErrorResult(e.getMessage());
                 }
 
                 Address address = AddressUtil.resolveAddressOrSymbol(program, addressStr);
@@ -644,9 +656,11 @@ public class StructureToolProvider extends AbstractToolProvider {
                 String programPath = getString(args, "programPath");
                 String structureName = getString(args, "structureName");
 
-                Program program = RevaProgramManager.getProgramByPath(programPath);
-                if (program == null) {
-                    return createErrorResult("Program not found: " + programPath);
+                Program program;
+                try {
+                    program = getValidatedProgram(programPath);
+                } catch (IllegalArgumentException | IllegalStateException e) {
+                    return createErrorResult(e.getMessage());
                 }
 
                 DataTypeManager dtm = program.getDataTypeManager();
@@ -707,9 +721,11 @@ public class StructureToolProvider extends AbstractToolProvider {
                 String headerContent = getString(args, "headerContent");
                 String category = getOptionalString(args, "category", "/");
 
-                Program program = RevaProgramManager.getProgramByPath(programPath);
-                if (program == null) {
-                    return createErrorResult("Program not found: " + programPath);
+                Program program;
+                try {
+                    program = getValidatedProgram(programPath);
+                } catch (IllegalArgumentException | IllegalStateException e) {
+                    return createErrorResult(e.getMessage());
                 }
 
                 DataTypeManager dtm = program.getDataTypeManager();

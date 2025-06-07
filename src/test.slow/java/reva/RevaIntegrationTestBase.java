@@ -22,8 +22,9 @@ import ghidra.program.model.listing.Program;
 import ghidra.framework.plugintool.PluginTool;
 
 import org.junit.Before;
-import org.apache.commons.compress.harmony.pack200.NewAttributeBands.Call;
 import org.junit.After;
+import org.junit.BeforeClass;
+import org.junit.AfterClass;
 
 import static org.junit.Assert.fail;
 
@@ -56,6 +57,15 @@ import reva.server.McpServerManager;
  */
 public abstract class RevaIntegrationTestBase extends AbstractGhidraHeadedIntegrationTest {
 
+    // Shared test environment across all tests
+    private static TestEnv sharedEnv;
+    private static PluginTool sharedTool;
+    private static RevaPlugin sharedPlugin;
+    private static ConfigManager sharedConfigManager;
+    private static McpServerManager sharedServerManager;
+    private static ObjectMapper sharedObjectMapper;
+    
+    // Per-test instances
     public TestEnv env;
     protected PluginTool tool;
     protected Program program;
@@ -66,12 +76,69 @@ public abstract class RevaIntegrationTestBase extends AbstractGhidraHeadedIntegr
 
 
     /**
+     * Set up shared test environment once for all tests in the class.
+     * This significantly speeds up test execution by reusing the Ghidra instance.
+     */
+    @BeforeClass
+    public static void setUpSharedTestEnvironment() throws Exception {
+        // Initialize shared object mapper
+        sharedObjectMapper = new ObjectMapper();
+        // Other shared setup will be done lazily in @Before to avoid TestEnv initialization issues
+    }
+
+    /**
+     * Set up shared MCP server services for the entire test class.
+     */
+    private static void setupSharedMcpServices() {
+        // Create and register shared ConfigManager
+        sharedConfigManager = new ConfigManager(sharedTool);
+        reva.util.RevaInternalServiceRegistry.registerService(ConfigManager.class, sharedConfigManager);
+        
+        // Create and register shared McpServerManager
+        sharedServerManager = new McpServerManager(sharedTool);
+        reva.util.RevaInternalServiceRegistry.registerService(McpServerManager.class, sharedServerManager);
+        reva.util.RevaInternalServiceRegistry.registerService(reva.services.RevaMcpService.class, sharedServerManager);
+        
+        // Start the shared MCP server
+        sharedServerManager.startServer();
+    }
+
+    /**
+     * Clean up shared test environment after all tests complete.
+     */
+    @AfterClass
+    public static void tearDownSharedTestEnvironment() throws Exception {
+        if (sharedEnv != null) {
+            // Shutdown the shared MCP server
+            if (sharedServerManager != null) {
+                sharedServerManager.shutdown();
+                sharedServerManager = null;
+            }
+
+            // Clear the shared service registry
+            reva.util.RevaInternalServiceRegistry.clearAllServices();
+
+            // Clean up the shared test environment
+            try {
+                sharedEnv.dispose();
+            } catch (IllegalAccessError e) {
+                // Ignore the module access error during cleanup
+            }
+            sharedEnv = null;
+            sharedTool = null;
+            sharedPlugin = null;
+            sharedConfigManager = null;
+            sharedObjectMapper = null;
+        }
+    }
+
+    /**
      * Create the MCP transport - provides a default HTTP SSE implementation.
      * Subclasses can override this to use different transport types (WebSocket, etc.)
      */
     protected McpClientTransport createMcpTransport() {
-        // Create HTTP SSE transport to connect to our MCP server
-        int serverPort = configManager != null ? configManager.getServerPort() : 8080;
+        // Use shared config manager for server port
+        int serverPort = sharedConfigManager != null ? sharedConfigManager.getServerPort() : 8080;
         String serverUrl = "http://localhost:" + serverPort;
 
         HttpClientSseClientTransport transport = HttpClientSseClientTransport.builder(serverUrl)
@@ -164,18 +231,61 @@ public abstract class RevaIntegrationTestBase extends AbstractGhidraHeadedIntegr
 
     @Before
     public void setUpRevaPlugin() throws Exception {
-        // Initialize object mapper for JSON parsing
-        objectMapper = new ObjectMapper();
+        // Initialize shared environment lazily on first test
+        if (sharedEnv == null) {
+            synchronized (RevaIntegrationTestBase.class) {
+                if (sharedEnv == null) {
+                    // Create shared test environment
+                    sharedEnv = new TestEnv();
+                    sharedTool = sharedEnv.getTool();
 
-        // Create test environment - this will work if test resources are available
-        if (env == null) {
-            env = new TestEnv();
+                    // Set up MCP services for testing
+                    setupSharedMcpServices();
+
+                    // Add the ReVa plugin to the shared tool
+                    sharedTool.addPlugin(RevaPlugin.class.getName());
+
+                    // Get the shared plugin instance
+                    for (ghidra.framework.plugintool.Plugin p : sharedTool.getManagedPlugins()) {
+                        if (p instanceof RevaPlugin) {
+                            sharedPlugin = (RevaPlugin) p;
+                            break;
+                        }
+                    }
+
+                    if (sharedPlugin == null) {
+                        throw new RuntimeException("Failed to load RevaPlugin in shared environment");
+                    }
+
+                    // Wait for the shared server to be ready
+                    int maxWait = 15000; // 15 seconds
+                    int waitTime = 0;
+                    int interval = 100;
+
+                    while (waitTime < maxWait) {
+                        if (sharedServerManager != null && sharedServerManager.isServerReady()) {
+                            break;
+                        }
+                        Thread.sleep(interval);
+                        waitTime += interval;
+                    }
+
+                    if (waitTime >= maxWait) {
+                        throw new RuntimeException("Shared server failed to start within timeout");
+                    }
+                }
+            }
         }
 
-        // Get the tool from the environment
-        tool = env.getTool();
+        // Use shared instances to avoid re-initialization
+        env = sharedEnv;
+        tool = sharedTool;
+        plugin = sharedPlugin;
+        configManager = sharedConfigManager;
+        serverManager = sharedServerManager;
+        objectMapper = sharedObjectMapper;
 
-        // Create a program using the helper method from parent class
+        // Create a fresh program for each test
         program = createDefaultProgram(getName(), "x86:LE:32:default", this);
 
         // Add a memory block to the program for tests that expect it
@@ -190,46 +300,10 @@ public abstract class RevaIntegrationTestBase extends AbstractGhidraHeadedIntegr
             }
         }
 
-        // Add the ReVa plugin to the tool
-        tool.addPlugin(RevaPlugin.class.getName());
-
-        // Get the plugin instance
-        for (ghidra.framework.plugintool.Plugin p : tool.getManagedPlugins()) {
-            if (p instanceof RevaPlugin) {
-                plugin = (RevaPlugin) p;
-                break;
-            }
+        // Register this program with the shared server (simulates program opening in tool)
+        if (serverManager != null) {
+            serverManager.programOpened(program, tool);
         }
-
-        if (plugin == null) {
-            throw new RuntimeException("Failed to load RevaPlugin");
-        }
-
-        // Initialize MCP utilities
-        configManager = reva.util.RevaInternalServiceRegistry.getService(ConfigManager.class);
-        serverManager = reva.util.RevaInternalServiceRegistry.getService(McpServerManager.class);
-
-        if (configManager != null) {
-        }
-
-        // Wait for the server to be ready
-        int maxWait = 15000; // 15 seconds
-        int waitTime = 0;
-        int interval = 100;
-
-        while (waitTime < maxWait) {
-            if (serverManager != null && serverManager.isServerReady()) {
-                break;
-            }
-            Thread.sleep(interval);
-            waitTime += interval;
-        }
-
-        if (waitTime >= maxWait) {
-            System.err.println("Server failed to become ready within " + maxWait + "ms");
-            throw new RuntimeException("Server failed to start within timeout");
-        }
-
 
         onGhidraStart();
     }
@@ -238,22 +312,19 @@ public abstract class RevaIntegrationTestBase extends AbstractGhidraHeadedIntegr
     public void tearDownRevaPlugin() throws Exception {
         onGhidraClose();
 
-        // Clean up the test environment to prevent interference between tests
-        if (env != null) {
-            try {
-                env.dispose();
-            } catch (IllegalAccessError e) {
-                // Ignore the module access error during cleanup
-                // This is a known issue with Ghidra's test framework in Java 11+
-            }
-            env = null;
+        // Unregister the test program from the shared server
+        if (serverManager != null && program != null) {
+            serverManager.programClosed(program, tool);
         }
-        tool = null;
-        program = null;
-        plugin = null;
-        configManager = null;
-        serverManager = null;
-        objectMapper = null;
+
+        // Clean up the program (but keep shared instances)
+        if (program != null) {
+            program.release(this);
+            program = null;
+        }
+
+        // Note: We don't shutdown the server or clear the registry here
+        // since they're shared across all tests in the class
     }
 
     /**
@@ -305,7 +376,7 @@ public abstract class RevaIntegrationTestBase extends AbstractGhidraHeadedIntegr
     protected ListToolsResult getAvailableTools() throws Exception {
 
         // First, let's verify server is accessible via simple HTTP check
-        int serverPort = configManager.getServerPort();
+        int serverPort = sharedConfigManager.getServerPort();
         String baseServerUrl = "http://localhost:" + serverPort;
 
         try {

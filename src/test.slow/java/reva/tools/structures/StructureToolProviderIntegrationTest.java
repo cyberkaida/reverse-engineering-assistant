@@ -57,12 +57,10 @@ public class StructureToolProviderIntegrationTest extends RevaIntegrationTestBas
             programManager.openProgram(program);
         }
         
-        // Register the program directly with RevaProgramManager for test environments
-        reva.plugin.RevaProgramManager.registerProgram(program);
         
         // Register the program with the server manager so it can be found by the tools
         if (serverManager != null) {
-            serverManager.programOpened(program);
+            serverManager.programOpened(program, tool);
         }
     }
 

@@ -31,6 +31,7 @@ import ghidra.framework.plugintool.PluginTool;
 import ghidra.program.model.listing.Program;
 import ghidra.util.Msg;
 import ghidra.util.task.TaskMonitor;
+import reva.util.RevaInternalServiceRegistry;
 
 /**
  * Manages access to open programs in Ghidra.
@@ -39,7 +40,7 @@ import ghidra.util.task.TaskMonitor;
 public class RevaProgramManager {
     // Cache of opened programs by path to avoid repeatedly opening the same program
     private static final Map<String, Program> programCache = new HashMap<>();
-    
+
     // Registry of directly opened programs (mainly for test environments)
     private static final Map<String, Program> registeredPrograms = new HashMap<>();
 
@@ -50,30 +51,66 @@ public class RevaProgramManager {
     public static List<Program> getOpenPrograms() {
         List<Program> openPrograms = new ArrayList<>();
 
-        // Get all tools from the tool manager
+        // First try to get programs from the tool manager
         Project project = AppInfo.getActiveProject();
         if (project == null) {
+            Msg.debug(RevaProgramManager.class, "No active project found");
             return openPrograms;
         }
 
         ToolManager toolManager = project.getToolManager();
         if (toolManager != null) {
-            for (PluginTool tool : toolManager.getRunningTools()) {
+            PluginTool[] runningTools = toolManager.getRunningTools();
+            Msg.debug(RevaProgramManager.class, "Found " + runningTools.length + " running tools");
+
+            for (PluginTool tool : runningTools) {
                 ProgramManager programManager = tool.getService(ProgramManager.class);
                 if (programManager != null) {
                     Program[] programs = programManager.getAllOpenPrograms();
+                    Msg.debug(RevaProgramManager.class, "Tool " + tool.getName() + " has " + programs.length + " open programs");
                     for (Program program : programs) {
                         if (!openPrograms.contains(program)) {
                             openPrograms.add(program);
+                            Msg.debug(RevaProgramManager.class, "Added program: " + program.getName() + " with domain path: " + program.getDomainFile().getPathname());
                         }
                     }
+                } else {
+                    Msg.debug(RevaProgramManager.class, "Tool " + tool.getName() + " has no ProgramManager service");
                 }
+            }
+        } else {
+            Msg.debug(RevaProgramManager.class, "No tool manager found");
+        }
+
+        // If no tools were found (common in test environments),
+        // try to get programs directly from the RevaPlugin's tool
+        if (openPrograms.isEmpty()) {
+            Msg.debug(RevaProgramManager.class, "No programs found via ToolManager, trying RevaPlugin tool");
+            RevaPlugin revaPlugin = RevaInternalServiceRegistry.getService(RevaPlugin.class);
+            if (revaPlugin != null && revaPlugin.getTool() != null) {
+                PluginTool tool = revaPlugin.getTool();
+                ProgramManager programManager = tool.getService(ProgramManager.class);
+                if (programManager != null) {
+                    Program[] programs = programManager.getAllOpenPrograms();
+                    Msg.debug(RevaProgramManager.class, "RevaPlugin tool has " + programs.length + " open programs");
+                    for (Program program : programs) {
+                        if (!openPrograms.contains(program)) {
+                            openPrograms.add(program);
+                            Msg.debug(RevaProgramManager.class, "Added program from RevaPlugin: " + program.getName() + " with domain path: " + program.getDomainFile().getPathname());
+                        }
+                    }
+                } else {
+                    Msg.debug(RevaProgramManager.class, "RevaPlugin tool has no ProgramManager service");
+                }
+            } else {
+                Msg.debug(RevaProgramManager.class, "RevaPlugin not found or has no tool");
             }
         }
 
+        Msg.debug(RevaProgramManager.class, "Total open programs found: " + openPrograms.size());
         return openPrograms;
     }
-    
+
     /**
      * Register a program directly with the manager. This is useful in test environments
      * or when programs are opened outside of the normal Ghidra tool system.
@@ -86,7 +123,7 @@ public class RevaProgramManager {
             Msg.debug(RevaProgramManager.class, "Registered program: " + programPath);
         }
     }
-    
+
     /**
      * Unregister a program from the manager.
      * @param program The program to unregister
@@ -98,6 +135,43 @@ public class RevaProgramManager {
             programCache.remove(programPath);
             Msg.debug(RevaProgramManager.class, "Unregistered program: " + programPath);
         }
+    }
+
+    /**
+     * Clear stale cache entries when a program is closed.
+     * This should be called when a program is closed to prevent stale references.
+     * @param program The program that was closed
+     */
+    public static void programClosed(Program program) {
+        if (program != null) {
+            String programPath = program.getDomainFile().getPathname();
+            registeredPrograms.remove(programPath);
+            programCache.remove(programPath);
+            Msg.debug(RevaProgramManager.class, "Program closed, cleared cache: " + programPath);
+        }
+    }
+
+    /**
+     * Handle when a program is opened.
+     * This ensures proper cache management and can be used to refresh stale entries.
+     * @param program The program that was opened
+     */
+    public static void programOpened(Program program) {
+        if (program != null && !program.isClosed()) {
+            String programPath = program.getDomainFile().getPathname();
+            // Clear any stale cache entry and let normal lookup repopulate
+            programCache.remove(programPath);
+            Msg.debug(RevaProgramManager.class, "Program opened, cleared stale cache: " + programPath);
+        }
+    }
+
+    /**
+     * Get the canonical domain path for a program
+     * @param program The program to get the canonical path for
+     * @return The canonical domain path
+     */
+    public static String getCanonicalProgramPath(Program program) {
+        return program.getDomainFile().getPathname();
     }
 
     /**
@@ -146,8 +220,9 @@ public class RevaProgramManager {
             String domainPath = program.getDomainFile().getPathname();
             Msg.debug(RevaProgramManager.class, "Comparing '" + programPath + "' with domain path '" + domainPath + "'");
             if (domainPath.equals(programPath)) {
-                // Add to cache for future lookups
-                programCache.put(programPath, program);
+                // Use canonical domain path as cache key for consistency
+                String canonicalPath = getCanonicalProgramPath(program);
+                programCache.put(canonicalPath, program);
                 Msg.debug(RevaProgramManager.class, "Found program by domain path: " + programPath);
                 return program;
             }
@@ -157,8 +232,9 @@ public class RevaProgramManager {
             String programName = program.getName();
             Msg.debug(RevaProgramManager.class, "Also checking executable path '" + executablePath + "' and name '" + programName + "'");
             if (executablePath.equals(programPath) || programName.equals(programPath)) {
-                // Add to cache for future lookups
-                programCache.put(programPath, program);
+                // Use canonical domain path as cache key for consistency
+                String canonicalPath = getCanonicalProgramPath(program);
+                programCache.put(canonicalPath, program);
                 Msg.debug(RevaProgramManager.class, "Found program by executable path or name: " + programPath);
                 return program;
             }
@@ -183,8 +259,9 @@ public class RevaProgramManager {
         Program program = programOpener.openProgram(locator, TaskMonitor.DUMMY);
 
         if (program != null) {
-            // Add to cache for future lookups
-            programCache.put(programPath, program);
+            // Use canonical domain path as cache key for consistency
+            String canonicalPath = getCanonicalProgramPath(program);
+            programCache.put(canonicalPath, program);
         }
 
         return program;
@@ -201,7 +278,7 @@ public class RevaProgramManager {
             }
         }
         programCache.clear();
-        
+
         // Clear registered programs (but don't release them as we didn't open them)
         registeredPrograms.clear();
     }

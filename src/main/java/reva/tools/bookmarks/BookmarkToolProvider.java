@@ -88,9 +88,11 @@ public class BookmarkToolProvider extends AbstractToolProvider {
             String category = getOptionalString(args, "category", "");
             String comment = getString(args, "comment");
 
-            Program program = RevaProgramManager.getProgramByPath(programPath);
-            if (program == null) {
-                return createErrorResult("Failed to find program: " + programPath);
+            Program program;
+            try {
+                program = getValidatedProgram(programPath);
+            } catch (IllegalArgumentException | IllegalStateException e) {
+                return createErrorResult(e.getMessage());
             }
 
             Address address = AddressUtil.resolveAddressOrSymbol(program, addressStr);
@@ -170,9 +172,11 @@ public class BookmarkToolProvider extends AbstractToolProvider {
             String typeFilter = getOptionalString(args, "type", null);
             String categoryFilter = getOptionalString(args, "category", null);
 
-            Program program = RevaProgramManager.getProgramByPath(programPath);
-            if (program == null) {
-                return createErrorResult("Failed to find program: " + programPath);
+            Program program;
+            try {
+                program = getValidatedProgram(programPath);
+            } catch (IllegalArgumentException | IllegalStateException e) {
+                return createErrorResult(e.getMessage());
             }
 
             BookmarkManager bookmarkMgr = program.getBookmarkManager();
@@ -259,9 +263,11 @@ public class BookmarkToolProvider extends AbstractToolProvider {
             String type = getString(args, "type");
             String category = getOptionalString(args, "category", "");
 
-            Program program = RevaProgramManager.getProgramByPath(programPath);
-            if (program == null) {
-                return createErrorResult("Failed to find program: " + programPath);
+            Program program;
+            try {
+                program = getValidatedProgram(programPath);
+            } catch (IllegalArgumentException | IllegalStateException e) {
+                return createErrorResult(e.getMessage());
             }
 
             Address address = AddressUtil.resolveAddressOrSymbol(program, addressStr);
@@ -350,9 +356,11 @@ public class BookmarkToolProvider extends AbstractToolProvider {
             Map<String, Object> addressRange = getOptionalMap(args, "addressRange", null);
             int maxResults = getOptionalInt(args, "maxResults", 100);
 
-            Program program = RevaProgramManager.getProgramByPath(programPath);
-            if (program == null) {
-                return createErrorResult("Failed to find program: " + programPath);
+            Program program;
+            try {
+                program = getValidatedProgram(programPath);
+            } catch (IllegalArgumentException | IllegalStateException e) {
+                return createErrorResult(e.getMessage());
             }
 
             AddressSetView searchRange = null;
@@ -433,9 +441,11 @@ public class BookmarkToolProvider extends AbstractToolProvider {
             String programPath = getString(args, "programPath");
             String type = getString(args, "type");
 
-            Program program = RevaProgramManager.getProgramByPath(programPath);
-            if (program == null) {
-                return createErrorResult("Failed to find program: " + programPath);
+            Program program;
+            try {
+                program = getValidatedProgram(programPath);
+            } catch (IllegalArgumentException | IllegalStateException e) {
+                return createErrorResult(e.getMessage());
             }
 
             BookmarkManager bookmarkMgr = program.getBookmarkManager();

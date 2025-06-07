@@ -152,9 +152,11 @@ public class DecompilerToolProvider extends AbstractToolProvider {
             }
 
             // Get the program from the path
-            Program program = RevaProgramManager.getProgramByPath(programPath);
-            if (program == null) {
-                return createErrorResult("Failed to find program: " + programPath);
+            Program program;
+            try {
+                program = getValidatedProgram(programPath);
+            } catch (IllegalArgumentException | IllegalStateException e) {
+                return createErrorResult(e.getMessage());
             }
 
             Map<String, Object> resultData = new HashMap<>();
@@ -346,9 +348,11 @@ public class DecompilerToolProvider extends AbstractToolProvider {
             }
 
             // Get the program from the path
-            Program program = RevaProgramManager.getProgramByPath(programPath);
-            if (program == null) {
-                return createErrorResult("Failed to find program: " + programPath);
+            Program program;
+            try {
+                program = getValidatedProgram(programPath);
+            } catch (IllegalArgumentException | IllegalStateException e) {
+                return createErrorResult(e.getMessage());
             }
 
             // Perform the search
@@ -417,9 +421,11 @@ public class DecompilerToolProvider extends AbstractToolProvider {
             }
 
             // Get the program from the path
-            Program program = RevaProgramManager.getProgramByPath(programPath);
-            if (program == null) {
-                return createErrorResult("Failed to find program: " + programPath);
+            Program program;
+            try {
+                program = getValidatedProgram(programPath);
+            } catch (IllegalArgumentException | IllegalStateException e) {
+                return createErrorResult(e.getMessage());
             }
 
             Function function = null;
@@ -656,9 +662,11 @@ public class DecompilerToolProvider extends AbstractToolProvider {
             }
 
             // Get the program from the path
-            Program program = RevaProgramManager.getProgramByPath(programPath);
-            if (program == null) {
-                return createErrorResult("Failed to find program: " + programPath);
+            Program program;
+            try {
+                program = getValidatedProgram(programPath);
+            } catch (IllegalArgumentException | IllegalStateException e) {
+                return createErrorResult(e.getMessage());
             }
 
             Function function = null;
@@ -1315,9 +1323,11 @@ public class DecompilerToolProvider extends AbstractToolProvider {
             }
 
             // Get the program from the path
-            Program program = RevaProgramManager.getProgramByPath(programPath);
-            if (program == null) {
-                return createErrorResult("Failed to find program: " + programPath);
+            Program program;
+            try {
+                program = getValidatedProgram(programPath);
+            } catch (IllegalArgumentException | IllegalStateException e) {
+                return createErrorResult(e.getMessage());
             }
 
             Function function = null;

@@ -38,9 +38,9 @@ public class RevaPluginUnitTest {
         assertEquals("Plugin package name should be ReVa", "ReVa", info.packageName());
         assertEquals("Plugin category should be ANALYSIS", PluginCategoryNames.ANALYSIS, info.category());
         assertEquals("Plugin short description should match",
-            "Reverse Engineering Assistant", info.shortDescription());
+            "Reverse Engineering Assistant (Tool)", info.shortDescription());
         assertEquals("Plugin description should match",
-            "Provides a Model Context Protocol server for interacting with Ghidra",
+            "Tool-level ReVa plugin that connects to the application-level MCP server",
             info.description());
     }
 
@@ -73,7 +73,7 @@ public class RevaPluginUnitTest {
         assertNotNull("Should have provider field",
             RevaPlugin.class.getDeclaredField("provider"));
 
-        assertNotNull("Should have serverManager field",
-            RevaPlugin.class.getDeclaredField("serverManager"));
+        assertNotNull("Should have mcpService field",
+            RevaPlugin.class.getDeclaredField("mcpService"));
     }
 }

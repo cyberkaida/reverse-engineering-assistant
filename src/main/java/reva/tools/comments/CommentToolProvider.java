@@ -94,9 +94,11 @@ public class CommentToolProvider extends AbstractToolProvider {
             String commentTypeStr = getOptionalString(args, "commentType", "eol");
             String comment = getString(args, "comment");
 
-            Program program = RevaProgramManager.getProgramByPath(programPath);
-            if (program == null) {
-                return createErrorResult("Failed to find program: " + programPath);
+            Program program;
+            try {
+                program = getValidatedProgram(programPath);
+            } catch (IllegalArgumentException | IllegalStateException e) {
+                return createErrorResult(e.getMessage());
             }
 
             Address address = AddressUtil.resolveAddressOrSymbol(program, addressStr);
@@ -175,9 +177,11 @@ public class CommentToolProvider extends AbstractToolProvider {
             @SuppressWarnings("unchecked")
             List<String> commentTypes = (List<String>) args.get("commentTypes");
 
-            Program program = RevaProgramManager.getProgramByPath(programPath);
-            if (program == null) {
-                return createErrorResult("Failed to find program: " + programPath);
+            Program program;
+            try {
+                program = getValidatedProgram(programPath);
+            } catch (IllegalArgumentException | IllegalStateException e) {
+                return createErrorResult(e.getMessage());
             }
 
             AddressSetView addresses;
@@ -268,9 +272,11 @@ public class CommentToolProvider extends AbstractToolProvider {
             String addressStr = getString(args, "address");
             String commentTypeStr = getString(args, "commentType");
 
-            Program program = RevaProgramManager.getProgramByPath(programPath);
-            if (program == null) {
-                return createErrorResult("Failed to find program: " + programPath);
+            Program program;
+            try {
+                program = getValidatedProgram(programPath);
+            } catch (IllegalArgumentException | IllegalStateException e) {
+                return createErrorResult(e.getMessage());
             }
 
             Address address = AddressUtil.resolveAddressOrSymbol(program, addressStr);
@@ -340,9 +346,11 @@ public class CommentToolProvider extends AbstractToolProvider {
             List<String> commentTypes = (List<String>) args.get("commentTypes");
             int maxResults = getOptionalInt(args, "maxResults", 100);
 
-            Program program = RevaProgramManager.getProgramByPath(programPath);
-            if (program == null) {
-                return createErrorResult("Failed to find program: " + programPath);
+            Program program;
+            try {
+                program = getValidatedProgram(programPath);
+            } catch (IllegalArgumentException | IllegalStateException e) {
+                return createErrorResult(e.getMessage());
             }
 
             List<Integer> types = new ArrayList<>();

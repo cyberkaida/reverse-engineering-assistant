@@ -77,7 +77,7 @@ public class CommentToolProvider extends AbstractToolProvider {
         properties.put("programPath", SchemaUtil.stringProperty("Path to the program in the Ghidra Project"));
         properties.put("address", SchemaUtil.stringProperty("Address or symbol name where to set the comment"));
         properties.put("commentType", SchemaUtil.stringPropertyWithDefault(
-            "Type of comment: 'pre', 'eol', 'post', 'plate', or 'repeatable'", "plate"));
+            "Type of comment: 'pre', 'eol', 'post', 'plate', or 'repeatable'", "pre"));
         properties.put("comment", SchemaUtil.stringProperty("The comment text to set"));
 
         List<String> required = List.of("programPath", "address", "comment");

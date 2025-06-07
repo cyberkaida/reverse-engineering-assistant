@@ -881,7 +881,7 @@ public class DecompilerToolProvider extends AbstractToolProvider {
      * @return Map containing synchronized content
      */
     private Map<String, Object> getSynchronizedContent(Program program, ClangTokenGroup markup,
-            String fullDecompCode, int offset, Integer limit, boolean includeDisassembly, 
+            String fullDecompCode, int offset, Integer limit, boolean includeDisassembly,
             boolean includeComments, Function function) {
         Map<String, Object> result = new HashMap<>();
 
@@ -917,7 +917,7 @@ public class DecompilerToolProvider extends AbstractToolProvider {
                     // Find corresponding assembly instructions
                     List<String> assemblyLines = getAssemblyForDecompLine(program, clangLines, lineNumber);
                     lineInfo.put("assembly", assemblyLines);
-                    
+
                     // Include comments if requested
                     if (includeComments) {
                         List<Map<String, Object>> lineComments = getCommentsForDecompLine(
@@ -939,7 +939,7 @@ public class DecompilerToolProvider extends AbstractToolProvider {
                     rangedDecomp.append(String.format("%4d\t%s\n", i + 1, decompLines[i]));
                 }
                 result.put("decompilation", rangedDecomp.toString());
-                
+
                 // Include all comments for the function if requested
                 if (includeComments) {
                     List<Map<String, Object>> functionComments = getAllCommentsInFunction(program, function);
@@ -1153,7 +1153,7 @@ public class DecompilerToolProvider extends AbstractToolProvider {
      */
     private List<Map<String, Object>> getCommentsForDecompLine(Program program, List<ClangLine> clangLines, int lineNumber) {
         List<Map<String, Object>> comments = new ArrayList<>();
-        
+
         try {
             // Find the ClangLine for this line number
             ClangLine targetLine = null;
@@ -1163,11 +1163,11 @@ public class DecompilerToolProvider extends AbstractToolProvider {
                     break;
                 }
             }
-            
+
             if (targetLine != null) {
                 // Get all tokens on this line
                 List<ClangToken> tokens = targetLine.getAllTokens();
-                
+
                 // Find addresses associated with tokens on this line
                 Set<Address> lineAddresses = new HashSet<>();
                 for (ClangToken token : tokens) {
@@ -1176,25 +1176,29 @@ public class DecompilerToolProvider extends AbstractToolProvider {
                         lineAddresses.add(tokenAddr);
                     }
                 }
-                
+
                 // Get comments at these addresses
                 Listing listing = program.getListing();
+                Map<Integer, String> commentTypes = Map.of(
+                    CodeUnit.PRE_COMMENT, "pre",
+                    CodeUnit.EOL_COMMENT, "eol",
+                    CodeUnit.POST_COMMENT, "post",
+                    CodeUnit.PLATE_COMMENT, "plate",
+                    CodeUnit.REPEATABLE_COMMENT, "repeatable"
+                );
                 for (Address addr : lineAddresses) {
                     CodeUnit cu = listing.getCodeUnitAt(addr);
                     if (cu != null) {
-                        // Check all comment types
-                        addCommentIfExists(comments, cu, CodeUnit.PRE_COMMENT, "pre", addr);
-                        addCommentIfExists(comments, cu, CodeUnit.EOL_COMMENT, "eol", addr);
-                        addCommentIfExists(comments, cu, CodeUnit.POST_COMMENT, "post", addr);
-                        addCommentIfExists(comments, cu, CodeUnit.PLATE_COMMENT, "plate", addr);
-                        addCommentIfExists(comments, cu, CodeUnit.REPEATABLE_COMMENT, "repeatable", addr);
+                        for (Map.Entry<Integer, String> entry : commentTypes.entrySet()) {
+                            addCommentIfExists(comments, cu, entry.getKey(), entry.getValue(), addr);
+                        }
                     }
                 }
             }
         } catch (Exception e) {
             logError("Error getting comments for decompilation line", e);
         }
-        
+
         return comments;
     }
 
@@ -1206,27 +1210,32 @@ public class DecompilerToolProvider extends AbstractToolProvider {
      */
     private List<Map<String, Object>> getAllCommentsInFunction(Program program, Function function) {
         List<Map<String, Object>> comments = new ArrayList<>();
-        
+
         try {
             Listing listing = program.getListing();
             AddressSetView body = function.getBody();
-            
+
             CodeUnitIterator codeUnits = listing.getCodeUnits(body, true);
+            Map<Integer, String> commentTypes = Map.of(
+                CodeUnit.PRE_COMMENT, "pre",
+                CodeUnit.EOL_COMMENT, "eol",
+                CodeUnit.POST_COMMENT, "post",
+                CodeUnit.PLATE_COMMENT, "plate",
+                CodeUnit.REPEATABLE_COMMENT, "repeatable"
+            );
             while (codeUnits.hasNext()) {
                 CodeUnit cu = codeUnits.next();
                 Address addr = cu.getAddress();
-                
+
                 // Check all comment types
-                addCommentIfExists(comments, cu, CodeUnit.PRE_COMMENT, "pre", addr);
-                addCommentIfExists(comments, cu, CodeUnit.EOL_COMMENT, "eol", addr);
-                addCommentIfExists(comments, cu, CodeUnit.POST_COMMENT, "post", addr);
-                addCommentIfExists(comments, cu, CodeUnit.PLATE_COMMENT, "plate", addr);
-                addCommentIfExists(comments, cu, CodeUnit.REPEATABLE_COMMENT, "repeatable", addr);
+                for (Map.Entry<Integer, String> entry : commentTypes.entrySet()) {
+                    addCommentIfExists(comments, cu, entry.getKey(), entry.getValue(), addr);
+                }
             }
         } catch (Exception e) {
             logError("Error getting all comments in function", e);
         }
-        
+
         return comments;
     }
 
@@ -1238,7 +1247,7 @@ public class DecompilerToolProvider extends AbstractToolProvider {
      * @param typeString The comment type string
      * @param address The address
      */
-    private void addCommentIfExists(List<Map<String, Object>> comments, CodeUnit cu, 
+    private void addCommentIfExists(List<Map<String, Object>> comments, CodeUnit cu,
             int commentType, String typeString, Address address) {
         String comment = cu.getComment(commentType);
         if (comment != null && !comment.isEmpty()) {
@@ -1304,7 +1313,7 @@ public class DecompilerToolProvider extends AbstractToolProvider {
             } else if ("eol".equals(commentTypeStr)) {
                 commentType = CodeUnit.EOL_COMMENT;
             } else {
-                return createErrorResult("Invalid comment type: " + commentTypeStr + 
+                return createErrorResult("Invalid comment type: " + commentTypeStr +
                     ". Must be 'pre' or 'eol' for decompilation comments.");
             }
 
@@ -1388,7 +1397,7 @@ public class DecompilerToolProvider extends AbstractToolProvider {
                 for (ClangLine clangLine : clangLines) {
                     if (clangLine.getLineNumber() == lineNumber) {
                         List<ClangToken> tokens = clangLine.getAllTokens();
-                        
+
                         // Find the first address on this line
                         for (ClangToken token : tokens) {
                             Address tokenAddr = token.getMinAddress();
@@ -1397,7 +1406,7 @@ public class DecompilerToolProvider extends AbstractToolProvider {
                                 break;
                             }
                         }
-                        
+
                         // If no direct address, find closest
                         if (targetAddress == null && !tokens.isEmpty()) {
                             targetAddress = DecompilerUtils.getClosestAddress(program, tokens.get(0));
@@ -1407,7 +1416,7 @@ public class DecompilerToolProvider extends AbstractToolProvider {
                 }
 
                 if (targetAddress == null) {
-                    return createErrorResult("Could not find an address for line " + lineNumber + 
+                    return createErrorResult("Could not find an address for line " + lineNumber +
                         " in decompiled function. The line may not correspond to any actual code.");
                 }
 
@@ -1416,7 +1425,7 @@ public class DecompilerToolProvider extends AbstractToolProvider {
                 try {
                     Listing listing = program.getListing();
                     listing.setComment(targetAddress, commentType, comment);
-                    
+
                     Map<String, Object> result = new HashMap<>();
                     result.put("success", true);
                     result.put("functionName", function.getName());
@@ -1424,7 +1433,7 @@ public class DecompilerToolProvider extends AbstractToolProvider {
                     result.put("address", targetAddress.toString());
                     result.put("commentType", commentTypeStr);
                     result.put("comment", comment);
-                    
+
                     program.endTransaction(transactionId, true);
                     return createJsonResult(result);
                 } catch (Exception e) {

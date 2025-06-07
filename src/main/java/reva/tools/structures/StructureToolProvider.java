@@ -537,7 +537,7 @@ public class StructureToolProvider extends AbstractToolProvider {
         Map<String, Object> properties = new HashMap<>();
         properties.put("programPath", SchemaUtil.createStringProperty("Path of the program"));
         properties.put("structureName", SchemaUtil.createStringProperty("Name of the structure"));
-        properties.put("address", SchemaUtil.createStringProperty("Address to apply structure"));
+        properties.put("address", SchemaUtil.createStringProperty("Address or symbol name to apply structure"));
         properties.put("clearExisting", SchemaUtil.createOptionalBooleanProperty("Clear existing data"));
         
         List<String> required = new ArrayList<>();
@@ -563,9 +563,9 @@ public class StructureToolProvider extends AbstractToolProvider {
                     return createErrorResult("Program not found: " + programPath);
                 }
 
-                Address address = AddressUtil.parseAddress(program, addressStr);
+                Address address = AddressUtil.resolveAddressOrSymbol(program, addressStr);
                 if (address == null) {
-                    return createErrorResult("Invalid address: " + addressStr);
+                    return createErrorResult("Invalid address or symbol: " + addressStr);
                 }
 
                 DataTypeManager dtm = program.getDataTypeManager();

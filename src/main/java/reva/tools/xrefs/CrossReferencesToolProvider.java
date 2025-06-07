@@ -33,6 +33,7 @@ import io.modelcontextprotocol.spec.McpError;
 import io.modelcontextprotocol.spec.McpSchema;
 import reva.plugin.RevaProgramManager;
 import reva.tools.AbstractToolProvider;
+import reva.util.AddressUtil;
 
 /**
  * Tool provider for cross-reference operations.
@@ -67,7 +68,7 @@ public class CrossReferencesToolProvider extends AbstractToolProvider {
         ));
         properties.put("address", Map.of(
             "type", "string",
-            "description", "Address to get references to and from (e.g., '0x00400123')"
+            "description", "Address or symbol name to get references to and from (e.g., '0x00400123' or 'main')"
         ));
         properties.put("includeFlow", Map.of(
             "type", "boolean",
@@ -119,10 +120,10 @@ public class CrossReferencesToolProvider extends AbstractToolProvider {
                 return createErrorResult("No address provided");
             }
 
-            // Parse the address
-            Address address = program.getAddressFactory().getAddress(addressString);
+            // Parse the address or symbol
+            Address address = AddressUtil.resolveAddressOrSymbol(program, addressString);
             if (address == null) {
-                return createErrorResult("Invalid address: " + addressString);
+                return createErrorResult("Invalid address or symbol: " + addressString);
             }
 
             // Get filters

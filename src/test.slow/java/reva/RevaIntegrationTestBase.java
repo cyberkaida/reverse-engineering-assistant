@@ -278,7 +278,7 @@ public abstract class RevaIntegrationTestBase extends AbstractGhidraHeadedIntegr
      * @throws Exception if the tool call fails
      */
     protected String callMcpTool(String toolName, Map<String, Object> arguments) throws Exception {
-        return withMcpClient(createMcpTransport(), client -> {
+        return withMcpClient(createMcpTransport(), (McpClientFunction<String>) client -> {
             client.initialize();
             CallToolResult result = client.callTool(new CallToolRequest(toolName, arguments));
 
@@ -343,7 +343,7 @@ public abstract class RevaIntegrationTestBase extends AbstractGhidraHeadedIntegr
         } catch (Exception e) {
         }
 
-        return withMcpClient(createMcpTransport(), client -> {
+        return withMcpClient(createMcpTransport(), (McpClientFunction<ListToolsResult>) client -> {
             try {
                 client.initialize();
             } catch (Exception e) {

@@ -19,6 +19,7 @@ import static org.junit.Assert.*;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.function.Consumer;
 
 import org.junit.Before;
 import org.junit.Test;
@@ -29,10 +30,9 @@ import ghidra.program.model.address.Address;
 import ghidra.program.model.data.StringDataType;
 import ghidra.program.model.data.TerminatedStringDataType;
 import ghidra.program.model.listing.Listing;
+import io.modelcontextprotocol.client.McpSyncClient;
 import io.modelcontextprotocol.spec.McpSchema.CallToolRequest;
 import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
-import io.modelcontextprotocol.spec.McpSchema.ListToolsResult;
-import io.modelcontextprotocol.spec.McpSchema.Tool;
 import io.modelcontextprotocol.spec.McpSchema.TextContent;
 
 import reva.RevaIntegrationTestBase;
@@ -105,7 +105,7 @@ public class StringToolProviderIntegrationTest extends RevaIntegrationTestBase {
 
     @Test
     public void testGetStringsCountWithValidProgram() throws Exception {
-        withMcpClient(createMcpTransport(), client -> {
+        withMcpClient(createMcpTransport(), (Consumer<McpSyncClient>) client -> {
             client.initialize();
 
             Map<String, Object> arguments = new HashMap<>();
@@ -132,7 +132,7 @@ public class StringToolProviderIntegrationTest extends RevaIntegrationTestBase {
 
     @Test
     public void testGetStringsWithValidProgram() throws Exception {
-        withMcpClient(createMcpTransport(), client -> {
+        withMcpClient(createMcpTransport(), (Consumer<McpSyncClient>) client -> {
             client.initialize();
 
             Map<String, Object> arguments = new HashMap<>();
@@ -209,7 +209,7 @@ public class StringToolProviderIntegrationTest extends RevaIntegrationTestBase {
 
     @Test
     public void testGetStringsWithPagination() throws Exception {
-        withMcpClient(createMcpTransport(), client -> {
+        withMcpClient(createMcpTransport(), (Consumer<McpSyncClient>) client -> {
             client.initialize();
 
             // First, get strings count
@@ -257,7 +257,7 @@ public class StringToolProviderIntegrationTest extends RevaIntegrationTestBase {
 
     @Test
     public void testGetStringsWithDefaultParameters() throws Exception {
-        withMcpClient(createMcpTransport(), client -> {
+        withMcpClient(createMcpTransport(), (Consumer<McpSyncClient>) client -> {
             client.initialize();
 
             // Test with only programPath (should use default startIndex=0, maxCount=100)
@@ -328,7 +328,7 @@ public class StringToolProviderIntegrationTest extends RevaIntegrationTestBase {
 
     @Test
     public void testSearchStringsRegexWithValidPattern() throws Exception {
-        withMcpClient(createMcpTransport(), client -> {
+        withMcpClient(createMcpTransport(), (Consumer<McpSyncClient>) client -> {
             client.initialize();
 
             // Search for strings containing "String"
@@ -378,7 +378,7 @@ public class StringToolProviderIntegrationTest extends RevaIntegrationTestBase {
 
     @Test
     public void testSearchStringsRegexWithExactMatch() throws Exception {
-        withMcpClient(createMcpTransport(), client -> {
+        withMcpClient(createMcpTransport(), (Consumer<McpSyncClient>) client -> {
             client.initialize();
 
             // Search for exact match of "Hello World"
@@ -412,7 +412,7 @@ public class StringToolProviderIntegrationTest extends RevaIntegrationTestBase {
 
     @Test
     public void testSearchStringsRegexWithNoMatches() throws Exception {
-        withMcpClient(createMcpTransport(), client -> {
+        withMcpClient(createMcpTransport(), (Consumer<McpSyncClient>) client -> {
             client.initialize();
 
             // Search for pattern that won't match anything
@@ -437,7 +437,7 @@ public class StringToolProviderIntegrationTest extends RevaIntegrationTestBase {
 
     @Test
     public void testSearchStringsRegexWithInvalidPattern() throws Exception {
-        withMcpClient(createMcpTransport(), client -> {
+        withMcpClient(createMcpTransport(), (Consumer<McpSyncClient>) client -> {
             client.initialize();
 
             // Invalid regex pattern
@@ -460,7 +460,7 @@ public class StringToolProviderIntegrationTest extends RevaIntegrationTestBase {
 
     @Test
     public void testSearchStringsRegexWithPagination() throws Exception {
-        withMcpClient(createMcpTransport(), client -> {
+        withMcpClient(createMcpTransport(), (Consumer<McpSyncClient>) client -> {
             client.initialize();
 
             // Search with pagination - get only 1 result at a time

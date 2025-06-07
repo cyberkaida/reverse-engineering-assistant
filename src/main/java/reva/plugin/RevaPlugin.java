@@ -25,25 +25,25 @@ import ghidra.framework.plugintool.util.PluginStatus;
 import ghidra.program.model.listing.Program;
 import ghidra.util.Msg;
 
-import reva.server.McpServerManager;
+import reva.services.RevaMcpService;
 import reva.ui.RevaProvider;
 import reva.util.RevaInternalServiceRegistry;
 
 /**
- * ReVa (Reverse Engineering Assistant) plugin for Ghidra.
- * The main plugin class that initializes all components and
- * provides a Model Context Protocol server for interacting with Ghidra.
+ * ReVa (Reverse Engineering Assistant) tool plugin for Ghidra.
+ * This tool-level plugin connects to the application-level MCP server
+ * and handles program lifecycle events for this specific tool.
  */
 @PluginInfo(
     status = PluginStatus.STABLE,
     packageName = "ReVa",
     category = PluginCategoryNames.ANALYSIS,
-    shortDescription = "Reverse Engineering Assistant",
-    description = "Provides a Model Context Protocol server for interacting with Ghidra"
+    shortDescription = "Reverse Engineering Assistant (Tool)",
+    description = "Tool-level ReVa plugin that connects to the application-level MCP server"
 )
 public class RevaPlugin extends ProgramPlugin {
     private RevaProvider provider;
-    private McpServerManager serverManager;
+    private RevaMcpService mcpService;
 
     /**
      * Plugin constructor.
@@ -51,26 +51,36 @@ public class RevaPlugin extends ProgramPlugin {
      */
     public RevaPlugin(PluginTool tool) {
         super(tool);
-        Msg.info(this, "ReVa initializing...");
+        Msg.info(this, "ReVa Tool Plugin initializing...");
 
         // Register this plugin in the service registry so components can access it
         RevaInternalServiceRegistry.registerService(RevaPlugin.class, this);
-
-        // Initialize the MCP server (singleton)
-        serverManager = McpServerManager.getInstance(tool);
     }
 
     @Override
     public void init() {
         super.init();
 
+        // Get the MCP service from the application plugin
+        mcpService = tool.getService(RevaMcpService.class);
+        
+        // Fallback for testing environments where ApplicationLevelPlugin isn't available
+        if (mcpService == null) {
+            mcpService = RevaInternalServiceRegistry.getService(RevaMcpService.class);
+        }
+        
+        if (mcpService == null) {
+            Msg.error(this, "RevaMcpService not available - RevaApplicationPlugin may not be loaded and no fallback service found");
+            return;
+        }
+
+        // Register this tool with the MCP server
+        mcpService.registerTool(tool);
+
         // Create the UI provider
         provider = new RevaProvider(this, getName());
 
-        // Start the server
-        serverManager.startServer();
-
-        Msg.info(this, "ReVa initialization complete");
+        Msg.info(this, "ReVa Tool Plugin initialization complete - connected to application-level MCP server");
     }
 
     @Override
@@ -78,8 +88,10 @@ public class RevaPlugin extends ProgramPlugin {
         Msg.info(this, "Program opened: " + program.getName());
         // Notify the program manager to handle cache management
         RevaProgramManager.programOpened(program);
-        if (serverManager != null) {
-            serverManager.programOpened(program);
+        
+        // Notify the MCP service about the program opening in this tool
+        if (mcpService != null) {
+            mcpService.programOpened(program, tool);
         }
     }
 
@@ -88,20 +100,22 @@ public class RevaPlugin extends ProgramPlugin {
         Msg.info(this, "Program closed: " + program.getName());
         // Notify the program manager to clear stale cache
         RevaProgramManager.programClosed(program);
-        if (serverManager != null) {
-            serverManager.programClosed(program);
+        
+        // Notify the MCP service about the program closing in this tool
+        if (mcpService != null) {
+            mcpService.programClosed(program, tool);
         }
     }
 
     @Override
     protected void cleanup() {
-        // Clean up all registered services
-        if (serverManager != null) {
-            serverManager.shutdown();
+        // Unregister this tool from the MCP service
+        if (mcpService != null) {
+            mcpService.unregisterTool(tool);
         }
 
-        // Clean up the service registry
-        RevaInternalServiceRegistry.clearAllServices();
+        // Only clear tool-specific services, not the application-level ones
+        RevaInternalServiceRegistry.unregisterService(RevaPlugin.class);
 
         super.cleanup();
     }
@@ -112,5 +126,13 @@ public class RevaPlugin extends ProgramPlugin {
      */
     public List<Program> getOpenPrograms() {
         return RevaProgramManager.getOpenPrograms();
+    }
+
+    /**
+     * Get the MCP service instance
+     * @return The MCP service, or null if not available
+     */
+    public RevaMcpService getMcpService() {
+        return mcpService;
     }
 }

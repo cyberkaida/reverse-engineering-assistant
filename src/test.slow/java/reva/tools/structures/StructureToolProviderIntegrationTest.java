@@ -60,7 +60,7 @@ public class StructureToolProviderIntegrationTest extends RevaIntegrationTestBas
         
         // Register the program with the server manager so it can be found by the tools
         if (serverManager != null) {
-            serverManager.programOpened(program);
+            serverManager.programOpened(program, tool);
         }
     }
 

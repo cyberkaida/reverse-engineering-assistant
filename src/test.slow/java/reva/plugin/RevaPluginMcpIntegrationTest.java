@@ -195,7 +195,7 @@ public class RevaPluginMcpIntegrationTest extends RevaIntegrationTestBase {
             programManager.openProgram(program);
         }
         if (serverManager != null) {
-            serverManager.programOpened(program);
+            serverManager.programOpened(program, tool);
         }
 
         // Test 1: Verify basic tool call works
@@ -209,14 +209,14 @@ public class RevaPluginMcpIntegrationTest extends RevaIntegrationTestBase {
 
         // Test 2: Simulate program change by closing and reopening
         if (serverManager != null) {
-            serverManager.programClosed(program);
+            serverManager.programClosed(program, tool);
         }
         programManager.closeProgram(program, false);
         
         // Reopen the program
         programManager.openProgram(program);
         if (serverManager != null) {
-            serverManager.programOpened(program);
+            serverManager.programOpened(program, tool);
         }
 
         // Test 3: Verify tool still works after program change

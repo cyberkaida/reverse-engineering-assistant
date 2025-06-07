@@ -48,6 +48,8 @@ import reva.tools.strings.StringToolProvider;
 import reva.tools.structures.StructureToolProvider;
 import reva.tools.symbols.SymbolToolProvider;
 import reva.tools.xrefs.CrossReferencesToolProvider;
+import reva.tools.comments.CommentToolProvider;
+import reva.tools.bookmarks.BookmarkToolProvider;
 import reva.util.ConfigManager;
 import reva.util.RevaInternalServiceRegistry;
 
@@ -165,6 +167,8 @@ public class McpServerManager {
         toolProviders.add(new CrossReferencesToolProvider(server));
         toolProviders.add(new DataTypeToolProvider(server));
         toolProviders.add(new StructureToolProvider(server));
+        toolProviders.add(new CommentToolProvider(server));
+        toolProviders.add(new BookmarkToolProvider(server));
 
         // Register all tools with the server
         for (ToolProvider provider : toolProviders) {

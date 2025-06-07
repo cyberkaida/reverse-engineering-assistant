@@ -17,9 +17,11 @@ package reva.tools.decompiler;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
@@ -34,6 +36,8 @@ import ghidra.app.decompiler.ClangToken;
 import ghidra.app.decompiler.component.DecompilerUtils;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.address.AddressSetView;
+import ghidra.program.model.listing.CodeUnit;
+import ghidra.program.model.listing.CodeUnitIterator;
 import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.FunctionIterator;
 import ghidra.program.model.listing.FunctionManager;
@@ -81,6 +85,7 @@ public class DecompilerToolProvider extends AbstractToolProvider {
         registerSearchDecompilationTool();
         registerRenameVariablesTool();
         registerChangeVariableDataTypesTool();
+        registerSetDecompilationCommentTool();
     }
 
     /**
@@ -113,6 +118,11 @@ public class DecompilerToolProvider extends AbstractToolProvider {
             "description", "Whether to include assembly listing alongside decompilation for sync",
             "default", false
         ));
+        properties.put("includeComments", Map.of(
+            "type", "boolean",
+            "description", "Whether to include comments in the decompilation output",
+            "default", false
+        ));
 
         List<String> required = List.of("programPath", "functionNameOrAddress");
 
@@ -131,6 +141,7 @@ public class DecompilerToolProvider extends AbstractToolProvider {
             int offset = args.containsKey("offset") ? ((Number) args.get("offset")).intValue() : 1;
             Integer limit = args.containsKey("limit") ? ((Number) args.get("limit")).intValue() : 50; // Default to 50 lines for context conservation
             boolean includeDisassembly = args.containsKey("includeDisassembly") ? (Boolean) args.get("includeDisassembly") : false;
+            boolean includeComments = args.containsKey("includeComments") ? (Boolean) args.get("includeComments") : false;
 
             if (programPath == null) {
                 return createErrorResult("No program path provided");
@@ -250,9 +261,9 @@ public class DecompilerToolProvider extends AbstractToolProvider {
                         DecompiledFunction decompiledFunction = decompileResults.getDecompiledFunction();
                         ClangTokenGroup markup = decompileResults.getCCodeMarkup();
 
-                        // Get synchronized decompilation with optional assembly listing
+                        // Get synchronized decompilation with optional assembly listing and comments
                         Map<String, Object> syncedContent = getSynchronizedContent(program, markup, decompiledFunction.getC(),
-                            offset, limit, includeDisassembly);
+                            offset, limit, includeDisassembly, includeComments, function);
 
                         // Add content to results
                         resultData.putAll(syncedContent);
@@ -858,17 +869,20 @@ public class DecompilerToolProvider extends AbstractToolProvider {
     }
 
     /**
-     * Get synchronized decompilation content with optional assembly listing
+     * Get synchronized decompilation content with optional assembly listing and comments
      * @param program The program
      * @param markup The Clang token markup from decompilation
      * @param fullDecompCode The full decompiled C code
      * @param offset Line number to start from (1-based)
      * @param limit Number of lines to return (null for all)
      * @param includeDisassembly Whether to include synchronized assembly
+     * @param includeComments Whether to include comments
+     * @param function The function being decompiled
      * @return Map containing synchronized content
      */
     private Map<String, Object> getSynchronizedContent(Program program, ClangTokenGroup markup,
-            String fullDecompCode, int offset, Integer limit, boolean includeDisassembly) {
+            String fullDecompCode, int offset, Integer limit, boolean includeDisassembly, 
+            boolean includeComments, Function function) {
         Map<String, Object> result = new HashMap<>();
 
         try {
@@ -903,6 +917,15 @@ public class DecompilerToolProvider extends AbstractToolProvider {
                     // Find corresponding assembly instructions
                     List<String> assemblyLines = getAssemblyForDecompLine(program, clangLines, lineNumber);
                     lineInfo.put("assembly", assemblyLines);
+                    
+                    // Include comments if requested
+                    if (includeComments) {
+                        List<Map<String, Object>> lineComments = getCommentsForDecompLine(
+                            program, clangLines, lineNumber);
+                        if (!lineComments.isEmpty()) {
+                            lineInfo.put("comments", lineComments);
+                        }
+                    }
 
                     syncedLines.add(lineInfo);
                 }
@@ -916,6 +939,14 @@ public class DecompilerToolProvider extends AbstractToolProvider {
                     rangedDecomp.append(String.format("%4d\t%s\n", i + 1, decompLines[i]));
                 }
                 result.put("decompilation", rangedDecomp.toString());
+                
+                // Include all comments for the function if requested
+                if (includeComments) {
+                    List<Map<String, Object>> functionComments = getAllCommentsInFunction(program, function);
+                    if (!functionComments.isEmpty()) {
+                        result.put("comments", functionComments);
+                    }
+                }
             }
 
         } catch (Exception e) {
@@ -1111,5 +1142,301 @@ public class DecompilerToolProvider extends AbstractToolProvider {
         // Consider decompilation "read" if it was accessed within the last 30 minutes
         long thirtyMinutesAgo = System.currentTimeMillis() - (30 * 60 * 1000);
         return lastReadTime > thirtyMinutesAgo;
+    }
+
+    /**
+     * Get comments associated with a specific decompilation line
+     * @param program The program
+     * @param clangLines List of ClangLine objects
+     * @param lineNumber The line number (1-based)
+     * @return List of comment objects
+     */
+    private List<Map<String, Object>> getCommentsForDecompLine(Program program, List<ClangLine> clangLines, int lineNumber) {
+        List<Map<String, Object>> comments = new ArrayList<>();
+        
+        try {
+            // Find the ClangLine for this line number
+            ClangLine targetLine = null;
+            for (ClangLine clangLine : clangLines) {
+                if (clangLine.getLineNumber() == lineNumber) {
+                    targetLine = clangLine;
+                    break;
+                }
+            }
+            
+            if (targetLine != null) {
+                // Get all tokens on this line
+                List<ClangToken> tokens = targetLine.getAllTokens();
+                
+                // Find addresses associated with tokens on this line
+                Set<Address> lineAddresses = new HashSet<>();
+                for (ClangToken token : tokens) {
+                    Address tokenAddr = token.getMinAddress();
+                    if (tokenAddr != null) {
+                        lineAddresses.add(tokenAddr);
+                    }
+                }
+                
+                // Get comments at these addresses
+                Listing listing = program.getListing();
+                for (Address addr : lineAddresses) {
+                    CodeUnit cu = listing.getCodeUnitAt(addr);
+                    if (cu != null) {
+                        // Check all comment types
+                        addCommentIfExists(comments, cu, CodeUnit.PRE_COMMENT, "pre", addr);
+                        addCommentIfExists(comments, cu, CodeUnit.EOL_COMMENT, "eol", addr);
+                        addCommentIfExists(comments, cu, CodeUnit.POST_COMMENT, "post", addr);
+                        addCommentIfExists(comments, cu, CodeUnit.PLATE_COMMENT, "plate", addr);
+                        addCommentIfExists(comments, cu, CodeUnit.REPEATABLE_COMMENT, "repeatable", addr);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            logError("Error getting comments for decompilation line", e);
+        }
+        
+        return comments;
+    }
+
+    /**
+     * Get all comments in a function
+     * @param program The program
+     * @param function The function
+     * @return List of comment objects
+     */
+    private List<Map<String, Object>> getAllCommentsInFunction(Program program, Function function) {
+        List<Map<String, Object>> comments = new ArrayList<>();
+        
+        try {
+            Listing listing = program.getListing();
+            AddressSetView body = function.getBody();
+            
+            CodeUnitIterator codeUnits = listing.getCodeUnits(body, true);
+            while (codeUnits.hasNext()) {
+                CodeUnit cu = codeUnits.next();
+                Address addr = cu.getAddress();
+                
+                // Check all comment types
+                addCommentIfExists(comments, cu, CodeUnit.PRE_COMMENT, "pre", addr);
+                addCommentIfExists(comments, cu, CodeUnit.EOL_COMMENT, "eol", addr);
+                addCommentIfExists(comments, cu, CodeUnit.POST_COMMENT, "post", addr);
+                addCommentIfExists(comments, cu, CodeUnit.PLATE_COMMENT, "plate", addr);
+                addCommentIfExists(comments, cu, CodeUnit.REPEATABLE_COMMENT, "repeatable", addr);
+            }
+        } catch (Exception e) {
+            logError("Error getting all comments in function", e);
+        }
+        
+        return comments;
+    }
+
+    /**
+     * Add a comment to the list if it exists
+     * @param comments The comment list to add to
+     * @param cu The code unit
+     * @param commentType The comment type constant
+     * @param typeString The comment type string
+     * @param address The address
+     */
+    private void addCommentIfExists(List<Map<String, Object>> comments, CodeUnit cu, 
+            int commentType, String typeString, Address address) {
+        String comment = cu.getComment(commentType);
+        if (comment != null && !comment.isEmpty()) {
+            Map<String, Object> commentInfo = new HashMap<>();
+            commentInfo.put("address", address.toString());
+            commentInfo.put("type", typeString);
+            commentInfo.put("comment", comment);
+            comments.add(commentInfo);
+        }
+    }
+
+    /**
+     * Register a tool to set a comment from decompilation context
+     * @throws McpError if there's an error registering the tool
+     */
+    private void registerSetDecompilationCommentTool() throws McpError {
+        // Define schema for the tool
+        Map<String, Object> properties = new HashMap<>();
+        properties.put("programPath", Map.of(
+            "type", "string",
+            "description", "Path in the Ghidra Project to the program containing the function"
+        ));
+        properties.put("functionNameOrAddress", Map.of(
+            "type", "string",
+            "description", "Function name, address, or symbol (e.g. 'main', '0x00401000', or 'start')"
+        ));
+        properties.put("lineNumber", Map.of(
+            "type", "integer",
+            "description", "Line number in the decompiled function (1-based)"
+        ));
+        properties.put("commentType", Map.of(
+            "type", "string",
+            "description", "Type of comment: 'pre' or 'eol' (end-of-line)",
+            "default", "eol"
+        ));
+        properties.put("comment", Map.of(
+            "type", "string",
+            "description", "The comment text to set"
+        ));
+
+        List<String> required = List.of("programPath", "functionNameOrAddress", "lineNumber", "comment");
+
+        // Create the tool
+        McpSchema.Tool tool = new McpSchema.Tool(
+            "set-decompilation-comment",
+            "Set a comment at a specific line in decompiled code. The comment will be placed at the address corresponding to the decompilation line.",
+            createSchema(properties, required)
+        );
+
+        // Register the tool with a handler
+        registerTool(tool, (exchange, args) -> {
+            // Get arguments from the request
+            String programPath = getString(args, "programPath");
+            String functionNameOrAddress = getString(args, "functionNameOrAddress");
+            int lineNumber = getInt(args, "lineNumber");
+            String commentTypeStr = getOptionalString(args, "commentType", "eol");
+            String comment = getString(args, "comment");
+
+            // Validate comment type
+            int commentType;
+            if ("pre".equals(commentTypeStr)) {
+                commentType = CodeUnit.PRE_COMMENT;
+            } else if ("eol".equals(commentTypeStr)) {
+                commentType = CodeUnit.EOL_COMMENT;
+            } else {
+                return createErrorResult("Invalid comment type: " + commentTypeStr + 
+                    ". Must be 'pre' or 'eol' for decompilation comments.");
+            }
+
+            // Get the program from the path
+            Program program = RevaProgramManager.getProgramByPath(programPath);
+            if (program == null) {
+                return createErrorResult("Failed to find program: " + programPath);
+            }
+
+            Function function = null;
+
+            // First try to resolve as address or symbol
+            Address address = AddressUtil.resolveAddressOrSymbol(program, functionNameOrAddress);
+            if (address != null) {
+                // Get the containing function for this address
+                function = AddressUtil.getContainingFunction(program, address);
+            }
+
+            // If not found by address, try by function name
+            if (function == null) {
+                FunctionManager functionManager = program.getFunctionManager();
+
+                // First try an exact match
+                FunctionIterator functions = functionManager.getFunctions(true);
+                while (functions.hasNext()) {
+                    Function f = functions.next();
+                    if (f.getName().equals(functionNameOrAddress)) {
+                        function = f;
+                        break;
+                    }
+                }
+
+                // If no exact match, try case-insensitive
+                if (function == null) {
+                    functions = functionManager.getFunctions(true);
+                    while (functions.hasNext()) {
+                        Function f = functions.next();
+                        if (f.getName().equalsIgnoreCase(functionNameOrAddress)) {
+                            function = f;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if (function == null) {
+                return createErrorResult("Function not found: " + functionNameOrAddress);
+            }
+
+            // Validate that the LLM has read the decompilation for this function first
+            String functionKey = programPath + ":" + function.getName();
+            if (!hasReadDecompilation(functionKey)) {
+                return createErrorResult("You must read the decompilation for function '" + function.getName() +
+                    "' using get-decompilation tool before setting comments. This ensures you understand the current state of the code.");
+            }
+
+            // Initialize the decompiler
+            DecompInterface decompiler = new DecompInterface();
+            decompiler.toggleCCode(true);
+            decompiler.toggleSyntaxTree(true);
+            decompiler.setSimplificationStyle("decompile");
+
+            boolean decompInitialized = decompiler.openProgram(program);
+            if (!decompInitialized) {
+                return createErrorResult("Failed to initialize decompiler");
+            }
+
+            try {
+                // Decompile the function
+                DecompileResults decompileResults = decompiler.decompileFunction(function, 0, TaskMonitor.DUMMY);
+                if (!decompileResults.decompileCompleted()) {
+                    return createErrorResult("Decompilation failed: " + decompileResults.getErrorMessage());
+                }
+
+                // Get the decompiled code and markup
+                ClangTokenGroup markup = decompileResults.getCCodeMarkup();
+                List<ClangLine> clangLines = DecompilerUtils.toLines(markup);
+
+                // Find the address for the specified line number
+                Address targetAddress = null;
+                for (ClangLine clangLine : clangLines) {
+                    if (clangLine.getLineNumber() == lineNumber) {
+                        List<ClangToken> tokens = clangLine.getAllTokens();
+                        
+                        // Find the first address on this line
+                        for (ClangToken token : tokens) {
+                            Address tokenAddr = token.getMinAddress();
+                            if (tokenAddr != null) {
+                                targetAddress = tokenAddr;
+                                break;
+                            }
+                        }
+                        
+                        // If no direct address, find closest
+                        if (targetAddress == null && !tokens.isEmpty()) {
+                            targetAddress = DecompilerUtils.getClosestAddress(program, tokens.get(0));
+                        }
+                        break;
+                    }
+                }
+
+                if (targetAddress == null) {
+                    return createErrorResult("Could not find an address for line " + lineNumber + 
+                        " in decompiled function. The line may not correspond to any actual code.");
+                }
+
+                // Set the comment
+                int transactionId = program.startTransaction("Set Decompilation Comment");
+                try {
+                    Listing listing = program.getListing();
+                    listing.setComment(targetAddress, commentType, comment);
+                    
+                    Map<String, Object> result = new HashMap<>();
+                    result.put("success", true);
+                    result.put("functionName", function.getName());
+                    result.put("lineNumber", lineNumber);
+                    result.put("address", targetAddress.toString());
+                    result.put("commentType", commentTypeStr);
+                    result.put("comment", comment);
+                    
+                    program.endTransaction(transactionId, true);
+                    return createJsonResult(result);
+                } catch (Exception e) {
+                    program.endTransaction(transactionId, false);
+                    throw e;
+                }
+            } catch (Exception e) {
+                logError("Error setting decompilation comment", e);
+                return createErrorResult("Failed to set comment: " + e.getMessage());
+            } finally {
+                decompiler.dispose();
+            }
+        });
     }
 }

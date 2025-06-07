@@ -76,6 +76,8 @@ public class RevaPlugin extends ProgramPlugin {
     @Override
     protected void programOpened(Program program) {
         Msg.info(this, "Program opened: " + program.getName());
+        // Notify the program manager to handle cache management
+        RevaProgramManager.programOpened(program);
         if (serverManager != null) {
             serverManager.programOpened(program);
         }
@@ -84,6 +86,8 @@ public class RevaPlugin extends ProgramPlugin {
     @Override
     protected void programClosed(Program program) {
         Msg.info(this, "Program closed: " + program.getName());
+        // Notify the program manager to clear stale cache
+        RevaProgramManager.programClosed(program);
         if (serverManager != null) {
             serverManager.programClosed(program);
         }

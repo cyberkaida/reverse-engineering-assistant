@@ -1,7 +1,6 @@
 # Testing Guidelines
 - Integration tests go in `test.slow`, unit tests in `test`
 - Unit tests should test things that don't require a Ghidra environment
-- When writing integration tests, don't forget to register the test program. Check the other tests if you don't know how to do this.
 - **CRITICAL**: Integration tests should validate actual Ghidra program state changes, not just MCP tool responses
 - Use `Function.getParameters()` and `Function.getAllVariables()` to validate variable changes
 - Use `DataType.isEquivalent()` to compare datatypes before/after changes

@@ -1156,13 +1156,10 @@ public class DecompilerToolProvider extends AbstractToolProvider {
 
         try {
             // Find the ClangLine for this line number
-            ClangLine targetLine = null;
-            for (ClangLine clangLine : clangLines) {
-                if (clangLine.getLineNumber() == lineNumber) {
-                    targetLine = clangLine;
-                    break;
-                }
-            }
+            ClangLine targetLine = clangLines.stream()
+                .filter(clangLine -> clangLine.getLineNumber() == lineNumber)
+                .findFirst()
+                .orElse(null);
 
             if (targetLine != null) {
                 // Get all tokens on this line

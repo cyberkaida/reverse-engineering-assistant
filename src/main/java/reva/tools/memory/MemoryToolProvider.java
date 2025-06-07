@@ -80,10 +80,12 @@ public class MemoryToolProvider extends AbstractToolProvider {
                 return createErrorResult("No program path provided");
             }
 
-            // Get the program from the path
-            Program program = RevaProgramManager.getProgramByPath(programPath);
-            if (program == null) {
-                return createErrorResult("Failed to find Program: " + programPath);
+            // Get and validate the program
+            Program program;
+            try {
+                program = getValidatedProgram(programPath);
+            } catch (IllegalArgumentException | IllegalStateException e) {
+                return createErrorResult(e.getMessage());
             }
 
             // Get the memory from the program
@@ -141,10 +143,12 @@ public class MemoryToolProvider extends AbstractToolProvider {
                 return createErrorResult("No program path provided");
             }
 
-            // Get the program from the path
-            Program program = RevaProgramManager.getProgramByPath(programPath);
-            if (program == null) {
-                return createErrorResult("Failed to find Program: " + programPath);
+            // Get and validate the program
+            Program program;
+            try {
+                program = getValidatedProgram(programPath);
+            } catch (IllegalArgumentException | IllegalStateException e) {
+                return createErrorResult(e.getMessage());
             }
 
             // Get the address from the request

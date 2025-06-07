@@ -109,9 +109,11 @@ public class CrossReferencesToolProvider extends AbstractToolProvider {
             }
 
             // Get the program from the path
-            Program program = RevaProgramManager.getProgramByPath(programPath);
-            if (program == null) {
-                return createErrorResult("Failed to find Program: " + programPath);
+            Program program;
+            try {
+                program = getValidatedProgram(programPath);
+            } catch (IllegalArgumentException | IllegalStateException e) {
+                return createErrorResult(e.getMessage());
             }
 
             // Get the address string
@@ -296,9 +298,11 @@ public class CrossReferencesToolProvider extends AbstractToolProvider {
             }
 
             // Get the program from the path
-            Program program = RevaProgramManager.getProgramByPath(programPath);
-            if (program == null) {
-                return createErrorResult("Failed to find Program: " + programPath);
+            Program program;
+            try {
+                program = getValidatedProgram(programPath);
+            } catch (IllegalArgumentException | IllegalStateException e) {
+                return createErrorResult(e.getMessage());
             }
 
             // Get the symbol name

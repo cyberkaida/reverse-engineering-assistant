@@ -166,6 +166,15 @@ public class RevaProgramManager {
     }
 
     /**
+     * Get the canonical domain path for a program
+     * @param program The program to get the canonical path for
+     * @return The canonical domain path
+     */
+    public static String getCanonicalProgramPath(Program program) {
+        return program.getDomainFile().getPathname();
+    }
+
+    /**
      * Get a program by its path
      * @param programPath Path to the program
      * @return Program object or null if not found
@@ -211,8 +220,9 @@ public class RevaProgramManager {
             String domainPath = program.getDomainFile().getPathname();
             Msg.debug(RevaProgramManager.class, "Comparing '" + programPath + "' with domain path '" + domainPath + "'");
             if (domainPath.equals(programPath)) {
-                // Add to cache for future lookups
-                programCache.put(programPath, program);
+                // Use canonical domain path as cache key for consistency
+                String canonicalPath = getCanonicalProgramPath(program);
+                programCache.put(canonicalPath, program);
                 Msg.debug(RevaProgramManager.class, "Found program by domain path: " + programPath);
                 return program;
             }
@@ -222,8 +232,9 @@ public class RevaProgramManager {
             String programName = program.getName();
             Msg.debug(RevaProgramManager.class, "Also checking executable path '" + executablePath + "' and name '" + programName + "'");
             if (executablePath.equals(programPath) || programName.equals(programPath)) {
-                // Add to cache for future lookups
-                programCache.put(programPath, program);
+                // Use canonical domain path as cache key for consistency
+                String canonicalPath = getCanonicalProgramPath(program);
+                programCache.put(canonicalPath, program);
                 Msg.debug(RevaProgramManager.class, "Found program by executable path or name: " + programPath);
                 return program;
             }
@@ -248,8 +259,9 @@ public class RevaProgramManager {
         Program program = programOpener.openProgram(locator, TaskMonitor.DUMMY);
 
         if (program != null) {
-            // Add to cache for future lookups
-            programCache.put(programPath, program);
+            // Use canonical domain path as cache key for consistency
+            String canonicalPath = getCanonicalProgramPath(program);
+            programCache.put(canonicalPath, program);
         }
 
         return program;

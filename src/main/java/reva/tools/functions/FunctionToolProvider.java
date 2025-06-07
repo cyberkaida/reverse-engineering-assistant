@@ -88,9 +88,11 @@ public class FunctionToolProvider extends AbstractToolProvider {
             }
             
             // Get the program from the path
-            Program program = RevaProgramManager.getProgramByPath(programPath);
-            if (program == null) {
-                return createErrorResult("Failed to find Program: " + programPath);
+            Program program;
+            try {
+                program = getValidatedProgram(programPath);
+            } catch (IllegalArgumentException | IllegalStateException e) {
+                return createErrorResult(e.getMessage());
             }
 
             // Get the filter parameter
@@ -172,9 +174,11 @@ public class FunctionToolProvider extends AbstractToolProvider {
                 ((Number) args.get("maxCount")).intValue() : 100;
 
             // Get the program from the path
-            Program program = RevaProgramManager.getProgramByPath(programPath);
-            if (program == null) {
-                return createErrorResult("Failed to find Program: " + programPath);
+            Program program;
+            try {
+                program = getValidatedProgram(programPath);
+            } catch (IllegalArgumentException | IllegalStateException e) {
+                return createErrorResult(e.getMessage());
             }
 
             // Get the filter parameter
@@ -288,9 +292,11 @@ public class FunctionToolProvider extends AbstractToolProvider {
                 ((Number) args.get("maxCount")).intValue() : 100;
 
             // Get the program from the path
-            Program program = RevaProgramManager.getProgramByPath(programPath);
-            if (program == null) {
-                return createErrorResult("Failed to find Program: " + programPath);
+            Program program;
+            try {
+                program = getValidatedProgram(programPath);
+            } catch (IllegalArgumentException | IllegalStateException e) {
+                return createErrorResult(e.getMessage());
             }
 
             // Get the filter parameter

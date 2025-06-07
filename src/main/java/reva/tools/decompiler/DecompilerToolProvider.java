@@ -24,6 +24,7 @@ import java.util.Map;
 import ghidra.app.decompiler.DecompInterface;
 import ghidra.app.decompiler.DecompileResults;
 import ghidra.app.decompiler.DecompiledFunction;
+import ghidra.program.model.address.Address;
 import ghidra.program.model.address.AddressSetView;
 import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.FunctionIterator;
@@ -45,6 +46,7 @@ import io.modelcontextprotocol.server.McpSyncServer;
 import io.modelcontextprotocol.spec.McpSchema;
 import reva.plugin.RevaProgramManager;
 import reva.tools.AbstractToolProvider;
+import reva.util.AddressUtil;
 import reva.util.DataTypeParserUtil;
 
 /**
@@ -77,32 +79,32 @@ public class DecompilerToolProvider extends AbstractToolProvider {
             "type", "string",
             "description", "Path in the Ghidra Project to the program containing the function"
         ));
-        properties.put("functionName", Map.of(
+        properties.put("functionNameOrAddress", Map.of(
             "type", "string",
-            "description", "Name of the function to decompile, this should be the name in Ghidra, not the mangled name."
+            "description", "Function name, address, or symbol to decompile (e.g. 'main', '0x00401000', or 'start'). For addresses pointing inside a function, the containing function will be decompiled."
         ));
 
-        List<String> required = List.of("programPath", "functionName");
+        List<String> required = List.of("programPath", "functionNameOrAddress");
 
         // Create the tool
         McpSchema.Tool tool = new McpSchema.Tool(
             "get-decompiled-function",
-            "Get decompiled and disassembled code for a function",
+            "Get decompiled and disassembled code for a function by name, address, or symbol",
             createSchema(properties, required)
         );
 
         // Register the tool with a handler
         registerTool(tool, (exchange, args) -> {
-            // Get the program path and function name from the request
+            // Get the program path and function name/address from the request
             String programPath = (String) args.get("programPath");
-            String functionName = (String) args.get("functionName");
+            String functionNameOrAddress = (String) args.get("functionNameOrAddress");
 
             if (programPath == null) {
                 return createErrorResult("No program path provided");
             }
 
-            if (functionName == null) {
-                return createErrorResult("No function name provided");
+            if (functionNameOrAddress == null) {
+                return createErrorResult("No function name or address provided");
             }
 
             // Get the program from the path
@@ -113,37 +115,55 @@ public class DecompilerToolProvider extends AbstractToolProvider {
 
             Map<String, Object> resultData = new HashMap<>();
             resultData.put("programName", program.getName());
-            resultData.put("functionName", functionName);
-
-            // Get the function by name
-            FunctionManager functionManager = program.getFunctionManager();
+            
             Function function = null;
-
-            // First try an exact match
-            FunctionIterator functions = functionManager.getFunctions(true);
-            while (functions.hasNext()) {
-                Function f = functions.next();
-                if (f.getName().equals(functionName)) {
-                    function = f;
-                    break;
+            
+            // First try to resolve as address or symbol
+            Address address = AddressUtil.resolveAddressOrSymbol(program, functionNameOrAddress);
+            if (address != null) {
+                // Get the containing function for this address
+                function = AddressUtil.getContainingFunction(program, address);
+                if (function != null) {
+                    resultData.put("functionName", function.getName());
+                    resultData.put("resolvedFrom", "address/symbol");
+                    resultData.put("inputAddress", AddressUtil.formatAddress(address));
                 }
             }
-
-            // If no exact match, try case-insensitive
+            
+            // If not found by address, try by function name
             if (function == null) {
-                functions = functionManager.getFunctions(true);
+                FunctionManager functionManager = program.getFunctionManager();
+                
+                // First try an exact match
+                FunctionIterator functions = functionManager.getFunctions(true);
                 while (functions.hasNext()) {
                     Function f = functions.next();
-                    if (f.getName().equalsIgnoreCase(functionName)) {
+                    if (f.getName().equals(functionNameOrAddress)) {
                         function = f;
+                        resultData.put("functionName", function.getName());
+                        resultData.put("resolvedFrom", "name-exact");
                         break;
+                    }
+                }
+
+                // If no exact match, try case-insensitive
+                if (function == null) {
+                    functions = functionManager.getFunctions(true);
+                    while (functions.hasNext()) {
+                        Function f = functions.next();
+                        if (f.getName().equalsIgnoreCase(functionNameOrAddress)) {
+                            function = f;
+                            resultData.put("functionName", function.getName());
+                            resultData.put("resolvedFrom", "name-case-insensitive");
+                            break;
+                        }
                     }
                 }
             }
 
             if (function == null) {
-                return createErrorResult("Function not found: " + functionName + " in program " + program.getName() +
-                    ". Check you are not using the mangled name and the namespace is correct.");
+                return createErrorResult("Function not found: " + functionNameOrAddress + " in program " + program.getName() +
+                    ". Tried as address/symbol and function name. Check you are not using the mangled name and the namespace is correct.");
             }
 
             // Add function details
@@ -242,9 +262,9 @@ public class DecompilerToolProvider extends AbstractToolProvider {
             "type", "string",
             "description", "Path in the Ghidra Project to the program containing the function"
         ));
-        properties.put("functionName", Map.of(
+        properties.put("functionNameOrAddress", Map.of(
             "type", "string",
-            "description", "Name of the function to rename variables in"
+            "description", "Function name, address, or symbol to rename variables in (e.g. 'main', '0x00401000', or 'start'). For addresses pointing inside a function, the containing function will be used."
         ));
         properties.put("variableMappings", Map.of(
             "type", "object",
@@ -252,7 +272,7 @@ public class DecompilerToolProvider extends AbstractToolProvider {
             "additionalProperties", Map.of("type", "string")
         ));
 
-        List<String> required = List.of("programPath", "functionName", "variableMappings");
+        List<String> required = List.of("programPath", "functionNameOrAddress", "variableMappings");
 
         // Create the tool
         McpSchema.Tool tool = new McpSchema.Tool(
@@ -265,7 +285,7 @@ public class DecompilerToolProvider extends AbstractToolProvider {
         registerTool(tool, (exchange, args) -> {
             // Get arguments from the request
             String programPath = (String) args.get("programPath");
-            String functionName = (String) args.get("functionName");
+            String functionNameOrAddress = (String) args.get("functionNameOrAddress");
             @SuppressWarnings("unchecked")
             Map<String, String> mappings = (Map<String, String>) args.get("variableMappings");
 
@@ -273,8 +293,8 @@ public class DecompilerToolProvider extends AbstractToolProvider {
             if (programPath == null) {
                 return createErrorResult("No program path provided");
             }
-            if (functionName == null) {
-                return createErrorResult("No function name provided");
+            if (functionNameOrAddress == null) {
+                return createErrorResult("No function name or address provided");
             }
             if (mappings == null || mappings.isEmpty()) {
                 return createErrorResult("No variable mappings provided");
@@ -286,34 +306,45 @@ public class DecompilerToolProvider extends AbstractToolProvider {
                 return createErrorResult("Failed to find program: " + programPath);
             }
 
-            // Get the function by name
-            FunctionManager functionManager = program.getFunctionManager();
             Function function = null;
-
-            // First try an exact match
-            FunctionIterator functions = functionManager.getFunctions(true);
-            while (functions.hasNext()) {
-                Function f = functions.next();
-                if (f.getName().equals(functionName)) {
-                    function = f;
-                    break;
-                }
+            
+            // First try to resolve as address or symbol
+            Address address = AddressUtil.resolveAddressOrSymbol(program, functionNameOrAddress);
+            if (address != null) {
+                // Get the containing function for this address
+                function = AddressUtil.getContainingFunction(program, address);
             }
-
-            // If no exact match, try case-insensitive
+            
+            // If not found by address, try by function name
             if (function == null) {
-                functions = functionManager.getFunctions(true);
+                FunctionManager functionManager = program.getFunctionManager();
+                
+                // First try an exact match
+                FunctionIterator functions = functionManager.getFunctions(true);
                 while (functions.hasNext()) {
                     Function f = functions.next();
-                    if (f.getName().equalsIgnoreCase(functionName)) {
+                    if (f.getName().equals(functionNameOrAddress)) {
                         function = f;
                         break;
+                    }
+                }
+
+                // If no exact match, try case-insensitive
+                if (function == null) {
+                    functions = functionManager.getFunctions(true);
+                    while (functions.hasNext()) {
+                        Function f = functions.next();
+                        if (f.getName().equalsIgnoreCase(functionNameOrAddress)) {
+                            function = f;
+                            break;
+                        }
                     }
                 }
             }
 
             if (function == null) {
-                return createErrorResult("Function not found: " + functionName + " in program " + program.getName());
+                return createErrorResult("Function not found: " + functionNameOrAddress + " in program " + program.getName() +
+                    ". Tried as address/symbol and function name. Check you are not using the mangled name and the namespace is correct.");
             }
 
             // Initialize the decompiler
@@ -401,7 +432,7 @@ public class DecompilerToolProvider extends AbstractToolProvider {
             // Now get the updated decompilation
             Map<String, Object> resultData = new HashMap<>();
             resultData.put("programName", program.getName());
-            resultData.put("functionName", functionName);
+            resultData.put("functionName", function.getName());
             resultData.put("address", "0x" + function.getEntryPoint().toString());
             resultData.put("variablesRenamed", true);
 
@@ -446,9 +477,9 @@ public class DecompilerToolProvider extends AbstractToolProvider {
             "type", "string",
             "description", "Path in the Ghidra Project to the program containing the function"
         ));
-        properties.put("functionName", Map.of(
+        properties.put("functionNameOrAddress", Map.of(
             "type", "string",
-            "description", "Name of the function to change variable data types in"
+            "description", "Function name, address, or symbol to change variable data types in (e.g. 'main', '0x00401000', or 'start'). For addresses pointing inside a function, the containing function will be used."
         ));
         properties.put("datatypeMappings", Map.of(
             "type", "object",
@@ -461,7 +492,7 @@ public class DecompilerToolProvider extends AbstractToolProvider {
             "default", ""
         ));
 
-        List<String> required = List.of("programPath", "functionName", "datatypeMappings");
+        List<String> required = List.of("programPath", "functionNameOrAddress", "datatypeMappings");
 
         // Create the tool
         McpSchema.Tool tool = new McpSchema.Tool(
@@ -474,7 +505,7 @@ public class DecompilerToolProvider extends AbstractToolProvider {
         registerTool(tool, (exchange, args) -> {
             // Get arguments from the request
             String programPath = (String) args.get("programPath");
-            String functionName = (String) args.get("functionName");
+            String functionNameOrAddress = (String) args.get("functionNameOrAddress");
             @SuppressWarnings("unchecked")
             Map<String, String> mappings = (Map<String, String>) args.get("datatypeMappings");
             String archiveName = args.containsKey("archiveName") ?
@@ -484,8 +515,8 @@ public class DecompilerToolProvider extends AbstractToolProvider {
             if (programPath == null) {
                 return createErrorResult("No program path provided");
             }
-            if (functionName == null) {
-                return createErrorResult("No function name provided");
+            if (functionNameOrAddress == null) {
+                return createErrorResult("No function name or address provided");
             }
             if (mappings == null || mappings.isEmpty()) {
                 return createErrorResult("No datatype mappings provided");
@@ -497,34 +528,45 @@ public class DecompilerToolProvider extends AbstractToolProvider {
                 return createErrorResult("Failed to find program: " + programPath);
             }
 
-            // Get the function by name
-            FunctionManager functionManager = program.getFunctionManager();
             Function function = null;
-
-            // First try an exact match
-            FunctionIterator functions = functionManager.getFunctions(true);
-            while (functions.hasNext()) {
-                Function f = functions.next();
-                if (f.getName().equals(functionName)) {
-                    function = f;
-                    break;
-                }
+            
+            // First try to resolve as address or symbol
+            Address address = AddressUtil.resolveAddressOrSymbol(program, functionNameOrAddress);
+            if (address != null) {
+                // Get the containing function for this address
+                function = AddressUtil.getContainingFunction(program, address);
             }
-
-            // If no exact match, try case-insensitive
+            
+            // If not found by address, try by function name
             if (function == null) {
-                functions = functionManager.getFunctions(true);
+                FunctionManager functionManager = program.getFunctionManager();
+                
+                // First try an exact match
+                FunctionIterator functions = functionManager.getFunctions(true);
                 while (functions.hasNext()) {
                     Function f = functions.next();
-                    if (f.getName().equalsIgnoreCase(functionName)) {
+                    if (f.getName().equals(functionNameOrAddress)) {
                         function = f;
                         break;
+                    }
+                }
+
+                // If no exact match, try case-insensitive
+                if (function == null) {
+                    functions = functionManager.getFunctions(true);
+                    while (functions.hasNext()) {
+                        Function f = functions.next();
+                        if (f.getName().equalsIgnoreCase(functionNameOrAddress)) {
+                            function = f;
+                            break;
+                        }
                     }
                 }
             }
 
             if (function == null) {
-                return createErrorResult("Function not found: " + functionName + " in program " + program.getName());
+                return createErrorResult("Function not found: " + functionNameOrAddress + " in program " + program.getName() +
+                    ". Tried as address/symbol and function name. Check you are not using the mangled name and the namespace is correct.");
             }
 
             // Initialize the decompiler
@@ -638,7 +680,7 @@ public class DecompilerToolProvider extends AbstractToolProvider {
             // Now get the updated decompilation
             Map<String, Object> resultData = new HashMap<>();
             resultData.put("programName", program.getName());
-            resultData.put("functionName", functionName);
+            resultData.put("functionName", function.getName());
             resultData.put("address", "0x" + function.getEntryPoint().toString());
             resultData.put("dataTypesChanged", anyChanged);
             

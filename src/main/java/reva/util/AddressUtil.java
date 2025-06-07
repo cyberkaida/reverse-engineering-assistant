@@ -17,7 +17,13 @@ package reva.util;
 
 import ghidra.program.model.address.Address;
 import ghidra.program.model.address.AddressSpace;
+import ghidra.program.model.listing.Data;
+import ghidra.program.model.listing.Function;
+import ghidra.program.model.listing.Listing;
 import ghidra.program.model.listing.Program;
+import ghidra.program.model.symbol.Symbol;
+import ghidra.program.model.symbol.SymbolTable;
+import java.util.List;
 
 /**
  * Utility functions for working with Ghidra addresses.
@@ -75,5 +81,73 @@ public class AddressUtil {
      */
     public static boolean isValidAddress(Program program, String addressString) {
         return parseAddress(program, addressString) != null;
+    }
+
+    /**
+     * Resolve an address or symbol string to an Address object.
+     * This method first attempts to find a symbol with the given name,
+     * and if not found, falls back to parsing it as an address.
+     * 
+     * @param program The Ghidra program to search in
+     * @param addressOrSymbol The address string (with or without "0x") or symbol name
+     * @return The resolved Address object, or null if neither symbol nor address is valid
+     */
+    public static Address resolveAddressOrSymbol(Program program, String addressOrSymbol) {
+        if (addressOrSymbol == null || addressOrSymbol.trim().isEmpty()) {
+            return null;
+        }
+
+        String input = addressOrSymbol.trim();
+        
+        // First, try to find it as a symbol
+        SymbolTable symbolTable = program.getSymbolTable();
+        List<Symbol> symbols = symbolTable.getLabelOrFunctionSymbols(input, null);
+        
+        if (!symbols.isEmpty()) {
+            // Return the address of the first matching symbol
+            return symbols.get(0).getAddress();
+        }
+        
+        // If not found as a symbol, try to parse as an address
+        return parseAddress(program, input);
+    }
+
+    /**
+     * Get the function containing the given address.
+     * 
+     * @param program The Ghidra program
+     * @param address The address to check
+     * @return The containing function, or null if the address is not within a function
+     */
+    public static Function getContainingFunction(Program program, Address address) {
+        if (program == null || address == null) {
+            return null;
+        }
+        
+        return program.getFunctionManager().getFunctionContaining(address);
+    }
+
+    /**
+     * Get the data item containing or starting at the given address.
+     * 
+     * @param program The Ghidra program
+     * @param address The address to check
+     * @return The data at or containing the address, or null if no data exists there
+     */
+    public static Data getContainingData(Program program, Address address) {
+        if (program == null || address == null) {
+            return null;
+        }
+        
+        Listing listing = program.getListing();
+        
+        // First check if there's data exactly at this address
+        Data data = listing.getDataAt(address);
+        if (data != null) {
+            return data;
+        }
+        
+        // If not, check if this address is within a larger data structure
+        return listing.getDataContaining(address);
     }
 }

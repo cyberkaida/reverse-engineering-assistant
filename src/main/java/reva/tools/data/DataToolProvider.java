@@ -38,6 +38,7 @@ import io.modelcontextprotocol.spec.McpSchema.Content;
 import io.modelcontextprotocol.spec.McpSchema.TextContent;
 import reva.plugin.RevaProgramManager;
 import reva.tools.AbstractToolProvider;
+import reva.util.AddressUtil;
 import reva.util.DataTypeParserUtil;
 
 /**
@@ -73,7 +74,7 @@ public class DataToolProvider extends AbstractToolProvider {
         ));
         properties.put("address", Map.of(
             "type", "string",
-            "description", "Address to get data from (e.g., '0x00400000')"
+            "description", "Address or symbol name to get data from (e.g., '0x00400000' or 'main')"
         ));
 
         List<String> required = List.of("programPath", "address");
@@ -104,15 +105,10 @@ public class DataToolProvider extends AbstractToolProvider {
                 return createErrorResult("Failed to find Program: " + programPath);
             }
 
-            // Parse the address
-            Address address;
-            if (addressString.toLowerCase().startsWith("0x")) {
-                addressString = addressString.substring(2);
-            }
-            try {
-                address = program.getAddressFactory().getAddress(addressString);
-            } catch (Exception e) {
-                return createErrorResult("Invalid address format: " + addressString);
+            // Parse the address or symbol
+            Address address = AddressUtil.resolveAddressOrSymbol(program, addressString);
+            if (address == null) {
+                return createErrorResult("Invalid address or symbol: " + addressString);
             }
 
             return getDataAtAddressResult(program, address);
@@ -319,7 +315,7 @@ public class DataToolProvider extends AbstractToolProvider {
         ));
         properties.put("address", Map.of(
             "type", "string",
-            "description", "Address to create label at (e.g., '0x00400000')"
+            "description", "Address or symbol name to create label at (e.g., '0x00400000' or 'main')"
         ));
         properties.put("labelName", Map.of(
             "type", "string",
@@ -365,15 +361,10 @@ public class DataToolProvider extends AbstractToolProvider {
                 return createErrorResult("Failed to find Program: " + programPath);
             }
 
-            // Parse the address
-            Address address;
-            if (addressString.toLowerCase().startsWith("0x")) {
-                addressString = addressString.substring(2);
-            }
-            try {
-                address = program.getAddressFactory().getAddress(addressString);
-            } catch (Exception e) {
-                return createErrorResult("Invalid address format: " + addressString);
+            // Parse the address or symbol
+            Address address = AddressUtil.resolveAddressOrSymbol(program, addressString);
+            if (address == null) {
+                return createErrorResult("Invalid address or symbol: " + addressString);
             }
 
             // Start a transaction to create the label
@@ -426,15 +417,15 @@ public class DataToolProvider extends AbstractToolProvider {
         // Get the listing
         Listing listing = program.getListing();
 
-        // Get data at the address
-        Data data = listing.getDataContaining(address);
+        // Get data at or containing the address
+        Data data = AddressUtil.getContainingData(program, address);
         if (data == null) {
-            return createErrorResult("No data found at address: 0x" + address.toString());
+            return createErrorResult("No data found at address: " + AddressUtil.formatAddress(address));
         }
 
         // Create result data
         Map<String, Object> resultData = new HashMap<>();
-        resultData.put("address", "0x" + data.getAddress().toString());
+        resultData.put("address", AddressUtil.formatAddress(data.getAddress()));
         resultData.put("dataType", data.getDataType().getName());
         resultData.put("length", data.getLength());
 

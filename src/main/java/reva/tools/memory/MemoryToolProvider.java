@@ -30,6 +30,7 @@ import io.modelcontextprotocol.spec.McpError;
 import io.modelcontextprotocol.spec.McpSchema;
 import reva.plugin.RevaProgramManager;
 import reva.tools.AbstractToolProvider;
+import reva.util.AddressUtil;
 import reva.util.MemoryUtil;
 import reva.util.SchemaUtil;
 
@@ -119,7 +120,7 @@ public class MemoryToolProvider extends AbstractToolProvider {
         // Define schema for the tool
         Map<String, Object> properties = new HashMap<>();
         properties.put("programPath", SchemaUtil.stringProperty("Path to the program in the Ghidra Project"));
-        properties.put("address", SchemaUtil.stringProperty("Address to read from (e.g. '00400000')"));
+        properties.put("address", SchemaUtil.stringProperty("Address or symbol name to read from (e.g. '00400000' or 'main')"));
         properties.put("length", SchemaUtil.integerPropertyWithDefault("Number of bytes to read", 16));
         properties.put("format", SchemaUtil.stringPropertyWithDefault("Output format: 'hex', 'bytes', or 'both'", "hex"));
 
@@ -152,12 +153,10 @@ public class MemoryToolProvider extends AbstractToolProvider {
                 return createErrorResult("No address provided");
             }
 
-            // Parse the address
-            Address address;
-            try {
-                address = program.getAddressFactory().getAddress(addressStr);
-            } catch (Exception e) {
-                return createErrorResult("Invalid address: " + addressStr);
+            // Parse the address or symbol
+            Address address = AddressUtil.resolveAddressOrSymbol(program, addressStr);
+            if (address == null) {
+                return createErrorResult("Invalid address or symbol: " + addressStr);
             }
 
             // Get the length from the request

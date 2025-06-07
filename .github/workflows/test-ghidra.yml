@@ -50,8 +50,6 @@ jobs:
       uses: gradle/actions/setup-gradle@v4
       with:
         gradle-version: "8.14"
-        dependency-graph: generate-and-submit
-        dependency-graph-continue-on-failure: true
 
     - name: Build Extension 🔨
       run: gradle buildExtension
@@ -109,15 +107,12 @@ jobs:
         Xvfb :99 -nolisten tcp &
         echo "DISPLAY=:99" >> $GITHUB_ENV
 
-    - name: Cache Gradle dependencies
-      uses: actions/cache@v3
+    - name: Setup Gradle 🔧
+      uses: gradle/actions/setup-gradle@v4
       with:
-        path: |
-          ~/.gradle/caches
-          ~/.gradle/wrapper
-        key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
-        restore-keys: |
-          ${{ runner.os }}-gradle-
+        gradle-version: "8.14"
+        dependency-graph: generate-and-submit
+        dependency-graph-continue-on-failure: true
 
     - name: Check code compilation
       run: gradle compileJava

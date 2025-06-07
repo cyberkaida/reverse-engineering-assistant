@@ -57,6 +57,7 @@ import reva.plugin.RevaProgramManager;
 import reva.tools.AbstractToolProvider;
 import reva.util.AddressUtil;
 import reva.util.DataTypeParserUtil;
+import reva.util.DecompilationDiffUtil;
 
 /**
  * Tool provider for function decompilation operations.
@@ -468,12 +469,15 @@ public class DecompilerToolProvider extends AbstractToolProvider {
                 return createErrorResult("Failed to initialize decompiler");
             }
 
-            // Decompile the function
+            // Decompile the function to get the "before" state
             DecompileResults decompileResults = decompiler.decompileFunction(function, 0, TaskMonitor.DUMMY);
             if (!decompileResults.decompileCompleted()) {
                 decompiler.dispose();
                 return createErrorResult("Decompilation failed: " + decompileResults.getErrorMessage());
             }
+
+            // Capture the original decompilation for diff comparison
+            String beforeDecompilation = decompileResults.getDecompiledFunction().getC();
 
             // Track if we actually renamed any variables
             boolean anyRenamed = false;
@@ -539,7 +543,7 @@ public class DecompilerToolProvider extends AbstractToolProvider {
                 return createErrorResult("No matching variables found to rename");
             }
 
-            // Now get the updated decompilation
+            // Now get the updated decompilation and create diff
             Map<String, Object> resultData = new HashMap<>();
             resultData.put("programName", program.getName());
             resultData.put("functionName", function.getName());
@@ -557,8 +561,15 @@ public class DecompilerToolProvider extends AbstractToolProvider {
                 DecompileResults newResults = newDecompiler.decompileFunction(function, 0, TaskMonitor.DUMMY);
                 if (newResults.decompileCompleted()) {
                     DecompiledFunction decompiledFunction = newResults.getDecompiledFunction();
-                    String decompCode = decompiledFunction.getC();
-                    resultData.put("decompilation", decompCode);
+                    String afterDecompilation = decompiledFunction.getC();
+                    
+                    // Create diff showing only changed parts
+                    DecompilationDiffUtil.DiffResult diff = DecompilationDiffUtil.createDiff(beforeDecompilation, afterDecompilation);
+                    if (diff.hasChanges()) {
+                        resultData.put("changes", DecompilationDiffUtil.toMap(diff));
+                    } else {
+                        resultData.put("changes", Map.of("hasChanges", false, "summary", "No changes detected in decompilation"));
+                    }
                 } else {
                     resultData.put("decompilationError", "Decompilation failed after renaming: " +
                         newResults.getErrorMessage());
@@ -697,12 +708,15 @@ public class DecompilerToolProvider extends AbstractToolProvider {
                 return createErrorResult("Failed to initialize decompiler");
             }
 
-            // Decompile the function
+            // Decompile the function to get the "before" state
             DecompileResults decompileResults = decompiler.decompileFunction(function, 0, TaskMonitor.DUMMY);
             if (!decompileResults.decompileCompleted()) {
                 decompiler.dispose();
                 return createErrorResult("Decompilation failed: " + decompileResults.getErrorMessage());
             }
+
+            // Capture the original decompilation for diff comparison
+            String beforeDecompilation = decompileResults.getDecompiledFunction().getC();
 
             // Track if we actually changed any data types
             boolean anyChanged = false;
@@ -794,7 +808,7 @@ public class DecompilerToolProvider extends AbstractToolProvider {
                 return createErrorResult("No matching variables found to change data types");
             }
 
-            // Now get the updated decompilation
+            // Now get the updated decompilation and create diff
             Map<String, Object> resultData = new HashMap<>();
             resultData.put("programName", program.getName());
             resultData.put("functionName", function.getName());
@@ -816,8 +830,15 @@ public class DecompilerToolProvider extends AbstractToolProvider {
                 DecompileResults newResults = newDecompiler.decompileFunction(function, 0, TaskMonitor.DUMMY);
                 if (newResults.decompileCompleted()) {
                     DecompiledFunction decompiledFunction = newResults.getDecompiledFunction();
-                    String decompCode = decompiledFunction.getC();
-                    resultData.put("decompilation", decompCode);
+                    String afterDecompilation = decompiledFunction.getC();
+                    
+                    // Create diff showing only changed parts
+                    DecompilationDiffUtil.DiffResult diff = DecompilationDiffUtil.createDiff(beforeDecompilation, afterDecompilation);
+                    if (diff.hasChanges()) {
+                        resultData.put("changes", DecompilationDiffUtil.toMap(diff));
+                    } else {
+                        resultData.put("changes", Map.of("hasChanges", false, "summary", "No changes detected in decompilation"));
+                    }
                 } else {
                     resultData.put("decompilationError", "Decompilation failed after changing data types: " +
                         newResults.getErrorMessage());

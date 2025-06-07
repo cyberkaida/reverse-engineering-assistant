@@ -205,15 +205,15 @@ public class DecompilerToolProviderIntegrationTest extends RevaIntegrationTestBa
                 assertTrue("Should have address", changeJson.has("address"));
                 assertTrue("Should have dataTypesChanged flag", changeJson.has("dataTypesChanged"));
 
-                // Should have updated decompilation
-                assertTrue("Should have decompilation or error",
-                    changeJson.has("decompilation") || changeJson.has("decompilationError"));
+                // Should have changes information
+                assertTrue("Should have changes or error",
+                    changeJson.has("changes") || changeJson.has("decompilationError"));
 
-                // If we have new decompilation, it might be different from the original
-                if (changeJson.has("decompilation")) {
-                    String newDecompilation = changeJson.get("decompilation").asText();
-                    assertNotNull("New decompilation should not be null", newDecompilation);
-                    assertFalse("New decompilation should not be empty", newDecompilation.trim().isEmpty());
+                // If we have changes, validate the structure
+                if (changeJson.has("changes")) {
+                    JsonNode changes = changeJson.get("changes");
+                    assertTrue("Changes should have hasChanges field", changes.has("hasChanges"));
+                    assertTrue("Changes should have summary field", changes.has("summary"));
                 }
 
                 // Validate that the program state has actually been updated
@@ -318,15 +318,15 @@ public class DecompilerToolProviderIntegrationTest extends RevaIntegrationTestBa
                 assertTrue("Should have address", renameJson.has("address"));
                 assertTrue("Should have variablesRenamed flag", renameJson.has("variablesRenamed"));
 
-                // Should have updated decompilation
-                assertTrue("Should have decompilation or error",
-                    renameJson.has("decompilation") || renameJson.has("decompilationError"));
+                // Should have changes information
+                assertTrue("Should have changes or error",
+                    renameJson.has("changes") || renameJson.has("decompilationError"));
 
-                // If we have decompilation, it should contain content
-                if (renameJson.has("decompilation")) {
-                    String newDecompilation = renameJson.get("decompilation").asText();
-                    assertNotNull("New decompilation should not be null", newDecompilation);
-                    assertFalse("New decompilation should not be empty", newDecompilation.trim().isEmpty());
+                // If we have changes, validate the structure
+                if (renameJson.has("changes")) {
+                    JsonNode changes = renameJson.get("changes");
+                    assertTrue("Changes should have hasChanges field", changes.has("hasChanges"));
+                    assertTrue("Changes should have summary field", changes.has("summary"));
                 }
 
                 // Validate that the program state has actually been updated
@@ -419,7 +419,7 @@ public class DecompilerToolProviderIntegrationTest extends RevaIntegrationTestBa
             // Test changing data types for non-existent function
             Map<String, Object> changeArgs = new HashMap<>();
             changeArgs.put("programPath", programPath);
-            changeArgs.put("functionName", "nonExistentFunction");
+            changeArgs.put("functionNameOrAddress", "nonExistentFunction");
 
             Map<String, String> datatypeMappings = new HashMap<>();
             datatypeMappings.put("someVar", "int");
@@ -466,7 +466,7 @@ public class DecompilerToolProviderIntegrationTest extends RevaIntegrationTestBa
             // Test with invalid function name
             Map<String, Object> args = new HashMap<>();
             args.put("programPath", programPath);
-            args.put("functionName", "anotherNonExistentFunction");
+            args.put("functionNameOrAddress", "anotherNonExistentFunction");
             args.put("datatypeMappings", Map.of("var1", "int"));
 
             CallToolResult result = client.callTool(new CallToolRequest("change-variable-datatypes", args));

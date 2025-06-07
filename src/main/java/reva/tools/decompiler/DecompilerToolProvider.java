@@ -20,6 +20,7 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 import java.util.regex.Matcher;
@@ -65,7 +66,7 @@ import reva.util.DecompilationDiffUtil;
 public class DecompilerToolProvider extends AbstractToolProvider {
 
     // Track which functions have been read by the LLM to enforce read-before-modify pattern
-    private final Map<String, Long> readDecompilationTracker = new HashMap<>();
+    private final Map<String, Long> readDecompilationTracker = new ConcurrentHashMap<>();
     /**
      * Constructor
      * @param server The MCP server
@@ -562,7 +563,7 @@ public class DecompilerToolProvider extends AbstractToolProvider {
                 if (newResults.decompileCompleted()) {
                     DecompiledFunction decompiledFunction = newResults.getDecompiledFunction();
                     String afterDecompilation = decompiledFunction.getC();
-                    
+
                     // Create diff showing only changed parts
                     DecompilationDiffUtil.DiffResult diff = DecompilationDiffUtil.createDiff(beforeDecompilation, afterDecompilation);
                     if (diff.hasChanges()) {
@@ -831,7 +832,7 @@ public class DecompilerToolProvider extends AbstractToolProvider {
                 if (newResults.decompileCompleted()) {
                     DecompiledFunction decompiledFunction = newResults.getDecompiledFunction();
                     String afterDecompilation = decompiledFunction.getC();
-                    
+
                     // Create diff showing only changed parts
                     DecompilationDiffUtil.DiffResult diff = DecompilationDiffUtil.createDiff(beforeDecompilation, afterDecompilation);
                     if (diff.hasChanges()) {

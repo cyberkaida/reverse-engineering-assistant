@@ -16,7 +16,6 @@
 package reva;
 
 import ghidra.test.AbstractGhidraHeadedIntegrationTest;
-import ghidra.test.AbstractGhidraHeadlessIntegrationTest;
 import ghidra.test.TestEnv;
 import ghidra.program.model.listing.Program;
 import ghidra.framework.plugintool.PluginTool;
@@ -387,36 +386,36 @@ public abstract class RevaIntegrationTestBase extends AbstractGhidraHeadedIntegr
         String baseServerUrl = "http://localhost:" + serverPort;
 
         try {
-            java.net.URL url = new java.net.URL(baseServerUrl + "/");
+            java.net.URL url = java.net.URI.create(baseServerUrl + "/").toURL();
             java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
             conn.setRequestMethod("GET");
             conn.setConnectTimeout(2000);
             conn.setReadTimeout(2000);
-            int responseCode = conn.getResponseCode();
+            conn.getResponseCode(); // Check server availability
             conn.disconnect();
         } catch (Exception e) {
         }
 
         // Try the MCP message endpoint
         try {
-            java.net.URL url = new java.net.URL(baseServerUrl + "/mcp/message");
+            java.net.URL url = java.net.URI.create(baseServerUrl + "/mcp/message").toURL();
             java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
             conn.setRequestMethod("GET");
             conn.setConnectTimeout(2000);
             conn.setReadTimeout(2000);
-            int responseCode = conn.getResponseCode();
+            conn.getResponseCode(); // Check server availability
             conn.disconnect();
         } catch (Exception e) {
         }
 
         // Try the MCP SSE endpoint
         try {
-            java.net.URL url = new java.net.URL(baseServerUrl + "/mcp/sse");
+            java.net.URL url = java.net.URI.create(baseServerUrl + "/mcp/sse").toURL();
             java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
             conn.setRequestMethod("GET");
             conn.setConnectTimeout(2000);
             conn.setReadTimeout(2000);
-            int responseCode = conn.getResponseCode();
+            conn.getResponseCode(); // Check server availability
             conn.disconnect();
         } catch (Exception e) {
         }

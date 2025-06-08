@@ -77,8 +77,9 @@ public class RevaPlugin extends ProgramPlugin {
         // Register this tool with the MCP server
         mcpService.registerTool(tool);
 
-        // Create the UI provider
-        provider = new RevaProvider(this, getName());
+        // TODO: Create the UI provider when needed
+        // provider = new RevaProvider(this, getName());
+        // tool.addComponentProvider(provider, false);
 
         Msg.info(this, "ReVa Tool Plugin initialization complete - connected to application-level MCP server");
     }
@@ -109,6 +110,11 @@ public class RevaPlugin extends ProgramPlugin {
 
     @Override
     protected void cleanup() {
+        // Remove the UI provider
+        if (provider != null) {
+            tool.removeComponentProvider(provider);
+        }
+
         // Unregister this tool from the MCP service
         if (mcpService != null) {
             mcpService.unregisterTool(tool);

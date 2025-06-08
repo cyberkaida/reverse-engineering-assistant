@@ -21,8 +21,6 @@ import java.util.List;
 import java.util.Map;
 
 import ghidra.program.model.address.Address;
-import ghidra.program.model.address.AddressRange;
-import ghidra.program.model.address.AddressRangeIterator;
 import ghidra.program.model.address.AddressSet;
 import ghidra.program.model.address.AddressSetView;
 import ghidra.program.model.address.AddressIterator;
@@ -33,7 +31,6 @@ import ghidra.program.model.listing.CodeUnitIterator;
 import io.modelcontextprotocol.server.McpSyncServer;
 import io.modelcontextprotocol.spec.McpError;
 import io.modelcontextprotocol.spec.McpSchema;
-import reva.plugin.RevaProgramManager;
 import reva.tools.AbstractToolProvider;
 import reva.util.AddressUtil;
 import reva.util.SchemaUtil;
@@ -162,10 +159,8 @@ public class CommentToolProvider extends AbstractToolProvider {
             // Get program and parameters using helper methods
             Program program = getProgramFromArgs(args);
             String addressStr = getOptionalString(args, "addressOrSymbol", null);
-            @SuppressWarnings("unchecked")
             Map<String, Object> addressRange = getOptionalMap(args, "addressRange", null);
-            @SuppressWarnings("unchecked")
-            List<String> commentTypes = (List<String>) args.get("commentTypes");
+            List<String> commentTypes = getOptionalStringList(args, "commentTypes", null);
 
             AddressSetView addresses;
             if (addressStr != null) {
@@ -315,8 +310,7 @@ public class CommentToolProvider extends AbstractToolProvider {
             Program program = getProgramFromArgs(args);
             String searchText = getString(args, "searchText");
             boolean caseSensitive = getOptionalBoolean(args, "caseSensitive", false);
-            @SuppressWarnings("unchecked")
-            List<String> commentTypes = (List<String>) args.get("commentTypes");
+            List<String> commentTypes = getOptionalStringList(args, "commentTypes", null);
             int maxResults = getOptionalInt(args, "maxResults", 100);
 
             List<Integer> types = new ArrayList<>();

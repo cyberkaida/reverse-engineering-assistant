@@ -1,7 +1,5 @@
 package reva.util;
 
-import java.util.Comparator;
-
 
 public class SimilarityComparator<T> implements java.util.Comparator<T> {
     

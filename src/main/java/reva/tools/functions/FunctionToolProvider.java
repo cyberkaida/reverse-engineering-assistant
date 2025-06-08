@@ -29,7 +29,6 @@ import ghidra.program.model.listing.Program;
 import io.modelcontextprotocol.spec.McpError;
 import io.modelcontextprotocol.server.McpSyncServer;
 import io.modelcontextprotocol.spec.McpSchema;
-import reva.plugin.RevaProgramManager;
 import reva.tools.AbstractToolProvider;
 import reva.util.SimilarityComparator;
 import reva.util.SymbolUtil;
@@ -84,9 +83,6 @@ public class FunctionToolProvider extends AbstractToolProvider {
             // Get program and parameters using helper methods
             Program program = getProgramFromArgs(args);
             boolean filterDefaultNames = getOptionalBoolean(args, "filterDefaultNames", true);
-
-            // Get the functions from the program
-            List<Map<String, Object>> functionData = new ArrayList<>();
 
             AtomicInteger count = new AtomicInteger(0);
 
@@ -254,7 +250,6 @@ public class FunctionToolProvider extends AbstractToolProvider {
 
             // Get functions and collect them for similarity sorting
             List<Map<String, Object>> similarFunctionData = new ArrayList<>();
-            AtomicInteger currentIndex = new AtomicInteger(0);
 
             // Iterate through all functions and collect them
             FunctionIterator functions = program.getFunctionManager().getFunctions(true);
@@ -263,8 +258,6 @@ public class FunctionToolProvider extends AbstractToolProvider {
                 if (filterDefaultNames && SymbolUtil.isDefaultSymbolName(function.getName())) {
                     return;
                 }
-
-                int index = currentIndex.getAndIncrement();
 
                 // Collect function data
                 Map<String, Object> functionInfo = createFunctionInfo(function);

@@ -244,7 +244,7 @@ public class StringToolProvider extends AbstractToolProvider {
                     }
                 }
             });
-            Collections.sort(similarStringData, new SimilarityComparator(searchString, new SimilarityComparator.StringExtractor<Map<String, Object>>() {
+            Collections.sort(similarStringData, new SimilarityComparator<Map<String, Object>>(searchString, new SimilarityComparator.StringExtractor<Map<String, Object>>() {
                 @Override
                 public String extract(Map<String, Object> item) {
                     return (String) item.get("content");

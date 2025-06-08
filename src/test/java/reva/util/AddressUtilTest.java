@@ -55,7 +55,7 @@ public class AddressUtilTest {
 
     @Before
     public void setUp() {
-        MockitoAnnotations.initMocks(this);
+        MockitoAnnotations.openMocks(this);
         when(program.getAddressFactory()).thenReturn(addressFactory);
         when(addressFactory.getDefaultAddressSpace()).thenReturn(addressSpace);
     }

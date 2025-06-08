@@ -17,25 +17,20 @@ package reva.tools.bookmarks;
 
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 import ghidra.program.model.address.Address;
 import ghidra.program.model.address.AddressSet;
 import ghidra.program.model.address.AddressSetView;
 import ghidra.program.model.listing.Bookmark;
 import ghidra.program.model.listing.BookmarkManager;
-import ghidra.program.model.listing.BookmarkType;
 import ghidra.program.model.listing.Program;
 import io.modelcontextprotocol.server.McpSyncServer;
 import io.modelcontextprotocol.spec.McpError;
 import io.modelcontextprotocol.spec.McpSchema;
-import reva.plugin.RevaProgramManager;
 import reva.tools.AbstractToolProvider;
-import reva.util.AddressUtil;
 import reva.util.SchemaUtil;
 
 /**
@@ -157,7 +152,6 @@ public class BookmarkToolProvider extends AbstractToolProvider {
             // Get program and parameters using helper methods
             Program program = getProgramFromArgs(args);
             String addressStr = getOptionalString(args, "addressOrSymbol", null);
-            @SuppressWarnings("unchecked")
             Map<String, Object> addressRange = getOptionalMap(args, "addressRange", null);
             String typeFilter = getOptionalString(args, "type", null);
             String categoryFilter = getOptionalString(args, "category", null);

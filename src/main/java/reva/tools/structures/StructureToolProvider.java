@@ -34,7 +34,6 @@ import ghidra.util.data.DataTypeParser.AllowedDataTypes;
 import io.modelcontextprotocol.server.McpSyncServer;
 import io.modelcontextprotocol.spec.McpError;
 import io.modelcontextprotocol.spec.McpSchema;
-import reva.plugin.RevaProgramManager;
 import reva.tools.AbstractToolProvider;
 import reva.util.AddressUtil;
 import reva.util.DataTypeParserUtil;
@@ -233,7 +232,7 @@ public class StructureToolProvider extends AbstractToolProvider {
                 int txId = program.startTransaction("Create Structure");
                 try {
                     // Create category if needed
-                    Category cat = dtm.createCategory(catPath);
+                    dtm.createCategory(catPath);
                     
                     // Create structure or union
                     Composite composite;

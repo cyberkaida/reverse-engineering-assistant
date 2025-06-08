@@ -16,7 +16,6 @@
 package reva.tools.decompiler;
 
 import static org.junit.Assert.*;
-import static org.mockito.Mockito.*;
 import org.junit.Test;
 import org.junit.Before;
 import org.mockito.Mock;
@@ -27,7 +26,6 @@ import java.util.Map;
 
 import io.modelcontextprotocol.server.McpSyncServer;
 import io.modelcontextprotocol.spec.McpError;
-import reva.tools.decompiler.DecompilerToolProvider;
 
 /**
  * Unit tests for DecompilerToolProvider.
@@ -43,7 +41,7 @@ public class DecompilerToolProviderTest {
     
     @Before
     public void setUp() {
-        MockitoAnnotations.initMocks(this);
+        MockitoAnnotations.openMocks(this);
         toolProvider = new DecompilerToolProvider(mockServer);
     }
     

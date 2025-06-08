@@ -19,7 +19,6 @@ import java.util.HashMap;
 import java.util.Map;
 
 import ghidra.framework.options.Options;
-import ghidra.framework.options.ToolOptions;
 import ghidra.framework.plugintool.PluginTool;
 import ghidra.util.Msg;
 

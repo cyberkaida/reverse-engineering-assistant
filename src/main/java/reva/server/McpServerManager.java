@@ -189,7 +189,7 @@ public class McpServerManager implements RevaMcpService {
 
         int serverPort = configManager.getServerPort();
         String baseUrl = "http://localhost:" + serverPort;
-        Msg.info(this, "Starting MCP server on port " + serverPort);
+        Msg.info(this, "Starting MCP server on " + baseUrl + serverPort);
 
         ServletContextHandler servletContextHandler = new ServletContextHandler(ServletContextHandler.SESSIONS);
         servletContextHandler.setContextPath("/");
@@ -247,18 +247,18 @@ public class McpServerManager implements RevaMcpService {
     @Override
     public void unregisterTool(PluginTool tool) {
         registeredTools.remove(tool);
-        
+
         // Remove tool from all program mappings
         for (Set<PluginTool> tools : programToTools.values()) {
             tools.remove(tool);
         }
-        
+
         // Clear active tool if it's the one being unregistered
         if (activeTool == tool) {
             activeTool = null;
             activeProgram = null;
         }
-        
+
         Msg.debug(this, "Unregistered tool from MCP server: " + tool.getName());
     }
 
@@ -266,10 +266,10 @@ public class McpServerManager implements RevaMcpService {
     public void programOpened(Program program, PluginTool tool) {
         // Add to program-tool mapping
         programToTools.computeIfAbsent(program, k -> ConcurrentHashMap.newKeySet()).add(tool);
-        
+
         // Set as active program
         setActiveProgram(program, tool);
-        
+
         // Notify providers
         for (ResourceProvider provider : resourceProviders) {
             provider.programOpened(program);
@@ -278,7 +278,7 @@ public class McpServerManager implements RevaMcpService {
         for (ToolProvider provider : toolProviders) {
             provider.programOpened(program);
         }
-        
+
         Msg.debug(this, "Program opened in tool " + tool.getName() + ": " + program.getName());
     }
 
@@ -292,13 +292,13 @@ public class McpServerManager implements RevaMcpService {
                 programToTools.remove(program);
             }
         }
-        
+
         // Clear active program if it was the one being closed
         if (activeProgram == program && activeTool == tool) {
             activeProgram = null;
             activeTool = null;
         }
-        
+
         // Notify providers only if this was the last tool with the program
         if (tools == null || tools.isEmpty()) {
             for (ResourceProvider provider : resourceProviders) {
@@ -309,7 +309,7 @@ public class McpServerManager implements RevaMcpService {
                 provider.programClosed(program);
             }
         }
-        
+
         Msg.debug(this, "Program closed in tool " + tool.getName() + ": " + program.getName());
     }
 
@@ -335,7 +335,7 @@ public class McpServerManager implements RevaMcpService {
     public void setActiveProgram(Program program, PluginTool tool) {
         this.activeProgram = program;
         this.activeTool = tool;
-        Msg.debug(this, "Active program changed to: " + (program != null ? program.getName() : "null") + 
+        Msg.debug(this, "Active program changed to: " + (program != null ? program.getName() : "null") +
                   " in tool: " + (tool != null ? tool.getName() : "null"));
     }
 
@@ -352,13 +352,13 @@ public class McpServerManager implements RevaMcpService {
      */
     public void shutdown() {
         Msg.info(this, "Shutting down MCP server...");
-        
+
         // Clear all tool registrations
         registeredTools.clear();
         programToTools.clear();
         activeProgram = null;
         activeTool = null;
-        
+
         // Notify all providers to clean up
         for (ResourceProvider provider : resourceProviders) {
             provider.cleanup();
@@ -388,7 +388,7 @@ public class McpServerManager implements RevaMcpService {
         }
 
         serverReady = false;
-        
+
         Msg.info(this, "MCP server shutdown complete");
     }
 }

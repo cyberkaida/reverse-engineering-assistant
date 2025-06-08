@@ -1,8 +1,8 @@
-# ReVA - Reverse Engineering Assistant
+# ReVa - Reverse Engineering Assistant
 
 > Rewritten from scratch as a [Model Context Protocol (MCP)](https://modelcontextprotocol.io/faqs) server!
 
-The reverse engineering assistant (ReVA) is a project to build a model agnostic AI assistant for
+The reverse engineering assistant (ReVa) is a project to build a model agnostic AI assistant for
 reverse engineering tasks. This includes both _offline_ and online inference and a simple architecture.
 
 ReVa is different from other efforts at building AI assistants for RE tasks because it uses a _tool driven approach_.
@@ -27,6 +27,7 @@ to allow ReVa access to source code on GitHub, or the
 [Kagi MCP Server](https://github.com/kagisearch/kagimcp) to allow ReVa to search the web.
 
 You can ask questions like:
+- Examine the programs in this project and explain the relationship between the main binary and the shared libraries.
 - What are the interesting strings in this program?
 - Does this program use encryption? Write a markdown report on the encryption and where it is used.
 - Draw a class diagram using plantuml syntax.
@@ -56,7 +57,7 @@ Then install the extension (in `dist/`) using the Ghidra extension manager.
 ReVa uses the [Model Context Protocol (MCP)](https://modelcontextprotocol.io/faqs) to communicate with the LLM.
 
 ReVa uses the [SSE MCP transport](https://modelcontextprotocol.io/docs/concepts/transports#server-sent-events-sse)
-and will listen on port `8080` by default, you can change this in the Ghidra settings.
+and will listen on port `8080` by default, you can change this in the Ghidra settings from the project view.
 
 You will need to configure your MCP client to connect to ReVa, this depends on the client you are using.
 

@@ -241,7 +241,7 @@ public class McpServerManager implements RevaMcpService {
     @Override
     public void registerTool(PluginTool tool) {
         registeredTools.add(tool);
-        Msg.info(this, "Registered tool with MCP server: " + tool.getName());
+        Msg.debug(this, "Registered tool with MCP server: " + tool.getName());
     }
 
     @Override
@@ -259,7 +259,7 @@ public class McpServerManager implements RevaMcpService {
             activeProgram = null;
         }
         
-        Msg.info(this, "Unregistered tool from MCP server: " + tool.getName());
+        Msg.debug(this, "Unregistered tool from MCP server: " + tool.getName());
     }
 
     @Override

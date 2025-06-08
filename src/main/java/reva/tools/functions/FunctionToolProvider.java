@@ -31,7 +31,6 @@ import io.modelcontextprotocol.server.McpSyncServer;
 import io.modelcontextprotocol.spec.McpSchema;
 import reva.plugin.RevaProgramManager;
 import reva.tools.AbstractToolProvider;
-import reva.tools.ProgramValidationException;
 import reva.util.SimilarityComparator;
 import reva.util.SymbolUtil;
 

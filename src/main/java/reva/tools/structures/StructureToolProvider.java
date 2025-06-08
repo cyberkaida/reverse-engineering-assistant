@@ -36,7 +36,6 @@ import io.modelcontextprotocol.spec.McpError;
 import io.modelcontextprotocol.spec.McpSchema;
 import reva.plugin.RevaProgramManager;
 import reva.tools.AbstractToolProvider;
-import reva.tools.ProgramValidationException;
 import reva.util.AddressUtil;
 import reva.util.DataTypeParserUtil;
 import reva.util.SchemaUtil;

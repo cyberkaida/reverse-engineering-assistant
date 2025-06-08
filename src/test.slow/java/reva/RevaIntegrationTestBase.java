@@ -78,12 +78,19 @@ public abstract class RevaIntegrationTestBase extends AbstractGhidraHeadedIntegr
     /**
      * Set up shared test environment once for all tests in the class.
      * This significantly speeds up test execution by reusing the Ghidra instance.
+     * 
+     * Note: TestEnv, MCP server, and plugin initialization must be done lazily in @Before 
+     * method due to Ghidra system initialization requirements, but we can prepare 
+     * non-Ghidra dependent shared resources here to reduce per-test overhead.
      */
     @BeforeClass
     public static void setUpSharedTestEnvironment() throws Exception {
-        // Initialize shared object mapper
+        // Initialize shared object mapper for JSON parsing across all tests
         sharedObjectMapper = new ObjectMapper();
-        // Other shared setup will be done lazily in @Before to avoid TestEnv initialization issues
+        
+        // Pre-configure any other non-Ghidra dependent shared resources here
+        // This reduces per-test initialization overhead even though the main 
+        // Ghidra/MCP setup must still be done lazily in @Before
     }
 
     /**
@@ -231,7 +238,7 @@ public abstract class RevaIntegrationTestBase extends AbstractGhidraHeadedIntegr
 
     @Before
     public void setUpRevaPlugin() throws Exception {
-        // Initialize shared environment lazily on first test
+        // Initialize shared environment lazily on first test to ensure Ghidra system is ready
         if (sharedEnv == null) {
             synchronized (RevaIntegrationTestBase.class) {
                 if (sharedEnv == null) {

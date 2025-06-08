@@ -1,30 +1,33 @@
 # Integration Test Guidelines
 
+## Shared Test Environment
+Integration tests now use a shared Ghidra environment to significantly speed up execution:
+
+- **@BeforeClass**: Sets up shared TestEnv, PluginTool, and MCP server once for all tests
+- **@Before**: Creates fresh Program for each test, reuses shared instances
+- **@After**: Cleans up test program, keeps shared environment running
+- **@AfterClass**: Shuts down shared environment after all tests complete
+
 ## Test Setup Pattern
-1. In `@Before` method, set `programPath = program.getDomainFile().getPathname()`
-2. Add test data to the program within transactions
-3. Open the program in the tool's ProgramManager:
-```java
-// Open the program in the tool's ProgramManager so it can be found by RevaProgramManager
-env.open(program);
-
-// Also open it directly in the tool's ProgramManager service to ensure it's available
-ghidra.app.services.ProgramManager programManager = tool.getService(ghidra.app.services.ProgramManager.class);
-if (programManager != null) {
-    programManager.openProgram(program);
-}
-
-// Register the program with the server manager so it can be found by the tools
-if (serverManager != null) {
-    serverManager.programOpened(program);
-}
-```
+1. Shared environment automatically handles MCP server and plugin setup
+2. Each test gets a fresh program via `createDefaultProgram(getName(), ...)`
+3. Program is automatically registered with shared MCP server
 4. Use `withMcpClient(createMcpTransport(), client -> { ... })` pattern for MCP calls
 5. Always call `client.initialize()` before making tool calls
 
+## Benefits of Shared Environment
+- **Faster execution**: No Ghidra restart between tests within a class (saves 5-10 seconds per test)
+- **Stable connections**: MCP server persists across all tests in a single test class
+- **Resource efficiency**: Single Ghidra instance serves all tests in the same class
+- **Reliable state**: Fresh program per test ensures test isolation
+- **Lazy initialization**: Shared environment is created only when first test runs
+
 ## Success Indicators
-- Look for `INFO Program opened: [testName] (RevaPlugin)` in logs - this indicates successful registration
+- Look for `INFO Registered tool with MCP server: Test Tool` in logs
+- MCP server shows `INFO MCP server started successfully` once at class start
+- Each test creates fresh program without restarting server
 
 ## Common Issues
-- Tool registration: Verify tools are registered before calling them  
+- Tool registration: Shared plugin is already registered with server
 - Transaction management: Always wrap program modifications in transactions
+- Program cleanup: Programs are automatically unregistered from server in @After

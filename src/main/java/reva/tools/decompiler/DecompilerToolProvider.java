@@ -328,7 +328,7 @@ public class DecompilerToolProvider extends AbstractToolProvider {
 
             // Validate pattern
             if (pattern.trim().isEmpty()) {
-                throw new IllegalArgumentException("Search pattern cannot be empty");
+                return createErrorResult("Search pattern cannot be empty");
             }
 
             // Perform the search
@@ -381,8 +381,7 @@ public class DecompilerToolProvider extends AbstractToolProvider {
         registerTool(tool, (exchange, args) -> {
             // Get program and parameters using helper methods
             Program program = getProgramFromArgs(args);
-            @SuppressWarnings("unchecked")
-            Map<String, String> mappings = (Map<String, String>) args.get("variableMappings");
+            Map<String, String> mappings = getStringMap(args, "variableMappings");
 
             // Validate arguments
             if (mappings == null || mappings.isEmpty()) {
@@ -574,8 +573,7 @@ public class DecompilerToolProvider extends AbstractToolProvider {
         registerTool(tool, (exchange, args) -> {
             // Get program and parameters using helper methods
             Program program = getProgramFromArgs(args);
-            @SuppressWarnings("unchecked")
-            Map<String, String> mappings = (Map<String, String>) args.get("datatypeMappings");
+            Map<String, String> mappings = getStringMap(args, "datatypeMappings");
             String archiveName = getOptionalString(args, "archiveName", "");
 
             // Validate arguments

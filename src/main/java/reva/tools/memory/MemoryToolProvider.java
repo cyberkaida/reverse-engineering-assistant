@@ -98,7 +98,7 @@ public class MemoryToolProvider extends AbstractToolProvider {
                 blockData.add(blockInfo);
             }
 
-            return createSuccessResult(blockData);
+            return createJsonResult(blockData);
         });
     }
 
@@ -130,7 +130,7 @@ public class MemoryToolProvider extends AbstractToolProvider {
             Address address = getAddressFromArgs(args, program, "addressOrSymbol");
 
             // Get the length from the request
-            int length = (Integer) args.getOrDefault("length", 16);
+            int length = getOptionalInt(args, "length", 16);
             if (length <= 0) {
                 return createErrorResult("Invalid length: " + length);
             }
@@ -157,24 +157,8 @@ public class MemoryToolProvider extends AbstractToolProvider {
                 result.put("bytes", MemoryUtil.byteArrayToIntList(bytes));
             }
 
-            return createSuccessResult(result);
+            return createJsonResult(result);
         });
     }
 
-    /**
-     * Helper method to create a success result with JSON content
-     * @param data The data to serialize as JSON
-     * @return CallToolResult with success flag set
-     */
-    protected McpSchema.CallToolResult createSuccessResult(Object data) {
-        try {
-            String jsonString = JSON.writeValueAsString(data);
-            return new McpSchema.CallToolResult(
-                List.of(new McpSchema.TextContent(jsonString)),
-                false
-            );
-        } catch (Exception e) {
-            return createErrorResult("Error serializing result to JSON: " + e.getMessage());
-        }
-    }
 }

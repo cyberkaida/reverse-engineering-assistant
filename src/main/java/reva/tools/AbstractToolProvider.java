@@ -367,6 +367,82 @@ public abstract class AbstractToolProvider implements ToolProvider {
     }
 
     /**
+     * Get a required list parameter from arguments
+     * @param args The arguments map
+     * @param key The parameter key
+     * @return The list value
+     * @throws IllegalArgumentException if the parameter is missing or not a list
+     */
+    @SuppressWarnings("unchecked")
+    protected List<String> getStringList(Map<String, Object> args, String key) {
+        Object value = args.get(key);
+        if (value == null) {
+            throw new IllegalArgumentException("Missing required parameter: " + key);
+        }
+        if (value instanceof List) {
+            return (List<String>) value;
+        }
+        throw new IllegalArgumentException("Parameter '" + key + "' must be a list");
+    }
+
+    /**
+     * Get an optional list parameter from arguments
+     * @param args The arguments map
+     * @param key The parameter key
+     * @param defaultValue The default value if not present
+     * @return The list value or default
+     */
+    @SuppressWarnings("unchecked")
+    protected List<String> getOptionalStringList(Map<String, Object> args, String key, List<String> defaultValue) {
+        Object value = args.get(key);
+        if (value == null) {
+            return defaultValue;
+        }
+        if (value instanceof List) {
+            return (List<String>) value;
+        }
+        throw new IllegalArgumentException("Parameter '" + key + "' must be a list");
+    }
+
+    /**
+     * Get a required string map parameter from arguments
+     * @param args The arguments map
+     * @param key The parameter key
+     * @return The map value
+     * @throws IllegalArgumentException if the parameter is missing or not a map
+     */
+    @SuppressWarnings("unchecked")
+    protected Map<String, String> getStringMap(Map<String, Object> args, String key) {
+        Object value = args.get(key);
+        if (value == null) {
+            throw new IllegalArgumentException("Missing required parameter: " + key);
+        }
+        if (value instanceof Map) {
+            return (Map<String, String>) value;
+        }
+        throw new IllegalArgumentException("Parameter '" + key + "' must be an object");
+    }
+
+    /**
+     * Get an optional string map parameter from arguments
+     * @param args The arguments map
+     * @param key The parameter key
+     * @param defaultValue The default value if not present
+     * @return The map value or default
+     */
+    @SuppressWarnings("unchecked")
+    protected Map<String, String> getOptionalStringMap(Map<String, Object> args, String key, Map<String, String> defaultValue) {
+        Object value = args.get(key);
+        if (value == null) {
+            return defaultValue;
+        }
+        if (value instanceof Map) {
+            return (Map<String, String>) value;
+        }
+        throw new IllegalArgumentException("Parameter '" + key + "' must be an object");
+    }
+
+    /**
      * Get a validated program by path. This method ensures the program exists and is in a valid state.
      * @param programPath The path to the program
      * @return A valid Program object

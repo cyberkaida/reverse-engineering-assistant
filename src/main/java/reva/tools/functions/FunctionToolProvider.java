@@ -250,7 +250,7 @@ public class FunctionToolProvider extends AbstractToolProvider {
             boolean filterDefaultNames = getOptionalBoolean(args, "filterDefaultNames", true);
 
             if (searchString.trim().isEmpty()) {
-                throw new IllegalArgumentException("Search string cannot be empty");
+                return createErrorResult("Search string cannot be empty");
             }
 
             // Get functions and collect them for similarity sorting

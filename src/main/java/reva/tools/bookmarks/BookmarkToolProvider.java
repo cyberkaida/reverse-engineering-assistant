@@ -168,9 +168,11 @@ public class BookmarkToolProvider extends AbstractToolProvider {
 
             if (addressStr != null) {
                 // Get bookmarks at specific address
-                Address address = AddressUtil.resolveAddressOrSymbol(program, addressStr);
-                if (address == null) {
-                    return createErrorResult("Invalid address or symbol: " + addressStr);
+                Address address;
+                try {
+                    address = getAddressFromArgs(Map.of("addressOrSymbol", addressStr), program, "addressOrSymbol");
+                } catch (IllegalArgumentException e) {
+                    return createErrorResult(e.getMessage());
                 }
 
                 Bookmark[] bookmarksAtAddr = bookmarkMgr.getBookmarks(address);
@@ -184,11 +186,12 @@ public class BookmarkToolProvider extends AbstractToolProvider {
                 String startStr = (String) addressRange.get("start");
                 String endStr = (String) addressRange.get("end");
 
-                Address start = AddressUtil.resolveAddressOrSymbol(program, startStr);
-                Address end = AddressUtil.resolveAddressOrSymbol(program, endStr);
-
-                if (start == null || end == null) {
-                    return createErrorResult("Invalid address range");
+                Address start, end;
+                try {
+                    start = getAddressFromArgs(Map.of("addressOrSymbol", startStr), program, "addressOrSymbol");
+                    end = getAddressFromArgs(Map.of("addressOrSymbol", endStr), program, "addressOrSymbol");
+                } catch (IllegalArgumentException e) {
+                    return createErrorResult("Invalid address range: " + e.getMessage());
                 }
 
                 AddressSet addrSet = new AddressSet(start, end);
@@ -322,11 +325,8 @@ public class BookmarkToolProvider extends AbstractToolProvider {
             // Get program and parameters using helper methods
             Program program = getProgramFromArgs(args);
             String searchText = getOptionalString(args, "searchText", null);
-            @SuppressWarnings("unchecked")
-            List<String> types = (List<String>) args.get("types");
-            @SuppressWarnings("unchecked")
-            List<String> categories = (List<String>) args.get("categories");
-            @SuppressWarnings("unchecked")
+            List<String> types = getOptionalStringList(args, "types", null);
+            List<String> categories = getOptionalStringList(args, "categories", null);
             Map<String, Object> addressRange = getOptionalMap(args, "addressRange", null);
             int maxResults = getOptionalInt(args, "maxResults", 100);
 
@@ -335,11 +335,12 @@ public class BookmarkToolProvider extends AbstractToolProvider {
                 String startStr = (String) addressRange.get("start");
                 String endStr = (String) addressRange.get("end");
 
-                Address start = AddressUtil.resolveAddressOrSymbol(program, startStr);
-                Address end = AddressUtil.resolveAddressOrSymbol(program, endStr);
-
-                if (start == null || end == null) {
-                    return createErrorResult("Invalid address range");
+                Address start, end;
+                try {
+                    start = getAddressFromArgs(Map.of("addressOrSymbol", startStr), program, "addressOrSymbol");
+                    end = getAddressFromArgs(Map.of("addressOrSymbol", endStr), program, "addressOrSymbol");
+                } catch (IllegalArgumentException e) {
+                    return createErrorResult("Invalid address range: " + e.getMessage());
                 }
 
                 searchRange = new AddressSet(start, end);

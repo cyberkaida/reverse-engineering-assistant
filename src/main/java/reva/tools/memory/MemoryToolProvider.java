@@ -30,6 +30,7 @@ import io.modelcontextprotocol.spec.McpError;
 import io.modelcontextprotocol.spec.McpSchema;
 import reva.plugin.RevaProgramManager;
 import reva.tools.AbstractToolProvider;
+import reva.tools.ProgramValidationException;
 import reva.util.AddressUtil;
 import reva.util.MemoryUtil;
 import reva.util.SchemaUtil;
@@ -84,7 +85,7 @@ public class MemoryToolProvider extends AbstractToolProvider {
             Program program;
             try {
                 program = getValidatedProgram(programPath);
-            } catch (IllegalArgumentException | IllegalStateException e) {
+            } catch (ProgramValidationException e) {
                 return createErrorResult(e.getMessage());
             }
 
@@ -147,7 +148,7 @@ public class MemoryToolProvider extends AbstractToolProvider {
             Program program;
             try {
                 program = getValidatedProgram(programPath);
-            } catch (IllegalArgumentException | IllegalStateException e) {
+            } catch (ProgramValidationException e) {
                 return createErrorResult(e.getMessage());
             }
 

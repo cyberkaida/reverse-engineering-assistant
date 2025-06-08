@@ -33,6 +33,7 @@ import io.modelcontextprotocol.spec.McpError;
 import io.modelcontextprotocol.spec.McpSchema;
 import reva.plugin.RevaProgramManager;
 import reva.tools.AbstractToolProvider;
+import reva.tools.ProgramValidationException;
 import reva.util.AddressUtil;
 
 /**
@@ -112,7 +113,7 @@ public class CrossReferencesToolProvider extends AbstractToolProvider {
             Program program;
             try {
                 program = getValidatedProgram(programPath);
-            } catch (IllegalArgumentException | IllegalStateException e) {
+            } catch (ProgramValidationException e) {
                 return createErrorResult(e.getMessage());
             }
 
@@ -301,7 +302,7 @@ public class CrossReferencesToolProvider extends AbstractToolProvider {
             Program program;
             try {
                 program = getValidatedProgram(programPath);
-            } catch (IllegalArgumentException | IllegalStateException e) {
+            } catch (ProgramValidationException e) {
                 return createErrorResult(e.getMessage());
             }
 

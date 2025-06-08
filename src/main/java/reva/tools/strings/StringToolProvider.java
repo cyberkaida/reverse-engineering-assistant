@@ -33,6 +33,7 @@ import io.modelcontextprotocol.server.McpSyncServer;
 import io.modelcontextprotocol.spec.McpSchema;
 import reva.plugin.RevaProgramManager;
 import reva.tools.AbstractToolProvider;
+import reva.tools.ProgramValidationException;
 import reva.util.SimilarityComparator;
 
 
@@ -90,7 +91,7 @@ public class StringToolProvider extends AbstractToolProvider {
             Program program;
             try {
                 program = getValidatedProgram(programPath);
-            } catch (IllegalArgumentException | IllegalStateException e) {
+            } catch (ProgramValidationException e) {
                 return createErrorResult(e.getMessage());
             }
 
@@ -160,7 +161,7 @@ public class StringToolProvider extends AbstractToolProvider {
             Program program;
             try {
                 program = getValidatedProgram(programPath);
-            } catch (IllegalArgumentException | IllegalStateException e) {
+            } catch (ProgramValidationException e) {
                 return createErrorResult(e.getMessage());
             }
 
@@ -268,7 +269,7 @@ public class StringToolProvider extends AbstractToolProvider {
             Program program;
             try {
                 program = getValidatedProgram(programPath);
-            } catch (IllegalArgumentException | IllegalStateException e) {
+            } catch (ProgramValidationException e) {
                 return createErrorResult(e.getMessage());
             }
 
@@ -380,7 +381,7 @@ public class StringToolProvider extends AbstractToolProvider {
             Program program;
             try {
                 program = getValidatedProgram(programPath);
-            } catch (IllegalArgumentException | IllegalStateException e) {
+            } catch (ProgramValidationException e) {
                 return createErrorResult(e.getMessage());
             }
 

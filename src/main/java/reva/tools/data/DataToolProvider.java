@@ -38,6 +38,7 @@ import io.modelcontextprotocol.spec.McpSchema.Content;
 import io.modelcontextprotocol.spec.McpSchema.TextContent;
 import reva.plugin.RevaProgramManager;
 import reva.tools.AbstractToolProvider;
+import reva.tools.ProgramValidationException;
 import reva.util.AddressUtil;
 import reva.util.DataTypeParserUtil;
 
@@ -103,7 +104,7 @@ public class DataToolProvider extends AbstractToolProvider {
             Program program;
             try {
                 program = getValidatedProgram(programPath);
-            } catch (IllegalArgumentException | IllegalStateException e) {
+            } catch (ProgramValidationException e) {
                 return createErrorResult(e.getMessage());
             }
 
@@ -159,7 +160,7 @@ public class DataToolProvider extends AbstractToolProvider {
             Program program;
             try {
                 program = getValidatedProgram(programPath);
-            } catch (IllegalArgumentException | IllegalStateException e) {
+            } catch (ProgramValidationException e) {
                 return createErrorResult(e.getMessage());
             }
 
@@ -235,7 +236,7 @@ public class DataToolProvider extends AbstractToolProvider {
             Program program;
             try {
                 program = getValidatedProgram(programPath);
-            } catch (IllegalArgumentException | IllegalStateException e) {
+            } catch (ProgramValidationException e) {
                 return createErrorResult(e.getMessage());
             }
 
@@ -365,7 +366,7 @@ public class DataToolProvider extends AbstractToolProvider {
             Program program;
             try {
                 program = getValidatedProgram(programPath);
-            } catch (IllegalArgumentException | IllegalStateException e) {
+            } catch (ProgramValidationException e) {
                 return createErrorResult(e.getMessage());
             }
 

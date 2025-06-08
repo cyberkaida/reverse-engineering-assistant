@@ -22,7 +22,7 @@ package reva.tools;
  * - Program is in an invalid state (e.g., closed)
  * - Invalid program path provided
  */
-public class ProgramValidationException extends Exception {
+public class ProgramValidationException extends RuntimeException {
     
     public ProgramValidationException(String message) {
         super(message);

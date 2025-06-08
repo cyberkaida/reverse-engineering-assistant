@@ -201,9 +201,8 @@ public class DecompilerToolProviderIntegrationTest extends RevaIntegrationTestBa
 
             assertNotNull("Change result should not be null", changeResult);
 
-            // Parse the result
+            // Get the content
             TextContent changeContent = (TextContent) changeResult.content().get(0);
-            JsonNode changeJson = parseJsonContent(changeContent.text());
 
             if (changeResult.isError()) {
                 // If it's an error, it should be meaningful (variables might not be found in decompilation)
@@ -213,6 +212,8 @@ public class DecompilerToolProviderIntegrationTest extends RevaIntegrationTestBa
                     errorMsg.contains("No matching variables") || errorMsg.contains("Could not find") ||
                     errorMsg.contains("Decompilation failed"));
             } else {
+                // Parse the result as JSON only if it's not an error
+                JsonNode changeJson = parseJsonContent(changeContent.text());
                 // If successful, validate the structure
                 assertEquals("Program name should match", program.getName(), changeJson.get("programName").asText());
                 assertEquals("Function name should match", "testFunction", changeJson.get("functionName").asText());
@@ -310,9 +311,8 @@ public class DecompilerToolProviderIntegrationTest extends RevaIntegrationTestBa
 
             assertNotNull("Rename result should not be null", renameResult);
 
-            // Parse the result
+            // Get the content
             TextContent renameContent = (TextContent) renameResult.content().get(0);
-            JsonNode renameJson = parseJsonContent(renameContent.text());
 
             if (renameResult.isError()) {
                 // If it's an error, it should be meaningful (variables might not be found in decompilation)
@@ -322,6 +322,8 @@ public class DecompilerToolProviderIntegrationTest extends RevaIntegrationTestBa
                     errorMsg.contains("No matching variables") || errorMsg.contains("Could not find") ||
                     errorMsg.contains("Decompilation failed"));
             } else {
+                // Parse the result as JSON only if it's not an error
+                JsonNode renameJson = parseJsonContent(renameContent.text());
                 // If successful, validate the structure
                 assertEquals("Program name should match", program.getName(), renameJson.get("programName").asText());
                 assertEquals("Function name should match", "testFunction", renameJson.get("functionName").asText());

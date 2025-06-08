@@ -190,16 +190,16 @@ public class DataTypeToolProvider extends AbstractToolProvider {
         // Register the tool with a handler
         registerTool(tool, (exchange, args) -> {
             // Get the archive name from the request
-            String archiveName = (String) args.get("archiveName");
-            if (archiveName == null) {
-                return createErrorResult("No archive name provided");
+            String archiveName;
+            try {
+                archiveName = getString(args, "archiveName");
+            } catch (IllegalArgumentException e) {
+                return createErrorResult(e.getMessage());
             }
 
             // Get pagination parameters
-            String categoryPath = args.containsKey("categoryPath") ?
-                (String) args.get("categoryPath") : "/";
-            boolean includeSubcategories = args.containsKey("includeSubcategories") ?
-                (Boolean) args.get("includeSubcategories") : false;
+            String categoryPath = getOptionalString(args, "categoryPath", "/");
+            boolean includeSubcategories = getOptionalBoolean(args, "includeSubcategories", false);
             int startIndex = getOptionalInt(args, "startIndex", 0);
             int maxCount = getOptionalInt(args, "maxCount", 100);
 

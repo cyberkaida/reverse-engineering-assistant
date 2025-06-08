@@ -75,7 +75,7 @@ public class BookmarkToolProviderIntegrationTest extends RevaIntegrationTestBase
                 // Set a bookmark
                 Map<String, Object> setArgs = new HashMap<>();
                 setArgs.put("programPath", programPath);
-                setArgs.put("address", addressStr);
+                setArgs.put("addressOrSymbol", addressStr);
                 setArgs.put("type", "Note");
                 setArgs.put("category", "Analysis");
                 setArgs.put("comment", "Test bookmark");
@@ -93,7 +93,7 @@ public class BookmarkToolProviderIntegrationTest extends RevaIntegrationTestBase
                 // Get the bookmark using the tool
                 Map<String, Object> getArgs = new HashMap<>();
                 getArgs.put("programPath", programPath);
-                getArgs.put("address", addressStr);
+                getArgs.put("addressOrSymbol", addressStr);
 
                 CallToolRequest getRequest = new CallToolRequest("get-bookmarks", getArgs);
                 CallToolResult getResult = client.callTool(getRequest);

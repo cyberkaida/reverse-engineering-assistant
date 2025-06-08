@@ -129,14 +129,15 @@ public class ProjectToolProvider extends AbstractToolProvider {
         // Register the tool with a handler
         registerTool(tool, (exchange, args) -> {
             // Get the folder path from the request
-            String folderPath = (String) args.get("folderPath");
-            if (folderPath == null) {
-                return createErrorResult("No folder path provided");
+            String folderPath;
+            try {
+                folderPath = getString(args, "folderPath");
+            } catch (IllegalArgumentException e) {
+                return createErrorResult(e.getMessage());
             }
 
             // Get the recursive flag
-            boolean recursive = args.containsKey("recursive") ?
-                (Boolean) args.get("recursive") : false;
+            boolean recursive = getOptionalBoolean(args, "recursive", false);
 
             // Get the active project
             Project project = AppInfo.getActiveProject();

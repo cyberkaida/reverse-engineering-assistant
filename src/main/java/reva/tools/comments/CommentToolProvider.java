@@ -76,12 +76,12 @@ public class CommentToolProvider extends AbstractToolProvider {
     private void registerSetCommentTool() throws McpError {
         Map<String, Object> properties = new HashMap<>();
         properties.put("programPath", SchemaUtil.stringProperty("Path to the program in the Ghidra Project"));
-        properties.put("address", SchemaUtil.stringProperty("Address or symbol name where to set the comment"));
+        properties.put("addressOrSymbol", SchemaUtil.stringProperty("Address or symbol name where to set the comment"));
         properties.put("commentType", SchemaUtil.stringPropertyWithDefault(
             "Type of comment: 'pre', 'eol', 'post', 'plate', or 'repeatable'", "pre"));
         properties.put("comment", SchemaUtil.stringProperty("The comment text to set"));
 
-        List<String> required = List.of("programPath", "address", "comment");
+        List<String> required = List.of("programPath", "addressOrSymbol", "comment");
 
         McpSchema.Tool tool = new McpSchema.Tool(
             "set-comment",
@@ -90,22 +90,11 @@ public class CommentToolProvider extends AbstractToolProvider {
         );
 
         registerTool(tool, (exchange, args) -> {
-            String programPath = getString(args, "programPath");
-            String addressStr = getString(args, "address");
+            // Get program and parameters using helper methods
+            Program program = getProgramFromArgs(args);
+            Address address = getAddressFromArgs(args, program, "addressOrSymbol");
             String commentTypeStr = getOptionalString(args, "commentType", "eol");
             String comment = getString(args, "comment");
-
-            Program program;
-            try {
-                program = getValidatedProgram(programPath);
-            } catch (ProgramValidationException e) {
-                return createErrorResult(e.getMessage());
-            }
-
-            Address address = AddressUtil.resolveAddressOrSymbol(program, addressStr);
-            if (address == null) {
-                return createErrorResult("Invalid address or symbol: " + addressStr);
-            }
 
             Integer commentType = COMMENT_TYPES.get(commentTypeStr.toLowerCase());
             if (commentType == null) {
@@ -145,7 +134,7 @@ public class CommentToolProvider extends AbstractToolProvider {
     private void registerGetCommentsTool() throws McpError {
         Map<String, Object> properties = new HashMap<>();
         properties.put("programPath", SchemaUtil.stringProperty("Path to the program in the Ghidra Project"));
-        properties.put("address", SchemaUtil.stringProperty("Address or symbol name to get comments from (optional if using addressRange)"));
+        properties.put("addressOrSymbol", SchemaUtil.stringProperty("Address or symbol name to get comments from (optional if using addressRange)"));
 
         Map<String, Object> addressRangeProps = new HashMap<>();
         addressRangeProps.put("start", SchemaUtil.stringProperty("Start address of the range"));
@@ -171,19 +160,13 @@ public class CommentToolProvider extends AbstractToolProvider {
         );
 
         registerTool(tool, (exchange, args) -> {
-            String programPath = getString(args, "programPath");
-            String addressStr = getOptionalString(args, "address", null);
+            // Get program and parameters using helper methods
+            Program program = getProgramFromArgs(args);
+            String addressStr = getOptionalString(args, "addressOrSymbol", null);
             @SuppressWarnings("unchecked")
             Map<String, Object> addressRange = getOptionalMap(args, "addressRange", null);
             @SuppressWarnings("unchecked")
             List<String> commentTypes = (List<String>) args.get("commentTypes");
-
-            Program program;
-            try {
-                program = getValidatedProgram(programPath);
-            } catch (ProgramValidationException e) {
-                return createErrorResult(e.getMessage());
-            }
 
             AddressSetView addresses;
             if (addressStr != null) {
@@ -256,11 +239,11 @@ public class CommentToolProvider extends AbstractToolProvider {
     private void registerRemoveCommentTool() throws McpError {
         Map<String, Object> properties = new HashMap<>();
         properties.put("programPath", SchemaUtil.stringProperty("Path to the program in the Ghidra Project"));
-        properties.put("address", SchemaUtil.stringProperty("Address or symbol name where to remove the comment"));
+        properties.put("addressOrSymbol", SchemaUtil.stringProperty("Address or symbol name where to remove the comment"));
         properties.put("commentType", SchemaUtil.stringProperty(
             "Type of comment to remove: 'pre', 'eol', 'post', 'plate', or 'repeatable'"));
 
-        List<String> required = List.of("programPath", "address", "commentType");
+        List<String> required = List.of("programPath", "addressOrSymbol", "commentType");
 
         McpSchema.Tool tool = new McpSchema.Tool(
             "remove-comment",
@@ -269,21 +252,10 @@ public class CommentToolProvider extends AbstractToolProvider {
         );
 
         registerTool(tool, (exchange, args) -> {
-            String programPath = getString(args, "programPath");
-            String addressStr = getString(args, "address");
+            // Get program and parameters using helper methods
+            Program program = getProgramFromArgs(args);
+            Address address = getAddressFromArgs(args, program, "addressOrSymbol");
             String commentTypeStr = getString(args, "commentType");
-
-            Program program;
-            try {
-                program = getValidatedProgram(programPath);
-            } catch (ProgramValidationException e) {
-                return createErrorResult(e.getMessage());
-            }
-
-            Address address = AddressUtil.resolveAddressOrSymbol(program, addressStr);
-            if (address == null) {
-                return createErrorResult("Invalid address or symbol: " + addressStr);
-            }
 
             Integer commentType = COMMENT_TYPES.get(commentTypeStr.toLowerCase());
             if (commentType == null) {
@@ -340,19 +312,13 @@ public class CommentToolProvider extends AbstractToolProvider {
         );
 
         registerTool(tool, (exchange, args) -> {
-            String programPath = getString(args, "programPath");
+            // Get program and parameters using helper methods
+            Program program = getProgramFromArgs(args);
             String searchText = getString(args, "searchText");
             boolean caseSensitive = getOptionalBoolean(args, "caseSensitive", false);
             @SuppressWarnings("unchecked")
             List<String> commentTypes = (List<String>) args.get("commentTypes");
             int maxResults = getOptionalInt(args, "maxResults", 100);
-
-            Program program;
-            try {
-                program = getValidatedProgram(programPath);
-            } catch (ProgramValidationException e) {
-                return createErrorResult(e.getMessage());
-            }
 
             List<Integer> types = new ArrayList<>();
             if (commentTypes != null && !commentTypes.isEmpty()) {

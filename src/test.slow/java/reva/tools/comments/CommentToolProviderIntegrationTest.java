@@ -75,7 +75,7 @@ public class CommentToolProviderIntegrationTest extends RevaIntegrationTestBase 
                 // Set a comment
                 Map<String, Object> setArgs = new HashMap<>();
                 setArgs.put("programPath", programPath);
-                setArgs.put("address", addressStr);
+                setArgs.put("addressOrSymbol", addressStr);
                 setArgs.put("commentType", "eol");
                 setArgs.put("comment", "Test comment");
 
@@ -91,7 +91,7 @@ public class CommentToolProviderIntegrationTest extends RevaIntegrationTestBase 
                 // Get the comment using the tool
                 Map<String, Object> getArgs = new HashMap<>();
                 getArgs.put("programPath", programPath);
-                getArgs.put("address", addressStr);
+                getArgs.put("addressOrSymbol", addressStr);
 
                 CallToolRequest getRequest = new CallToolRequest("get-comments", getArgs);
                 CallToolResult getResult = client.callTool(getRequest);

@@ -36,7 +36,6 @@ import io.modelcontextprotocol.spec.McpSchema;
 import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
 import io.modelcontextprotocol.spec.McpSchema.Content;
 import io.modelcontextprotocol.spec.McpSchema.TextContent;
-import reva.plugin.RevaProgramManager;
 import reva.tools.AbstractToolProvider;
 import reva.tools.ProgramValidationException;
 import reva.util.AddressUtil;
@@ -56,144 +55,60 @@ public class DataToolProvider extends AbstractToolProvider {
 
     @Override
     public void registerTools() throws McpError {
-        registerGetDataByAddressTool();
-        registerGetDataBySymbolTool();
-        registerApplyDataTypeToSymbolTool();
+        registerGetDataTool();
+        registerApplyDataTypeTool();
         registerCreateLabelTool();
     }
 
     /**
-     * Register a tool to get data at a specific address in a program
+     * Register a unified tool to get data by address or symbol name
      * @throws McpError if there's an error registering the tool
      */
-    private void registerGetDataByAddressTool() throws McpError {
+    private void registerGetDataTool() throws McpError {
         // Define schema for the tool
         Map<String, Object> properties = new HashMap<>();
         properties.put("programPath", Map.of(
             "type", "string",
             "description", "Path in the Ghidra Project to the program containing the data"
         ));
-        properties.put("address", Map.of(
+        properties.put("addressOrSymbol", Map.of(
             "type", "string",
             "description", "Address or symbol name to get data from (e.g., '0x00400000' or 'main')"
         ));
 
-        List<String> required = List.of("programPath", "address");
+        List<String> required = List.of("programPath", "addressOrSymbol");
 
         // Create the tool
         McpSchema.Tool tool = new McpSchema.Tool(
-            "get-data-at-address",
-            "Get data at a specific address in a program",
+            "get-data",
+            "Get data at a specific address or symbol in a program",
             createSchema(properties, required)
         );
 
         // Register the tool with a handler
         registerTool(tool, (exchange, args) -> {
-            // Get the program path and address from the request
-            String programPath = (String) args.get("programPath");
-            String addressString = (String) args.get("address");
-
-            if (programPath == null) {
-                return createErrorResult("No program path provided");
-            }
-            if (addressString == null) {
-                return createErrorResult("No address provided");
-            }
-
-            // Get the program from the path
-            Program program;
-            try {
-                program = getValidatedProgram(programPath);
-            } catch (ProgramValidationException e) {
-                return createErrorResult(e.getMessage());
-            }
-
-            // Parse the address or symbol
-            Address address = AddressUtil.resolveAddressOrSymbol(program, addressString);
-            if (address == null) {
-                return createErrorResult("Invalid address or symbol: " + addressString);
-            }
+            // Get program and address using helper methods
+            Program program = getProgramFromArgs(args);
+            Address address = getAddressFromArgs(args, program, "addressOrSymbol");
 
             return getDataAtAddressResult(program, address);
         });
     }
 
     /**
-     * Register a tool to get data by symbol name in a program
+     * Register a tool to apply a data type to an address or symbol
      * @throws McpError if there's an error registering the tool
      */
-    private void registerGetDataBySymbolTool() throws McpError {
+    private void registerApplyDataTypeTool() throws McpError {
         // Define schema for the tool
         Map<String, Object> properties = new HashMap<>();
         properties.put("programPath", Map.of(
             "type", "string",
-            "description", "Path in the Ghidra Project to the program containing the data"
+            "description", "Path in the Ghidra Project to the program"
         ));
-        properties.put("symbolName", Map.of(
+        properties.put("addressOrSymbol", Map.of(
             "type", "string",
-            "description", "Name of the symbol to get data for"
-        ));
-
-        List<String> required = List.of("programPath", "symbolName");
-
-        // Create the tool
-        McpSchema.Tool tool = new McpSchema.Tool(
-            "get-data-by-symbol",
-            "Get data for a specific symbol in a program",
-            createSchema(properties, required)
-        );
-
-        // Register the tool with a handler
-        registerTool(tool, (exchange, args) -> {
-            // Get the program path and symbol name from the request
-            String programPath = (String) args.get("programPath");
-            String symbolName = (String) args.get("symbolName");
-
-            if (programPath == null) {
-                return createErrorResult("No program path provided");
-            }
-            if (symbolName == null) {
-                return createErrorResult("No symbol name provided");
-            }
-
-            // Get the program from the path
-            Program program;
-            try {
-                program = getValidatedProgram(programPath);
-            } catch (ProgramValidationException e) {
-                return createErrorResult(e.getMessage());
-            }
-
-            // Find the symbol
-            SymbolTable symbolTable = program.getSymbolTable();
-            List<Symbol> symbols = symbolTable.getLabelOrFunctionSymbols(symbolName, null);
-
-            if (symbols.isEmpty()) {
-                return createErrorResult("Symbol not found: " + symbolName);
-            }
-
-            // Use the first matching symbol's address
-            Symbol symbol = symbols.get(0);
-            Address address = symbol.getAddress();
-
-            return getDataAtAddressResult(program, address);
-        });
-    }
-
-    /**
-     * Register a tool to apply a data type to a symbol
-     * @throws McpError if there's an error registering the tool
-     */
-    private void registerApplyDataTypeToSymbolTool() throws McpError {
-        // Define schema for the tool
-        Map<String, Object> properties = new HashMap<>();
-        properties.put("programPath", Map.of(
-            "type", "string",
-            "description", "Path in the Ghidra Project to the program containing the symbol"
-        ));
-        properties.put("symbolName", Map.of(
-            "type", "string",
-            "description", "Name of the symbol to apply the data type to"
+            "description", "Address or symbol name to apply the data type to (e.g., '0x00400000' or 'main')"
         ));
         properties.put("dataTypeString", Map.of(
             "type", "string",
@@ -205,52 +120,26 @@ public class DataToolProvider extends AbstractToolProvider {
             "default", ""
         ));
 
-        List<String> required = List.of("programPath", "symbolName", "dataTypeString");
+        List<String> required = List.of("programPath", "addressOrSymbol", "dataTypeString");
 
         // Create the tool
         McpSchema.Tool tool = new McpSchema.Tool(
-            "apply-data-type-to-symbol",
-            "Apply a data type to a symbol in a program",
+            "apply-data-type",
+            "Apply a data type to a specific address or symbol in a program",
             createSchema(properties, required)
         );
 
         // Register the tool with a handler
         registerTool(tool, (exchange, args) -> {
-            // Get the parameters from the request
-            String programPath = (String) args.get("programPath");
-            String symbolName = (String) args.get("symbolName");
-            String dataTypeString = (String) args.get("dataTypeString");
-            String archiveName = args.containsKey("archiveName") ? (String) args.get("archiveName") : "";
+            // Get program and parameters using helper methods
+            Program program = getProgramFromArgs(args);
+            Address targetAddress = getAddressFromArgs(args, program, "addressOrSymbol");
+            String dataTypeString = getString(args, "dataTypeString");
+            String archiveName = getOptionalString(args, "archiveName", "");
 
-            if (programPath == null) {
-                return createErrorResult("No program path provided");
+            if (dataTypeString.trim().isEmpty()) {
+                return createErrorResult("Data type string cannot be empty");
             }
-            if (symbolName == null) {
-                return createErrorResult("No symbol name provided");
-            }
-            if (dataTypeString == null || dataTypeString.isEmpty()) {
-                return createErrorResult("No data type string provided");
-            }
-
-            // Get the program from the path
-            Program program;
-            try {
-                program = getValidatedProgram(programPath);
-            } catch (ProgramValidationException e) {
-                return createErrorResult(e.getMessage());
-            }
-
-            // Find the symbol
-            SymbolTable symbolTable = program.getSymbolTable();
-            List<Symbol> symbols = symbolTable.getLabelOrFunctionSymbols(symbolName, null);
-
-            if (symbols.isEmpty()) {
-                return createErrorResult("Symbol not found: " + symbolName);
-            }
-
-            // Use the first matching symbol
-            Symbol symbol = symbols.get(0);
-            Address symbolAddress = symbol.getAddress();
 
             try {
                 // Try to parse the data type from the string and get the actual DataType object
@@ -267,7 +156,7 @@ public class DataToolProvider extends AbstractToolProvider {
                 }
 
                 // Start a transaction to apply the data type
-                int transactionID = program.startTransaction("Apply Data Type to Symbol");
+                int transactionID = program.startTransaction("Apply Data Type");
                 boolean success = false;
 
                 try {
@@ -276,15 +165,15 @@ public class DataToolProvider extends AbstractToolProvider {
                     Listing listing = program.getListing();
 
                     // Clear any existing data at the address
-                    if (listing.getDataAt(symbolAddress) != null) {
-                        listing.clearCodeUnits(symbolAddress, symbolAddress.add(dataType.getLength() - 1), false);
+                    if (listing.getDataAt(targetAddress) != null) {
+                        listing.clearCodeUnits(targetAddress, targetAddress.add(dataType.getLength() - 1), false);
                     }
 
                     // Create the data at the address with the specified data type
-                    Data createdData = listing.createData(symbolAddress, dataType);
+                    Data createdData = listing.createData(targetAddress, dataType);
 
                     if (createdData == null) {
-                        throw new Exception("Failed to create data at address: " + symbolAddress);
+                        throw new Exception("Failed to create data at address: " + targetAddress);
                     }
 
                     success = true;
@@ -292,8 +181,7 @@ public class DataToolProvider extends AbstractToolProvider {
                     // Create result data
                     Map<String, Object> resultData = new HashMap<>();
                     resultData.put("success", true);
-                    resultData.put("symbolName", symbol.getName());
-                    resultData.put("address", "0x" + symbolAddress.toString());
+                    resultData.put("address", "0x" + targetAddress.toString());
                     resultData.put("dataType", dataType.getName());
                     resultData.put("dataTypeDisplayName", dataType.getDisplayName());
                     resultData.put("length", dataType.getLength());
@@ -320,7 +208,7 @@ public class DataToolProvider extends AbstractToolProvider {
             "type", "string",
             "description", "Path in the Ghidra Project to the program containing the address"
         ));
-        properties.put("address", Map.of(
+        properties.put("addressOrSymbol", Map.of(
             "type", "string",
             "description", "Address or symbol name to create label at (e.g., '0x00400000' or 'main')"
         ));
@@ -334,7 +222,7 @@ public class DataToolProvider extends AbstractToolProvider {
             "default", true
         ));
 
-        List<String> required = List.of("programPath", "address", "labelName");
+        List<String> required = List.of("programPath", "addressOrSymbol", "labelName");
 
         // Create the tool
         McpSchema.Tool tool = new McpSchema.Tool(
@@ -345,35 +233,21 @@ public class DataToolProvider extends AbstractToolProvider {
 
         // Register the tool with a handler
         registerTool(tool, (exchange, args) -> {
-            // Get the parameters from the request
-            String programPath = (String) args.get("programPath");
-            String addressString = (String) args.get("address");
-            String labelName = (String) args.get("labelName");
-            boolean setAsPrimary = args.containsKey("setAsPrimary") ?
-                (Boolean) args.get("setAsPrimary") : true;
-
-            if (programPath == null) {
-                return createErrorResult("No program path provided");
-            }
-            if (addressString == null) {
-                return createErrorResult("No address provided");
-            }
-            if (labelName == null || labelName.isEmpty()) {
-                return createErrorResult("No label name provided");
-            }
-
-            // Get the program from the path
+            // Get program and parameters using helper methods
             Program program;
+            String labelName;
+            Address address;
             try {
-                program = getValidatedProgram(programPath);
-            } catch (ProgramValidationException e) {
+                program = getProgramFromArgs(args);
+                labelName = getString(args, "labelName");
+                address = getAddressFromArgs(args, program, "addressOrSymbol");
+            } catch (IllegalArgumentException | ProgramValidationException e) {
                 return createErrorResult(e.getMessage());
             }
+            boolean setAsPrimary = getOptionalBoolean(args, "setAsPrimary", true);
 
-            // Parse the address or symbol
-            Address address = AddressUtil.resolveAddressOrSymbol(program, addressString);
-            if (address == null) {
-                return createErrorResult("Invalid address or symbol: " + addressString);
+            if (labelName.trim().isEmpty()) {
+                return createErrorResult("Label name cannot be empty");
             }
 
             // Start a transaction to create the label
@@ -423,8 +297,6 @@ public class DataToolProvider extends AbstractToolProvider {
      * @return Call tool result with data information
      */
     private CallToolResult getDataAtAddressResult(Program program, Address address) {
-        // Get the listing
-        Listing listing = program.getListing();
 
         // Get data at or containing the address
         Data data = AddressUtil.getContainingData(program, address);

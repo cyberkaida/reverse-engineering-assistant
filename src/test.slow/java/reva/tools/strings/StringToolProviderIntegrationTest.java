@@ -514,7 +514,7 @@ public class StringToolProviderIntegrationTest extends RevaIntegrationTestBase {
         Map<String, Object> arguments = new HashMap<>();
         arguments.put("programPath", programPath);
 
-        verifyMcpToolFailsWithError("search-strings-regex", arguments, "pattern");
+        verifyMcpToolFailsWithError("search-strings-regex", arguments, "Pattern");
     }
 
     @Test

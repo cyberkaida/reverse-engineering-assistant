@@ -28,9 +28,7 @@ import io.modelcontextprotocol.server.McpSyncServer;
 import io.modelcontextprotocol.server.McpServerFeatures.SyncToolSpecification;
 import io.modelcontextprotocol.spec.McpError;
 import io.modelcontextprotocol.spec.McpSchema;
-import reva.plugin.RevaProgramManager;
 import reva.tools.AbstractToolProvider;
-import reva.tools.ProgramValidationException;
 import reva.util.AddressUtil;
 import reva.util.MemoryUtil;
 import reva.util.SchemaUtil;
@@ -75,19 +73,8 @@ public class MemoryToolProvider extends AbstractToolProvider {
 
         // Add the tool using the parent's method
         super.registerTool(tool, (exchange, args) -> {
-            // Get the program path from the request
-            String programPath = (String) args.get("programPath");
-            if (programPath == null) {
-                return createErrorResult("No program path provided");
-            }
-
-            // Get and validate the program
-            Program program;
-            try {
-                program = getValidatedProgram(programPath);
-            } catch (ProgramValidationException e) {
-                return createErrorResult(e.getMessage());
-            }
+            // Get program using helper method
+            Program program = getProgramFromArgs(args);
 
             // Get the memory from the program
             Memory memory = program.getMemory();
@@ -123,11 +110,11 @@ public class MemoryToolProvider extends AbstractToolProvider {
         // Define schema for the tool
         Map<String, Object> properties = new HashMap<>();
         properties.put("programPath", SchemaUtil.stringProperty("Path to the program in the Ghidra Project"));
-        properties.put("address", SchemaUtil.stringProperty("Address or symbol name to read from (e.g. '00400000' or 'main')"));
+        properties.put("addressOrSymbol", SchemaUtil.stringProperty("Address or symbol name to read from (e.g. '00400000' or 'main')"));
         properties.put("length", SchemaUtil.integerPropertyWithDefault("Number of bytes to read", 16));
         properties.put("format", SchemaUtil.stringPropertyWithDefault("Output format: 'hex', 'bytes', or 'both'", "hex"));
 
-        List<String> required = List.of("programPath", "address");
+        List<String> required = List.of("programPath", "addressOrSymbol");
 
         // Create the tool
         McpSchema.Tool tool = new McpSchema.Tool(
@@ -138,31 +125,9 @@ public class MemoryToolProvider extends AbstractToolProvider {
 
         // Add the tool using the parent's method
         super.registerTool(tool, (exchange, args) -> {
-            // Get the program path from the request
-            String programPath = (String) args.get("programPath");
-            if (programPath == null) {
-                return createErrorResult("No program path provided");
-            }
-
-            // Get and validate the program
-            Program program;
-            try {
-                program = getValidatedProgram(programPath);
-            } catch (ProgramValidationException e) {
-                return createErrorResult(e.getMessage());
-            }
-
-            // Get the address from the request
-            String addressStr = (String) args.get("address");
-            if (addressStr == null) {
-                return createErrorResult("No address provided");
-            }
-
-            // Parse the address or symbol
-            Address address = AddressUtil.resolveAddressOrSymbol(program, addressStr);
-            if (address == null) {
-                return createErrorResult("Invalid address or symbol: " + addressStr);
-            }
+            // Get program and address using helper methods
+            Program program = getProgramFromArgs(args);
+            Address address = getAddressFromArgs(args, program, "addressOrSymbol");
 
             // Get the length from the request
             int length = (Integer) args.getOrDefault("length", 16);
@@ -171,7 +136,7 @@ public class MemoryToolProvider extends AbstractToolProvider {
             }
 
             // Get the format from the request
-            String format = (String) args.getOrDefault("format", "hex");
+            String format = getOptionalString(args, "format", "hex");
 
             // Read the memory
             byte[] bytes = MemoryUtil.readMemoryBytes(program, address, length);

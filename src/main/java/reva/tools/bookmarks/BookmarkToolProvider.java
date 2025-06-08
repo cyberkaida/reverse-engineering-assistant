@@ -69,12 +69,12 @@ public class BookmarkToolProvider extends AbstractToolProvider {
     private void registerSetBookmarkTool() throws McpError {
         Map<String, Object> properties = new HashMap<>();
         properties.put("programPath", SchemaUtil.stringProperty("Path to the program in the Ghidra Project"));
-        properties.put("address", SchemaUtil.stringProperty("Address or symbol name where to set the bookmark"));
+        properties.put("addressOrSymbol", SchemaUtil.stringProperty("Address or symbol name where to set the bookmark"));
         properties.put("type", SchemaUtil.stringProperty("Bookmark type (e.g. 'Note', 'Warning', 'TODO', 'Bug', 'Analysis')"));
         properties.put("category", SchemaUtil.stringProperty("Bookmark category for organizing bookmarks (optional)"));
         properties.put("comment", SchemaUtil.stringProperty("Bookmark comment text"));
 
-        List<String> required = List.of("programPath", "address", "type", "comment");
+        List<String> required = List.of("programPath", "addressOrSymbol", "type", "comment");
 
         McpSchema.Tool tool = new McpSchema.Tool(
             "set-bookmark",
@@ -83,23 +83,12 @@ public class BookmarkToolProvider extends AbstractToolProvider {
         );
 
         registerTool(tool, (exchange, args) -> {
-            String programPath = getString(args, "programPath");
-            String addressStr = getString(args, "address");
+            // Get program and parameters using helper methods
+            Program program = getProgramFromArgs(args);
+            Address address = getAddressFromArgs(args, program, "addressOrSymbol");
             String type = getString(args, "type");
             String category = getOptionalString(args, "category", "");
             String comment = getString(args, "comment");
-
-            Program program;
-            try {
-                program = getValidatedProgram(programPath);
-            } catch (ProgramValidationException e) {
-                return createErrorResult(e.getMessage());
-            }
-
-            Address address = AddressUtil.resolveAddressOrSymbol(program, addressStr);
-            if (address == null) {
-                return createErrorResult("Invalid address or symbol: " + addressStr);
-            }
 
             try {
                 int transactionId = program.startTransaction("Set Bookmark");
@@ -143,7 +132,7 @@ public class BookmarkToolProvider extends AbstractToolProvider {
     private void registerGetBookmarksTool() throws McpError {
         Map<String, Object> properties = new HashMap<>();
         properties.put("programPath", SchemaUtil.stringProperty("Path to the program in the Ghidra Project"));
-        properties.put("address", SchemaUtil.stringProperty("Address or symbol name to get bookmarks from (optional if using addressRange)"));
+        properties.put("addressOrSymbol", SchemaUtil.stringProperty("Address or symbol name to get bookmarks from (optional if using addressRange)"));
 
         Map<String, Object> addressRangeProps = new HashMap<>();
         addressRangeProps.put("start", SchemaUtil.stringProperty("Start address of the range"));
@@ -166,19 +155,13 @@ public class BookmarkToolProvider extends AbstractToolProvider {
         );
 
         registerTool(tool, (exchange, args) -> {
-            String programPath = getString(args, "programPath");
-            String addressStr = getOptionalString(args, "address", null);
+            // Get program and parameters using helper methods
+            Program program = getProgramFromArgs(args);
+            String addressStr = getOptionalString(args, "addressOrSymbol", null);
             @SuppressWarnings("unchecked")
             Map<String, Object> addressRange = getOptionalMap(args, "addressRange", null);
             String typeFilter = getOptionalString(args, "type", null);
             String categoryFilter = getOptionalString(args, "category", null);
-
-            Program program;
-            try {
-                program = getValidatedProgram(programPath);
-            } catch (ProgramValidationException e) {
-                return createErrorResult(e.getMessage());
-            }
 
             BookmarkManager bookmarkMgr = program.getBookmarkManager();
             List<Map<String, Object>> bookmarks = new ArrayList<>();
@@ -246,11 +229,11 @@ public class BookmarkToolProvider extends AbstractToolProvider {
     private void registerRemoveBookmarkTool() throws McpError {
         Map<String, Object> properties = new HashMap<>();
         properties.put("programPath", SchemaUtil.stringProperty("Path to the program in the Ghidra Project"));
-        properties.put("address", SchemaUtil.stringProperty("Address or symbol name of the bookmark"));
+        properties.put("addressOrSymbol", SchemaUtil.stringProperty("Address or symbol name of the bookmark"));
         properties.put("type", SchemaUtil.stringProperty("Bookmark type"));
         properties.put("category", SchemaUtil.stringProperty("Bookmark category (optional)"));
 
-        List<String> required = List.of("programPath", "address", "type");
+        List<String> required = List.of("programPath", "addressOrSymbol", "type");
 
         McpSchema.Tool tool = new McpSchema.Tool(
             "remove-bookmark",
@@ -259,22 +242,11 @@ public class BookmarkToolProvider extends AbstractToolProvider {
         );
 
         registerTool(tool, (exchange, args) -> {
-            String programPath = getString(args, "programPath");
-            String addressStr = getString(args, "address");
+            // Get program and parameters using helper methods
+            Program program = getProgramFromArgs(args);
+            Address address = getAddressFromArgs(args, program, "addressOrSymbol");
             String type = getString(args, "type");
             String category = getOptionalString(args, "category", "");
-
-            Program program;
-            try {
-                program = getValidatedProgram(programPath);
-            } catch (ProgramValidationException e) {
-                return createErrorResult(e.getMessage());
-            }
-
-            Address address = AddressUtil.resolveAddressOrSymbol(program, addressStr);
-            if (address == null) {
-                return createErrorResult("Invalid address or symbol: " + addressStr);
-            }
 
             try {
                 int transactionId = program.startTransaction("Remove Bookmark");
@@ -347,7 +319,8 @@ public class BookmarkToolProvider extends AbstractToolProvider {
         );
 
         registerTool(tool, (exchange, args) -> {
-            String programPath = getString(args, "programPath");
+            // Get program and parameters using helper methods
+            Program program = getProgramFromArgs(args);
             String searchText = getOptionalString(args, "searchText", null);
             @SuppressWarnings("unchecked")
             List<String> types = (List<String>) args.get("types");
@@ -356,13 +329,6 @@ public class BookmarkToolProvider extends AbstractToolProvider {
             @SuppressWarnings("unchecked")
             Map<String, Object> addressRange = getOptionalMap(args, "addressRange", null);
             int maxResults = getOptionalInt(args, "maxResults", 100);
-
-            Program program;
-            try {
-                program = getValidatedProgram(programPath);
-            } catch (ProgramValidationException e) {
-                return createErrorResult(e.getMessage());
-            }
 
             AddressSetView searchRange = null;
             if (addressRange != null) {
@@ -439,15 +405,9 @@ public class BookmarkToolProvider extends AbstractToolProvider {
         );
 
         registerTool(tool, (exchange, args) -> {
-            String programPath = getString(args, "programPath");
+            // Get program and parameters using helper methods
+            Program program = getProgramFromArgs(args);
             String type = getString(args, "type");
-
-            Program program;
-            try {
-                program = getValidatedProgram(programPath);
-            } catch (ProgramValidationException e) {
-                return createErrorResult(e.getMessage());
-            }
 
             BookmarkManager bookmarkMgr = program.getBookmarkManager();
             Map<String, Integer> categoryCounts = new HashMap<>();

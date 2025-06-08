@@ -22,8 +22,15 @@ import java.util.Map;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import ghidra.program.model.address.Address;
+import ghidra.program.model.listing.Function;
+import ghidra.program.model.listing.FunctionIterator;
+import ghidra.program.model.listing.FunctionManager;
 import ghidra.program.model.listing.Program;
+import ghidra.program.model.symbol.Symbol;
+import ghidra.program.model.symbol.SymbolTable;
 import ghidra.util.Msg;
+import reva.util.AddressUtil;
 import io.modelcontextprotocol.server.McpServerFeatures.SyncToolSpecification;
 import reva.plugin.RevaProgramManager;
 import io.modelcontextprotocol.server.McpSyncServer;
@@ -128,7 +135,22 @@ public abstract class AbstractToolProvider implements ToolProvider {
      * @throws McpError if there's an error registering the tool
      */
     protected void registerTool(Tool tool, java.util.function.BiFunction<io.modelcontextprotocol.server.McpSyncServerExchange, java.util.Map<String, Object>, McpSchema.CallToolResult> handler) throws McpError {
-        SyncToolSpecification toolSpec = new SyncToolSpecification(tool, handler);
+        // Wrap the handler with safe execution
+        java.util.function.BiFunction<io.modelcontextprotocol.server.McpSyncServerExchange, java.util.Map<String, Object>, McpSchema.CallToolResult> safeHandler = 
+            (exchange, args) -> {
+                try {
+                    return handler.apply(exchange, args);
+                } catch (IllegalArgumentException e) {
+                    return createErrorResult(e.getMessage());
+                } catch (ProgramValidationException e) {
+                    return createErrorResult(e.getMessage());
+                } catch (Exception e) {
+                    logError("Unexpected error in tool execution", e);
+                    return createErrorResult("Tool execution failed: " + e.getMessage());
+                }
+            };
+        
+        SyncToolSpecification toolSpec = new SyncToolSpecification(tool, safeHandler);
         server.addTool(toolSpec);
         registeredTools.add(tool);
         logInfo("Registered tool: " + tool.name());
@@ -164,17 +186,15 @@ public abstract class AbstractToolProvider implements ToolProvider {
      * @param args The arguments map
      * @param key The parameter key
      * @return The string value
-     * @throws IllegalArgumentException if the parameter is missing or not a string
+     * @throws IllegalArgumentException if the parameter is missing
      */
     protected String getString(Map<String, Object> args, String key) {
         Object value = args.get(key);
         if (value == null) {
             throw new IllegalArgumentException("Missing required parameter: " + key);
         }
-        if (!(value instanceof String)) {
-            throw new IllegalArgumentException("Parameter '" + key + "' must be a string");
-        }
-        return (String) value;
+        // Convert non-string values to string for flexibility
+        return value.toString();
     }
 
     /**
@@ -189,10 +209,8 @@ public abstract class AbstractToolProvider implements ToolProvider {
         if (value == null) {
             return defaultValue;
         }
-        if (!(value instanceof String)) {
-            throw new IllegalArgumentException("Parameter '" + key + "' must be a string");
-        }
-        return (String) value;
+        // Convert non-string values to string for flexibility
+        return value.toString();
     }
 
     /**
@@ -209,6 +227,14 @@ public abstract class AbstractToolProvider implements ToolProvider {
         }
         if (value instanceof Number) {
             return ((Number) value).intValue();
+        }
+        // Try to parse string representations of numbers
+        if (value instanceof String) {
+            try {
+                return Integer.parseInt((String) value);
+            } catch (NumberFormatException e) {
+                throw new IllegalArgumentException("Parameter '" + key + "' must be a number, got: " + value);
+            }
         }
         throw new IllegalArgumentException("Parameter '" + key + "' must be a number");
     }
@@ -227,6 +253,14 @@ public abstract class AbstractToolProvider implements ToolProvider {
         }
         if (value instanceof Number) {
             return ((Number) value).intValue();
+        }
+        // Try to parse string representations of numbers
+        if (value instanceof String) {
+            try {
+                return Integer.parseInt((String) value);
+            } catch (NumberFormatException e) {
+                throw new IllegalArgumentException("Parameter '" + key + "' must be a number, got: " + value);
+            }
         }
         throw new IllegalArgumentException("Parameter '" + key + "' must be a number");
     }
@@ -248,7 +282,42 @@ public abstract class AbstractToolProvider implements ToolProvider {
         if (value instanceof Number) {
             return ((Number) value).intValue();
         }
+        // Try to parse string representations of numbers
+        if (value instanceof String) {
+            try {
+                return Integer.parseInt((String) value);
+            } catch (NumberFormatException e) {
+                throw new IllegalArgumentException("Parameter '" + key + "' must be a number, got: " + value);
+            }
+        }
         throw new IllegalArgumentException("Parameter '" + key + "' must be a number");
+    }
+
+    /**
+     * Get a required boolean parameter from arguments
+     * @param args The arguments map
+     * @param key The parameter key
+     * @return The boolean value
+     * @throws IllegalArgumentException if the parameter is missing or not a valid boolean
+     */
+    protected boolean getBoolean(Map<String, Object> args, String key) {
+        Object value = args.get(key);
+        if (value == null) {
+            throw new IllegalArgumentException("Missing required parameter: " + key);
+        }
+        if (value instanceof Boolean) {
+            return (Boolean) value;
+        }
+        // Handle string representations of booleans
+        if (value instanceof String) {
+            String strValue = ((String) value).toLowerCase();
+            if ("true".equals(strValue)) {
+                return true;
+            } else if ("false".equals(strValue)) {
+                return false;
+            }
+        }
+        throw new IllegalArgumentException("Parameter '" + key + "' must be a boolean or 'true'/'false' string");
     }
 
     /**
@@ -266,7 +335,16 @@ public abstract class AbstractToolProvider implements ToolProvider {
         if (value instanceof Boolean) {
             return (Boolean) value;
         }
-        throw new IllegalArgumentException("Parameter '" + key + "' must be a boolean");
+        // Handle string representations of booleans
+        if (value instanceof String) {
+            String strValue = ((String) value).toLowerCase();
+            if ("true".equals(strValue)) {
+                return true;
+            } else if ("false".equals(strValue)) {
+                return false;
+            }
+        }
+        throw new IllegalArgumentException("Parameter '" + key + "' must be a boolean or 'true'/'false' string");
     }
 
     /**
@@ -309,5 +387,178 @@ public abstract class AbstractToolProvider implements ToolProvider {
         }
 
         return program;
+    }
+
+    /**
+     * Get a validated program from MCP arguments. Handles parameter extraction and validation in one call.
+     * @param args The arguments map from MCP tool call
+     * @return A valid Program object
+     * @throws IllegalArgumentException if programPath parameter is missing or invalid
+     * @throws ProgramValidationException if the program is not found, invalid, or in an invalid state
+     */
+    protected Program getProgramFromArgs(Map<String, Object> args) throws IllegalArgumentException, ProgramValidationException {
+        String programPath = getString(args, "programPath");
+        return getValidatedProgram(programPath);
+    }
+
+
+    /**
+     * Simple record to hold pagination parameters
+     */
+    protected record PaginationParams(int startIndex, int maxCount) {}
+
+    /**
+     * Get pagination parameters from arguments with common defaults
+     * @param args The arguments map
+     * @param defaultMaxCount Default maximum count (varies by tool type)
+     * @return PaginationParams object
+     */
+    protected PaginationParams getPaginationParams(Map<String, Object> args, int defaultMaxCount) {
+        int startIndex = getOptionalInt(args, "startIndex", 0);
+        int maxCount = getOptionalInt(args, "maxCount", defaultMaxCount);
+        return new PaginationParams(startIndex, maxCount);
+    }
+
+    /**
+     * Get pagination parameters from arguments with standard default (100)
+     * @param args The arguments map
+     * @return PaginationParams object
+     */
+    protected PaginationParams getPaginationParams(Map<String, Object> args) {
+        return getPaginationParams(args, 100);
+    }
+
+    /**
+     * Get and resolve an address from MCP arguments
+     * @param args The arguments map
+     * @param program The program to resolve the address in
+     * @param addressKey The key for the address parameter (usually "addressOrSymbol")
+     * @return Resolved Address object
+     * @throws IllegalArgumentException if address parameter is missing or address cannot be resolved
+     */
+    protected Address getAddressFromArgs(Map<String, Object> args, Program program, String addressKey) throws IllegalArgumentException {
+        String addressString = getString(args, addressKey);
+        Address address = AddressUtil.resolveAddressOrSymbol(program, addressString);
+        if (address == null) {
+            throw new IllegalArgumentException("Invalid address or symbol: " + addressString);
+        }
+        return address;
+    }
+
+    /**
+     * Get and resolve an address from MCP arguments using standard "address" key
+     * @param args The arguments map
+     * @param program The program to resolve the address in
+     * @return Resolved Address object
+     * @throws IllegalArgumentException if address parameter is missing or address cannot be resolved
+     */
+    protected Address getAddressFromArgs(Map<String, Object> args, Program program) throws IllegalArgumentException {
+        return getAddressFromArgs(args, program, "address");
+    }
+
+    /**
+     * Helper method to get a function from arguments by name or address
+     * @param args The arguments map
+     * @param program The program to search in
+     * @param paramName The parameter name containing the function name or address
+     * @return The resolved function
+     * @throws IllegalArgumentException if the function cannot be found
+     */
+    protected Function getFunctionFromArgs(Map<String, Object> args, Program program, String paramName) throws IllegalArgumentException {
+        String functionNameOrAddress = getString(args, paramName);
+        if (functionNameOrAddress == null) {
+            throw new IllegalArgumentException("No " + paramName + " provided");
+        }
+
+        Function function = null;
+
+        // First try to resolve as address or symbol
+        Address address = AddressUtil.resolveAddressOrSymbol(program, functionNameOrAddress);
+        if (address != null) {
+            // Get the containing function for this address
+            function = AddressUtil.getContainingFunction(program, address);
+        }
+
+        // If not found by address, try by function name
+        if (function == null) {
+            FunctionManager functionManager = program.getFunctionManager();
+
+            // First try an exact match
+            FunctionIterator functions = functionManager.getFunctions(true);
+            while (functions.hasNext()) {
+                Function f = functions.next();
+                if (f.getName().equals(functionNameOrAddress)) {
+                    function = f;
+                    break;
+                }
+            }
+
+            // If no exact match, try case-insensitive
+            if (function == null) {
+                functions = functionManager.getFunctions(true);
+                while (functions.hasNext()) {
+                    Function f = functions.next();
+                    if (f.getName().equalsIgnoreCase(functionNameOrAddress)) {
+                        function = f;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (function == null) {
+            throw new IllegalArgumentException("Function not found: " + functionNameOrAddress);
+        }
+
+        return function;
+    }
+
+    /**
+     * Helper method to get a function from arguments by name or address (using default parameter name)
+     * @param args The arguments map
+     * @param program The program to search in
+     * @return The resolved function
+     * @throws IllegalArgumentException if the function cannot be found
+     */
+    protected Function getFunctionFromArgs(Map<String, Object> args, Program program) throws IllegalArgumentException {
+        return getFunctionFromArgs(args, program, "functionNameOrAddress");
+    }
+
+    /**
+     * Helper method to resolve a symbol name to an address
+     * @param args The arguments map
+     * @param program The program to search in
+     * @param paramName The parameter name containing the symbol name
+     * @return The resolved address from the symbol
+     * @throws IllegalArgumentException if the symbol cannot be found
+     */
+    protected Address getAddressFromSymbolArgs(Map<String, Object> args, Program program, String paramName) throws IllegalArgumentException {
+        String symbolName = getString(args, paramName);
+        if (symbolName == null) {
+            throw new IllegalArgumentException("No " + paramName + " provided");
+        }
+
+        // Find the symbol
+        SymbolTable symbolTable = program.getSymbolTable();
+        List<Symbol> symbols = symbolTable.getLabelOrFunctionSymbols(symbolName, null);
+
+        if (symbols.isEmpty()) {
+            throw new IllegalArgumentException("Symbol not found: " + symbolName);
+        }
+
+        // Use the first matching symbol's address
+        Symbol symbol = symbols.get(0);
+        return symbol.getAddress();
+    }
+
+    /**
+     * Helper method to resolve a symbol name to an address (using default parameter name)
+     * @param args The arguments map
+     * @param program The program to search in
+     * @return The resolved address from the symbol
+     * @throws IllegalArgumentException if the symbol cannot be found
+     */
+    protected Address getAddressFromSymbolArgs(Map<String, Object> args, Program program) throws IllegalArgumentException {
+        return getAddressFromSymbolArgs(args, program, "symbolName");
     }
 }

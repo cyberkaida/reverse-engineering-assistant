@@ -29,9 +29,7 @@ import ghidra.program.model.symbol.SymbolType;
 import io.modelcontextprotocol.spec.McpError;
 import io.modelcontextprotocol.server.McpSyncServer;
 import io.modelcontextprotocol.spec.McpSchema;
-import reva.plugin.RevaProgramManager;
 import reva.tools.AbstractToolProvider;
-import reva.tools.ProgramValidationException;
 import reva.util.SymbolUtil;
 
 /**
@@ -84,26 +82,11 @@ public class SymbolToolProvider extends AbstractToolProvider {
         );
 
         // Register the tool with a handler
-        registerTool(tool, (io.modelcontextprotocol.server.McpSyncServerExchange exchange, Map<String, Object> args) -> {
-            // Get the program path from the request
-            String programPath = (String) args.get("programPath");
-            if (programPath == null) {
-                return createErrorResult("No program path provided");
-            }
-
-            // Get the program from the path
-            Program program;
-            try {
-                program = getValidatedProgram(programPath);
-            } catch (ProgramValidationException e) {
-                return createErrorResult(e.getMessage());
-            }
-
-            // Get parameters
-            boolean includeExternal = args.containsKey("includeExternal") ?
-                (Boolean) args.get("includeExternal") : false;
-            boolean filterDefaultNames = args.containsKey("filterDefaultNames") ?
-                (Boolean) args.get("filterDefaultNames") : true;
+        registerTool(tool, (exchange, args) -> {
+            // Get program and parameters using helper methods
+            Program program = getProgramFromArgs(args);
+            boolean includeExternal = getOptionalBoolean(args, "includeExternal", false);
+            boolean filterDefaultNames = getOptionalBoolean(args, "filterDefaultNames", true);
 
             // Count the symbols
             SymbolTable symbolTable = program.getSymbolTable();
@@ -173,28 +156,12 @@ public class SymbolToolProvider extends AbstractToolProvider {
         );
 
         // Register the tool with a handler
-        registerTool(tool, (io.modelcontextprotocol.server.McpSyncServerExchange exchange, Map<String, Object> args) -> {
-            // Get the program path from the request
-            String programPath = (String) args.get("programPath");
-            if (programPath == null) {
-                return createErrorResult("No program path provided");
-            }
-
-            // Get parameters
-            boolean includeExternal = args.containsKey("includeExternal") ?
-                (Boolean) args.get("includeExternal") : false;
-            int startIndex = getOptionalInt(args, "startIndex", 0);
-            int maxCount = getOptionalInt(args, "maxCount", 200);
-            boolean filterDefaultNames = args.containsKey("filterDefaultNames") ?
-                (Boolean) args.get("filterDefaultNames") : true;
-
-            // Get the program from the path
-            Program program;
-            try {
-                program = getValidatedProgram(programPath);
-            } catch (ProgramValidationException e) {
-                return createErrorResult(e.getMessage());
-            }
+        registerTool(tool, (exchange, args) -> {
+            // Get program and parameters using helper methods
+            Program program = getProgramFromArgs(args);
+            boolean includeExternal = getOptionalBoolean(args, "includeExternal", false);
+            PaginationParams pagination = getPaginationParams(args, 200);
+            boolean filterDefaultNames = getOptionalBoolean(args, "filterDefaultNames", true);
 
             // Get the symbols with pagination
             List<Map<String, Object>> symbolData = new ArrayList<>();
@@ -217,12 +184,12 @@ public class SymbolToolProvider extends AbstractToolProvider {
                 int index = currentIndex.getAndIncrement();
 
                 // Skip symbols before the start index
-                if (index < startIndex) {
+                if (index < pagination.startIndex()) {
                     return;
                 }
 
                 // Stop after we've collected maxCount symbols
-                if (symbolData.size() >= maxCount) {
+                if (symbolData.size() >= pagination.maxCount()) {
                     return;
                 }
 
@@ -232,10 +199,10 @@ public class SymbolToolProvider extends AbstractToolProvider {
 
             // Create pagination metadata
             Map<String, Object> paginationInfo = new HashMap<>();
-            paginationInfo.put("startIndex", startIndex);
-            paginationInfo.put("requestedCount", maxCount);
+            paginationInfo.put("startIndex", pagination.startIndex());
+            paginationInfo.put("requestedCount", pagination.maxCount());
             paginationInfo.put("actualCount", symbolData.size());
-            paginationInfo.put("nextStartIndex", startIndex + symbolData.size());
+            paginationInfo.put("nextStartIndex", pagination.startIndex() + symbolData.size());
             paginationInfo.put("totalProcessed", currentIndex.get());
             paginationInfo.put("includeExternal", includeExternal);
             paginationInfo.put("filterDefaultNames", filterDefaultNames);

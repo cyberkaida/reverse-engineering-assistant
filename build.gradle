@@ -88,7 +88,7 @@ dependencies {
 	implementation "io.modelcontextprotocol.sdk:mcp"
 	implementation "jakarta.servlet:jakarta.servlet-api:6.1.0"
 	// Add Jetty for embedded servlet support
-	implementation "org.eclipse.jetty:jetty-server:12.0.22"
+	implementation "org.eclipse.jetty:jetty-server:11.0.25"
 	implementation "org.eclipse.jetty:jetty-servlet:11.0.25"
 
 	// Testing dependencies
@@ -111,13 +111,13 @@ task integrationTest(type: Test) {
 	description 'Runs integration tests (tests that require GUI/headed environment)'
 	testClassesDirs = sourceSets.integrationTest.output.classesDirs
 	classpath = sourceSets.integrationTest.runtimeClasspath
-	
+
 	// Fork every test to prevent configuration conflicts
 	forkEvery 1
-	
+
 	// These tests require a GUI environment
 	systemProperty 'java.awt.headless', 'false'
-	
+
 	// Exclude suite classes
 	exclude '**/*Suite*'
 }

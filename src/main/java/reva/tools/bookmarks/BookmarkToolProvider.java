@@ -17,25 +17,20 @@ package reva.tools.bookmarks;
 
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 import ghidra.program.model.address.Address;
 import ghidra.program.model.address.AddressSet;
 import ghidra.program.model.address.AddressSetView;
 import ghidra.program.model.listing.Bookmark;
 import ghidra.program.model.listing.BookmarkManager;
-import ghidra.program.model.listing.BookmarkType;
 import ghidra.program.model.listing.Program;
 import io.modelcontextprotocol.server.McpSyncServer;
 import io.modelcontextprotocol.spec.McpError;
 import io.modelcontextprotocol.spec.McpSchema;
-import reva.plugin.RevaProgramManager;
 import reva.tools.AbstractToolProvider;
-import reva.util.AddressUtil;
 import reva.util.SchemaUtil;
 
 /**
@@ -68,12 +63,12 @@ public class BookmarkToolProvider extends AbstractToolProvider {
     private void registerSetBookmarkTool() throws McpError {
         Map<String, Object> properties = new HashMap<>();
         properties.put("programPath", SchemaUtil.stringProperty("Path to the program in the Ghidra Project"));
-        properties.put("address", SchemaUtil.stringProperty("Address or symbol name where to set the bookmark"));
+        properties.put("addressOrSymbol", SchemaUtil.stringProperty("Address or symbol name where to set the bookmark"));
         properties.put("type", SchemaUtil.stringProperty("Bookmark type (e.g. 'Note', 'Warning', 'TODO', 'Bug', 'Analysis')"));
         properties.put("category", SchemaUtil.stringProperty("Bookmark category for organizing bookmarks (optional)"));
         properties.put("comment", SchemaUtil.stringProperty("Bookmark comment text"));
 
-        List<String> required = List.of("programPath", "address", "type", "comment");
+        List<String> required = List.of("programPath", "addressOrSymbol", "type", "comment");
 
         McpSchema.Tool tool = new McpSchema.Tool(
             "set-bookmark",
@@ -82,21 +77,12 @@ public class BookmarkToolProvider extends AbstractToolProvider {
         );
 
         registerTool(tool, (exchange, args) -> {
-            String programPath = getString(args, "programPath");
-            String addressStr = getString(args, "address");
+            // Get program and parameters using helper methods
+            Program program = getProgramFromArgs(args);
+            Address address = getAddressFromArgs(args, program, "addressOrSymbol");
             String type = getString(args, "type");
             String category = getOptionalString(args, "category", "");
             String comment = getString(args, "comment");
-
-            Program program = RevaProgramManager.getProgramByPath(programPath);
-            if (program == null) {
-                return createErrorResult("Failed to find program: " + programPath);
-            }
-
-            Address address = AddressUtil.resolveAddressOrSymbol(program, addressStr);
-            if (address == null) {
-                return createErrorResult("Invalid address or symbol: " + addressStr);
-            }
 
             try {
                 int transactionId = program.startTransaction("Set Bookmark");
@@ -140,7 +126,7 @@ public class BookmarkToolProvider extends AbstractToolProvider {
     private void registerGetBookmarksTool() throws McpError {
         Map<String, Object> properties = new HashMap<>();
         properties.put("programPath", SchemaUtil.stringProperty("Path to the program in the Ghidra Project"));
-        properties.put("address", SchemaUtil.stringProperty("Address or symbol name to get bookmarks from (optional if using addressRange)"));
+        properties.put("addressOrSymbol", SchemaUtil.stringProperty("Address or symbol name to get bookmarks from (optional if using addressRange)"));
 
         Map<String, Object> addressRangeProps = new HashMap<>();
         addressRangeProps.put("start", SchemaUtil.stringProperty("Start address of the range"));
@@ -163,26 +149,23 @@ public class BookmarkToolProvider extends AbstractToolProvider {
         );
 
         registerTool(tool, (exchange, args) -> {
-            String programPath = getString(args, "programPath");
-            String addressStr = getOptionalString(args, "address", null);
-            @SuppressWarnings("unchecked")
+            // Get program and parameters using helper methods
+            Program program = getProgramFromArgs(args);
+            String addressStr = getOptionalString(args, "addressOrSymbol", null);
             Map<String, Object> addressRange = getOptionalMap(args, "addressRange", null);
             String typeFilter = getOptionalString(args, "type", null);
             String categoryFilter = getOptionalString(args, "category", null);
-
-            Program program = RevaProgramManager.getProgramByPath(programPath);
-            if (program == null) {
-                return createErrorResult("Failed to find program: " + programPath);
-            }
 
             BookmarkManager bookmarkMgr = program.getBookmarkManager();
             List<Map<String, Object>> bookmarks = new ArrayList<>();
 
             if (addressStr != null) {
                 // Get bookmarks at specific address
-                Address address = AddressUtil.resolveAddressOrSymbol(program, addressStr);
-                if (address == null) {
-                    return createErrorResult("Invalid address or symbol: " + addressStr);
+                Address address;
+                try {
+                    address = getAddressFromArgs(Map.of("addressOrSymbol", addressStr), program, "addressOrSymbol");
+                } catch (IllegalArgumentException e) {
+                    return createErrorResult(e.getMessage());
                 }
 
                 Bookmark[] bookmarksAtAddr = bookmarkMgr.getBookmarks(address);
@@ -196,11 +179,12 @@ public class BookmarkToolProvider extends AbstractToolProvider {
                 String startStr = (String) addressRange.get("start");
                 String endStr = (String) addressRange.get("end");
 
-                Address start = AddressUtil.resolveAddressOrSymbol(program, startStr);
-                Address end = AddressUtil.resolveAddressOrSymbol(program, endStr);
-
-                if (start == null || end == null) {
-                    return createErrorResult("Invalid address range");
+                Address start, end;
+                try {
+                    start = getAddressFromArgs(Map.of("addressOrSymbol", startStr), program, "addressOrSymbol");
+                    end = getAddressFromArgs(Map.of("addressOrSymbol", endStr), program, "addressOrSymbol");
+                } catch (IllegalArgumentException e) {
+                    return createErrorResult("Invalid address range: " + e.getMessage());
                 }
 
                 AddressSet addrSet = new AddressSet(start, end);
@@ -241,11 +225,11 @@ public class BookmarkToolProvider extends AbstractToolProvider {
     private void registerRemoveBookmarkTool() throws McpError {
         Map<String, Object> properties = new HashMap<>();
         properties.put("programPath", SchemaUtil.stringProperty("Path to the program in the Ghidra Project"));
-        properties.put("address", SchemaUtil.stringProperty("Address or symbol name of the bookmark"));
+        properties.put("addressOrSymbol", SchemaUtil.stringProperty("Address or symbol name of the bookmark"));
         properties.put("type", SchemaUtil.stringProperty("Bookmark type"));
         properties.put("category", SchemaUtil.stringProperty("Bookmark category (optional)"));
 
-        List<String> required = List.of("programPath", "address", "type");
+        List<String> required = List.of("programPath", "addressOrSymbol", "type");
 
         McpSchema.Tool tool = new McpSchema.Tool(
             "remove-bookmark",
@@ -254,20 +238,11 @@ public class BookmarkToolProvider extends AbstractToolProvider {
         );
 
         registerTool(tool, (exchange, args) -> {
-            String programPath = getString(args, "programPath");
-            String addressStr = getString(args, "address");
+            // Get program and parameters using helper methods
+            Program program = getProgramFromArgs(args);
+            Address address = getAddressFromArgs(args, program, "addressOrSymbol");
             String type = getString(args, "type");
             String category = getOptionalString(args, "category", "");
-
-            Program program = RevaProgramManager.getProgramByPath(programPath);
-            if (program == null) {
-                return createErrorResult("Failed to find program: " + programPath);
-            }
-
-            Address address = AddressUtil.resolveAddressOrSymbol(program, addressStr);
-            if (address == null) {
-                return createErrorResult("Invalid address or symbol: " + addressStr);
-            }
 
             try {
                 int transactionId = program.startTransaction("Remove Bookmark");
@@ -340,31 +315,25 @@ public class BookmarkToolProvider extends AbstractToolProvider {
         );
 
         registerTool(tool, (exchange, args) -> {
-            String programPath = getString(args, "programPath");
+            // Get program and parameters using helper methods
+            Program program = getProgramFromArgs(args);
             String searchText = getOptionalString(args, "searchText", null);
-            @SuppressWarnings("unchecked")
-            List<String> types = (List<String>) args.get("types");
-            @SuppressWarnings("unchecked")
-            List<String> categories = (List<String>) args.get("categories");
-            @SuppressWarnings("unchecked")
+            List<String> types = getOptionalStringList(args, "types", null);
+            List<String> categories = getOptionalStringList(args, "categories", null);
             Map<String, Object> addressRange = getOptionalMap(args, "addressRange", null);
             int maxResults = getOptionalInt(args, "maxResults", 100);
-
-            Program program = RevaProgramManager.getProgramByPath(programPath);
-            if (program == null) {
-                return createErrorResult("Failed to find program: " + programPath);
-            }
 
             AddressSetView searchRange = null;
             if (addressRange != null) {
                 String startStr = (String) addressRange.get("start");
                 String endStr = (String) addressRange.get("end");
 
-                Address start = AddressUtil.resolveAddressOrSymbol(program, startStr);
-                Address end = AddressUtil.resolveAddressOrSymbol(program, endStr);
-
-                if (start == null || end == null) {
-                    return createErrorResult("Invalid address range");
+                Address start, end;
+                try {
+                    start = getAddressFromArgs(Map.of("addressOrSymbol", startStr), program, "addressOrSymbol");
+                    end = getAddressFromArgs(Map.of("addressOrSymbol", endStr), program, "addressOrSymbol");
+                } catch (IllegalArgumentException e) {
+                    return createErrorResult("Invalid address range: " + e.getMessage());
                 }
 
                 searchRange = new AddressSet(start, end);
@@ -430,13 +399,9 @@ public class BookmarkToolProvider extends AbstractToolProvider {
         );
 
         registerTool(tool, (exchange, args) -> {
-            String programPath = getString(args, "programPath");
+            // Get program and parameters using helper methods
+            Program program = getProgramFromArgs(args);
             String type = getString(args, "type");
-
-            Program program = RevaProgramManager.getProgramByPath(programPath);
-            if (program == null) {
-                return createErrorResult("Failed to find program: " + programPath);
-            }
 
             BookmarkManager bookmarkMgr = program.getBookmarkManager();
             Map<String, Integer> categoryCounts = new HashMap<>();

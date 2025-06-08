@@ -18,17 +18,24 @@ package reva.plugin;
 import static org.junit.Assert.*;
 
 import java.net.HttpURLConnection;
+import java.net.URI;
 import java.net.URL;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import org.junit.Test;
 import org.junit.Before;
 import org.junit.After;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import ghidra.app.services.ProgramManager;
+import ghidra.program.model.address.Address;
+import ghidra.program.model.listing.FunctionManager;
+import ghidra.util.task.TaskMonitor;
 import io.modelcontextprotocol.spec.McpSchema.ListToolsResult;
 import io.modelcontextprotocol.spec.McpSchema.Tool;
 
-import reva.RevaHeadlessIntegrationTestBase;
 import reva.RevaIntegrationTestBase;
 import reva.util.ConfigManager;
 
@@ -57,7 +64,7 @@ public class RevaPluginMcpIntegrationTest extends RevaIntegrationTestBase {
         // The server starts asynchronously, so we need to give it more time
         // and retry a few times
         int port = configManager.getServerPort();
-        URL url = new URL("http://localhost:" + port + "/");
+        URL url = URI.create("http://localhost:" + port + "/").toURL();
 
         boolean connected = false;
         Exception lastException = null;
@@ -143,5 +150,77 @@ public class RevaPluginMcpIntegrationTest extends RevaIntegrationTestBase {
             toolNames.stream().anyMatch(name -> name.contains("string")));
         assertTrue("Should have symbol-related tools",
             toolNames.stream().anyMatch(name -> name.contains("symbol")));
+    }
+
+    /**
+     * Regression test for program lookup bug that caused tools to hang when programs change.
+     * This test verifies that tools can find programs without requiring special test masking.
+     *
+     * Background: Previously, RevaProgramManager.getProgramByPath() failed in test environments
+     * because ToolManager.getRunningTools() returned empty arrays. The fix added a fallback
+     * mechanism to check the RevaPlugin tool directly.
+     */
+    @Test
+    public void testProgramLookupAfterProgramChanges() throws Exception {
+        // Create a test function for verification
+        String programPath = program.getDomainFile().getPathname();
+        int txId = program.startTransaction("Add test function for regression test");
+        try {
+            Address funcAddr = program.getAddressFactory().getDefaultAddressSpace().getAddress(0x01000100);
+
+            // Add a simple instruction sequence (ret instruction)
+            byte[] retBytes = {(byte) 0xc3}; // x86 ret instruction
+            program.getMemory().setBytes(funcAddr, retBytes);
+
+            // Create the instruction first
+            ghidra.app.cmd.disassemble.DisassembleCommand cmd = new ghidra.app.cmd.disassemble.DisassembleCommand(
+                funcAddr, null, true);
+            cmd.applyTo(program, TaskMonitor.DUMMY);
+
+            // Create address set for the function body
+            ghidra.program.model.address.AddressSet funcBody = new ghidra.program.model.address.AddressSet(funcAddr, funcAddr);
+
+            // Now create the function
+            FunctionManager funcMgr = program.getFunctionManager();
+            funcMgr.createFunction("testRegressionFunction", funcAddr, funcBody, ghidra.program.model.symbol.SourceType.USER_DEFINED);
+        } finally {
+            program.endTransaction(txId, true);
+        }
+
+        // Verify program is opened through normal flow (no special test masking)
+        env.open(program);
+        ProgramManager programManager = tool.getService(ProgramManager.class);
+        if (programManager != null) {
+            programManager.openProgram(program);
+        }
+        if (serverManager != null) {
+            serverManager.programOpened(program, tool);
+        }
+
+        // Test 1: Verify basic tool call works
+        Map<String, Object> getDecompArgs = new HashMap<>();
+        getDecompArgs.put("programPath", programPath);
+        getDecompArgs.put("functionNameOrAddress", "testRegressionFunction");
+
+        String result = callMcpTool("get-decompilation", getDecompArgs);
+        JsonNode resultJson = parseJsonContent(result);
+        assertTrue("Tool should succeed with normal program lookup", resultJson.has("decompilation"));
+
+        // Test 2: Simulate program change by closing and reopening
+        if (serverManager != null) {
+            serverManager.programClosed(program, tool);
+        }
+        programManager.closeProgram(program, false);
+
+        // Reopen the program
+        programManager.openProgram(program);
+        if (serverManager != null) {
+            serverManager.programOpened(program, tool);
+        }
+
+        // Test 3: Verify tool still works after program change
+        String result2 = callMcpTool("get-decompilation", getDecompArgs);
+        JsonNode resultJson2 = parseJsonContent(result2);
+        assertTrue("Tool should still work after program change (regression test)", resultJson2.has("decompilation"));
     }
 }

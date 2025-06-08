@@ -34,7 +34,6 @@ import ghidra.util.data.DataTypeParser.AllowedDataTypes;
 import io.modelcontextprotocol.server.McpSyncServer;
 import io.modelcontextprotocol.spec.McpError;
 import io.modelcontextprotocol.spec.McpSchema;
-import reva.plugin.RevaProgramManager;
 import reva.tools.AbstractToolProvider;
 import reva.util.AddressUtil;
 import reva.util.DataTypeParserUtil;
@@ -87,14 +86,10 @@ public class StructureToolProvider extends AbstractToolProvider {
 
         registerTool(tool, (exchange, args) -> {
             try {
-                String programPath = getString(args, "programPath");
+                // Get program and parameters using helper methods
+                Program program = getProgramFromArgs(args);
                 String cDefinition = getString(args, "cDefinition");
                 String category = getOptionalString(args, "category", "/");
-
-                Program program = RevaProgramManager.getProgramByPath(programPath);
-                if (program == null) {
-                    return createErrorResult("Program not found: " + programPath);
-                }
 
                 DataTypeManager dtm = program.getDataTypeManager();
                 CParser parser = new CParser(dtm);
@@ -222,7 +217,8 @@ public class StructureToolProvider extends AbstractToolProvider {
 
         registerTool(tool, (exchange, args) -> {
             try {
-                String programPath = getString(args, "programPath");
+                // Get program and parameters using helper methods
+                Program program = getProgramFromArgs(args);
                 String name = getString(args, "name");
                 int size = getOptionalInt(args, "size", 0);
                 String type = getOptionalString(args, "type", "structure");
@@ -230,18 +226,13 @@ public class StructureToolProvider extends AbstractToolProvider {
                 boolean packed = getOptionalBoolean(args, "packed", false);
                 String description = getOptionalString(args, "description", null);
 
-                Program program = RevaProgramManager.getProgramByPath(programPath);
-                if (program == null) {
-                    return createErrorResult("Program not found: " + programPath);
-                }
-
                 DataTypeManager dtm = program.getDataTypeManager();
                 CategoryPath catPath = new CategoryPath(category);
                 
                 int txId = program.startTransaction("Create Structure");
                 try {
                     // Create category if needed
-                    Category cat = dtm.createCategory(catPath);
+                    dtm.createCategory(catPath);
                     
                     // Create structure or union
                     Composite composite;
@@ -310,18 +301,14 @@ public class StructureToolProvider extends AbstractToolProvider {
 
         registerTool(tool, (exchange, args) -> {
             try {
-                String programPath = getString(args, "programPath");
+                // Get program and parameters using helper methods
+                Program program = getProgramFromArgs(args);
                 String structureName = getString(args, "structureName");
                 String fieldName = getString(args, "fieldName");
                 String dataTypeStr = getString(args, "dataType");
                 Integer offset = getOptionalInteger(args, "offset", null);
                 String comment = getOptionalString(args, "comment", null);
                 Map<String, Object> bitfield = getOptionalMap(args, "bitfield", null);
-
-                Program program = RevaProgramManager.getProgramByPath(programPath);
-                if (program == null) {
-                    return createErrorResult("Program not found: " + programPath);
-                }
 
                 DataTypeManager dtm = program.getDataTypeManager();
                 
@@ -431,13 +418,9 @@ public class StructureToolProvider extends AbstractToolProvider {
 
         registerTool(tool, (exchange, args) -> {
             try {
-                String programPath = getString(args, "programPath");
+                // Get program and parameters using helper methods
+                Program program = getProgramFromArgs(args);
                 String structureName = getString(args, "structureName");
-
-                Program program = RevaProgramManager.getProgramByPath(programPath);
-                if (program == null) {
-                    return createErrorResult("Program not found: " + programPath);
-                }
 
                 DataTypeManager dtm = program.getDataTypeManager();
                 DataType dt = findDataTypeByName(dtm, structureName);
@@ -479,15 +462,11 @@ public class StructureToolProvider extends AbstractToolProvider {
 
         registerTool(tool, (exchange, args) -> {
             try {
-                String programPath = getString(args, "programPath");
+                // Get program and parameters using helper methods
+                Program program = getProgramFromArgs(args);
                 String categoryFilter = getOptionalString(args, "category", null);
                 String nameFilter = getOptionalString(args, "nameFilter", null);
                 boolean includeBuiltIn = getOptionalBoolean(args, "includeBuiltIn", false);
-
-                Program program = RevaProgramManager.getProgramByPath(programPath);
-                if (program == null) {
-                    return createErrorResult("Program not found: " + programPath);
-                }
 
                 DataTypeManager dtm = program.getDataTypeManager();
                 List<Map<String, Object>> structures = new ArrayList<>();
@@ -537,13 +516,13 @@ public class StructureToolProvider extends AbstractToolProvider {
         Map<String, Object> properties = new HashMap<>();
         properties.put("programPath", SchemaUtil.createStringProperty("Path of the program"));
         properties.put("structureName", SchemaUtil.createStringProperty("Name of the structure"));
-        properties.put("address", SchemaUtil.createStringProperty("Address or symbol name to apply structure"));
+        properties.put("addressOrSymbol", SchemaUtil.createStringProperty("Address or symbol name to apply structure"));
         properties.put("clearExisting", SchemaUtil.createOptionalBooleanProperty("Clear existing data"));
         
         List<String> required = new ArrayList<>();
         required.add("programPath");
         required.add("structureName");
-        required.add("address");
+        required.add("addressOrSymbol");
 
         McpSchema.Tool tool = new McpSchema.Tool(
             "apply-structure",
@@ -553,20 +532,11 @@ public class StructureToolProvider extends AbstractToolProvider {
 
         registerTool(tool, (exchange, args) -> {
             try {
-                String programPath = getString(args, "programPath");
+                // Get program and parameters using helper methods
+                Program program = getProgramFromArgs(args);
                 String structureName = getString(args, "structureName");
-                String addressStr = getString(args, "address");
+                Address address = getAddressFromArgs(args, program, "addressOrSymbol");
                 boolean clearExisting = getOptionalBoolean(args, "clearExisting", true);
-
-                Program program = RevaProgramManager.getProgramByPath(programPath);
-                if (program == null) {
-                    return createErrorResult("Program not found: " + programPath);
-                }
-
-                Address address = AddressUtil.resolveAddressOrSymbol(program, addressStr);
-                if (address == null) {
-                    return createErrorResult("Invalid address or symbol: " + addressStr);
-                }
 
                 DataTypeManager dtm = program.getDataTypeManager();
                 DataType dt = findDataTypeByName(dtm, structureName);
@@ -582,7 +552,7 @@ public class StructureToolProvider extends AbstractToolProvider {
                 // Check if address is in valid memory
                 Memory memory = program.getMemory();
                 if (!memory.contains(address)) {
-                    return createErrorResult("Address is not in valid memory: " + addressStr);
+                    return createErrorResult("Address is not in valid memory: " + AddressUtil.formatAddress(address));
                 }
                 
                 int txId = program.startTransaction("Apply Structure");
@@ -641,13 +611,9 @@ public class StructureToolProvider extends AbstractToolProvider {
 
         registerTool(tool, (exchange, args) -> {
             try {
-                String programPath = getString(args, "programPath");
+                // Get program and parameters using helper methods
+                Program program = getProgramFromArgs(args);
                 String structureName = getString(args, "structureName");
-
-                Program program = RevaProgramManager.getProgramByPath(programPath);
-                if (program == null) {
-                    return createErrorResult("Program not found: " + programPath);
-                }
 
                 DataTypeManager dtm = program.getDataTypeManager();
                 DataType dt = findDataTypeByName(dtm, structureName);
@@ -703,14 +669,10 @@ public class StructureToolProvider extends AbstractToolProvider {
 
         registerTool(tool, (exchange, args) -> {
             try {
-                String programPath = getString(args, "programPath");
+                // Get program and parameters using helper methods
+                Program program = getProgramFromArgs(args);
                 String headerContent = getString(args, "headerContent");
                 String category = getOptionalString(args, "category", "/");
-
-                Program program = RevaProgramManager.getProgramByPath(programPath);
-                if (program == null) {
-                    return createErrorResult("Program not found: " + programPath);
-                }
 
                 DataTypeManager dtm = program.getDataTypeManager();
                 CParser parser = new CParser(dtm);

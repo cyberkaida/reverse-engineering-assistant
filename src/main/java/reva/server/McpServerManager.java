@@ -17,6 +17,9 @@ package reva.server;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 import org.eclipse.jetty.server.Server;
 import org.eclipse.jetty.servlet.ServletContextHandler;
@@ -37,6 +40,7 @@ import io.modelcontextprotocol.spec.McpSchema;
 
 import reva.resources.ResourceProvider;
 import reva.resources.impl.ProgramListResource;
+import reva.services.RevaMcpService;
 import reva.tools.ToolProvider;
 import reva.tools.data.DataToolProvider;
 import reva.tools.datatypes.DataTypeToolProvider;
@@ -54,20 +58,17 @@ import reva.util.ConfigManager;
 import reva.util.RevaInternalServiceRegistry;
 
 /**
- * Manages the Model Context Protocol server.
+ * Manages the Model Context Protocol server at the application level.
  * This class is responsible for initializing, configuring, and starting the MCP server,
- * as well as registering all resources and tools.
- * Implements singleton pattern to ensure only one server instance exists.
+ * as well as registering all resources and tools. It handles multiple tools accessing
+ * the same server instance and coordinates program lifecycle events across tools.
  */
-public class McpServerManager {
+public class McpServerManager implements RevaMcpService {
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final String MCP_MSG_ENDPOINT = "/mcp/message";
     private static final String MCP_SSE_ENDPOINT = "/mcp/sse";
     private static final String MCP_SERVER_NAME = "ReVa";
     private static final String MCP_SERVER_VERSION = "1.0.0";
-
-    private static volatile McpServerManager instance;
-    private static final Object instanceLock = new Object();
 
     private final McpSyncServer server;
     private final HttpServletSseServerTransportProvider transportProvider;
@@ -79,27 +80,17 @@ public class McpServerManager {
     private final List<ToolProvider> toolProviders = new ArrayList<>();
     private volatile boolean serverReady = false;
 
-    /**
-     * Get the singleton instance of McpServerManager.
-     * @param pluginTool The plugin tool, used for configuration (only used on first call)
-     * @return The singleton instance
-     */
-    public static McpServerManager getInstance(PluginTool pluginTool) {
-        if (instance == null) {
-            synchronized (instanceLock) {
-                if (instance == null) {
-                    instance = new McpServerManager(pluginTool);
-                }
-            }
-        }
-        return instance;
-    }
+    // Multi-tool tracking
+    private final Set<PluginTool> registeredTools = ConcurrentHashMap.newKeySet();
+    private final Map<Program, Set<PluginTool>> programToTools = new ConcurrentHashMap<>();
+    private volatile Program activeProgram;
+    private volatile PluginTool activeTool;
 
     /**
-     * Private constructor. Initializes the MCP server with all capabilities.
+     * Constructor. Initializes the MCP server with all capabilities.
      * @param pluginTool The plugin tool, used for configuration
      */
-    private McpServerManager(PluginTool pluginTool) {
+    public McpServerManager(PluginTool pluginTool) {
         // Initialize configuration
         configManager = new ConfigManager(pluginTool);
         RevaInternalServiceRegistry.registerService(ConfigManager.class, configManager);
@@ -198,7 +189,7 @@ public class McpServerManager {
 
         int serverPort = configManager.getServerPort();
         String baseUrl = "http://localhost:" + serverPort;
-        Msg.info(this, "Starting MCP server on port " + serverPort);
+        Msg.info(this, "Starting MCP server on " + baseUrl + serverPort);
 
         ServletContextHandler servletContextHandler = new ServletContextHandler(ServletContextHandler.SESSIONS);
         servletContextHandler.setContextPath("/");
@@ -247,32 +238,105 @@ public class McpServerManager {
 
     }
 
-    /**
-     * Notify providers that a program has been opened
-     * @param program The program that was opened
-     */
-    public void programOpened(Program program) {
-        for (ResourceProvider provider : resourceProviders) {
-            provider.programOpened(program);
-        }
-
-        for (ToolProvider provider : toolProviders) {
-            provider.programOpened(program);
-        }
+    @Override
+    public void registerTool(PluginTool tool) {
+        registeredTools.add(tool);
+        Msg.debug(this, "Registered tool with MCP server: " + tool.getName());
     }
 
-    /**
-     * Notify providers that a program has been closed
-     * @param program The program that was closed
-     */
-    public void programClosed(Program program) {
+    @Override
+    public void unregisterTool(PluginTool tool) {
+        registeredTools.remove(tool);
+
+        // Remove tool from all program mappings
+        for (Set<PluginTool> tools : programToTools.values()) {
+            tools.remove(tool);
+        }
+
+        // Clear active tool if it's the one being unregistered
+        if (activeTool == tool) {
+            activeTool = null;
+            activeProgram = null;
+        }
+
+        Msg.debug(this, "Unregistered tool from MCP server: " + tool.getName());
+    }
+
+    @Override
+    public void programOpened(Program program, PluginTool tool) {
+        // Add to program-tool mapping
+        programToTools.computeIfAbsent(program, k -> ConcurrentHashMap.newKeySet()).add(tool);
+
+        // Set as active program
+        setActiveProgram(program, tool);
+
+        // Notify providers
         for (ResourceProvider provider : resourceProviders) {
-            provider.programClosed(program);
+            provider.programOpened(program);
         }
 
         for (ToolProvider provider : toolProviders) {
-            provider.programClosed(program);
+            provider.programOpened(program);
         }
+
+        Msg.debug(this, "Program opened in tool " + tool.getName() + ": " + program.getName());
+    }
+
+    @Override
+    public void programClosed(Program program, PluginTool tool) {
+        // Remove from program-tool mapping
+        Set<PluginTool> tools = programToTools.get(program);
+        if (tools != null) {
+            tools.remove(tool);
+            if (tools.isEmpty()) {
+                programToTools.remove(program);
+            }
+        }
+
+        // Clear active program if it was the one being closed
+        if (activeProgram == program && activeTool == tool) {
+            activeProgram = null;
+            activeTool = null;
+        }
+
+        // Notify providers only if this was the last tool with the program
+        if (tools == null || tools.isEmpty()) {
+            for (ResourceProvider provider : resourceProviders) {
+                provider.programClosed(program);
+            }
+
+            for (ToolProvider provider : toolProviders) {
+                provider.programClosed(program);
+            }
+        }
+
+        Msg.debug(this, "Program closed in tool " + tool.getName() + ": " + program.getName());
+    }
+
+    @Override
+    public boolean isServerRunning() {
+        return httpServer != null && httpServer.isRunning() && serverReady;
+    }
+
+    @Override
+    public int getServerPort() {
+        if (configManager != null) {
+            return configManager.getServerPort();
+        }
+        return -1;
+    }
+
+    @Override
+    public Program getActiveProgram() {
+        return activeProgram;
+    }
+
+    @Override
+    public void setActiveProgram(Program program, PluginTool tool) {
+        this.activeProgram = program;
+        this.activeTool = tool;
+        Msg.debug(this, "Active program changed to: " + (program != null ? program.getName() : "null") +
+                  " in tool: " + (tool != null ? tool.getName() : "null"));
     }
 
     /**
@@ -280,13 +344,21 @@ public class McpServerManager {
      * @return true if the server is ready
      */
     public boolean isServerReady() {
-        return httpServer.getState().equals(org.eclipse.jetty.server.Server.STARTED);
+        return httpServer != null && httpServer.getState().equals(org.eclipse.jetty.server.Server.STARTED);
     }
 
     /**
      * Shut down the MCP server and clean up resources
      */
     public void shutdown() {
+        Msg.info(this, "Shutting down MCP server...");
+
+        // Clear all tool registrations
+        registeredTools.clear();
+        programToTools.clear();
+        activeProgram = null;
+        activeTool = null;
+
         // Notify all providers to clean up
         for (ResourceProvider provider : resourceProviders) {
             provider.cleanup();
@@ -316,12 +388,7 @@ public class McpServerManager {
         }
 
         serverReady = false;
-        
-        // Reset singleton instance on shutdown
-        synchronized (instanceLock) {
-            instance = null;
-        }
-        
+
         Msg.info(this, "MCP server shutdown complete");
     }
 }

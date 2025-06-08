@@ -31,7 +31,6 @@ import ghidra.program.model.mem.MemoryAccessException;
 import io.modelcontextprotocol.spec.McpError;
 import io.modelcontextprotocol.server.McpSyncServer;
 import io.modelcontextprotocol.spec.McpSchema;
-import reva.plugin.RevaProgramManager;
 import reva.tools.AbstractToolProvider;
 import reva.util.SimilarityComparator;
 
@@ -80,17 +79,8 @@ public class StringToolProvider extends AbstractToolProvider {
 
         // Register the tool with a handler
         registerTool(tool, (exchange, args) -> {
-            // Get the program path from the request
-            String programPath = (String) args.get("programPath");
-            if (programPath == null) {
-                return createErrorResult("No program path provided");
-            }
-
-            // Get the program from the path
-            Program program = RevaProgramManager.getProgramByPath(programPath);
-            if (program == null) {
-                return createErrorResult("Failed to find Program: " + programPath);
-            }
+            // Get program using helper method
+            Program program = getProgramFromArgs(args);
 
             // Count the strings
             AtomicInteger count = new AtomicInteger(0);
@@ -142,23 +132,9 @@ public class StringToolProvider extends AbstractToolProvider {
 
         // Register the tool with a handler
         registerTool(tool, (exchange, args) -> {
-            // Get the program path from the request
-            String programPath = (String) args.get("programPath");
-            if (programPath == null) {
-                return createErrorResult("No program path provided");
-            }
-
-            // Get pagination parameters
-            int startIndex = args.containsKey("startIndex") ?
-                ((Number) args.get("startIndex")).intValue() : 0;
-            int maxCount = args.containsKey("maxCount") ?
-                ((Number) args.get("maxCount")).intValue() : 100;
-
-            // Get the program from the path
-            Program program = RevaProgramManager.getProgramByPath(programPath);
-            if (program == null) {
-                return createErrorResult("Failed to find Program: " + programPath);
-            }
+            // Get program and pagination parameters using helper methods
+            Program program = getProgramFromArgs(args);
+            PaginationParams pagination = getPaginationParams(args);
 
             // Get strings with pagination
             List<Map<String, Object>> stringData = new ArrayList<>();
@@ -170,12 +146,12 @@ public class StringToolProvider extends AbstractToolProvider {
                     int index = currentIndex.getAndIncrement();
 
                     // Skip strings before the start index
-                    if (index < startIndex) {
+                    if (index < pagination.startIndex()) {
                         return;
                     }
 
                     // Stop after we've collected maxCount strings
-                    if (stringData.size() >= maxCount) {
+                    if (stringData.size() >= pagination.maxCount()) {
                         return;
                     }
 
@@ -189,10 +165,10 @@ public class StringToolProvider extends AbstractToolProvider {
 
             // Create pagination metadata
             Map<String, Object> paginationInfo = new HashMap<>();
-            paginationInfo.put("startIndex", startIndex);
-            paginationInfo.put("requestedCount", maxCount);
+            paginationInfo.put("startIndex", pagination.startIndex());
+            paginationInfo.put("requestedCount", pagination.maxCount());
             paginationInfo.put("actualCount", stringData.size());
-            paginationInfo.put("nextStartIndex", startIndex + stringData.size());
+            paginationInfo.put("nextStartIndex", pagination.startIndex() + stringData.size());
             paginationInfo.put("totalProcessed", currentIndex.get());
 
             // Return as a single JSON array with pagination info first, then string data
@@ -242,28 +218,13 @@ public class StringToolProvider extends AbstractToolProvider {
 
         // Register the tool with a handler
         registerTool(tool, (exchange, args) -> {
-            // Get the program path from the request
-            String programPath = (String) args.get("programPath");
-            if (programPath == null) {
-                return createErrorResult("No program path provided");
-            }
+            // Get program and parameters using helper methods
+            Program program = getProgramFromArgs(args);
+            String searchString = getString(args, "searchString");
+            PaginationParams pagination = getPaginationParams(args);
 
-            // Get the search string from the request
-            String searchString = (String) args.get("searchString");
-            if (searchString == null || searchString.isEmpty()) {
-                return createErrorResult("No search string provided");
-            }
-
-            // Get pagination parameters
-            int startIndex = args.containsKey("startIndex") ?
-                ((Number) args.get("startIndex")).intValue() : 0;
-            int maxCount = args.containsKey("maxCount") ?
-                ((Number) args.get("maxCount")).intValue() : 100;
-
-            // Get the program from the path
-            Program program = RevaProgramManager.getProgramByPath(programPath);
-            if (program == null) {
-                return createErrorResult("Failed to find Program: " + programPath);
+            if (searchString.trim().isEmpty()) {
+                return createErrorResult("Search string cannot be empty");
             }
 
             // Get strings with pagination
@@ -274,7 +235,7 @@ public class StringToolProvider extends AbstractToolProvider {
             // Iterate through the data and collect strings
             dataIterator.forEach(data -> {
                 if (data.getValue() instanceof String) {
-                    int index = currentIndex.getAndIncrement();
+                    currentIndex.getAndIncrement();
 
                     // Collect string data
                     Map<String, Object> stringInfo = getStringInfo(data);
@@ -283,21 +244,21 @@ public class StringToolProvider extends AbstractToolProvider {
                     }
                 }
             });
-            Collections.sort(similarStringData, new SimilarityComparator(searchString, new SimilarityComparator.StringExtractor<Map<String, Object>>() {
+            Collections.sort(similarStringData, new SimilarityComparator<Map<String, Object>>(searchString, new SimilarityComparator.StringExtractor<Map<String, Object>>() {
                 @Override
                 public String extract(Map<String, Object> item) {
                     return (String) item.get("content");
                 }
             }));
 
-            List<Map<String, Object>> paginatedStringData = similarStringData.subList(startIndex, Math.min(startIndex + maxCount, similarStringData.size()));
+            List<Map<String, Object>> paginatedStringData = similarStringData.subList(pagination.startIndex(), Math.min(pagination.startIndex() + pagination.maxCount(), similarStringData.size()));
             // Create pagination metadata
             Map<String, Object> paginationInfo = new HashMap<>();
-            paginationInfo.put("startIndex", startIndex);
-            paginationInfo.put("requestedCount", maxCount);
+            paginationInfo.put("startIndex", pagination.startIndex());
+            paginationInfo.put("requestedCount", pagination.maxCount());
             paginationInfo.put("actualCount", paginatedStringData.size());
-            paginationInfo.put("nextStartIndex", startIndex + paginatedStringData.size());
-            paginationInfo.put("totalProcessed", startIndex + paginatedStringData.size());
+            paginationInfo.put("nextStartIndex", pagination.startIndex() + paginatedStringData.size());
+            paginationInfo.put("totalProcessed", pagination.startIndex() + paginatedStringData.size());
 
             // Default return all strings
             List<Object> resultData = new ArrayList<>();
@@ -344,16 +305,13 @@ public class StringToolProvider extends AbstractToolProvider {
 
         // Register the tool with a handler
         registerTool(tool, (exchange, args) -> {
-            // Get the program path from the request
-            String programPath = (String) args.get("programPath");
-            if (programPath == null) {
-                return createErrorResult("No program path provided");
-            }
+            // Get program and parameters using helper methods
+            Program program = getProgramFromArgs(args);
+            String regexPattern = getString(args, "regexPattern");
+            PaginationParams pagination = getPaginationParams(args);
 
-            // Get the regex pattern from the request
-            String regexPattern = (String) args.get("regexPattern");
-            if (regexPattern == null || regexPattern.isEmpty()) {
-                return createErrorResult("No regex pattern provided");
+            if (regexPattern.trim().isEmpty()) {
+                return createErrorResult("Regex pattern cannot be empty");
             }
 
             // Compile the regex pattern
@@ -362,18 +320,6 @@ public class StringToolProvider extends AbstractToolProvider {
                 pattern = Pattern.compile(regexPattern);
             } catch (PatternSyntaxException e) {
                 return createErrorResult("Invalid regex pattern: " + e.getMessage());
-            }
-
-            // Get pagination parameters
-            int startIndex = args.containsKey("startIndex") ?
-                ((Number) args.get("startIndex")).intValue() : 0;
-            int maxCount = args.containsKey("maxCount") ?
-                ((Number) args.get("maxCount")).intValue() : 100;
-
-            // Get the program from the path
-            Program program = RevaProgramManager.getProgramByPath(programPath);
-            if (program == null) {
-                return createErrorResult("Failed to find Program: " + programPath);
             }
 
             // Search strings matching the regex pattern
@@ -393,13 +339,13 @@ public class StringToolProvider extends AbstractToolProvider {
                         int currentMatchIndex = matchesFound.getAndIncrement();
                         
                         // Skip matches before the start index
-                        if (currentMatchIndex < startIndex) {
+                        if (currentMatchIndex < pagination.startIndex()) {
                             matchesSkipped.incrementAndGet();
                             return;
                         }
                         
                         // Stop after we've collected maxCount matches
-                        if (matchingStrings.size() >= maxCount) {
+                        if (matchingStrings.size() >= pagination.maxCount()) {
                             return;
                         }
                         
@@ -417,11 +363,11 @@ public class StringToolProvider extends AbstractToolProvider {
             searchMetadata.put("regexPattern", regexPattern);
             searchMetadata.put("totalStringsProcessed", totalProcessed.get());
             searchMetadata.put("totalMatches", matchesFound.get());
-            searchMetadata.put("startIndex", startIndex);
-            searchMetadata.put("requestedCount", maxCount);
+            searchMetadata.put("startIndex", pagination.startIndex());
+            searchMetadata.put("requestedCount", pagination.maxCount());
             searchMetadata.put("actualCount", matchingStrings.size());
             searchMetadata.put("skippedMatches", matchesSkipped.get());
-            searchMetadata.put("nextStartIndex", startIndex + matchingStrings.size());
+            searchMetadata.put("nextStartIndex", pagination.startIndex() + matchingStrings.size());
 
             // Return as a single JSON array with metadata first, then matching strings
             List<Object> resultData = new ArrayList<>();

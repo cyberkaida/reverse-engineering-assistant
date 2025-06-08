@@ -25,12 +25,9 @@ import ghidra.program.model.listing.Program;
 import ghidra.program.model.mem.Memory;
 import ghidra.program.model.mem.MemoryBlock;
 import io.modelcontextprotocol.server.McpSyncServer;
-import io.modelcontextprotocol.server.McpServerFeatures.SyncToolSpecification;
 import io.modelcontextprotocol.spec.McpError;
 import io.modelcontextprotocol.spec.McpSchema;
-import reva.plugin.RevaProgramManager;
 import reva.tools.AbstractToolProvider;
-import reva.util.AddressUtil;
 import reva.util.MemoryUtil;
 import reva.util.SchemaUtil;
 
@@ -74,17 +71,8 @@ public class MemoryToolProvider extends AbstractToolProvider {
 
         // Add the tool using the parent's method
         super.registerTool(tool, (exchange, args) -> {
-            // Get the program path from the request
-            String programPath = (String) args.get("programPath");
-            if (programPath == null) {
-                return createErrorResult("No program path provided");
-            }
-
-            // Get the program from the path
-            Program program = RevaProgramManager.getProgramByPath(programPath);
-            if (program == null) {
-                return createErrorResult("Failed to find Program: " + programPath);
-            }
+            // Get program using helper method
+            Program program = getProgramFromArgs(args);
 
             // Get the memory from the program
             Memory memory = program.getMemory();
@@ -108,7 +96,7 @@ public class MemoryToolProvider extends AbstractToolProvider {
                 blockData.add(blockInfo);
             }
 
-            return createSuccessResult(blockData);
+            return createJsonResult(blockData);
         });
     }
 
@@ -120,11 +108,11 @@ public class MemoryToolProvider extends AbstractToolProvider {
         // Define schema for the tool
         Map<String, Object> properties = new HashMap<>();
         properties.put("programPath", SchemaUtil.stringProperty("Path to the program in the Ghidra Project"));
-        properties.put("address", SchemaUtil.stringProperty("Address or symbol name to read from (e.g. '00400000' or 'main')"));
+        properties.put("addressOrSymbol", SchemaUtil.stringProperty("Address or symbol name to read from (e.g. '00400000' or 'main')"));
         properties.put("length", SchemaUtil.integerPropertyWithDefault("Number of bytes to read", 16));
         properties.put("format", SchemaUtil.stringPropertyWithDefault("Output format: 'hex', 'bytes', or 'both'", "hex"));
 
-        List<String> required = List.of("programPath", "address");
+        List<String> required = List.of("programPath", "addressOrSymbol");
 
         // Create the tool
         McpSchema.Tool tool = new McpSchema.Tool(
@@ -135,38 +123,18 @@ public class MemoryToolProvider extends AbstractToolProvider {
 
         // Add the tool using the parent's method
         super.registerTool(tool, (exchange, args) -> {
-            // Get the program path from the request
-            String programPath = (String) args.get("programPath");
-            if (programPath == null) {
-                return createErrorResult("No program path provided");
-            }
-
-            // Get the program from the path
-            Program program = RevaProgramManager.getProgramByPath(programPath);
-            if (program == null) {
-                return createErrorResult("Failed to find Program: " + programPath);
-            }
-
-            // Get the address from the request
-            String addressStr = (String) args.get("address");
-            if (addressStr == null) {
-                return createErrorResult("No address provided");
-            }
-
-            // Parse the address or symbol
-            Address address = AddressUtil.resolveAddressOrSymbol(program, addressStr);
-            if (address == null) {
-                return createErrorResult("Invalid address or symbol: " + addressStr);
-            }
+            // Get program and address using helper methods
+            Program program = getProgramFromArgs(args);
+            Address address = getAddressFromArgs(args, program, "addressOrSymbol");
 
             // Get the length from the request
-            int length = (Integer) args.getOrDefault("length", 16);
+            int length = getOptionalInt(args, "length", 16);
             if (length <= 0) {
                 return createErrorResult("Invalid length: " + length);
             }
 
             // Get the format from the request
-            String format = (String) args.getOrDefault("format", "hex");
+            String format = getOptionalString(args, "format", "hex");
 
             // Read the memory
             byte[] bytes = MemoryUtil.readMemoryBytes(program, address, length);
@@ -187,24 +155,8 @@ public class MemoryToolProvider extends AbstractToolProvider {
                 result.put("bytes", MemoryUtil.byteArrayToIntList(bytes));
             }
 
-            return createSuccessResult(result);
+            return createJsonResult(result);
         });
     }
 
-    /**
-     * Helper method to create a success result with JSON content
-     * @param data The data to serialize as JSON
-     * @return CallToolResult with success flag set
-     */
-    protected McpSchema.CallToolResult createSuccessResult(Object data) {
-        try {
-            String jsonString = JSON.writeValueAsString(data);
-            return new McpSchema.CallToolResult(
-                List.of(new McpSchema.TextContent(jsonString)),
-                false
-            );
-        } catch (Exception e) {
-            return createErrorResult("Error serializing result to JSON: " + e.getMessage());
-        }
-    }
 }

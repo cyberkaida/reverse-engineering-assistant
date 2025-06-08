@@ -10,27 +10,86 @@ ReVa (Reverse Engineering Assistant) is a Ghidra extension that provides a Model
 
 ### Core Components
 
-1. **[RevaPlugin](src/main/java/reva/plugin/RevaPlugin.java)** - The main plugin class that initializes all components and integrates with Ghidra's plugin system.
-2. **[McpServerManager](src/main/java/reva/server/McpServerManager.java)** - Manages the Model Context Protocol server, including configuration, registration of resources and tools.
-3. **[ServiceRegistry](src/main/java/reva/util/ServiceRegistry.java)** - A simple service locator that allows components to find each other at runtime.
-4. **[ConfigManager](src/main/java/reva/util/ConfigManager.java)** - Manages configuration settings for the extension.
+1. **Plugin Architecture** - ReVa provides two plugins to Ghidra:
+   - **[RevaApplicationPlugin](src/main/java/reva/plugin/RevaApplicationPlugin.java)** - An [application-level plugin](https://github.com/NationalSecurityAgency/ghidra/blob/stable/Ghidra/Framework/Project/src/main/java/ghidra/framework/main/ApplicationLevelPlugin.java) that manages the MCP server at the Ghidra application level. This plugin:
+     - Implements `ApplicationLevelPlugin` to persist across tool sessions
+     - Starts and manages the MCP server for the entire Ghidra instance
+     - Survives when individual analysis tools are closed and reopened
+     - Provides the `RevaMcpService` to other plugins
+     - Runs in the FrontEndTool (project window)
+     - Allows access to the entire Ghidra project from one MCP client session
+
+   - **[RevaPlugin](src/main/java/reva/plugin/RevaPlugin.java)** - A tool-level plugin that runs in each CodeBrowser tool. This plugin:
+     - Extends `ProgramPlugin` for program-specific functionality
+       - Things like current location, current program, etc.
+     - Connects to the application-level MCP server via `RevaMcpService`
+     - Handles program open/close events for its specific tool
+     - Provides the UI components (RevaProvider)
+     - Notifies the MCP server about program lifecycle in its tool
+
+2. **[McpServerManager](src/main/java/reva/server/McpServerManager.java)** - Manages the Model Context Protocol server, including configuration, registration of resources and tools. The server lifecycle is tied to Ghidra's lifetime through the application plugin.
+
+3. **[RevaProgramManager](src/main/java/reva/plugin/RevaProgramManager.java)** - Manages program lookup and validation with consistent error handling across all tools.
+
+4. **[RevaInternalServiceRegistry](src/main/java/reva/util/RevaInternalServiceRegistry.java)** - A simple service locator that allows components to find each other at runtime.
+
+5. **[ConfigManager](src/main/java/reva/util/ConfigManager.java)** - Manages configuration settings for the extension.
 
 ### MCP Server Components
 
 The MCP server components are divided into two main categories:
 
-1. **[Resources](src/main/java/reva/resources/ResourceProvider.java)** - Read-only data sources exposed by the MCP server.
-2. **[Tools](src/main/java/reva/tools/ToolProvider.java)** - Interactive operations that can be invoked by clients.
+1. **[Resources](src/main/java/reva/resources/ResourceProvider.java)** - Read-only data sources exposed by the MCP server. This will be expanded in the future, when more MCP clients support resources.
+2. **[Tools](src/main/java/reva/tools/ToolProvider.java)** - Interactive operations that can be invoked by clients. These mirror what humans can do in Ghidra, such as searching for symbols, managing bookmarks, and more.
 
 Each component follows a provider pattern where the provider is responsible for registering and managing one or more resources or tools.
+
+## Plugin Architecture and Lifecycle
+
+### Why an Application Plugin and a Tool Plugin?
+
+ReVa aims to provide a multi-program environment to solve complex reverse engineering tasks. The MCP SSE architecture requires a persistent server for the lifetime of the session.
+Both of these goals require some components to run for the entire Ghidra session (MCP server, project access), while others need to be tool-specific (current program, current selection).
+
+1. **Application Plugin Benefits**:
+   - The MCP server stays running even when you close all CodeBrowser windows
+   - External clients (Claude, VSCode, etc.) maintain their connection
+   - No interruption when switching between programs or tools
+   - Single server instance handles all Ghidra tools
+
+2. **Tool Plugin Benefits**:
+   - Each CodeBrowser gets program-specific functionality
+   - UI components are properly integrated with each tool
+   - Program lifecycle events are handled per-tool
+   - Multiple programs can be open simultaneously
+
+### How They Work Together
+
+1. **Startup Sequence**:
+   - When Ghidra starts, `RevaApplicationPlugin` loads in the [FrontEndTool](https://github.com/NationalSecurityAgency/ghidra/blob/stable/Ghidra/Framework/Project/src/main/java/ghidra/framework/main/FrontEndTool.java)
+   - It starts the MCP server and registers `RevaMcpService`
+   - When you open a CodeBrowser, `RevaPlugin` loads and connects to the service
+   - The tool plugin registers itself with the application plugin
+
+2. **Communication Flow**:
+   - External MCP clients connect to the server in `RevaApplicationPlugin`
+   - The server uses `RevaProgramManager` to find programs across all Ghidra tools
+   - Tool plugins notify the server about program open/close events
+   - The server can access programs from any registered tool
+
+3. **Shutdown Sequence**:
+   - When a CodeBrowser closes, `RevaPlugin` unregisters from the server
+   - The MCP server continues running for other tools
+   - When Ghidra shuts down, `RevaApplicationPlugin` stops the server
 
 ## Lifecycle Management
 
 ReVa is designed to handle the Ghidra lifecycle correctly:
 
-1. **Extension Lifecycle** - The [`RevaPlugin`](src/main/java/reva/plugin/RevaPlugin.java) manages the overall extension lifecycle, including initialization and cleanup.
-2. **Program Lifecycle** - Resources and tools are notified when programs are opened or closed via the `programOpened` and `programClosed` methods.
-3. **Server Lifecycle** - The MCP server is started when the extension is initialized and shut down when the extension is unloaded.
+1. **Application Lifecycle** - The [`RevaApplicationPlugin`](src/main/java/reva/plugin/RevaApplicationPlugin.java) manages the MCP server for the entire Ghidra session.
+2. **Tool Lifecycle** - The [`RevaPlugin`](src/main/java/reva/plugin/RevaPlugin.java) manages tool-specific functionality and UI.
+3. **Program Lifecycle** - Both plugins coordinate to handle program open/close events, with the application plugin maintaining the program registry.
+4. **Server Lifecycle** - The MCP server starts with Ghidra and stops when Ghidra shuts down, surviving individual tool closures.
 
 ## Adding New Resources
 
@@ -102,7 +161,7 @@ Tools provide interactive operations that can be invoked by clients. To add a ne
 
 ### Example Tool Implementation
 
-For concrete examples, see the [`SymbolToolProvider`](src/main/java/reva/tools/symbols/SymbolToolProvider.java), [`StringToolProvider`](src/main/java/reva/tools/strings/StringToolProvider.java), or other implementations in the `reva.tools` package.
+For concrete examples, see the [`SymbolToolProvider`](src/main/java/reva/tools/symbols/SymbolToolProvider.java), [`StringToolProvider`](src/main/java/reva/tools/strings/StringToolProvider.java), [`BookmarkToolProvider`](src/main/java/reva/tools/bookmarks/BookmarkToolProvider.java), [`CommentToolProvider`](src/main/java/reva/tools/comments/CommentToolProvider.java), or other implementations in the `reva.tools` package.
 
 ```java
 public class MyNewToolProvider extends AbstractToolProvider {
@@ -145,10 +204,11 @@ public class MyNewToolProvider extends AbstractToolProvider {
                 return createErrorResult("No program path provided");
             }
 
-            // Get the program from the path
-            Program program = RevaProgramManager.getProgramByPath(programPath);
-            if (program == null) {
-                return createErrorResult("Failed to find Program: " + programPath);
+            // Get the program from the path - this will throw ProgramValidationException if invalid
+            try {
+                Program program = RevaProgramManager.getValidatedProgram(programPath);
+            } catch (ProgramValidationException e) {
+                return createErrorResult(e.getMessage());
             }
 
             // Implement tool logic
@@ -169,14 +229,18 @@ public class MyNewToolProvider extends AbstractToolProvider {
 
 ### Resource and Tool Design
 
-1. **Separation of Concerns**:
-   - Resources should provide read-only access to data. See [`ResourceProvider`](src/main/java/reva/resources/ResourceProvider.java).
-   - Tools should perform operations and return results. See [`ToolProvider`](src/main/java/reva/tools/ToolProvider.java).
+1. **Tool and Resource Design**
+   - Try to make tools and resources mirror what a human can do in Ghidra.
+   - Use clear and descriptive names for tools and resources.
+   - Hint to the LLM about context the human would have, for example, return relevant listing view content when decompiling. A human would look at both. Return cross references when getting data, the human sees them together in the UI.
+   - Use utility methods to reduce tool usage, like allowing both symbols and addresses as input in the same parameter. Try to make input standard to reduce tool calls.
+     - If the LLM fails to use a tool correctly, try to adapt to the common mistake it makes.
 
 2. **Error Handling**:
    - Always validate input parameters.
    - Return clear error messages when operations fail.
    - Use the `createErrorResult` method to create standardized error responses.
+    - Include a hint for what to do next.
 
 3. **Program Lifecycle**:
    - Be aware of the program lifecycle and handle program opened/closed events appropriately.

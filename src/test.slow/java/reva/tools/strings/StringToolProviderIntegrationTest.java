@@ -94,12 +94,10 @@ public class StringToolProviderIntegrationTest extends RevaIntegrationTestBase {
             programManager.openProgram(program);
         }
 
-        // Register the program directly with RevaProgramManager for test environments
-        reva.plugin.RevaProgramManager.registerProgram(program);
 
         // Register the program with the server manager so it can be found by the tools
         if (serverManager != null) {
-            serverManager.programOpened(program);
+            serverManager.programOpened(program, tool);
         }
     }
 
@@ -516,7 +514,7 @@ public class StringToolProviderIntegrationTest extends RevaIntegrationTestBase {
         Map<String, Object> arguments = new HashMap<>();
         arguments.put("programPath", programPath);
 
-        verifyMcpToolFailsWithError("search-strings-regex", arguments, "pattern");
+        verifyMcpToolFailsWithError("search-strings-regex", arguments, "Pattern");
     }
 
     @Test

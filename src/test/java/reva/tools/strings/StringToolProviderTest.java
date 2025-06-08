@@ -18,7 +18,6 @@ package reva.tools.strings;
 import static org.junit.Assert.*;
 import static org.mockito.Mockito.*;
 
-import java.util.HashMap;
 import java.util.Map;
 
 import org.junit.Before;
@@ -33,10 +32,7 @@ import ghidra.program.model.listing.DataIterator;
 import ghidra.program.model.listing.Listing;
 import ghidra.program.model.listing.Program;
 import io.modelcontextprotocol.server.McpSyncServer;
-import io.modelcontextprotocol.server.McpServerFeatures.SyncToolSpecification;
 import io.modelcontextprotocol.spec.McpError;
-import io.modelcontextprotocol.spec.McpSchema;
-import reva.plugin.RevaProgramManager;
 
 /**
  * Unit tests for StringToolProvider
@@ -122,6 +118,7 @@ public class StringToolProviderTest {
         java.lang.reflect.Method method = StringToolProvider.class.getDeclaredMethod("getStringInfo", Data.class);
         method.setAccessible(true);
         
+        @SuppressWarnings("unchecked")
         Map<String, Object> result = (Map<String, Object>) method.invoke(stringToolProvider, mockData);
         
         assertNull("Result should be null for non-string data", result);

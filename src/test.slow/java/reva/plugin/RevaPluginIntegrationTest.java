@@ -19,7 +19,6 @@ import static org.junit.Assert.*;
 
 import org.junit.Test;
 
-import ghidra.program.model.listing.Program;
 import reva.RevaIntegrationTestBase;
 import reva.util.RevaInternalServiceRegistry;
 

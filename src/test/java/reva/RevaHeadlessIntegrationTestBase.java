@@ -19,7 +19,6 @@ import ghidra.test.AbstractGhidraHeadlessIntegrationTest;
 import ghidra.program.model.listing.Program;
 import ghidra.program.database.ProgramDB;
 import ghidra.program.model.lang.Language;
-import ghidra.program.model.lang.LanguageService;
 import ghidra.program.model.lang.LanguageID;
 import ghidra.program.model.lang.CompilerSpec;
 import ghidra.program.model.mem.Memory;

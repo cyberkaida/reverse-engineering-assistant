@@ -17,13 +17,8 @@ package reva.tools.memory;
 
 import static org.junit.Assert.*;
 
-import java.util.HashMap;
-import java.util.Map;
-
 import org.junit.Before;
 import org.junit.Test;
-
-import com.fasterxml.jackson.databind.JsonNode;
 
 import ghidra.program.model.mem.MemoryBlock;
 import reva.RevaIntegrationTestBase;

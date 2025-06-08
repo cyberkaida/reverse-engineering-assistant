@@ -31,9 +31,7 @@ import ghidra.program.model.symbol.SymbolTable;
 import io.modelcontextprotocol.server.McpSyncServer;
 import io.modelcontextprotocol.spec.McpError;
 import io.modelcontextprotocol.spec.McpSchema;
-import reva.plugin.RevaProgramManager;
 import reva.tools.AbstractToolProvider;
-import reva.util.AddressUtil;
 
 /**
  * Tool provider for cross-reference operations.
@@ -66,7 +64,7 @@ public class CrossReferencesToolProvider extends AbstractToolProvider {
             "type", "string",
             "description", "Path in the Ghidra Project to the program to get references from"
         ));
-        properties.put("address", Map.of(
+        properties.put("addressOrSymbol", Map.of(
             "type", "string",
             "description", "Address or symbol name to get references to and from (e.g., '0x00400123' or 'main')"
         ));
@@ -91,7 +89,7 @@ public class CrossReferencesToolProvider extends AbstractToolProvider {
             "default", true
         ));
 
-        List<String> required = List.of("programPath", "address");
+        List<String> required = List.of("programPath", "addressOrSymbol");
 
         // Create the tool
         McpSchema.Tool tool = new McpSchema.Tool(
@@ -102,39 +100,15 @@ public class CrossReferencesToolProvider extends AbstractToolProvider {
 
         // Register the tool with a handler
         registerTool(tool, (exchange, args) -> {
-            // Get the program path from the request
-            String programPath = (String) args.get("programPath");
-            if (programPath == null) {
-                return createErrorResult("No program path provided");
-            }
-
-            // Get the program from the path
-            Program program = RevaProgramManager.getProgramByPath(programPath);
-            if (program == null) {
-                return createErrorResult("Failed to find Program: " + programPath);
-            }
-
-            // Get the address string
-            String addressString = (String) args.get("address");
-            if (addressString == null) {
-                return createErrorResult("No address provided");
-            }
-
-            // Parse the address or symbol
-            Address address = AddressUtil.resolveAddressOrSymbol(program, addressString);
-            if (address == null) {
-                return createErrorResult("Invalid address or symbol: " + addressString);
-            }
+            // Get program and parameters using helper methods
+            Program program = getProgramFromArgs(args);
+            Address address = getAddressFromArgs(args, program, "addressOrSymbol");
 
             // Get filters
-            boolean includeFlow = args.containsKey("includeFlow") ?
-                (Boolean) args.get("includeFlow") : true;
-            boolean includeData = args.containsKey("includeData") ?
-                (Boolean) args.get("includeData") : true;
-            boolean includeFromAddress = args.containsKey("includeFromAddress") ?
-                (Boolean) args.get("includeFromAddress") : true;
-            boolean includeToAddress = args.containsKey("includeToAddress") ?
-                (Boolean) args.get("includeToAddress") : true;
+            boolean includeFlow = getOptionalBoolean(args, "includeFlow", true);
+            boolean includeData = getOptionalBoolean(args, "includeData", true);
+            boolean includeFromAddress = getOptionalBoolean(args, "includeFromAddress", true);
+            boolean includeToAddress = getOptionalBoolean(args, "includeToAddress", true);
 
             // Get the symbol table for looking up symbols
             SymbolTable symbolTable = program.getSymbolTable();
@@ -220,7 +194,7 @@ public class CrossReferencesToolProvider extends AbstractToolProvider {
 
             // Create result data
             Map<String, Object> resultData = new HashMap<>();
-            resultData.put("program", programPath);
+            resultData.put("program", program.getName());
             resultData.put("address", address.toString());
             resultData.put("referencesFrom", referencesFrom);
             resultData.put("referencesTo", referencesTo);
@@ -289,39 +263,19 @@ public class CrossReferencesToolProvider extends AbstractToolProvider {
 
         // Register the tool with a handler
         registerTool(tool, (exchange, args) -> {
-            // Get the program path from the request
-            String programPath = (String) args.get("programPath");
-            if (programPath == null) {
-                return createErrorResult("No program path provided");
-            }
-
-            // Get the program from the path
-            Program program = RevaProgramManager.getProgramByPath(programPath);
-            if (program == null) {
-                return createErrorResult("Failed to find Program: " + programPath);
-            }
-
-            // Get the symbol name
-            String symbolName = (String) args.get("symbolName");
-            if (symbolName == null || symbolName.trim().isEmpty()) {
-                return createErrorResult("No symbol name provided");
-            }
+            // Get program and parameters using helper methods
+            Program program = getProgramFromArgs(args);
+            String symbolName = getString(args, "symbolName");
 
             // Get the namespace (if provided)
-            String namespaceString = args.containsKey("namespace") ?
-                (String) args.get("namespace") : "";
+            String namespaceString = getOptionalString(args, "namespace", "");
 
             // Get filters
-            boolean includeFlow = args.containsKey("includeFlow") ?
-                (Boolean) args.get("includeFlow") : true;
-            boolean includeData = args.containsKey("includeData") ?
-                (Boolean) args.get("includeData") : true;
-            boolean exactMatch = args.containsKey("exactMatch") ?
-                (Boolean) args.get("exactMatch") : true;
-            boolean includeFromSymbol = args.containsKey("includeFromSymbol") ?
-                (Boolean) args.get("includeFromSymbol") : true;
-            boolean includeToSymbol = args.containsKey("includeToSymbol") ?
-                (Boolean) args.get("includeToSymbol") : true;
+            boolean includeFlow = getOptionalBoolean(args, "includeFlow", true);
+            boolean includeData = getOptionalBoolean(args, "includeData", true);
+            boolean exactMatch = getOptionalBoolean(args, "exactMatch", true);
+            boolean includeFromSymbol = getOptionalBoolean(args, "includeFromSymbol", true);
+            boolean includeToSymbol = getOptionalBoolean(args, "includeToSymbol", true);
 
             // Find the symbol
             SymbolTable symbolTable = program.getSymbolTable();
@@ -462,7 +416,7 @@ public class CrossReferencesToolProvider extends AbstractToolProvider {
 
             // Create result data
             Map<String, Object> resultData = new HashMap<>();
-            resultData.put("program", programPath);
+            resultData.put("program", program.getName());
             resultData.put("symbolName", symbolName);
             if (!namespaceString.isEmpty()) {
                 resultData.put("namespace", namespaceString);

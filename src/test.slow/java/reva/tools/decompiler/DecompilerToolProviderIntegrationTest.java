@@ -30,21 +30,16 @@ import ghidra.program.model.address.Address;
 import ghidra.program.model.data.DataType;
 import ghidra.program.model.data.IntegerDataType;
 import ghidra.program.model.data.PointerDataType;
-import ghidra.program.model.data.CharDataType;
 import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.FunctionManager;
 import ghidra.program.model.listing.Parameter;
 import ghidra.program.model.listing.ParameterImpl;
 import ghidra.program.model.listing.Variable;
-import ghidra.program.model.listing.Instruction;
-import ghidra.program.model.listing.Listing;
 import ghidra.program.model.symbol.SourceType;
-import ghidra.program.model.lang.Register;
 import io.modelcontextprotocol.spec.McpSchema.CallToolRequest;
 import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
 import io.modelcontextprotocol.spec.McpSchema.TextContent;
 import reva.RevaIntegrationTestBase;
-import reva.server.McpServerManager;
 
 /**
  * Integration tests for DecompilerToolProvider.
@@ -63,7 +58,6 @@ public class DecompilerToolProviderIntegrationTest extends RevaIntegrationTestBa
         // Use an address within the existing memory block (base class creates block at 0x01000000)
         Address functionAddr = program.getAddressFactory().getDefaultAddressSpace().getAddress(0x01000100);
         FunctionManager functionManager = program.getFunctionManager();
-        Listing listing = program.getListing();
 
         int transactionId = program.startTransaction("Create Test Function");
         try {
@@ -97,12 +91,10 @@ public class DecompilerToolProviderIntegrationTest extends RevaIntegrationTestBa
             programManager.openProgram(program);
         }
 
-        // Register the program directly with RevaProgramManager for test environments
-        reva.plugin.RevaProgramManager.registerProgram(program);
 
         // Register the program with the server manager so it can be found by the tools
         if (serverManager != null) {
-            serverManager.programOpened(program);
+            serverManager.programOpened(program, tool);
         }
 
         assertNotNull("Test function should be created", testFunction);
@@ -167,7 +159,7 @@ public class DecompilerToolProviderIntegrationTest extends RevaIntegrationTestBa
     public void testChangeVariableDataTypesSuccess() throws Exception {
         withMcpClient(createMcpTransport(), client -> {
             client.initialize();
-            
+
             // First, read the decompilation to satisfy the forced read requirement
             performForcedDecompilationRead(client, "testFunction");
 
@@ -175,16 +167,12 @@ public class DecompilerToolProviderIntegrationTest extends RevaIntegrationTestBa
             Variable[] originalParams = testFunction.getParameters();
             DataType originalParam1Type = null;
             DataType originalParam2Type = null;
-            String originalParam1Name = null;
-            String originalParam2Name = null;
 
             for (Variable param : originalParams) {
                 if ("param1".equals(param.getName())) {
                     originalParam1Type = param.getDataType();
-                    originalParam1Name = param.getName();
                 } else if ("param2".equals(param.getName())) {
                     originalParam2Type = param.getDataType();
-                    originalParam2Name = param.getName();
                 }
             }
 
@@ -203,9 +191,8 @@ public class DecompilerToolProviderIntegrationTest extends RevaIntegrationTestBa
 
             assertNotNull("Change result should not be null", changeResult);
 
-            // Parse the result
+            // Get the content
             TextContent changeContent = (TextContent) changeResult.content().get(0);
-            JsonNode changeJson = parseJsonContent(changeContent.text());
 
             if (changeResult.isError()) {
                 // If it's an error, it should be meaningful (variables might not be found in decompilation)
@@ -215,6 +202,8 @@ public class DecompilerToolProviderIntegrationTest extends RevaIntegrationTestBa
                     errorMsg.contains("No matching variables") || errorMsg.contains("Could not find") ||
                     errorMsg.contains("Decompilation failed"));
             } else {
+                // Parse the result as JSON only if it's not an error
+                JsonNode changeJson = parseJsonContent(changeContent.text());
                 // If successful, validate the structure
                 assertEquals("Program name should match", program.getName(), changeJson.get("programName").asText());
                 assertEquals("Function name should match", "testFunction", changeJson.get("functionName").asText());
@@ -280,7 +269,7 @@ public class DecompilerToolProviderIntegrationTest extends RevaIntegrationTestBa
     public void testRenameVariablesSuccess() throws Exception {
         withMcpClient(createMcpTransport(), client -> {
             client.initialize();
-            
+
             // First, read the decompilation to satisfy the forced read requirement
             performForcedDecompilationRead(client, "testFunction");
 
@@ -312,9 +301,8 @@ public class DecompilerToolProviderIntegrationTest extends RevaIntegrationTestBa
 
             assertNotNull("Rename result should not be null", renameResult);
 
-            // Parse the result
+            // Get the content
             TextContent renameContent = (TextContent) renameResult.content().get(0);
-            JsonNode renameJson = parseJsonContent(renameContent.text());
 
             if (renameResult.isError()) {
                 // If it's an error, it should be meaningful (variables might not be found in decompilation)
@@ -324,6 +312,8 @@ public class DecompilerToolProviderIntegrationTest extends RevaIntegrationTestBa
                     errorMsg.contains("No matching variables") || errorMsg.contains("Could not find") ||
                     errorMsg.contains("Decompilation failed"));
             } else {
+                // Parse the result as JSON only if it's not an error
+                JsonNode renameJson = parseJsonContent(renameContent.text());
                 // If successful, validate the structure
                 assertEquals("Program name should match", program.getName(), renameJson.get("programName").asText());
                 assertEquals("Function name should match", "testFunction", renameJson.get("functionName").asText());
@@ -545,7 +535,7 @@ public class DecompilerToolProviderIntegrationTest extends RevaIntegrationTestBa
             }
         });
     }
-    
+
     @Test
     public void testGetDecompilationWithRange() throws Exception {
         withMcpClient(createMcpTransport(), client -> {
@@ -562,10 +552,10 @@ public class DecompilerToolProviderIntegrationTest extends RevaIntegrationTestBa
 
             assertNotNull("Result should not be null", result);
             assertMcpResultNotError(result, "Result should not be an error");
-            
+
             TextContent content = (TextContent) result.content().get(0);
             JsonNode json = parseJsonContent(content.text());
-            
+
             assertTrue("Should have offset", json.has("offset"));
             assertTrue("Should have limit", json.has("limit"));
             assertTrue("Should have totalLines", json.has("totalLines"));
@@ -573,7 +563,7 @@ public class DecompilerToolProviderIntegrationTest extends RevaIntegrationTestBa
             assertEquals("Limit should be 5", 5, json.get("limit").asInt());
         });
     }
-    
+
     @Test
     public void testGetDecompilationDefaultLimit() throws Exception {
         withMcpClient(createMcpTransport(), client -> {
@@ -589,10 +579,10 @@ public class DecompilerToolProviderIntegrationTest extends RevaIntegrationTestBa
 
             assertNotNull("Result should not be null", result);
             assertMcpResultNotError(result, "Result should not be an error");
-            
+
             TextContent content = (TextContent) result.content().get(0);
             JsonNode json = parseJsonContent(content.text());
-            
+
             assertTrue("Should have offset", json.has("offset"));
             assertTrue("Should have limit", json.has("limit"));
             assertTrue("Should have totalLines", json.has("totalLines"));
@@ -600,7 +590,7 @@ public class DecompilerToolProviderIntegrationTest extends RevaIntegrationTestBa
             assertEquals("Limit should default to 50", 50, json.get("limit").asInt());
         });
     }
-    
+
     @Test
     public void testGetDecompilationWithSync() throws Exception {
         withMcpClient(createMcpTransport(), client -> {
@@ -616,15 +606,15 @@ public class DecompilerToolProviderIntegrationTest extends RevaIntegrationTestBa
 
             assertNotNull("Result should not be null", result);
             assertMcpResultNotError(result, "Result should not be an error");
-            
+
             TextContent content = (TextContent) result.content().get(0);
             JsonNode json = parseJsonContent(content.text());
-            
-            assertTrue("Should have synchronizedContent when includeDisassembly is true", 
+
+            assertTrue("Should have synchronizedContent when includeDisassembly is true",
                 json.has("synchronizedContent") || json.has("decompilation"));
         });
     }
-    
+
     @Test
     public void testSearchDecompilation() throws Exception {
         withMcpClient(createMcpTransport(), client -> {
@@ -640,17 +630,17 @@ public class DecompilerToolProviderIntegrationTest extends RevaIntegrationTestBa
 
             assertNotNull("Result should not be null", result);
             assertMcpResultNotError(result, "Result should not be an error");
-            
+
             TextContent content = (TextContent) result.content().get(0);
             JsonNode json = parseJsonContent(content.text());
-            
+
             assertTrue("Should have results array", json.has("results"));
             assertTrue("Should have resultsCount", json.has("resultsCount"));
             assertTrue("Should have pattern", json.has("pattern"));
             assertEquals("Pattern should match", ".*", json.get("pattern").asText());
         });
     }
-    
+
     @Test
     public void testForcedReadValidation() throws Exception {
         withMcpClient(createMcpTransport(), client -> {
@@ -666,10 +656,10 @@ public class DecompilerToolProviderIntegrationTest extends RevaIntegrationTestBa
 
             assertNotNull("Rename result should not be null", renameResult);
             assertTrue("Should return error for not reading decompilation first", renameResult.isError());
-            
+
             TextContent content = (TextContent) renameResult.content().get(0);
             String errorMsg = content.text();
-            assertTrue("Error should mention reading decompilation first", 
+            assertTrue("Error should mention reading decompilation first",
                 errorMsg.contains("read the decompilation") || errorMsg.contains("get-decompilation"));
         });
     }

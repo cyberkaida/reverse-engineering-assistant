@@ -10,3 +10,6 @@ bin/
 .DS_Store
 .mypy_cache/
 __pycache__
+
+# Java heap dump files
+*.hprof

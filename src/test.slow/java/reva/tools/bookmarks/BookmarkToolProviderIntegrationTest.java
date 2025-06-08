@@ -28,7 +28,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.listing.Bookmark;
 import ghidra.program.model.listing.BookmarkManager;
-import io.modelcontextprotocol.client.McpSyncClient;
 import io.modelcontextprotocol.spec.McpSchema.CallToolRequest;
 import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
 import io.modelcontextprotocol.spec.McpSchema.TextContent;
@@ -56,12 +55,9 @@ public class BookmarkToolProviderIntegrationTest extends RevaIntegrationTestBase
             programManager.openProgram(program);
         }
 
-        // Register the program directly with RevaProgramManager for test environments
-        reva.plugin.RevaProgramManager.registerProgram(program);
-
         // Register the program with the server manager so it can be found by the tools
         if (serverManager != null) {
-            serverManager.programOpened(program);
+            serverManager.programOpened(program, tool);
         }
     }
 
@@ -78,7 +74,7 @@ public class BookmarkToolProviderIntegrationTest extends RevaIntegrationTestBase
                 // Set a bookmark
                 Map<String, Object> setArgs = new HashMap<>();
                 setArgs.put("programPath", programPath);
-                setArgs.put("address", addressStr);
+                setArgs.put("addressOrSymbol", addressStr);
                 setArgs.put("type", "Note");
                 setArgs.put("category", "Analysis");
                 setArgs.put("comment", "Test bookmark");
@@ -96,7 +92,7 @@ public class BookmarkToolProviderIntegrationTest extends RevaIntegrationTestBase
                 // Get the bookmark using the tool
                 Map<String, Object> getArgs = new HashMap<>();
                 getArgs.put("programPath", programPath);
-                getArgs.put("address", addressStr);
+                getArgs.put("addressOrSymbol", addressStr);
 
                 CallToolRequest getRequest = new CallToolRequest("get-bookmarks", getArgs);
                 CallToolResult getResult = client.callTool(getRequest);

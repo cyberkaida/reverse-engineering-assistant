@@ -29,7 +29,6 @@ import ghidra.program.model.listing.Program;
 import io.modelcontextprotocol.spec.McpError;
 import io.modelcontextprotocol.server.McpSyncServer;
 import io.modelcontextprotocol.spec.McpSchema;
-import reva.plugin.RevaProgramManager;
 import reva.tools.AbstractToolProvider;
 import reva.util.SimilarityComparator;
 import reva.util.SymbolUtil;
@@ -81,23 +80,9 @@ public class FunctionToolProvider extends AbstractToolProvider {
 
         // Register the tool with a handler
         registerTool(tool, (exchange, args) -> {
-            // Get the program path from the request
-            String programPath = (String) args.get("programPath");
-            if (programPath == null) {
-                return createErrorResult("No program path provided");
-            }
-            
-            // Get the program from the path
-            Program program = RevaProgramManager.getProgramByPath(programPath);
-            if (program == null) {
-                return createErrorResult("Failed to find Program: " + programPath);
-            }
-
-            // Get the filter parameter
-            boolean filterDefaultNames = (Boolean) args.getOrDefault("filterDefaultNames", true);
-
-            // Get the functions from the program
-            List<Map<String, Object>> functionData = new ArrayList<>();
+            // Get program and parameters using helper methods
+            Program program = getProgramFromArgs(args);
+            boolean filterDefaultNames = getOptionalBoolean(args, "filterDefaultNames", true);
 
             AtomicInteger count = new AtomicInteger(0);
 
@@ -159,26 +144,10 @@ public class FunctionToolProvider extends AbstractToolProvider {
 
         // Register the tool with a handler
         registerTool(tool, (exchange, args) -> {
-            // Get the program path from the request
-            String programPath = (String) args.get("programPath");
-            if (programPath == null) {
-                return createErrorResult("No program path provided");
-            }
-
-            // Get pagination parameters
-            int startIndex = args.containsKey("startIndex") ?
-                ((Number) args.get("startIndex")).intValue() : 0;
-            int maxCount = args.containsKey("maxCount") ?
-                ((Number) args.get("maxCount")).intValue() : 100;
-
-            // Get the program from the path
-            Program program = RevaProgramManager.getProgramByPath(programPath);
-            if (program == null) {
-                return createErrorResult("Failed to find Program: " + programPath);
-            }
-
-            // Get the filter parameter
-            boolean filterDefaultNames = (Boolean) args.getOrDefault("filterDefaultNames", true);
+            // Get program and parameters using helper methods
+            Program program = getProgramFromArgs(args);
+            PaginationParams pagination = getPaginationParams(args);
+            boolean filterDefaultNames = getOptionalBoolean(args, "filterDefaultNames", true);
 
             // Get the functions from the program
             List<Map<String, Object>> functionData = new ArrayList<>();
@@ -194,13 +163,13 @@ public class FunctionToolProvider extends AbstractToolProvider {
                 }
                 
                 int index = currentIndex.getAndIncrement();
-                // Skip strings before the start index
-                if (index < startIndex) {
+                // Skip functions before the start index
+                if (index < pagination.startIndex()) {
                     return;
                 }
 
-                // Stop after we've collected maxCount strings
-                if (functionData.size() >= maxCount) {
+                // Stop after we've collected maxCount functions
+                if (functionData.size() >= pagination.maxCount()) {
                     return;
                 }
 
@@ -209,10 +178,10 @@ public class FunctionToolProvider extends AbstractToolProvider {
 
             // Add metadata about the filtering
             Map<String, Object> metadataInfo = new HashMap<>();
-            metadataInfo.put("startIndex", startIndex);
-            metadataInfo.put("requestedCount", maxCount);
+            metadataInfo.put("startIndex", pagination.startIndex());
+            metadataInfo.put("requestedCount", pagination.maxCount());
             metadataInfo.put("actualCount", functionData.size());
-            metadataInfo.put("nextStartIndex", startIndex + functionData.size());
+            metadataInfo.put("nextStartIndex", pagination.startIndex() + functionData.size());
             metadataInfo.put("totalProcessed", currentIndex.get());
             metadataInfo.put("filterDefaultNames", filterDefaultNames);
 
@@ -269,36 +238,18 @@ public class FunctionToolProvider extends AbstractToolProvider {
 
         // Register the tool with a handler
         registerTool(tool, (exchange, args) -> {
-            // Get the program path from the request
-            String programPath = (String) args.get("programPath");
-            if (programPath == null) {
-                return createErrorResult("No program path provided");
+            // Get program and parameters using helper methods
+            Program program = getProgramFromArgs(args);
+            String searchString = getString(args, "searchString");
+            PaginationParams pagination = getPaginationParams(args);
+            boolean filterDefaultNames = getOptionalBoolean(args, "filterDefaultNames", true);
+
+            if (searchString.trim().isEmpty()) {
+                return createErrorResult("Search string cannot be empty");
             }
-
-            // Get the search string from the request
-            String searchString = (String) args.get("searchString");
-            if (searchString == null || searchString.isEmpty()) {
-                return createErrorResult("No search string provided");
-            }
-
-            // Get pagination parameters
-            int startIndex = args.containsKey("startIndex") ?
-                ((Number) args.get("startIndex")).intValue() : 0;
-            int maxCount = args.containsKey("maxCount") ?
-                ((Number) args.get("maxCount")).intValue() : 100;
-
-            // Get the program from the path
-            Program program = RevaProgramManager.getProgramByPath(programPath);
-            if (program == null) {
-                return createErrorResult("Failed to find Program: " + programPath);
-            }
-
-            // Get the filter parameter
-            boolean filterDefaultNames = (Boolean) args.getOrDefault("filterDefaultNames", true);
 
             // Get functions and collect them for similarity sorting
             List<Map<String, Object>> similarFunctionData = new ArrayList<>();
-            AtomicInteger currentIndex = new AtomicInteger(0);
 
             // Iterate through all functions and collect them
             FunctionIterator functions = program.getFunctionManager().getFunctions(true);
@@ -307,8 +258,6 @@ public class FunctionToolProvider extends AbstractToolProvider {
                 if (filterDefaultNames && SymbolUtil.isDefaultSymbolName(function.getName())) {
                     return;
                 }
-
-                int index = currentIndex.getAndIncrement();
 
                 // Collect function data
                 Map<String, Object> functionInfo = createFunctionInfo(function);
@@ -327,17 +276,17 @@ public class FunctionToolProvider extends AbstractToolProvider {
 
             // Apply pagination to sorted results
             List<Map<String, Object>> paginatedFunctionData = similarFunctionData.subList(
-                startIndex, 
-                Math.min(startIndex + maxCount, similarFunctionData.size())
+                pagination.startIndex(), 
+                Math.min(pagination.startIndex() + pagination.maxCount(), similarFunctionData.size())
             );
 
             // Create pagination metadata
             Map<String, Object> paginationInfo = new HashMap<>();
             paginationInfo.put("searchString", searchString);
-            paginationInfo.put("startIndex", startIndex);
-            paginationInfo.put("requestedCount", maxCount);
+            paginationInfo.put("startIndex", pagination.startIndex());
+            paginationInfo.put("requestedCount", pagination.maxCount());
             paginationInfo.put("actualCount", paginatedFunctionData.size());
-            paginationInfo.put("nextStartIndex", startIndex + paginatedFunctionData.size());
+            paginationInfo.put("nextStartIndex", pagination.startIndex() + paginatedFunctionData.size());
             paginationInfo.put("totalMatchingFunctions", similarFunctionData.size());
             paginationInfo.put("filterDefaultNames", filterDefaultNames);
 

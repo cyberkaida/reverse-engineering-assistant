@@ -27,7 +27,6 @@ import ghidra.program.model.symbol.SourceType;
 import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.FunctionManager;
 import ghidra.program.model.listing.Program;
-import ghidra.util.task.TaskMonitor;
 
 import reva.RevaHeadlessIntegrationTestBase;
 import reva.util.RevaInternalServiceRegistry;

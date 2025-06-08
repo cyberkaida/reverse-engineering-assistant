@@ -42,11 +42,9 @@ import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.FunctionIterator;
 import ghidra.program.model.listing.FunctionManager;
 import ghidra.program.model.listing.Instruction;
-import ghidra.program.model.listing.InstructionIterator;
 import ghidra.program.model.listing.Listing;
 import ghidra.program.model.listing.Program;
 import ghidra.program.model.address.AddressSet;
-import ghidra.program.model.address.AddressSpace;
 import ghidra.program.model.symbol.SourceType;
 import ghidra.program.model.pcode.HighFunction;
 import ghidra.program.model.pcode.HighFunctionDBUtil;
@@ -58,7 +56,6 @@ import ghidra.util.exception.InvalidInputException;
 import io.modelcontextprotocol.spec.McpError;
 import io.modelcontextprotocol.server.McpSyncServer;
 import io.modelcontextprotocol.spec.McpSchema;
-import reva.plugin.RevaProgramManager;
 import reva.tools.AbstractToolProvider;
 import reva.util.AddressUtil;
 import reva.util.DataTypeParserUtil;
@@ -135,27 +132,13 @@ public class DecompilerToolProvider extends AbstractToolProvider {
 
         // Register the tool with a handler
         registerTool(tool, (exchange, args) -> {
-            // Get the program path and function name/address from the request
-            String programPath = (String) args.get("programPath");
-            String functionNameOrAddress = (String) args.get("functionNameOrAddress");
-            int offset = args.containsKey("offset") ? ((Number) args.get("offset")).intValue() : 1;
-            Integer limit = args.containsKey("limit") ? ((Number) args.get("limit")).intValue() : 50; // Default to 50 lines for context conservation
-            boolean includeDisassembly = args.containsKey("includeDisassembly") ? (Boolean) args.get("includeDisassembly") : false;
-            boolean includeComments = args.containsKey("includeComments") ? (Boolean) args.get("includeComments") : false;
-
-            if (programPath == null) {
-                return createErrorResult("No program path provided");
-            }
-
-            if (functionNameOrAddress == null) {
-                return createErrorResult("No function name or address provided");
-            }
-
-            // Get the program from the path
-            Program program = RevaProgramManager.getProgramByPath(programPath);
-            if (program == null) {
-                return createErrorResult("Failed to find program: " + programPath);
-            }
+            // Get parameters using helper methods
+            Program program = getProgramFromArgs(args);
+            String functionNameOrAddress = getString(args, "functionNameOrAddress");
+            int offset = getOptionalInt(args, "offset", 1);
+            Integer limit = getOptionalInteger(args, "limit", 50); // Default to 50 lines for context conservation
+            boolean includeDisassembly = getOptionalBoolean(args, "includeDisassembly", false);
+            boolean includeComments = getOptionalBoolean(args, "includeComments", false);
 
             Map<String, Object> resultData = new HashMap<>();
             resultData.put("programName", program.getName());
@@ -272,6 +255,8 @@ public class DecompilerToolProvider extends AbstractToolProvider {
                         resultData.put("decompSignature", decompiledFunction.getSignature());
 
                         // Track that this function's decompilation has been read
+                        // Use the program path for consistency with validation checks
+                        String programPath = getString(args, "programPath");
                         String functionKey = programPath + ":" + function.getName();
                         readDecompilationTracker.put(functionKey, System.currentTimeMillis());
 
@@ -331,24 +316,15 @@ public class DecompilerToolProvider extends AbstractToolProvider {
 
         // Register the tool with a handler
         registerTool(tool, (exchange, args) -> {
-            // Get arguments from the request
-            String programPath = (String) args.get("programPath");
-            String pattern = (String) args.get("pattern");
-            int maxResults = args.containsKey("maxResults") ? ((Number) args.get("maxResults")).intValue() : 50;
-            boolean caseSensitive = args.containsKey("caseSensitive") ? (Boolean) args.get("caseSensitive") : false;
+            // Get arguments using helper methods
+            Program program = getProgramFromArgs(args);
+            String pattern = getString(args, "pattern");
+            int maxResults = getOptionalInt(args, "maxResults", 50);
+            boolean caseSensitive = getOptionalBoolean(args, "caseSensitive", false);
 
-            // Validate arguments
-            if (programPath == null) {
-                return createErrorResult("No program path provided");
-            }
-            if (pattern == null || pattern.trim().isEmpty()) {
-                return createErrorResult("No search pattern provided");
-            }
-
-            // Get the program from the path
-            Program program = RevaProgramManager.getProgramByPath(programPath);
-            if (program == null) {
-                return createErrorResult("Failed to find program: " + programPath);
+            // Validate pattern
+            if (pattern.trim().isEmpty()) {
+                return createErrorResult("Search pattern cannot be empty");
             }
 
             // Perform the search
@@ -399,71 +375,26 @@ public class DecompilerToolProvider extends AbstractToolProvider {
 
         // Register the tool with a handler
         registerTool(tool, (exchange, args) -> {
-            // Get arguments from the request
-            String programPath = (String) args.get("programPath");
-            String functionNameOrAddress = (String) args.get("functionNameOrAddress");
-            @SuppressWarnings("unchecked")
-            Map<String, String> mappings = (Map<String, String>) args.get("variableMappings");
+            // Get program and parameters using helper methods
+            Program program = getProgramFromArgs(args);
+            Map<String, String> mappings = getStringMap(args, "variableMappings");
 
             // Validate arguments
-            if (programPath == null) {
-                return createErrorResult("No program path provided");
-            }
-            if (functionNameOrAddress == null) {
-                return createErrorResult("No function name or address provided");
-            }
             if (mappings == null || mappings.isEmpty()) {
                 return createErrorResult("No variable mappings provided");
             }
 
-            // Get the program from the path
-            Program program = RevaProgramManager.getProgramByPath(programPath);
-            if (program == null) {
-                return createErrorResult("Failed to find program: " + programPath);
-            }
-
-            Function function = null;
-
-            // First try to resolve as address or symbol
-            Address address = AddressUtil.resolveAddressOrSymbol(program, functionNameOrAddress);
-            if (address != null) {
-                // Get the containing function for this address
-                function = AddressUtil.getContainingFunction(program, address);
-            }
-
-            // If not found by address, try by function name
-            if (function == null) {
-                FunctionManager functionManager = program.getFunctionManager();
-
-                // First try an exact match
-                FunctionIterator functions = functionManager.getFunctions(true);
-                while (functions.hasNext()) {
-                    Function f = functions.next();
-                    if (f.getName().equals(functionNameOrAddress)) {
-                        function = f;
-                        break;
-                    }
-                }
-
-                // If no exact match, try case-insensitive
-                if (function == null) {
-                    functions = functionManager.getFunctions(true);
-                    while (functions.hasNext()) {
-                        Function f = functions.next();
-                        if (f.getName().equalsIgnoreCase(functionNameOrAddress)) {
-                            function = f;
-                            break;
-                        }
-                    }
-                }
-            }
-
-            if (function == null) {
-                return createErrorResult("Function not found: " + functionNameOrAddress + " in program " + program.getName() +
+            // Get function using helper method
+            Function function;
+            try {
+                function = getFunctionFromArgs(args, program);
+            } catch (IllegalArgumentException e) {
+                return createErrorResult("Function not found: " + e.getMessage() + " in program " + program.getName() +
                     ". Tried as address/symbol and function name. Check you are not using the mangled name and the namespace is correct.");
             }
 
             // Validate that the LLM has read the decompilation for this function first
+            String programPath = getString(args, "programPath");
             String functionKey = programPath + ":" + function.getName();
             if (!hasReadDecompilation(functionKey)) {
                 return createErrorResult("You must read the decompilation for function '" + function.getName() +
@@ -636,73 +567,27 @@ public class DecompilerToolProvider extends AbstractToolProvider {
 
         // Register the tool with a handler
         registerTool(tool, (exchange, args) -> {
-            // Get arguments from the request
-            String programPath = (String) args.get("programPath");
-            String functionNameOrAddress = (String) args.get("functionNameOrAddress");
-            @SuppressWarnings("unchecked")
-            Map<String, String> mappings = (Map<String, String>) args.get("datatypeMappings");
-            String archiveName = args.containsKey("archiveName") ?
-                (String) args.get("archiveName") : "";
+            // Get program and parameters using helper methods
+            Program program = getProgramFromArgs(args);
+            Map<String, String> mappings = getStringMap(args, "datatypeMappings");
+            String archiveName = getOptionalString(args, "archiveName", "");
 
             // Validate arguments
-            if (programPath == null) {
-                return createErrorResult("No program path provided");
-            }
-            if (functionNameOrAddress == null) {
-                return createErrorResult("No function name or address provided");
-            }
             if (mappings == null || mappings.isEmpty()) {
                 return createErrorResult("No datatype mappings provided");
             }
 
-            // Get the program from the path
-            Program program = RevaProgramManager.getProgramByPath(programPath);
-            if (program == null) {
-                return createErrorResult("Failed to find program: " + programPath);
-            }
-
-            Function function = null;
-
-            // First try to resolve as address or symbol
-            Address address = AddressUtil.resolveAddressOrSymbol(program, functionNameOrAddress);
-            if (address != null) {
-                // Get the containing function for this address
-                function = AddressUtil.getContainingFunction(program, address);
-            }
-
-            // If not found by address, try by function name
-            if (function == null) {
-                FunctionManager functionManager = program.getFunctionManager();
-
-                // First try an exact match
-                FunctionIterator functions = functionManager.getFunctions(true);
-                while (functions.hasNext()) {
-                    Function f = functions.next();
-                    if (f.getName().equals(functionNameOrAddress)) {
-                        function = f;
-                        break;
-                    }
-                }
-
-                // If no exact match, try case-insensitive
-                if (function == null) {
-                    functions = functionManager.getFunctions(true);
-                    while (functions.hasNext()) {
-                        Function f = functions.next();
-                        if (f.getName().equalsIgnoreCase(functionNameOrAddress)) {
-                            function = f;
-                            break;
-                        }
-                    }
-                }
-            }
-
-            if (function == null) {
-                return createErrorResult("Function not found: " + functionNameOrAddress + " in program " + program.getName() +
+            // Get function using helper method
+            Function function;
+            try {
+                function = getFunctionFromArgs(args, program);
+            } catch (IllegalArgumentException e) {
+                return createErrorResult("Function not found: " + e.getMessage() + " in program " + program.getName() +
                     ". Tried as address/symbol and function name. Check you are not using the mangled name and the namespace is correct.");
             }
 
             // Validate that the LLM has read the decompilation for this function first
+            String programPath = getString(args, "programPath");
             String functionKey = programPath + ":" + function.getName();
             if (!hasReadDecompilation(functionKey)) {
                 return createErrorResult("You must read the decompilation for function '" + function.getName() +
@@ -1296,9 +1181,8 @@ public class DecompilerToolProvider extends AbstractToolProvider {
 
         // Register the tool with a handler
         registerTool(tool, (exchange, args) -> {
-            // Get arguments from the request
-            String programPath = getString(args, "programPath");
-            String functionNameOrAddress = getString(args, "functionNameOrAddress");
+            // Get program and parameters using helper methods
+            Program program = getProgramFromArgs(args);
             int lineNumber = getInt(args, "lineNumber");
             String commentTypeStr = getOptionalString(args, "commentType", "eol");
             String comment = getString(args, "comment");
@@ -1314,53 +1198,16 @@ public class DecompilerToolProvider extends AbstractToolProvider {
                     ". Must be 'pre' or 'eol' for decompilation comments.");
             }
 
-            // Get the program from the path
-            Program program = RevaProgramManager.getProgramByPath(programPath);
-            if (program == null) {
-                return createErrorResult("Failed to find program: " + programPath);
-            }
-
-            Function function = null;
-
-            // First try to resolve as address or symbol
-            Address address = AddressUtil.resolveAddressOrSymbol(program, functionNameOrAddress);
-            if (address != null) {
-                // Get the containing function for this address
-                function = AddressUtil.getContainingFunction(program, address);
-            }
-
-            // If not found by address, try by function name
-            if (function == null) {
-                FunctionManager functionManager = program.getFunctionManager();
-
-                // First try an exact match
-                FunctionIterator functions = functionManager.getFunctions(true);
-                while (functions.hasNext()) {
-                    Function f = functions.next();
-                    if (f.getName().equals(functionNameOrAddress)) {
-                        function = f;
-                        break;
-                    }
-                }
-
-                // If no exact match, try case-insensitive
-                if (function == null) {
-                    functions = functionManager.getFunctions(true);
-                    while (functions.hasNext()) {
-                        Function f = functions.next();
-                        if (f.getName().equalsIgnoreCase(functionNameOrAddress)) {
-                            function = f;
-                            break;
-                        }
-                    }
-                }
-            }
-
-            if (function == null) {
-                return createErrorResult("Function not found: " + functionNameOrAddress);
+            // Get function using helper method
+            Function function;
+            try {
+                function = getFunctionFromArgs(args, program);
+            } catch (IllegalArgumentException e) {
+                return createErrorResult("Function not found: " + e.getMessage());
             }
 
             // Validate that the LLM has read the decompilation for this function first
+            String programPath = getString(args, "programPath");
             String functionKey = programPath + ":" + function.getName();
             if (!hasReadDecompilation(functionKey)) {
                 return createErrorResult("You must read the decompilation for function '" + function.getName() +

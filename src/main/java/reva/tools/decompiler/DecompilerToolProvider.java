@@ -139,8 +139,8 @@ public class DecompilerToolProvider extends AbstractToolProvider {
             // Get the program path and function name/address from the request
             String programPath = (String) args.get("programPath");
             String functionNameOrAddress = (String) args.get("functionNameOrAddress");
-            int offset = args.containsKey("offset") ? ((Number) args.get("offset")).intValue() : 1;
-            Integer limit = args.containsKey("limit") ? ((Number) args.get("limit")).intValue() : 50; // Default to 50 lines for context conservation
+            int offset = getOptionalInt(args, "offset", 1);
+            Integer limit = getOptionalInteger(args, "limit", 50); // Default to 50 lines for context conservation
             boolean includeDisassembly = args.containsKey("includeDisassembly") ? (Boolean) args.get("includeDisassembly") : false;
             boolean includeComments = args.containsKey("includeComments") ? (Boolean) args.get("includeComments") : false;
 
@@ -337,7 +337,7 @@ public class DecompilerToolProvider extends AbstractToolProvider {
             // Get arguments from the request
             String programPath = (String) args.get("programPath");
             String pattern = (String) args.get("pattern");
-            int maxResults = args.containsKey("maxResults") ? ((Number) args.get("maxResults")).intValue() : 50;
+            int maxResults = getOptionalInt(args, "maxResults", 50);
             boolean caseSensitive = args.containsKey("caseSensitive") ? (Boolean) args.get("caseSensitive") : false;
 
             // Validate arguments

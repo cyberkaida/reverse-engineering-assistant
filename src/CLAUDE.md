@@ -25,6 +25,7 @@
 - Validate parameters before processing (non-empty mappings, valid function, etc.)
 - Return structured JSON with success flags and updated decompilation
 - Follow MCP tool schema patterns for consistency
+- Use AbstractToolProvider helper methods (getInt, getOptionalInt) for numeric parameters to handle both Number and String inputs
 
 # JUnit Version
 - Use JUnit 4 for all tests (imports: `org.junit.Test`, `org.junit.Before`)

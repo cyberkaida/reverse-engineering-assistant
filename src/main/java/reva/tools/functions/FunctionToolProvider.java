@@ -169,10 +169,8 @@ public class FunctionToolProvider extends AbstractToolProvider {
             }
 
             // Get pagination parameters
-            int startIndex = args.containsKey("startIndex") ?
-                ((Number) args.get("startIndex")).intValue() : 0;
-            int maxCount = args.containsKey("maxCount") ?
-                ((Number) args.get("maxCount")).intValue() : 100;
+            int startIndex = getOptionalInt(args, "startIndex", 0);
+            int maxCount = getOptionalInt(args, "maxCount", 100);
 
             // Get the program from the path
             Program program;
@@ -287,10 +285,8 @@ public class FunctionToolProvider extends AbstractToolProvider {
             }
 
             // Get pagination parameters
-            int startIndex = args.containsKey("startIndex") ?
-                ((Number) args.get("startIndex")).intValue() : 0;
-            int maxCount = args.containsKey("maxCount") ?
-                ((Number) args.get("maxCount")).intValue() : 100;
+            int startIndex = getOptionalInt(args, "startIndex", 0);
+            int maxCount = getOptionalInt(args, "maxCount", 100);
 
             // Get the program from the path
             Program program;

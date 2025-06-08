@@ -183,10 +183,8 @@ public class SymbolToolProvider extends AbstractToolProvider {
             // Get parameters
             boolean includeExternal = args.containsKey("includeExternal") ?
                 (Boolean) args.get("includeExternal") : false;
-            int startIndex = args.containsKey("startIndex") ?
-                ((Number) args.get("startIndex")).intValue() : 0;
-            int maxCount = args.containsKey("maxCount") ?
-                ((Number) args.get("maxCount")).intValue() : 200;
+            int startIndex = getOptionalInt(args, "startIndex", 0);
+            int maxCount = getOptionalInt(args, "maxCount", 200);
             boolean filterDefaultNames = args.containsKey("filterDefaultNames") ?
                 (Boolean) args.get("filterDefaultNames") : true;
 

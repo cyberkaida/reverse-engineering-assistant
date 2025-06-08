@@ -200,10 +200,8 @@ public class DataTypeToolProvider extends AbstractToolProvider {
                 (String) args.get("categoryPath") : "/";
             boolean includeSubcategories = args.containsKey("includeSubcategories") ?
                 (Boolean) args.get("includeSubcategories") : false;
-            int startIndex = args.containsKey("startIndex") ?
-                ((Number) args.get("startIndex")).intValue() : 0;
-            int maxCount = args.containsKey("maxCount") ?
-                ((Number) args.get("maxCount")).intValue() : 100;
+            int startIndex = getOptionalInt(args, "startIndex", 0);
+            int maxCount = getOptionalInt(args, "maxCount", 100);
 
             // Find the data type manager
             DataTypeManager dtm = DataTypeParserUtil.findDataTypeManager(archiveName);

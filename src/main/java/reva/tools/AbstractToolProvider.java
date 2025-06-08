@@ -292,21 +292,20 @@ public abstract class AbstractToolProvider implements ToolProvider {
      * Get a validated program by path. This method ensures the program exists and is in a valid state.
      * @param programPath The path to the program
      * @return A valid Program object
-     * @throws IllegalArgumentException if the program is not found
-     * @throws IllegalStateException if the program is in an invalid state (e.g., closed)
+     * @throws ProgramValidationException if the program is not found, invalid, or in an invalid state
      */
-    protected Program getValidatedProgram(String programPath) {
+    protected Program getValidatedProgram(String programPath) throws ProgramValidationException {
         if (programPath == null || programPath.trim().isEmpty()) {
-            throw new IllegalArgumentException("Program path cannot be null or empty");
+            throw new ProgramValidationException("Program path cannot be null or empty");
         }
 
         Program program = RevaProgramManager.getProgramByPath(programPath);
         if (program == null) {
-            throw new IllegalArgumentException("Program not found: " + programPath);
+            throw new ProgramValidationException("Program not found: " + programPath);
         }
 
         if (program.isClosed()) {
-            throw new IllegalStateException("Program is closed: " + programPath);
+            throw new ProgramValidationException("Program is closed: " + programPath);
         }
 
         return program;

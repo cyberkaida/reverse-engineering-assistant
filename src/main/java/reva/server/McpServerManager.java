@@ -37,7 +37,7 @@ import io.modelcontextprotocol.server.McpSyncServer;
 import io.modelcontextprotocol.server.transport.HttpServletSseServerTransportProvider;
 import io.modelcontextprotocol.spec.McpError;
 import io.modelcontextprotocol.spec.McpSchema;
-
+import reva.plugin.ConfigManager;
 import reva.resources.ResourceProvider;
 import reva.resources.impl.ProgramListResource;
 import reva.services.RevaMcpService;
@@ -54,7 +54,6 @@ import reva.tools.symbols.SymbolToolProvider;
 import reva.tools.xrefs.CrossReferencesToolProvider;
 import reva.tools.comments.CommentToolProvider;
 import reva.tools.bookmarks.BookmarkToolProvider;
-import reva.util.ConfigManager;
 import reva.util.RevaInternalServiceRegistry;
 
 /**

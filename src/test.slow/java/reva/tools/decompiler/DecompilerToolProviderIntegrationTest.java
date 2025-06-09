@@ -663,4 +663,65 @@ public class DecompilerToolProviderIntegrationTest extends RevaIntegrationTestBa
                 errorMsg.contains("read the decompilation") || errorMsg.contains("get-decompilation"));
         });
     }
+
+    @Test
+    public void testSearchDecompilationRespectsMaxFunctionLimitConfig() throws Exception {
+        // Get the config manager and save the original value
+        reva.plugin.ConfigManager configManager = reva.util.RevaInternalServiceRegistry.getService(reva.plugin.ConfigManager.class);
+        int originalMax = configManager.getMaxDecompilerSearchFunctions();
+        try {
+            // Set max functions to 0 to force the limit
+            configManager.setMaxDecompilerSearchFunctions(0);
+
+            withMcpClient(createMcpTransport(), client -> {
+                client.initialize();
+                Map<String, Object> args = new HashMap<>();
+                args.put("programPath", programPath);
+                args.put("pattern", ".*");
+                args.put("maxResults", 10);
+
+                CallToolResult result = client.callTool(new CallToolRequest("search-decompilation", args));
+                assertNotNull("Result should not be null", result);
+                assertTrue("Should return error when function count exceeds max", result.isError());
+                TextContent content = (TextContent) result.content().get(0);
+                String errorMsg = content.text();
+                assertTrue("Error should mention maximum limit", errorMsg.contains("maximum limit") || errorMsg.contains("exceeds the maximum"));
+            });
+        } finally {
+            // Restore the original config value
+            configManager.setMaxDecompilerSearchFunctions(originalMax);
+        }
+    }
+
+    @Test
+    public void testSearchDecompilationRespectsMaxFunctionLimitConfigOverride() throws Exception {
+        // Get the config manager and save the original value
+        reva.plugin.ConfigManager configManager = reva.util.RevaInternalServiceRegistry.getService(reva.plugin.ConfigManager.class);
+        int originalMax = configManager.getMaxDecompilerSearchFunctions();
+        try {
+            // Set max functions to 0 to force the limit
+            configManager.setMaxDecompilerSearchFunctions(0);
+
+            withMcpClient(createMcpTransport(), client -> {
+                client.initialize();
+                Map<String, Object> args = new HashMap<>();
+                args.put("programPath", programPath);
+                args.put("pattern", ".*");
+                args.put("maxResults", 10);
+                args.put("overrideMaxFunctionsLimit", true); // Override the max functions limit
+
+                CallToolResult result = client.callTool(new CallToolRequest("search-decompilation", args));
+                assertNotNull("Result should not be null", result);
+                assertFalse("Should not return error when function count exceeds max and override is set", result.isError());
+                TextContent content = (TextContent) result.content().get(0);
+                JsonNode json = parseJsonContent(content.text());
+                assertTrue("Should have results array", json.has("results"));
+            });
+        } finally {
+            // Restore the original config value
+            configManager.setMaxDecompilerSearchFunctions(originalMax);
+        }
+    }
+
+
 }

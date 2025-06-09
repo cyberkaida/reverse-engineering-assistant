@@ -37,7 +37,6 @@ import io.modelcontextprotocol.spec.McpSchema.ListToolsResult;
 import io.modelcontextprotocol.spec.McpSchema.Tool;
 
 import reva.RevaIntegrationTestBase;
-import reva.util.ConfigManager;
 
 /**
  * Integration tests for the MCP server functionality in RevaPlugin

@@ -56,10 +56,12 @@ import ghidra.util.exception.InvalidInputException;
 import io.modelcontextprotocol.spec.McpError;
 import io.modelcontextprotocol.server.McpSyncServer;
 import io.modelcontextprotocol.spec.McpSchema;
+import reva.plugin.ConfigManager;
 import reva.tools.AbstractToolProvider;
 import reva.util.AddressUtil;
 import reva.util.DataTypeParserUtil;
 import reva.util.DecompilationDiffUtil;
+import reva.util.RevaInternalServiceRegistry;
 
 /**
  * Tool provider for function decompilation operations.
@@ -304,13 +306,18 @@ public class DecompilerToolProvider extends AbstractToolProvider {
             "description", "Whether the search should be case sensitive",
             "default", false
         ));
+        properties.put("overrideMaxFunctionsLimit", Map.of(
+            "type", "boolean",
+            "description", "Whether to override the maximum function limit for decompiler searches. Use with caution as large programs may take a long time to search.",
+            "default", false
+        ));
 
         List<String> required = List.of("programPath", "pattern");
 
         // Create the tool
         McpSchema.Tool tool = new McpSchema.Tool(
             "search-decompilation",
-            "Search for patterns across all function decompilations in a program. Returns function names and line numbers where patterns match.",
+            "Search for patterns across all function decompilations in a program. Returns function names and line numbers where patterns match. If looking for calls or references to data, try the cross reference tools first.",
             createSchema(properties, required)
         );
 
@@ -321,11 +328,23 @@ public class DecompilerToolProvider extends AbstractToolProvider {
             String pattern = getString(args, "pattern");
             int maxResults = getOptionalInt(args, "maxResults", 50);
             boolean caseSensitive = getOptionalBoolean(args, "caseSensitive", false);
+            boolean overrideMaxFunctionsLimit = getOptionalBoolean(args, "overrideMaxFunctionsLimit", false);
 
             // Validate pattern
             if (pattern.trim().isEmpty()) {
                 return createErrorResult("Search pattern cannot be empty");
             }
+
+            // Get the config manager
+            ConfigManager config = RevaInternalServiceRegistry.getService(ConfigManager.class);
+            int maxFunctions = config.getMaxDecompilerSearchFunctions();
+            if (program.getFunctionManager().getFunctionCount() > maxFunctions && !overrideMaxFunctionsLimit) {
+                return createErrorResult("Program has " + program.getFunctionManager().getFunctionCount() +
+                    " functions, which exceeds the maximum limit of " + maxFunctions +
+                    ". Use 'overrideMaxFunctionsLimit' to bypass this check, but be aware it may take a long time. If possible, try the cross reference tools.");
+            }
+
+            // TODO: In the future, when MCP's Java SDK supports it, we should report progress to the MCP client
 
             // Perform the search
             List<Map<String, Object>> searchResults = searchDecompilationInProgram(program, pattern, maxResults, caseSensitive);

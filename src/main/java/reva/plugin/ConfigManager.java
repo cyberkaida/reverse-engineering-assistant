@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package reva.util;
+package reva.plugin;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -34,11 +34,13 @@ public class ConfigManager {
     public static final String SERVER_PORT = "Server Port";
     public static final String SERVER_ENABLED = "Server Enabled";
     public static final String DEBUG_MODE = "Debug Mode";
+    public static final String MAX_DECOMPILER_SEARCH_FUNCTIONS = "Max Decompiler Search Functions";
 
     // Default values
     private static final int DEFAULT_PORT = 8080;
     private static final boolean DEFAULT_SERVER_ENABLED = true;
     private static final boolean DEFAULT_DEBUG_MODE = false;
+    private static final int DEFAULT_MAX_DECOMPILER_SEARCH_FUNCTIONS = 1000;
 
     private final PluginTool tool;
     private final Map<String, Object> cachedOptions = new HashMap<>();
@@ -65,11 +67,15 @@ public class ConfigManager {
             "Whether the ReVa MCP server is enabled");
         options.registerOption(DEBUG_MODE, DEFAULT_DEBUG_MODE, null,
             "Whether debug mode is enabled");
+        options.registerOption(MAX_DECOMPILER_SEARCH_FUNCTIONS, DEFAULT_MAX_DECOMPILER_SEARCH_FUNCTIONS, null,
+            "Maximum number of functions before discouraging decompiler search");
 
         // Cache the options
         cachedOptions.put(SERVER_PORT, options.getInt(SERVER_PORT, DEFAULT_PORT));
         cachedOptions.put(SERVER_ENABLED, options.getBoolean(SERVER_ENABLED, DEFAULT_SERVER_ENABLED));
         cachedOptions.put(DEBUG_MODE, options.getBoolean(DEBUG_MODE, DEFAULT_DEBUG_MODE));
+        cachedOptions.put(MAX_DECOMPILER_SEARCH_FUNCTIONS,
+            options.getInt(MAX_DECOMPILER_SEARCH_FUNCTIONS, DEFAULT_MAX_DECOMPILER_SEARCH_FUNCTIONS));
 
         Msg.debug(this, "Loaded ReVa configuration settings");
     }
@@ -143,5 +149,21 @@ public class ConfigManager {
      */
     public void setDebugMode(boolean enabled) {
         saveOption(SERVER_OPTIONS, DEBUG_MODE, enabled);
+    }
+
+    /**
+     * Get the maximum number of functions to search in the decompiler
+     * @return The configured maximum number of functions
+     */
+    public int getMaxDecompilerSearchFunctions() {
+        return (Integer) cachedOptions.getOrDefault(MAX_DECOMPILER_SEARCH_FUNCTIONS, DEFAULT_MAX_DECOMPILER_SEARCH_FUNCTIONS);
+    }
+
+    /**
+     * Set the maximum number of functions to search in the decompiler
+     * @param maxFunctions The maximum number of functions
+     */
+    public void setMaxDecompilerSearchFunctions(int maxFunctions) {
+        saveOption(SERVER_OPTIONS, MAX_DECOMPILER_SEARCH_FUNCTIONS, maxFunctions);
     }
 }

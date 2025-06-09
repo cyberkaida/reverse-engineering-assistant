@@ -44,9 +44,8 @@ import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
 import io.modelcontextprotocol.spec.McpSchema.ClientCapabilities;
 import io.modelcontextprotocol.spec.McpSchema.ListToolsResult;
 import io.modelcontextprotocol.spec.McpSchema.TextContent;
-
+import reva.plugin.ConfigManager;
 import reva.plugin.RevaPlugin;
-import reva.util.ConfigManager;
 import reva.server.McpServerManager;
 
 /**
@@ -63,7 +62,7 @@ public abstract class RevaIntegrationTestBase extends AbstractGhidraHeadedIntegr
     private static ConfigManager sharedConfigManager;
     private static McpServerManager sharedServerManager;
     private static ObjectMapper sharedObjectMapper;
-    
+
     // Per-test instances
     public TestEnv env;
     protected PluginTool tool;
@@ -77,18 +76,18 @@ public abstract class RevaIntegrationTestBase extends AbstractGhidraHeadedIntegr
     /**
      * Set up shared test environment once for all tests in the class.
      * This significantly speeds up test execution by reusing the Ghidra instance.
-     * 
-     * Note: TestEnv, MCP server, and plugin initialization must be done lazily in @Before 
-     * method due to Ghidra system initialization requirements, but we can prepare 
+     *
+     * Note: TestEnv, MCP server, and plugin initialization must be done lazily in @Before
+     * method due to Ghidra system initialization requirements, but we can prepare
      * non-Ghidra dependent shared resources here to reduce per-test overhead.
      */
     @BeforeClass
     public static void setUpSharedTestEnvironment() throws Exception {
         // Initialize shared object mapper for JSON parsing across all tests
         sharedObjectMapper = new ObjectMapper();
-        
+
         // Pre-configure any other non-Ghidra dependent shared resources here
-        // This reduces per-test initialization overhead even though the main 
+        // This reduces per-test initialization overhead even though the main
         // Ghidra/MCP setup must still be done lazily in @Before
     }
 
@@ -99,12 +98,12 @@ public abstract class RevaIntegrationTestBase extends AbstractGhidraHeadedIntegr
         // Create and register shared ConfigManager
         sharedConfigManager = new ConfigManager(sharedTool);
         reva.util.RevaInternalServiceRegistry.registerService(ConfigManager.class, sharedConfigManager);
-        
+
         // Create and register shared McpServerManager
         sharedServerManager = new McpServerManager(sharedTool);
         reva.util.RevaInternalServiceRegistry.registerService(McpServerManager.class, sharedServerManager);
         reva.util.RevaInternalServiceRegistry.registerService(reva.services.RevaMcpService.class, sharedServerManager);
-        
+
         // Start the shared MCP server
         sharedServerManager.startServer();
     }

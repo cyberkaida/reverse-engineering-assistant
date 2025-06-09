@@ -60,6 +60,7 @@ import reva.plugin.ConfigManager;
 import reva.tools.AbstractToolProvider;
 import reva.util.AddressUtil;
 import reva.util.DataTypeParserUtil;
+import reva.util.DecompilationContextUtil;
 import reva.util.DecompilationDiffUtil;
 import reva.util.RevaInternalServiceRegistry;
 
@@ -122,6 +123,16 @@ public class DecompilerToolProvider extends AbstractToolProvider {
             "description", "Whether to include comments in the decompilation output",
             "default", false
         ));
+        properties.put("includeIncomingReferences", Map.of(
+            "type", "boolean",
+            "description", "Whether to include incoming cross references to this function on the function declaration line",
+            "default", true
+        ));
+        properties.put("includeReferenceContext", Map.of(
+            "type", "boolean",
+            "description", "Whether to include code context snippets from calling functions (requires includeIncomingReferences)",
+            "default", true
+        ));
 
         List<String> required = List.of("programPath", "functionNameOrAddress");
 
@@ -141,6 +152,8 @@ public class DecompilerToolProvider extends AbstractToolProvider {
             Integer limit = getOptionalInteger(args, "limit", 50); // Default to 50 lines for context conservation
             boolean includeDisassembly = getOptionalBoolean(args, "includeDisassembly", false);
             boolean includeComments = getOptionalBoolean(args, "includeComments", false);
+            boolean includeIncomingReferences = getOptionalBoolean(args, "includeIncomingReferences", true);
+            boolean includeReferenceContext = getOptionalBoolean(args, "includeReferenceContext", true);
 
             Map<String, Object> resultData = new HashMap<>();
             resultData.put("programName", program.getName());
@@ -248,7 +261,7 @@ public class DecompilerToolProvider extends AbstractToolProvider {
 
                         // Get synchronized decompilation with optional assembly listing and comments
                         Map<String, Object> syncedContent = getSynchronizedContent(program, markup, decompiledFunction.getC(),
-                            offset, limit, includeDisassembly, includeComments, function);
+                            offset, limit, includeDisassembly, includeComments, includeIncomingReferences, includeReferenceContext, function);
 
                         // Add content to results
                         resultData.putAll(syncedContent);
@@ -773,7 +786,7 @@ public class DecompilerToolProvider extends AbstractToolProvider {
     }
 
     /**
-     * Get synchronized decompilation content with optional assembly listing and comments
+     * Get synchronized decompilation content with optional assembly listing, comments, and incoming references
      * @param program The program
      * @param markup The Clang token markup from decompilation
      * @param fullDecompCode The full decompiled C code
@@ -781,12 +794,14 @@ public class DecompilerToolProvider extends AbstractToolProvider {
      * @param limit Number of lines to return (null for all)
      * @param includeDisassembly Whether to include synchronized assembly
      * @param includeComments Whether to include comments
+     * @param includeIncomingReferences Whether to include incoming cross references
+     * @param includeReferenceContext Whether to include code context for references
      * @param function The function being decompiled
      * @return Map containing synchronized content
      */
     private Map<String, Object> getSynchronizedContent(Program program, ClangTokenGroup markup,
             String fullDecompCode, int offset, Integer limit, boolean includeDisassembly,
-            boolean includeComments, Function function) {
+            boolean includeComments, boolean includeIncomingReferences, boolean includeReferenceContext, Function function) {
         Map<String, Object> result = new HashMap<>();
 
         try {
@@ -831,6 +846,15 @@ public class DecompilerToolProvider extends AbstractToolProvider {
                         }
                     }
 
+                    // Include incoming references if requested and this is the first line of the function
+                    if (includeIncomingReferences && lineNumber == 1) {
+                        List<Map<String, Object>> incomingRefs = DecompilationContextUtil
+                            .getEnhancedIncomingReferences(program, function, includeReferenceContext);
+                        if (!incomingRefs.isEmpty()) {
+                            lineInfo.put("incomingReferences", incomingRefs);
+                        }
+                    }
+
                     syncedLines.add(lineInfo);
                 }
 
@@ -849,6 +873,15 @@ public class DecompilerToolProvider extends AbstractToolProvider {
                     List<Map<String, Object>> functionComments = getAllCommentsInFunction(program, function);
                     if (!functionComments.isEmpty()) {
                         result.put("comments", functionComments);
+                    }
+                }
+
+                // Include incoming references if requested
+                if (includeIncomingReferences) {
+                    List<Map<String, Object>> incomingRefs = DecompilationContextUtil
+                        .getEnhancedIncomingReferences(program, function, includeReferenceContext);
+                    if (!incomingRefs.isEmpty()) {
+                        result.put("incomingReferences", incomingRefs);
                     }
                 }
             }

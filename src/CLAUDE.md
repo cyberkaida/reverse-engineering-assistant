@@ -5,6 +5,12 @@
 - Use `Function.getParameters()` and `Function.getAllVariables()` to validate variable changes
 - Use `DataType.isEquivalent()` to compare datatypes before/after changes
 
+# Address Formatting
+- **ALWAYS use `AddressUtil.formatAddress(address)`** for consistent address formatting in JSON output
+- This ensures all addresses have the "0x" prefix format consistently across all ReVa tools
+- Import: `import reva.util.AddressUtil;`
+- Format: `AddressUtil.formatAddress(address)` returns `"0x" + address.toString()`
+
 # Decompiler Tool Implementation Pattern
 ## Adding New Tools to DecompilerToolProvider.java
 1. Create `register[ToolName]Tool()` method following existing patterns

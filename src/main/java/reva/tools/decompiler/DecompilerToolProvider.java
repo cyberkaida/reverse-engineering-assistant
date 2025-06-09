@@ -56,10 +56,13 @@ import ghidra.util.exception.InvalidInputException;
 import io.modelcontextprotocol.spec.McpError;
 import io.modelcontextprotocol.server.McpSyncServer;
 import io.modelcontextprotocol.spec.McpSchema;
+import reva.plugin.ConfigManager;
 import reva.tools.AbstractToolProvider;
 import reva.util.AddressUtil;
 import reva.util.DataTypeParserUtil;
+import reva.util.DecompilationContextUtil;
 import reva.util.DecompilationDiffUtil;
+import reva.util.RevaInternalServiceRegistry;
 
 /**
  * Tool provider for function decompilation operations.
@@ -120,6 +123,16 @@ public class DecompilerToolProvider extends AbstractToolProvider {
             "description", "Whether to include comments in the decompilation output",
             "default", false
         ));
+        properties.put("includeIncomingReferences", Map.of(
+            "type", "boolean",
+            "description", "Whether to include incoming cross references to this function on the function declaration line",
+            "default", true
+        ));
+        properties.put("includeReferenceContext", Map.of(
+            "type", "boolean",
+            "description", "Whether to include code context snippets from calling functions (requires includeIncomingReferences)",
+            "default", true
+        ));
 
         List<String> required = List.of("programPath", "functionNameOrAddress");
 
@@ -139,6 +152,8 @@ public class DecompilerToolProvider extends AbstractToolProvider {
             Integer limit = getOptionalInteger(args, "limit", 50); // Default to 50 lines for context conservation
             boolean includeDisassembly = getOptionalBoolean(args, "includeDisassembly", false);
             boolean includeComments = getOptionalBoolean(args, "includeComments", false);
+            boolean includeIncomingReferences = getOptionalBoolean(args, "includeIncomingReferences", true);
+            boolean includeReferenceContext = getOptionalBoolean(args, "includeReferenceContext", true);
 
             Map<String, Object> resultData = new HashMap<>();
             resultData.put("programName", program.getName());
@@ -246,7 +261,7 @@ public class DecompilerToolProvider extends AbstractToolProvider {
 
                         // Get synchronized decompilation with optional assembly listing and comments
                         Map<String, Object> syncedContent = getSynchronizedContent(program, markup, decompiledFunction.getC(),
-                            offset, limit, includeDisassembly, includeComments, function);
+                            offset, limit, includeDisassembly, includeComments, includeIncomingReferences, includeReferenceContext, function);
 
                         // Add content to results
                         resultData.putAll(syncedContent);
@@ -304,13 +319,18 @@ public class DecompilerToolProvider extends AbstractToolProvider {
             "description", "Whether the search should be case sensitive",
             "default", false
         ));
+        properties.put("overrideMaxFunctionsLimit", Map.of(
+            "type", "boolean",
+            "description", "Whether to override the maximum function limit for decompiler searches. Use with caution as large programs may take a long time to search.",
+            "default", false
+        ));
 
         List<String> required = List.of("programPath", "pattern");
 
         // Create the tool
         McpSchema.Tool tool = new McpSchema.Tool(
             "search-decompilation",
-            "Search for patterns across all function decompilations in a program. Returns function names and line numbers where patterns match.",
+            "Search for patterns across all function decompilations in a program. Returns function names and line numbers where patterns match. If looking for calls or references to data, try the cross reference tools first.",
             createSchema(properties, required)
         );
 
@@ -321,11 +341,23 @@ public class DecompilerToolProvider extends AbstractToolProvider {
             String pattern = getString(args, "pattern");
             int maxResults = getOptionalInt(args, "maxResults", 50);
             boolean caseSensitive = getOptionalBoolean(args, "caseSensitive", false);
+            boolean overrideMaxFunctionsLimit = getOptionalBoolean(args, "overrideMaxFunctionsLimit", false);
 
             // Validate pattern
             if (pattern.trim().isEmpty()) {
                 return createErrorResult("Search pattern cannot be empty");
             }
+
+            // Get the config manager
+            ConfigManager config = RevaInternalServiceRegistry.getService(ConfigManager.class);
+            int maxFunctions = config.getMaxDecompilerSearchFunctions();
+            if (program.getFunctionManager().getFunctionCount() > maxFunctions && !overrideMaxFunctionsLimit) {
+                return createErrorResult("Program has " + program.getFunctionManager().getFunctionCount() +
+                    " functions, which exceeds the maximum limit of " + maxFunctions +
+                    ". Use 'overrideMaxFunctionsLimit' to bypass this check, but be aware it may take a long time. If possible, try the cross reference tools.");
+            }
+
+            // TODO: In the future, when MCP's Java SDK supports it, we should report progress to the MCP client
 
             // Perform the search
             List<Map<String, Object>> searchResults = searchDecompilationInProgram(program, pattern, maxResults, caseSensitive);
@@ -754,7 +786,7 @@ public class DecompilerToolProvider extends AbstractToolProvider {
     }
 
     /**
-     * Get synchronized decompilation content with optional assembly listing and comments
+     * Get synchronized decompilation content with optional assembly listing, comments, and incoming references
      * @param program The program
      * @param markup The Clang token markup from decompilation
      * @param fullDecompCode The full decompiled C code
@@ -762,12 +794,14 @@ public class DecompilerToolProvider extends AbstractToolProvider {
      * @param limit Number of lines to return (null for all)
      * @param includeDisassembly Whether to include synchronized assembly
      * @param includeComments Whether to include comments
+     * @param includeIncomingReferences Whether to include incoming cross references
+     * @param includeReferenceContext Whether to include code context for references
      * @param function The function being decompiled
      * @return Map containing synchronized content
      */
     private Map<String, Object> getSynchronizedContent(Program program, ClangTokenGroup markup,
             String fullDecompCode, int offset, Integer limit, boolean includeDisassembly,
-            boolean includeComments, Function function) {
+            boolean includeComments, boolean includeIncomingReferences, boolean includeReferenceContext, Function function) {
         Map<String, Object> result = new HashMap<>();
 
         try {
@@ -784,6 +818,15 @@ public class DecompilerToolProvider extends AbstractToolProvider {
             result.put("offset", offset);
             if (limit != null) {
                 result.put("limit", limit);
+            }
+
+            // Include incoming references at the top level if requested
+            if (includeIncomingReferences) {
+                List<Map<String, Object>> incomingRefs = DecompilationContextUtil
+                    .getEnhancedIncomingReferences(program, function, includeReferenceContext);
+                if (!incomingRefs.isEmpty()) {
+                    result.put("incomingReferences", incomingRefs);
+                }
             }
 
             if (includeDisassembly) {

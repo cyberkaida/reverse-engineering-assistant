@@ -392,7 +392,7 @@ public class DecompilerToolProviderIntegrationTest extends RevaIntegrationTestBa
     }
 
     @Test
-    public void testGetDecompiledFunctionWithInvalidFunction() throws Exception {
+    public void testGetDecompilationWithInvalidFunction() throws Exception {
         withMcpClient(createMcpTransport(), client -> {
             client.initialize();
 
@@ -663,4 +663,124 @@ public class DecompilerToolProviderIntegrationTest extends RevaIntegrationTestBa
                 errorMsg.contains("read the decompilation") || errorMsg.contains("get-decompilation"));
         });
     }
+
+    @Test
+    public void testSearchDecompilationRespectsMaxFunctionLimitConfig() throws Exception {
+        // Get the config manager and save the original value
+        reva.plugin.ConfigManager configManager = reva.util.RevaInternalServiceRegistry.getService(reva.plugin.ConfigManager.class);
+        int originalMax = configManager.getMaxDecompilerSearchFunctions();
+        try {
+            // Set max functions to 0 to force the limit
+            configManager.setMaxDecompilerSearchFunctions(0);
+
+            withMcpClient(createMcpTransport(), client -> {
+                client.initialize();
+                Map<String, Object> args = new HashMap<>();
+                args.put("programPath", programPath);
+                args.put("pattern", ".*");
+                args.put("maxResults", 10);
+
+                CallToolResult result = client.callTool(new CallToolRequest("search-decompilation", args));
+                assertNotNull("Result should not be null", result);
+                assertTrue("Should return error when function count exceeds max", result.isError());
+                TextContent content = (TextContent) result.content().get(0);
+                String errorMsg = content.text();
+                assertTrue("Error should mention maximum limit", errorMsg.contains("maximum limit") || errorMsg.contains("exceeds the maximum"));
+            });
+        } finally {
+            // Restore the original config value
+            configManager.setMaxDecompilerSearchFunctions(originalMax);
+        }
+    }
+
+    @Test
+    public void testSearchDecompilationRespectsMaxFunctionLimitConfigOverride() throws Exception {
+        // Get the config manager and save the original value
+        reva.plugin.ConfigManager configManager = reva.util.RevaInternalServiceRegistry.getService(reva.plugin.ConfigManager.class);
+        int originalMax = configManager.getMaxDecompilerSearchFunctions();
+        try {
+            // Set max functions to 0 to force the limit
+            configManager.setMaxDecompilerSearchFunctions(0);
+
+            withMcpClient(createMcpTransport(), client -> {
+                client.initialize();
+                Map<String, Object> args = new HashMap<>();
+                args.put("programPath", programPath);
+                args.put("pattern", ".*");
+                args.put("maxResults", 10);
+                args.put("overrideMaxFunctionsLimit", true); // Override the max functions limit
+
+                CallToolResult result = client.callTool(new CallToolRequest("search-decompilation", args));
+                assertNotNull("Result should not be null", result);
+                assertFalse("Should not return error when function count exceeds max and override is set", result.isError());
+                TextContent content = (TextContent) result.content().get(0);
+                JsonNode json = parseJsonContent(content.text());
+                assertTrue("Should have results array", json.has("results"));
+            });
+        } finally {
+            // Restore the original config value
+            configManager.setMaxDecompilerSearchFunctions(originalMax);
+        }
+    }
+
+    @Test
+    public void testGetDecompilationReferencesContainSymbolAndAddress() throws Exception {
+        // Create a caller function that references testFunction
+        Address callerAddr = program.getAddressFactory().getDefaultAddressSpace().getAddress(0x01000200);
+        FunctionManager functionManager = program.getFunctionManager();
+        int txId = program.startTransaction("Create Caller Function");
+        try {
+            // Create a simple caller function
+            Function callerFunction = functionManager.createFunction("callerFunction", callerAddr,
+                program.getAddressFactory().getAddressSet(callerAddr, callerAddr.add(20)),
+                SourceType.USER_DEFINED);
+            // Insert a call instruction from callerFunction to testFunction
+            // For x86, 0xE8 is CALL rel32. We'll use a dummy relative offset (not actually executable, but enough for Ghidra to create a reference)
+            byte[] callInstr = new byte[] { (byte)0xE8, 0x00, 0x00, 0x00, 0x00 }; // CALL +0
+            program.getMemory().setBytes(callerAddr, callInstr);
+            // Add a reference from the call instruction to testFunction
+            program.getReferenceManager().addMemoryReference(
+                callerAddr, // from
+                testFunction.getEntryPoint(), // to
+                ghidra.program.model.symbol.RefType.UNCONDITIONAL_CALL,
+                ghidra.program.model.symbol.SourceType.USER_DEFINED,
+                0
+            );
+        } finally {
+            program.endTransaction(txId, true);
+        }
+
+        withMcpClient(createMcpTransport(), client -> {
+            client.initialize();
+
+            Map<String, Object> args = new HashMap<>();
+            args.put("programPath", programPath);
+            args.put("functionNameOrAddress", "testFunction");
+            args.put("includeIncomingReferences", true);
+            args.put("includeReferenceContext", false);
+            CallToolResult result = client.callTool(new CallToolRequest("get-decompilation", args));
+            assertNotNull("Result should not be null", result);
+            assertMcpResultNotError(result, "Result should not be an error");
+            TextContent content = (TextContent) result.content().get(0);
+            JsonNode json = parseJsonContent(content.text());
+            assertTrue("Should have incomingReferences", json.has("incomingReferences"));
+            JsonNode refs = json.get("incomingReferences");
+            boolean foundCaller = false;
+            for (JsonNode ref : refs) {
+                // Should have both fromAddress and fromSymbol fields (fromSymbol may be null if no symbol)
+                assertTrue("Reference should have fromAddress", ref.has("fromAddress"));
+                assertTrue("Reference should have referenceType", ref.has("referenceType"));
+                // fromSymbol is optional but if present, should be a string
+                if (ref.has("fromSymbol")) {
+                    assertTrue("fromSymbol should be a string if present", ref.get("fromSymbol").isTextual());
+                    if ("callerFunction".equals(ref.get("fromSymbol").asText())) {
+                        foundCaller = true;
+                    }
+                }
+            }
+            assertTrue("Should have a reference from callerFunction", foundCaller);
+        });
+    }
+
+
 }

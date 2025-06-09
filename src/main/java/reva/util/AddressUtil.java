@@ -34,7 +34,7 @@ public class AddressUtil {
     /**
      * Format an address for JSON output with consistent "0x" prefix.
      * This is the standard format used across all ReVa tool providers.
-     * 
+     *
      * @param address The Ghidra address to format
      * @return A hex string representation with "0x" prefix
      */
@@ -42,13 +42,15 @@ public class AddressUtil {
         if (address == null) {
             return null;
         }
-        return "0x" + address.toString();
+        // Format the address with a consistent "0x" prefix
+        // address with a 0x prefix.
+        return address.toString("0x");
     }
 
     /**
      * Parse an address string that may or may not have a "0x" prefix.
      * This handles user input that might come in either format.
-     * 
+     *
      * @param program The Ghidra program to get the address space from
      * @param addressString The address string to parse (with or without "0x")
      * @return The parsed Address object, or null if parsing fails
@@ -74,7 +76,7 @@ public class AddressUtil {
 
     /**
      * Check if an address string is valid (parseable).
-     * 
+     *
      * @param program The Ghidra program to get the address space from
      * @param addressString The address string to validate
      * @return true if the address string can be parsed, false otherwise
@@ -87,7 +89,7 @@ public class AddressUtil {
      * Resolve an address or symbol string to an Address object.
      * This method first attempts to find a symbol with the given name,
      * and if not found, falls back to parsing it as an address.
-     * 
+     *
      * @param program The Ghidra program to search in
      * @param addressOrSymbol The address string (with or without "0x") or symbol name
      * @return The resolved Address object, or null if neither symbol nor address is valid
@@ -98,23 +100,23 @@ public class AddressUtil {
         }
 
         String input = addressOrSymbol.trim();
-        
+
         // First, try to find it as a symbol
         SymbolTable symbolTable = program.getSymbolTable();
         List<Symbol> symbols = symbolTable.getLabelOrFunctionSymbols(input, null);
-        
+
         if (!symbols.isEmpty()) {
             // Return the address of the first matching symbol
             return symbols.get(0).getAddress();
         }
-        
+
         // If not found as a symbol, try to parse as an address
         return parseAddress(program, input);
     }
 
     /**
      * Get the function containing the given address.
-     * 
+     *
      * @param program The Ghidra program
      * @param address The address to check
      * @return The containing function, or null if the address is not within a function
@@ -123,13 +125,13 @@ public class AddressUtil {
         if (program == null || address == null) {
             return null;
         }
-        
+
         return program.getFunctionManager().getFunctionContaining(address);
     }
 
     /**
      * Get the data item containing or starting at the given address.
-     * 
+     *
      * @param program The Ghidra program
      * @param address The address to check
      * @return The data at or containing the address, or null if no data exists there
@@ -138,15 +140,15 @@ public class AddressUtil {
         if (program == null || address == null) {
             return null;
         }
-        
+
         Listing listing = program.getListing();
-        
+
         // First check if there's data exactly at this address
         Data data = listing.getDataAt(address);
         if (data != null) {
             return data;
         }
-        
+
         // If not, check if this address is within a larger data structure
         return listing.getDataContaining(address);
     }

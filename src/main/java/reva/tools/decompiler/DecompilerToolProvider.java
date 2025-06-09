@@ -820,6 +820,15 @@ public class DecompilerToolProvider extends AbstractToolProvider {
                 result.put("limit", limit);
             }
 
+            // Include incoming references at the top level if requested
+            if (includeIncomingReferences) {
+                List<Map<String, Object>> incomingRefs = DecompilationContextUtil
+                    .getEnhancedIncomingReferences(program, function, includeReferenceContext);
+                if (!incomingRefs.isEmpty()) {
+                    result.put("incomingReferences", incomingRefs);
+                }
+            }
+
             if (includeDisassembly) {
                 // Create synchronized content with assembly mapping
                 List<Map<String, Object>> syncedLines = new ArrayList<>();
@@ -846,15 +855,6 @@ public class DecompilerToolProvider extends AbstractToolProvider {
                         }
                     }
 
-                    // Include incoming references if requested and this is the first line of the function
-                    if (includeIncomingReferences && lineNumber == 1) {
-                        List<Map<String, Object>> incomingRefs = DecompilationContextUtil
-                            .getEnhancedIncomingReferences(program, function, includeReferenceContext);
-                        if (!incomingRefs.isEmpty()) {
-                            lineInfo.put("incomingReferences", incomingRefs);
-                        }
-                    }
-
                     syncedLines.add(lineInfo);
                 }
 
@@ -873,15 +873,6 @@ public class DecompilerToolProvider extends AbstractToolProvider {
                     List<Map<String, Object>> functionComments = getAllCommentsInFunction(program, function);
                     if (!functionComments.isEmpty()) {
                         result.put("comments", functionComments);
-                    }
-                }
-
-                // Include incoming references if requested
-                if (includeIncomingReferences) {
-                    List<Map<String, Object>> incomingRefs = DecompilationContextUtil
-                        .getEnhancedIncomingReferences(program, function, includeReferenceContext);
-                    if (!incomingRefs.isEmpty()) {
-                        result.put("incomingReferences", incomingRefs);
                     }
                 }
             }

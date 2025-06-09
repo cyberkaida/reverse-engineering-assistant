@@ -42,11 +42,7 @@ public class AddressUtil {
         if (address == null) {
             return null;
         }
-        // Ensure we have an actual Address object and format it properly
-        if (!(address instanceof Address)) {
-            throw new IllegalArgumentException("Expected Address object, got: " + address.getClass().getName());
-        }
-
+        // Format the address with a consistent "0x" prefix
         // address with a 0x prefix.
         return address.toString("0x");
     }

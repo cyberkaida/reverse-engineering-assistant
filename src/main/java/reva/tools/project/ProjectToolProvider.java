@@ -15,16 +15,21 @@
  */
 package reva.tools.project;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import ghidra.framework.data.DefaultCheckinHandler;
 import ghidra.framework.main.AppInfo;
 import ghidra.framework.model.DomainFile;
 import ghidra.framework.model.DomainFolder;
 import ghidra.framework.model.Project;
 import ghidra.program.model.listing.Program;
+import ghidra.util.exception.CancelledException;
+import ghidra.util.exception.VersionException;
+import ghidra.util.task.TaskMonitor;
 import io.modelcontextprotocol.spec.McpError;
 import io.modelcontextprotocol.server.McpSyncServer;
 import io.modelcontextprotocol.spec.McpSchema;
@@ -34,7 +39,7 @@ import reva.util.SchemaUtil;
 
 /**
  * Tool provider for project-related operations.
- * Provides tools to get the current program and list project files.
+ * Provides tools to get the current program, list project files, and perform version control operations.
  */
 public class ProjectToolProvider extends AbstractToolProvider {
 
@@ -51,6 +56,7 @@ public class ProjectToolProvider extends AbstractToolProvider {
         registerGetCurrentProgramTool();
         registerListProjectFilesTool();
         registerListOpenProgramsTool();
+        registerCheckinProgramTool();
     }
 
     /**
@@ -240,6 +246,111 @@ public class ProjectToolProvider extends AbstractToolProvider {
             resultData.addAll(programsData);
 
             return createMultiJsonResult(resultData);
+        });
+    }
+
+    /**
+     * Register a tool to checkin (commit) a program to version control
+     * @throws McpError if there's an error registering the tool
+     */
+    private void registerCheckinProgramTool() throws McpError {
+        // Define schema for the tool
+        Map<String, Object> properties = new HashMap<>();
+        properties.put("programPath", SchemaUtil.stringProperty(
+            "Path in the Ghidra Project to the program to checkin"
+        ));
+        properties.put("message", SchemaUtil.stringProperty(
+            "Commit message describing the changes being checked in"
+        ));
+        properties.put("keepCheckedOut", SchemaUtil.booleanPropertyWithDefault(
+            "Whether to keep the program checked out after commit", true
+        ));
+
+        List<String> required = List.of("programPath", "message");
+
+        // Create the tool
+        McpSchema.Tool tool = new McpSchema.Tool(
+            "checkin-program",
+            "Check in (commit) a program to version control with a message",
+            createSchema(properties, required)
+        );
+
+        // Register the tool with a handler
+        registerTool(tool, (exchange, args) -> {
+            // Get parameters
+            String programPath;
+            String message;
+            try {
+                programPath = getString(args, "programPath");
+                message = getString(args, "message");
+            } catch (IllegalArgumentException e) {
+                return createErrorResult(e.getMessage());
+            }
+
+            boolean keepCheckedOut = getOptionalBoolean(args, "keepCheckedOut", true);
+
+            // Get the program to obtain its domain file
+            Program program = getProgramFromArgs(args);
+            DomainFile domainFile = program.getDomainFile();
+
+            try {
+                // Handle new files vs. existing versioned files
+                if (domainFile.canAddToRepository()) {
+                    // This is a new file that needs to be added to version control
+                    domainFile.addToVersionControl(message, !keepCheckedOut, TaskMonitor.DUMMY);
+
+                    Map<String, Object> result = new HashMap<>();
+                    result.put("success", true);
+                    result.put("action", "added_to_version_control");
+                    result.put("programPath", programPath);
+                    result.put("message", message);
+                    result.put("keepCheckedOut", keepCheckedOut);
+                    result.put("isVersioned", domainFile.isVersioned());
+                    result.put("isCheckedOut", domainFile.isCheckedOut());
+
+                    return createJsonResult(result);
+                }
+                else if (domainFile.canCheckin()) {
+                    // This is an existing versioned file that can be checked in
+                    DefaultCheckinHandler checkinHandler = new DefaultCheckinHandler(message + "\n💜🐉✨ (ReVa)", keepCheckedOut, false);
+                    domainFile.checkin(checkinHandler, TaskMonitor.DUMMY);
+
+                    Map<String, Object> result = new HashMap<>();
+                    result.put("success", true);
+                    result.put("action", "checked_in");
+                    result.put("programPath", programPath);
+                    result.put("message", message);
+                    result.put("keepCheckedOut", keepCheckedOut);
+                    result.put("isVersioned", domainFile.isVersioned());
+                    result.put("isCheckedOut", domainFile.isCheckedOut());
+
+                    return createJsonResult(result);
+                }
+                else {
+                    // Cannot checkin - determine why
+                    if (!domainFile.isVersioned()) {
+                        return createErrorResult("Program is not under version control: " + programPath);
+                    }
+                    else if (!domainFile.isCheckedOut()) {
+                        return createErrorResult("Program is not checked out and cannot be modified: " + programPath);
+                    }
+                    else if (!domainFile.modifiedSinceCheckout()) {
+                        return createErrorResult("Program has no changes since checkout: " + programPath);
+                    }
+                    else {
+                        return createErrorResult("Program cannot be checked in for an unknown reason: " + programPath);
+                    }
+                }
+
+            } catch (IOException e) {
+                return createErrorResult("IO error during checkin: " + e.getMessage());
+            } catch (VersionException e) {
+                return createErrorResult("Version control error: " + e.getMessage());
+            } catch (CancelledException e) {
+                return createErrorResult("Checkin operation was cancelled");
+            } catch (Exception e) {
+                return createErrorResult("Unexpected error during checkin: " + e.getMessage());
+            }
         });
     }
 

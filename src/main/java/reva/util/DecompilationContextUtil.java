@@ -32,6 +32,7 @@ import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.Program;
 import ghidra.program.model.symbol.Reference;
 import ghidra.program.model.symbol.ReferenceIterator;
+import ghidra.program.model.symbol.Symbol;
 import ghidra.util.Msg;
 import ghidra.util.task.TaskMonitor;
 
@@ -44,7 +45,7 @@ public class DecompilationContextUtil {
 
     /**
      * Get the decompilation line number for a specific address within a function.
-     * 
+     *
      * @param program The Ghidra program
      * @param function The function containing the address
      * @param address The address to find the line number for
@@ -106,7 +107,7 @@ public class DecompilationContextUtil {
 
     /**
      * Get a context snippet around a specific line in a function's decompilation.
-     * 
+     *
      * @param program The Ghidra program
      * @param function The function to decompile
      * @param lineNumber The target line number (1-based)
@@ -164,7 +165,7 @@ public class DecompilationContextUtil {
 
     /**
      * Get enhanced incoming reference information for a function with line numbers and optional context.
-     * 
+     *
      * @param program The Ghidra program
      * @param targetFunction The function to get incoming references for
      * @param includeContext Whether to include code context snippets
@@ -189,6 +190,15 @@ public class DecompilationContextUtil {
                 Map<String, Object> refInfo = new HashMap<>();
                 refInfo.put("fromAddress", AddressUtil.formatAddress(fromAddress));
                 refInfo.put("referenceType", ref.getReferenceType().toString());
+
+                // Add symbol name if available
+                if (fromAddress != null) {
+                    Symbol fromSymbol = program.getSymbolTable().getPrimarySymbol(fromAddress);
+                    if (fromSymbol != null) {
+                        refInfo.put("fromSymbol", fromSymbol.getName());
+                        refInfo.put("fromSymbolType", fromSymbol.getSymbolType().toString());
+                    }
+                }
 
                 if (fromFunction != null) {
                     refInfo.put("fromFunction", fromFunction.getName());
@@ -220,7 +230,7 @@ public class DecompilationContextUtil {
     /**
      * Get enhanced reference information for any address with line numbers and optional context.
      * This method can be used by cross reference tools to add decompilation context.
-     * 
+     *
      * @param program The Ghidra program
      * @param targetAddress The address to get references to
      * @param includeContext Whether to include code context snippets

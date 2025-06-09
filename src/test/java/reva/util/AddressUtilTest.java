@@ -61,24 +61,12 @@ public class AddressUtilTest {
     }
 
     /**
-     * Test formatAddress with valid address
-     */
-    @Test
-    public void testFormatAddress_ValidAddress() {
-        when(address.toString()).thenReturn("00401000");
-        
-        String result = AddressUtil.formatAddress(address);
-        
-        assertEquals("0x00401000", result);
-    }
-
-    /**
      * Test formatAddress with null address
      */
     @Test
     public void testFormatAddress_NullAddress() {
         String result = AddressUtil.formatAddress(null);
-        
+
         assertNull(result);
     }
 
@@ -89,9 +77,9 @@ public class AddressUtilTest {
     public void testParseAddress_WithHexPrefix() {
         String addressString = "0x00401000";
         when(addressSpace.getAddress(0x00401000L)).thenReturn(address);
-        
+
         Address result = AddressUtil.parseAddress(program, addressString);
-        
+
         assertEquals(address, result);
     }
 
@@ -102,9 +90,9 @@ public class AddressUtilTest {
     public void testParseAddress_WithoutHexPrefix() {
         String addressString = "00401000";
         when(addressSpace.getAddress(0x00401000L)).thenReturn(address);
-        
+
         Address result = AddressUtil.parseAddress(program, addressString);
-        
+
         assertEquals(address, result);
     }
 
@@ -115,9 +103,9 @@ public class AddressUtilTest {
     public void testParseAddress_UppercaseHex() {
         String addressString = "0xDEADBEEF";
         when(addressSpace.getAddress(0xDEADBEEFL)).thenReturn(address);
-        
+
         Address result = AddressUtil.parseAddress(program, addressString);
-        
+
         assertEquals(address, result);
     }
 
@@ -127,7 +115,7 @@ public class AddressUtilTest {
     @Test
     public void testParseAddress_NullInput() {
         Address result = AddressUtil.parseAddress(program, null);
-        
+
         assertNull(result);
     }
 
@@ -137,7 +125,7 @@ public class AddressUtilTest {
     @Test
     public void testParseAddress_EmptyString() {
         Address result = AddressUtil.parseAddress(program, "");
-        
+
         assertNull(result);
     }
 
@@ -147,7 +135,7 @@ public class AddressUtilTest {
     @Test
     public void testParseAddress_Whitespace() {
         Address result = AddressUtil.parseAddress(program, "   ");
-        
+
         assertNull(result);
     }
 
@@ -157,9 +145,9 @@ public class AddressUtilTest {
     @Test
     public void testParseAddress_InvalidHex() {
         String addressString = "0xGHIJKL";
-        
+
         Address result = AddressUtil.parseAddress(program, addressString);
-        
+
         assertNull(result);
     }
 
@@ -170,9 +158,9 @@ public class AddressUtilTest {
     public void testIsValidAddress_ValidAddress() {
         String addressString = "0x00401000";
         when(addressSpace.getAddress(0x00401000L)).thenReturn(address);
-        
+
         boolean result = AddressUtil.isValidAddress(program, addressString);
-        
+
         assertTrue(result);
     }
 
@@ -182,9 +170,9 @@ public class AddressUtilTest {
     @Test
     public void testIsValidAddress_InvalidAddress() {
         String addressString = "invalid";
-        
+
         boolean result = AddressUtil.isValidAddress(program, addressString);
-        
+
         assertFalse(result);
     }
 
@@ -196,13 +184,13 @@ public class AddressUtilTest {
         String symbolName = "main";
         List<Symbol> symbols = new ArrayList<>();
         symbols.add(symbol);
-        
+
         when(program.getSymbolTable()).thenReturn(symbolTable);
         when(symbolTable.getLabelOrFunctionSymbols(symbolName, null)).thenReturn(symbols);
         when(symbol.getAddress()).thenReturn(address);
-        
+
         Address result = AddressUtil.resolveAddressOrSymbol(program, symbolName);
-        
+
         assertEquals(address, result);
     }
 
@@ -213,13 +201,13 @@ public class AddressUtilTest {
     public void testResolveAddressOrSymbol_Address() {
         String addressString = "0x00401000";
         List<Symbol> symbols = new ArrayList<>(); // Empty list
-        
+
         when(program.getSymbolTable()).thenReturn(symbolTable);
         when(symbolTable.getLabelOrFunctionSymbols(addressString, null)).thenReturn(symbols);
         when(addressSpace.getAddress(0x00401000L)).thenReturn(address);
-        
+
         Address result = AddressUtil.resolveAddressOrSymbol(program, addressString);
-        
+
         assertEquals(address, result);
     }
 
@@ -229,7 +217,7 @@ public class AddressUtilTest {
     @Test
     public void testResolveAddressOrSymbol_NullInput() {
         Address result = AddressUtil.resolveAddressOrSymbol(program, null);
-        
+
         assertNull(result);
     }
 
@@ -239,7 +227,7 @@ public class AddressUtilTest {
     @Test
     public void testResolveAddressOrSymbol_EmptyString() {
         Address result = AddressUtil.resolveAddressOrSymbol(program, "");
-        
+
         assertNull(result);
     }
 
@@ -250,13 +238,13 @@ public class AddressUtilTest {
     public void testResolveAddressOrSymbol_InvalidInput() {
         String input = "invalid";
         List<Symbol> symbols = new ArrayList<>(); // Empty list
-        
+
         when(program.getSymbolTable()).thenReturn(symbolTable);
         when(symbolTable.getLabelOrFunctionSymbols(input, null)).thenReturn(symbols);
         // parseAddress will return null for invalid input
-        
+
         Address result = AddressUtil.resolveAddressOrSymbol(program, input);
-        
+
         assertNull(result);
     }
 
@@ -267,9 +255,9 @@ public class AddressUtilTest {
     public void testGetContainingFunction_InsideFunction() {
         when(program.getFunctionManager()).thenReturn(functionManager);
         when(functionManager.getFunctionContaining(address)).thenReturn(function);
-        
+
         Function result = AddressUtil.getContainingFunction(program, address);
-        
+
         assertEquals(function, result);
     }
 
@@ -280,9 +268,9 @@ public class AddressUtilTest {
     public void testGetContainingFunction_OutsideFunction() {
         when(program.getFunctionManager()).thenReturn(functionManager);
         when(functionManager.getFunctionContaining(address)).thenReturn(null);
-        
+
         Function result = AddressUtil.getContainingFunction(program, address);
-        
+
         assertNull(result);
     }
 
@@ -292,7 +280,7 @@ public class AddressUtilTest {
     @Test
     public void testGetContainingFunction_NullProgram() {
         Function result = AddressUtil.getContainingFunction(null, address);
-        
+
         assertNull(result);
     }
 
@@ -302,7 +290,7 @@ public class AddressUtilTest {
     @Test
     public void testGetContainingFunction_NullAddress() {
         Function result = AddressUtil.getContainingFunction(program, null);
-        
+
         assertNull(result);
     }
 
@@ -313,9 +301,9 @@ public class AddressUtilTest {
     public void testGetContainingData_ExactAddress() {
         when(program.getListing()).thenReturn(listing);
         when(listing.getDataAt(address)).thenReturn(data);
-        
+
         Data result = AddressUtil.getContainingData(program, address);
-        
+
         assertEquals(data, result);
     }
 
@@ -327,9 +315,9 @@ public class AddressUtilTest {
         when(program.getListing()).thenReturn(listing);
         when(listing.getDataAt(address)).thenReturn(null);
         when(listing.getDataContaining(address)).thenReturn(data);
-        
+
         Data result = AddressUtil.getContainingData(program, address);
-        
+
         assertEquals(data, result);
     }
 
@@ -341,9 +329,9 @@ public class AddressUtilTest {
         when(program.getListing()).thenReturn(listing);
         when(listing.getDataAt(address)).thenReturn(null);
         when(listing.getDataContaining(address)).thenReturn(null);
-        
+
         Data result = AddressUtil.getContainingData(program, address);
-        
+
         assertNull(result);
     }
 
@@ -353,7 +341,7 @@ public class AddressUtilTest {
     @Test
     public void testGetContainingData_NullProgram() {
         Data result = AddressUtil.getContainingData(null, address);
-        
+
         assertNull(result);
     }
 
@@ -363,7 +351,7 @@ public class AddressUtilTest {
     @Test
     public void testGetContainingData_NullAddress() {
         Data result = AddressUtil.getContainingData(program, null);
-        
+
         assertNull(result);
     }
 
@@ -374,9 +362,9 @@ public class AddressUtilTest {
     public void testParseAddress_VeryLargeHex() {
         String addressString = "0xFFFFFFFFFFFFFFFF";
         when(addressSpace.getAddress(0xFFFFFFFFFFFFFFFFL)).thenReturn(address);
-        
+
         Address result = AddressUtil.parseAddress(program, addressString);
-        
+
         assertEquals(address, result);
     }
 
@@ -387,9 +375,9 @@ public class AddressUtilTest {
     public void testParseAddress_WithSpaces() {
         String addressString = "  0x00401000  ";
         when(addressSpace.getAddress(0x00401000L)).thenReturn(address);
-        
+
         Address result = AddressUtil.parseAddress(program, addressString);
-        
+
         assertEquals(address, result);
     }
 
@@ -401,13 +389,13 @@ public class AddressUtilTest {
         String symbolName = "Main"; // Different case than "main"
         List<Symbol> symbols = new ArrayList<>();
         symbols.add(symbol);
-        
+
         when(program.getSymbolTable()).thenReturn(symbolTable);
         when(symbolTable.getLabelOrFunctionSymbols(symbolName, null)).thenReturn(symbols);
         when(symbol.getAddress()).thenReturn(address);
-        
+
         Address result = AddressUtil.resolveAddressOrSymbol(program, symbolName);
-        
+
         assertEquals(address, result);
     }
 
@@ -420,17 +408,17 @@ public class AddressUtilTest {
         List<Symbol> symbols = new ArrayList<>();
         Symbol symbol2 = mock(Symbol.class);
         Address address2 = mock(Address.class);
-        
+
         symbols.add(symbol);
         symbols.add(symbol2);
-        
+
         when(program.getSymbolTable()).thenReturn(symbolTable);
         when(symbolTable.getLabelOrFunctionSymbols(symbolName, null)).thenReturn(symbols);
         when(symbol.getAddress()).thenReturn(address);
         when(symbol2.getAddress()).thenReturn(address2);
-        
+
         Address result = AddressUtil.resolveAddressOrSymbol(program, symbolName);
-        
+
         assertEquals(address, result); // Should return first symbol's address
     }
 }

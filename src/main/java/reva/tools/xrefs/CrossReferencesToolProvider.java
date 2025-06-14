@@ -21,8 +21,9 @@ import java.util.List;
 import java.util.Map;
 
 import ghidra.program.model.address.Address;
+import ghidra.program.model.address.AddressSetView;
+import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.Program;
-import ghidra.program.model.symbol.Namespace;
 import ghidra.program.model.symbol.Reference;
 import ghidra.program.model.symbol.ReferenceIterator;
 import ghidra.program.model.symbol.ReferenceManager;
@@ -32,10 +33,13 @@ import io.modelcontextprotocol.server.McpSyncServer;
 import io.modelcontextprotocol.spec.McpError;
 import io.modelcontextprotocol.spec.McpSchema;
 import reva.tools.AbstractToolProvider;
+import reva.util.AddressUtil;
+import reva.util.DecompilationContextUtil;
 
 /**
  * Tool provider for cross-reference operations.
- * Provides tools to retrieve references to and from addresses or symbols in a program.
+ * Provides a unified tool to retrieve references to and from addresses or symbols
+ * with optional decompilation context snippets.
  */
 public class CrossReferencesToolProvider extends AbstractToolProvider {
 
@@ -49,473 +53,294 @@ public class CrossReferencesToolProvider extends AbstractToolProvider {
 
     @Override
     public void registerTools() throws McpError {
-        registerReferencesTool();
-        registerSymbolReferencesTool();
+        registerCrossReferencesTool();
     }
 
     /**
-     * Register a tool to get all references to and from an address in a single call
+     * Register the unified cross references tool
      * @throws McpError if there's an error registering the tool
      */
-    private void registerReferencesTool() throws McpError {
+    private void registerCrossReferencesTool() throws McpError {
         // Define schema for the tool
         Map<String, Object> properties = new HashMap<>();
         properties.put("programPath", Map.of(
             "type", "string",
             "description", "Path in the Ghidra Project to the program to get references from"
         ));
-        properties.put("addressOrSymbol", Map.of(
+        properties.put("location", Map.of(
             "type", "string",
-            "description", "Address or symbol name to get references to and from (e.g., '0x00400123' or 'main')"
+            "description", "Address or symbol name to get references for (e.g., '0x00400123', 'main', 'FUN_00401000')"
+        ));
+        properties.put("direction", Map.of(
+            "type", "string",
+            "description", "Direction of references to retrieve: 'to' (incoming), 'from' (outgoing), or 'both' (default)",
+            "enum", List.of("to", "from", "both"),
+            "default", "both"
         ));
         properties.put("includeFlow", Map.of(
             "type", "boolean",
-            "description", "Whether to include flow references (calls, jumps, etc.)",
+            "description", "Include flow references (calls, jumps, branches)",
             "default", true
         ));
         properties.put("includeData", Map.of(
             "type", "boolean",
-            "description", "Whether to include data references",
+            "description", "Include data references (reads, writes)",
             "default", true
         ));
-        properties.put("includeFromAddress", Map.of(
+        properties.put("includeContext", Map.of(
             "type", "boolean",
-            "description", "Whether to include references from the address",
-            "default", true
+            "description", "Include decompilation context snippets for code references",
+            "default", false
         ));
-        properties.put("includeToAddress", Map.of(
-            "type", "boolean",
-            "description", "Whether to include references to the address",
-            "default", true
+        properties.put("contextLines", Map.of(
+            "type", "integer",
+            "description", "Number of lines before and after to include in context snippets",
+            "default", 2
+        ));
+        properties.put("offset", Map.of(
+            "type", "integer",
+            "description", "Starting offset for pagination (0-based)",
+            "default", 0
+        ));
+        properties.put("limit", Map.of(
+            "type", "integer",
+            "description", "Maximum number of references to return per direction",
+            "default", 100
         ));
 
-        List<String> required = List.of("programPath", "addressOrSymbol");
+        List<String> required = List.of("programPath", "location");
 
         // Create the tool
         McpSchema.Tool tool = new McpSchema.Tool(
-            "get-references",
-            "Get all references to and from a specified address (use this to locate what uses a specific function, or string, or piece of data)",
+            "find-cross-references",
+            "Find all references to or from a memory location, symbol, or function. Returns incoming and/or outgoing references with optional decompilation context.",
             createSchema(properties, required)
         );
 
         // Register the tool with a handler
         registerTool(tool, (exchange, args) -> {
-            // Get program and parameters using helper methods
-            Program program = getProgramFromArgs(args);
-            Address address = getAddressFromArgs(args, program, "addressOrSymbol");
-
-            // Get filters
-            boolean includeFlow = getOptionalBoolean(args, "includeFlow", true);
-            boolean includeData = getOptionalBoolean(args, "includeData", true);
-            boolean includeFromAddress = getOptionalBoolean(args, "includeFromAddress", true);
-            boolean includeToAddress = getOptionalBoolean(args, "includeToAddress", true);
-
-            // Get the symbol table for looking up symbols
-            SymbolTable symbolTable = program.getSymbolTable();
-            ReferenceManager refManager = program.getReferenceManager();
-
-            // Prepare result containers
-            List<Map<String, Object>> referencesFrom = new ArrayList<>();
-            List<Map<String, Object>> referencesTo = new ArrayList<>();
-
-            // Get references from the address if requested
-            if (includeFromAddress) {
-                Reference[] refs = refManager.getReferencesFrom(address);
-
-                for (Reference ref : refs) {
-                    // Skip based on filter settings
-                    if (!includeFlow && ref.getReferenceType().isFlow()) {
-                        continue;
-                    }
-                    if (!includeData && !ref.getReferenceType().isFlow()) {
-                        continue;
-                    }
-
-                    Map<String, Object> refData = new HashMap<>();
-                    refData.put("fromAddress", ref.getFromAddress().toString());
-                    refData.put("toAddress", ref.getToAddress().toString());
-                    refData.put("referenceType", ref.getReferenceType().toString());
-                    refData.put("isPrimary", ref.isPrimary());
-                    refData.put("operandIndex", ref.getOperandIndex());
-                    refData.put("sourceType", ref.getSource().toString());
-
-                    // Add destination symbol information if available
-                    Symbol toSymbol = symbolTable.getPrimarySymbol(ref.getToAddress());
-                    if (toSymbol != null) {
-                        refData.put("toSymbol", toSymbol.getName());
-                        refData.put("toSymbolType", toSymbol.getSymbolType().toString());
-                        addNamespaceInfo(refData, toSymbol, "toSymbol");
-                    }
-
-                    referencesFrom.add(refData);
-                }
-            }
-
-            // Get references to the address if requested
-            if (includeToAddress) {
-                // Check if the address is a valid memory address for references to
-                if (address.isStackAddress() || address.isRegisterAddress()) {
-                    // Just skip this part rather than error, since we may still have from refs
-                    logInfo("Skipping references to stack/register address: " + address);
-                } else {
+            try {
+                // Get program and parameters using helper methods
+                Program program = getProgramFromArgs(args);
+                Address address = getAddressFromArgs(args, program, "location");
+                
+                // Get parameters
+                String direction = getOptionalString(args, "direction", "both");
+                boolean includeFlow = getOptionalBoolean(args, "includeFlow", true);
+                boolean includeData = getOptionalBoolean(args, "includeData", true);
+                boolean includeContext = getOptionalBoolean(args, "includeContext", false);
+                int contextLines = getOptionalInt(args, "contextLines", 2);
+                int offset = getOptionalInt(args, "offset", 0);
+                int limit = getOptionalInt(args, "limit", 100);
+                
+                // Validate parameters
+                if (offset < 0) offset = 0;
+                if (limit <= 0) limit = 100;
+                if (limit > 1000) limit = 1000; // Cap at reasonable maximum
+                
+                // Get references based on direction
+                boolean includeTo = direction.equals("to") || direction.equals("both");
+                boolean includeFrom = direction.equals("from") || direction.equals("both");
+                
+                // Prepare result containers
+                List<Map<String, Object>> referencesTo = new ArrayList<>();
+                List<Map<String, Object>> referencesFrom = new ArrayList<>();
+                int totalToCount = 0;
+                int totalFromCount = 0;
+                
+                ReferenceManager refManager = program.getReferenceManager();
+                SymbolTable symbolTable = program.getSymbolTable();
+                
+                // Get references TO this address
+                if (includeTo && !address.isStackAddress() && !address.isRegisterAddress()) {
                     ReferenceIterator refIter = refManager.getReferencesTo(address);
-
+                    List<Map<String, Object>> allRefsTo = new ArrayList<>();
+                    
                     while (refIter.hasNext()) {
                         Reference ref = refIter.next();
-
-                        // Skip based on filter settings
-                        if (!includeFlow && ref.getReferenceType().isFlow()) {
-                            continue;
-                        }
-                        if (!includeData && !ref.getReferenceType().isFlow()) {
-                            continue;
-                        }
-
-                        Map<String, Object> refData = new HashMap<>();
-                        refData.put("fromAddress", ref.getFromAddress().toString());
-                        refData.put("toAddress", ref.getToAddress().toString());
-                        refData.put("referenceType", ref.getReferenceType().toString());
-                        refData.put("isPrimary", ref.isPrimary());
-                        refData.put("operandIndex", ref.getOperandIndex());
-                        refData.put("sourceType", ref.getSource().toString());
-
-                        // Add source symbol information if available
-                        Symbol fromSymbol = symbolTable.getPrimarySymbol(ref.getFromAddress());
-                        if (fromSymbol != null) {
-                            refData.put("fromSymbol", fromSymbol.getName());
-                            refData.put("fromSymbolType", fromSymbol.getSymbolType().toString());
-                            addNamespaceInfo(refData, fromSymbol, "fromSymbol");
-                        }
-
-                        referencesTo.add(refData);
+                        
+                        // Apply filters
+                        if (!includeFlow && ref.getReferenceType().isFlow()) continue;
+                        if (!includeData && !ref.getReferenceType().isFlow()) continue;
+                        
+                        allRefsTo.add(createReferenceInfo(ref, program, includeContext, contextLines, true));
+                    }
+                    
+                    totalToCount = allRefsTo.size();
+                    
+                    // Apply pagination
+                    int endIndex = Math.min(offset + limit, allRefsTo.size());
+                    if (offset < allRefsTo.size()) {
+                        referencesTo = allRefsTo.subList(offset, endIndex);
                     }
                 }
+                
+                // Get references FROM this address
+                if (includeFrom) {
+                    List<Map<String, Object>> allRefsFrom = new ArrayList<>();
+                    
+                    // Check if this address is within a function
+                    Function function = program.getFunctionManager().getFunctionContaining(address);
+                    if (function != null) {
+                        // Get all addresses in the function body
+                        AddressSetView functionBody = function.getBody();
+                        for (Address addr : functionBody.getAddresses(true)) {
+                            Reference[] refs = refManager.getReferencesFrom(addr);
+                            for (Reference ref : refs) {
+                                // Apply filters
+                                if (!includeFlow && ref.getReferenceType().isFlow()) continue;
+                                if (!includeData && !ref.getReferenceType().isFlow()) continue;
+                                
+                                allRefsFrom.add(createReferenceInfo(ref, program, includeContext, contextLines, false));
+                            }
+                        }
+                    } else {
+                        // Not in a function, just get references from the specific address
+                        Reference[] refs = refManager.getReferencesFrom(address);
+                        for (Reference ref : refs) {
+                            // Apply filters
+                            if (!includeFlow && ref.getReferenceType().isFlow()) continue;
+                            if (!includeData && !ref.getReferenceType().isFlow()) continue;
+                            
+                            allRefsFrom.add(createReferenceInfo(ref, program, includeContext, contextLines, false));
+                        }
+                    }
+                    
+                    totalFromCount = allRefsFrom.size();
+                    
+                    // Apply pagination
+                    int endIndex = Math.min(offset + limit, allRefsFrom.size());
+                    if (offset < allRefsFrom.size()) {
+                        referencesFrom = allRefsFrom.subList(offset, endIndex);
+                    }
+                }
+                
+                // Get symbol information for the target address
+                Symbol targetSymbol = symbolTable.getPrimarySymbol(address);
+                Map<String, Object> locationInfo = new HashMap<>();
+                locationInfo.put("address", AddressUtil.formatAddress(address));
+                if (targetSymbol != null) {
+                    locationInfo.put("symbol", targetSymbol.getName());
+                    locationInfo.put("symbolType", targetSymbol.getSymbolType().toString());
+                    if (!targetSymbol.isGlobal()) {
+                        locationInfo.put("namespace", targetSymbol.getParentNamespace().getName(true));
+                    }
+                }
+                
+                // Check if this is a function
+                Function targetFunction = program.getFunctionManager().getFunctionContaining(address);
+                if (targetFunction != null) {
+                    locationInfo.put("function", targetFunction.getName());
+                    if (targetFunction.getEntryPoint().equals(address)) {
+                        locationInfo.put("isFunctionEntry", true);
+                    }
+                }
+                
+                // Create result data
+                Map<String, Object> resultData = new HashMap<>();
+                resultData.put("program", program.getName());
+                resultData.put("location", locationInfo);
+                resultData.put("referencesTo", referencesTo);
+                resultData.put("referencesFrom", referencesFrom);
+                resultData.put("pagination", Map.of(
+                    "offset", offset,
+                    "limit", limit,
+                    "totalToCount", totalToCount,
+                    "totalFromCount", totalFromCount,
+                    "hasMoreTo", offset + limit < totalToCount,
+                    "hasMoreFrom", offset + limit < totalFromCount
+                ));
+                
+                return createJsonResult(resultData);
+                
+            } catch (IllegalArgumentException e) {
+                return createErrorResult(e.getMessage());
+            } catch (Exception e) {
+                logError("Error getting cross references", e);
+                return createErrorResult("Error getting cross references: " + e.getMessage());
             }
-
-            // Create result data
-            Map<String, Object> resultData = new HashMap<>();
-            resultData.put("program", program.getName());
-            resultData.put("address", address.toString());
-            resultData.put("referencesFrom", referencesFrom);
-            resultData.put("referencesTo", referencesTo);
-            resultData.put("countFrom", referencesFrom.size());
-            resultData.put("countTo", referencesTo.size());
-            resultData.put("totalCount", referencesFrom.size() + referencesTo.size());
-
-            return createJsonResult(resultData);
         });
     }
-
+    
     /**
-     * Register a tool to get symbol-based references to and from in a single call
-     * @throws McpError if there's an error registering the tool
+     * Create reference information map with optional decompilation context
+     * @param ref The reference
+     * @param program The program
+     * @param includeContext Whether to include decompilation context
+     * @param contextLines Number of context lines
+     * @param isIncoming Whether this is an incoming reference (to) or outgoing (from)
+     * @return Map containing reference information
      */
-    private void registerSymbolReferencesTool() throws McpError {
-        // Define schema for the tool
-        Map<String, Object> properties = new HashMap<>();
-        properties.put("programPath", Map.of(
-            "type", "string",
-            "description", "Path in the Ghidra Project to the program to get references from"
-        ));
-        properties.put("symbolName", Map.of(
-            "type", "string",
-            "description", "Name of the symbol to get references to and from"
-        ));
-        properties.put("namespace", Map.of(
-            "type", "string",
-            "description", "Optional namespace to restrict the symbol search (e.g., 'namespace1::namespace2')",
-            "default", ""
-        ));
-        properties.put("includeFlow", Map.of(
-            "type", "boolean",
-            "description", "Whether to include flow references (calls, jumps, etc.)",
-            "default", true
-        ));
-        properties.put("includeData", Map.of(
-            "type", "boolean",
-            "description", "Whether to include data references",
-            "default", true
-        ));
-        properties.put("exactMatch", Map.of(
-            "type", "boolean",
-            "description", "Whether the symbol name must match exactly, or can be a partial match",
-            "default", true
-        ));
-        properties.put("includeFromSymbol", Map.of(
-            "type", "boolean",
-            "description", "Whether to include references from the symbol",
-            "default", true
-        ));
-        properties.put("includeToSymbol", Map.of(
-            "type", "boolean",
-            "description", "Whether to include references to the symbol",
-            "default", true
-        ));
-
-        List<String> required = List.of("programPath", "symbolName");
-
-        // Create the tool
-        McpSchema.Tool tool = new McpSchema.Tool(
-            "get-symbol-references",
-            "Get all references to and from a specified symbol (this is not for searching for a symbol, but for finding what uses a specific symbol)",
-            createSchema(properties, required)
-        );
-
-        // Register the tool with a handler
-        registerTool(tool, (exchange, args) -> {
-            // Get program and parameters using helper methods
-            Program program = getProgramFromArgs(args);
-            String symbolName = getString(args, "symbolName");
-
-            // Get the namespace (if provided)
-            String namespaceString = getOptionalString(args, "namespace", "");
-
-            // Get filters
-            boolean includeFlow = getOptionalBoolean(args, "includeFlow", true);
-            boolean includeData = getOptionalBoolean(args, "includeData", true);
-            boolean exactMatch = getOptionalBoolean(args, "exactMatch", true);
-            boolean includeFromSymbol = getOptionalBoolean(args, "includeFromSymbol", true);
-            boolean includeToSymbol = getOptionalBoolean(args, "includeToSymbol", true);
-
-            // Find the symbol
-            SymbolTable symbolTable = program.getSymbolTable();
-            List<Symbol> matchingSymbols = new ArrayList<>();
-
-            // Try to resolve the namespace if provided
-            Namespace searchNamespace = program.getGlobalNamespace(); // Default to global
-            if (!namespaceString.isEmpty()) {
-                try {
-                    // Find or create the namespace hierarchy
-                    searchNamespace = resolveNamespace(namespaceString, program);
-                    if (searchNamespace == null) {
-                        return createErrorResult("Could not find namespace: " + namespaceString);
-                    }
-                } catch (Exception e) {
-                    return createErrorResult("Error resolving namespace: " + e.getMessage());
-                }
+    private Map<String, Object> createReferenceInfo(Reference ref, Program program, 
+                                                    boolean includeContext, int contextLines,
+                                                    boolean isIncoming) {
+        Map<String, Object> refInfo = new HashMap<>();
+        SymbolTable symbolTable = program.getSymbolTable();
+        
+        // Basic reference information
+        refInfo.put("fromAddress", AddressUtil.formatAddress(ref.getFromAddress()));
+        refInfo.put("toAddress", AddressUtil.formatAddress(ref.getToAddress()));
+        refInfo.put("referenceType", ref.getReferenceType().toString());
+        refInfo.put("isPrimary", ref.isPrimary());
+        refInfo.put("operandIndex", ref.getOperandIndex());
+        refInfo.put("sourceType", ref.getSource().toString());
+        refInfo.put("isCall", ref.getReferenceType().isCall());
+        refInfo.put("isJump", ref.getReferenceType().isJump());
+        refInfo.put("isData", ref.getReferenceType().isData());
+        refInfo.put("isRead", ref.getReferenceType().isRead());
+        refInfo.put("isWrite", ref.getReferenceType().isWrite());
+        
+        // Add symbol information for both addresses
+        Symbol fromSymbol = symbolTable.getPrimarySymbol(ref.getFromAddress());
+        if (fromSymbol != null) {
+            Map<String, Object> fromSymbolInfo = new HashMap<>();
+            fromSymbolInfo.put("name", fromSymbol.getName());
+            fromSymbolInfo.put("type", fromSymbol.getSymbolType().toString());
+            if (!fromSymbol.isGlobal()) {
+                fromSymbolInfo.put("namespace", fromSymbol.getParentNamespace().getName(true));
             }
-
-            // Find symbols, considering namespace
-            if (exactMatch) {
-                // Get symbols that match the name in the specified namespace
-                List<Symbol> symbols = symbolTable.getSymbols(symbolName, searchNamespace);
-                matchingSymbols.addAll(symbols);
-            } else {
-                // For partial matches, we need to check all symbols in the namespace
-                symbolTable.getSymbols(searchNamespace).forEach(symbol -> {
-                    if (symbol.getName().contains(symbolName)) {
-                        matchingSymbols.add(symbol);
-                    }
-                });
+            refInfo.put("fromSymbol", fromSymbolInfo);
+        }
+        
+        Symbol toSymbol = symbolTable.getPrimarySymbol(ref.getToAddress());
+        if (toSymbol != null) {
+            Map<String, Object> toSymbolInfo = new HashMap<>();
+            toSymbolInfo.put("name", toSymbol.getName());
+            toSymbolInfo.put("type", toSymbol.getSymbolType().toString());
+            if (!toSymbol.isGlobal()) {
+                toSymbolInfo.put("namespace", toSymbol.getParentNamespace().getName(true));
             }
-
-            if (matchingSymbols.isEmpty()) {
-                if (namespaceString.isEmpty()) {
-                    return createErrorResult("No symbols found matching: " + symbolName);
-                } else {
-                    return createErrorResult("No symbols found matching: " + symbolName +
-                        " in namespace: " + namespaceString);
-                }
-            }
-
-            // Prepare result containers
-            List<Map<String, Object>> referencesFrom = new ArrayList<>();
-            List<Map<String, Object>> referencesTo = new ArrayList<>();
-            ReferenceManager refManager = program.getReferenceManager();
-
-            for (Symbol symbol : matchingSymbols) {
-                // Get the address of the symbol
-                Address symbolAddr = symbol.getAddress();
-
-                // Get references from the symbol if requested
-                if (includeFromSymbol) {
-                    Reference[] refs = refManager.getReferencesFrom(symbolAddr);
-
-                    // Filter and convert references to a response format
-                    for (Reference ref : refs) {
-                        // Skip based on filter settings
-                        if (!includeFlow && ref.getReferenceType().isFlow()) {
-                            continue;
-                        }
-                        if (!includeData && !ref.getReferenceType().isFlow()) {
-                            continue;
-                        }
-
-                        Map<String, Object> refData = new HashMap<>();
-                        refData.put("symbol", symbol.getName());
-                        refData.put("symbolAddress", symbol.getAddress().toString());
-                        refData.put("symbolType", symbol.getSymbolType().toString());
-                        addNamespaceInfo(refData, symbol, "symbol");
-
-                        refData.put("fromAddress", ref.getFromAddress().toString());
-                        refData.put("toAddress", ref.getToAddress().toString());
-                        refData.put("referenceType", ref.getReferenceType().toString());
-                        refData.put("isPrimary", ref.isPrimary());
-                        refData.put("operandIndex", ref.getOperandIndex());
-                        refData.put("sourceType", ref.getSource().toString());
-
-                        // Add destination symbol information if available
-                        Symbol toSymbol = symbolTable.getPrimarySymbol(ref.getToAddress());
-                        if (toSymbol != null) {
-                            refData.put("toSymbol", toSymbol.getName());
-                            refData.put("toSymbolType", toSymbol.getSymbolType().toString());
-                            addNamespaceInfo(refData, toSymbol, "toSymbol");
-                        }
-
-                        referencesFrom.add(refData);
-                    }
-                }
-
-                // Get references to the symbol if requested
-                if (includeToSymbol) {
-                    // Skip stack or register addresses
-                    if (symbolAddr.isStackAddress() || symbolAddr.isRegisterAddress()) {
-                        continue;
-                    }
-
-                    // Get references to this symbol
-                    ReferenceIterator refIter = refManager.getReferencesTo(symbolAddr);
-
-                    // Filter and convert references to a response format
-                    while (refIter.hasNext()) {
-                        Reference ref = refIter.next();
-
-                        // Skip based on filter settings
-                        if (!includeFlow && ref.getReferenceType().isFlow()) {
-                            continue;
-                        }
-                        if (!includeData && !ref.getReferenceType().isFlow()) {
-                            continue;
-                        }
-
-                        Map<String, Object> refData = new HashMap<>();
-                        refData.put("symbol", symbol.getName());
-                        refData.put("symbolAddress", symbol.getAddress().toString());
-                        refData.put("symbolType", symbol.getSymbolType().toString());
-                        addNamespaceInfo(refData, symbol, "symbol");
-
-                        refData.put("fromAddress", ref.getFromAddress().toString());
-                        refData.put("toAddress", ref.getToAddress().toString());
-                        refData.put("referenceType", ref.getReferenceType().toString());
-                        refData.put("isPrimary", ref.isPrimary());
-                        refData.put("operandIndex", ref.getOperandIndex());
-                        refData.put("sourceType", ref.getSource().toString());
-
-                        // Try to get source symbol information
-                        Symbol fromSymbol = symbolTable.getPrimarySymbol(ref.getFromAddress());
-                        if (fromSymbol != null) {
-                            refData.put("fromSymbol", fromSymbol.getName());
-                            refData.put("fromSymbolType", fromSymbol.getSymbolType().toString());
-                            addNamespaceInfo(refData, fromSymbol, "fromSymbol");
-                        }
-
-                        referencesTo.add(refData);
+            refInfo.put("toSymbol", toSymbolInfo);
+        }
+        
+        // Add function information and optional decompilation context
+        Address contextAddress = isIncoming ? ref.getFromAddress() : ref.getToAddress();
+        Function contextFunction = program.getFunctionManager().getFunctionContaining(contextAddress);
+        
+        if (contextFunction != null) {
+            Map<String, Object> functionInfo = new HashMap<>();
+            functionInfo.put("name", contextFunction.getName());
+            functionInfo.put("entry", AddressUtil.formatAddress(contextFunction.getEntryPoint()));
+            
+            // For incoming references, add decompilation context from the calling function
+            if (includeContext && ref.getReferenceType().isFlow()) {
+                int lineNumber = DecompilationContextUtil.getLineNumberForAddress(
+                    program, contextFunction, contextAddress);
+                    
+                if (lineNumber > 0) {
+                    functionInfo.put("line", lineNumber);
+                    
+                    String context = DecompilationContextUtil.getDecompilationContext(
+                        program, contextFunction, lineNumber, contextLines);
+                    if (context != null) {
+                        functionInfo.put("context", context);
                     }
                 }
             }
-
-            // Create result data
-            Map<String, Object> resultData = new HashMap<>();
-            resultData.put("program", program.getName());
-            resultData.put("symbolName", symbolName);
-            if (!namespaceString.isEmpty()) {
-                resultData.put("namespace", namespaceString);
-            }
-            resultData.put("matchedSymbols", matchingSymbols.size());
-            resultData.put("referencesFrom", referencesFrom);
-            resultData.put("referencesTo", referencesTo);
-            resultData.put("countFrom", referencesFrom.size());
-            resultData.put("countTo", referencesTo.size());
-            resultData.put("totalCount", referencesFrom.size() + referencesTo.size());
-
-            return createJsonResult(resultData);
-        });
-    }
-
-    /**
-     * Add namespace information to the reference data for a symbol
-     * @param refData Map to add namespace information to
-     * @param symbol Symbol to get namespace information from
-     * @param prefix Prefix for the keys in the map
-     */
-    private void addNamespaceInfo(Map<String, Object> refData, Symbol symbol, String prefix) {
-        // Add the namespace path if it's not in the global namespace
-        if (!symbol.isGlobal()) {
-            Namespace parentNamespace = symbol.getParentNamespace();
-            if (parentNamespace != null && !parentNamespace.isGlobal()) {
-                refData.put(prefix + "Namespace", getNamespacePath(parentNamespace));
-            }
+            
+            refInfo.put(isIncoming ? "fromFunction" : "toFunction", functionInfo);
         }
-
-        // Include full path with namespaces
-        String[] path = symbol.getPath();
-        if (path != null && path.length > 0) {
-            refData.put(prefix + "Path", String.join("::", path));
-        }
-    }
-
-    /**
-     * Get the full path of a namespace as a string
-     * @param namespace The namespace to get the path for
-     * @return The namespace path as a string
-     */
-    private String getNamespacePath(Namespace namespace) {
-        if (namespace == null || namespace.isGlobal()) {
-            return "";
-        }
-
-        StringBuilder path = new StringBuilder();
-        buildNamespacePath(namespace, path);
-        return path.toString();
-    }
-
-    /**
-     * Recursively build a namespace path
-     * @param namespace The namespace to build the path for
-     * @param path The StringBuilder to append to
-     */
-    private void buildNamespacePath(Namespace namespace, StringBuilder path) {
-        if (namespace == null || namespace.isGlobal()) {
-            return;
-        }
-
-        Namespace parent = namespace.getParentNamespace();
-        if (parent != null && !parent.isGlobal()) {
-            buildNamespacePath(parent, path);
-            path.append("::");
-        }
-        path.append(namespace.getName());
-    }
-
-    /**
-     * Resolve a namespace string to a Namespace object
-     * @param namespaceString Namespace path string (e.g., "ns1::ns2::ns3")
-     * @param program The program to search in
-     * @return The resolved Namespace or null if not found
-     */
-    private Namespace resolveNamespace(String namespaceString, Program program) {
-        if (namespaceString == null || namespaceString.isEmpty()) {
-            return program.getGlobalNamespace();
-        }
-
-        // Split the namespace path
-        String[] parts = namespaceString.split("::");
-
-        // Start with the global namespace
-        Namespace current = program.getGlobalNamespace();
-
-        // Navigate through the namespace hierarchy
-        for (String part : parts) {
-            if (part.isEmpty()) continue;
-
-            // Find the child namespace
-            Namespace child = program.getSymbolTable().getNamespace(part, current);
-            if (child == null) {
-                return null; // Namespace not found
-            }
-            current = child;
-        }
-
-        return current;
+        
+        return refInfo;
     }
 }

@@ -442,9 +442,10 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
     public void shutdown() {
         Msg.info(this, "Shutting down MCP server...");
         
-        // Remove config change listener
+        // Remove config change listener and dispose
         if (configManager != null) {
             configManager.removeConfigChangeListener(this);
+            configManager.dispose();
         }
 
         // Clear all tool registrations

@@ -17,6 +17,8 @@ package reva.plugin;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 import ghidra.framework.options.Options;
 import ghidra.framework.plugintool.PluginTool;
@@ -46,6 +48,7 @@ public class ConfigManager {
 
     private final PluginTool tool;
     private final Map<String, Object> cachedOptions = new HashMap<>();
+    private final Set<ConfigChangeListener> configChangeListeners = ConcurrentHashMap.newKeySet();
 
     /**
      * Constructor
@@ -93,6 +96,9 @@ public class ConfigManager {
      * @param value Option value
      */
     public void saveOption(String category, String name, Object value) {
+        // Get old value for change notification
+        Object oldValue = cachedOptions.get(name);
+        
         Options options = tool.getOptions(category);
 
         if (value instanceof Integer) {
@@ -107,6 +113,46 @@ public class ConfigManager {
         cachedOptions.put(name, value);
 
         Msg.debug(this, "Saved option: " + category + "." + name + " = " + value);
+        
+        // Notify listeners if value actually changed
+        if (oldValue == null || !oldValue.equals(value)) {
+            notifyConfigChangeListeners(category, name, oldValue, value);
+        }
+    }
+    
+    /**
+     * Add a configuration change listener
+     * @param listener The listener to add
+     */
+    public void addConfigChangeListener(ConfigChangeListener listener) {
+        configChangeListeners.add(listener);
+        Msg.debug(this, "Added config change listener: " + listener.getClass().getSimpleName());
+    }
+    
+    /**
+     * Remove a configuration change listener
+     * @param listener The listener to remove
+     */
+    public void removeConfigChangeListener(ConfigChangeListener listener) {
+        configChangeListeners.remove(listener);
+        Msg.debug(this, "Removed config change listener: " + listener.getClass().getSimpleName());
+    }
+    
+    /**
+     * Notify all registered listeners about a configuration change
+     * @param category The category of the changed option
+     * @param name The name of the changed option
+     * @param oldValue The old value
+     * @param newValue The new value
+     */
+    private void notifyConfigChangeListeners(String category, String name, Object oldValue, Object newValue) {
+        for (ConfigChangeListener listener : configChangeListeners) {
+            try {
+                listener.onConfigChanged(category, name, oldValue, newValue);
+            } catch (Exception e) {
+                Msg.error(this, "Error notifying config change listener: " + listener.getClass().getSimpleName(), e);
+            }
+        }
     }
 
     /**

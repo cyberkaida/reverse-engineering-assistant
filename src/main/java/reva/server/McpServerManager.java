@@ -38,6 +38,7 @@ import io.modelcontextprotocol.server.transport.HttpServletSseServerTransportPro
 import io.modelcontextprotocol.spec.McpError;
 import io.modelcontextprotocol.spec.McpSchema;
 import reva.plugin.ConfigManager;
+import reva.plugin.ConfigChangeListener;
 import reva.resources.ResourceProvider;
 import reva.resources.impl.ProgramListResource;
 import reva.services.RevaMcpService;
@@ -62,7 +63,7 @@ import reva.util.RevaInternalServiceRegistry;
  * as well as registering all resources and tools. It handles multiple tools accessing
  * the same server instance and coordinates program lifecycle events across tools.
  */
-public class McpServerManager implements RevaMcpService {
+public class McpServerManager implements RevaMcpService, ConfigChangeListener {
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final String MCP_MSG_ENDPOINT = "/mcp/message";
     private static final String MCP_SSE_ENDPOINT = "/mcp/sse";
@@ -71,6 +72,7 @@ public class McpServerManager implements RevaMcpService {
 
     private final McpSyncServer server;
     private final HttpServletSseServerTransportProvider transportProvider;
+    private HttpServletSseServerTransportProvider currentTransportProvider;
     private Server httpServer;
     private final GThreadPool threadPool;
     private final ConfigManager configManager;
@@ -93,6 +95,9 @@ public class McpServerManager implements RevaMcpService {
         // Initialize configuration
         configManager = new ConfigManager(pluginTool);
         RevaInternalServiceRegistry.registerService(ConfigManager.class, configManager);
+        
+        // Register as a config change listener
+        configManager.addConfigChangeListener(this);
         // Initialize thread pool
         threadPool = GThreadPool.getPrivateThreadPool("ReVa");
         RevaInternalServiceRegistry.registerService(GThreadPool.class, threadPool);
@@ -106,6 +111,9 @@ public class McpServerManager implements RevaMcpService {
             .messageEndpoint(MCP_MSG_ENDPOINT)
             .sseEndpoint(MCP_SSE_ENDPOINT)
             .build();
+        
+        // Initialize current transport provider to the original one
+        currentTransportProvider = transportProvider;
         // Configure server capabilities
         McpSchema.ServerCapabilities serverCapabilities = McpSchema.ServerCapabilities.builder()
             .prompts(true)
@@ -188,11 +196,11 @@ public class McpServerManager implements RevaMcpService {
 
         int serverPort = configManager.getServerPort();
         String baseUrl = "http://localhost:" + serverPort;
-        Msg.info(this, "Starting MCP server on " + baseUrl + serverPort);
+        Msg.info(this, "Starting MCP server on " + baseUrl);
 
         ServletContextHandler servletContextHandler = new ServletContextHandler(ServletContextHandler.SESSIONS);
         servletContextHandler.setContextPath("/");
-        ServletHolder servletHolder = new ServletHolder(transportProvider);
+        ServletHolder servletHolder = new ServletHolder(currentTransportProvider);
         servletContextHandler.addServlet(servletHolder, "/*");
 
         httpServer = new Server(serverPort);
@@ -345,12 +353,99 @@ public class McpServerManager implements RevaMcpService {
     public boolean isServerReady() {
         return httpServer != null && httpServer.getState().equals(org.eclipse.jetty.server.Server.STARTED);
     }
+    
+    /**
+     * Restart the MCP server with new configuration.
+     * This method gracefully stops the current server and starts a new one.
+     */
+    public void restartServer() {
+        Msg.info(this, "Restarting MCP server...");
+        
+        // Check if server is enabled in config
+        if (!configManager.isServerEnabled()) {
+            Msg.info(this, "MCP server is disabled in configuration. Stopping server.");
+            stopServer();
+            return;
+        }
+        
+        // Stop the current server
+        stopServer();
+        
+        // Recreate transport provider with new port configuration
+        recreateTransportProvider();
+        
+        // Start the server with new configuration
+        startServer();
+        
+        Msg.info(this, "MCP server restart complete");
+    }
+    
+    /**
+     * Recreate the transport provider with updated port configuration.
+     * This is necessary when the port changes during server restart.
+     */
+    private void recreateTransportProvider() {
+        int serverPort = configManager.getServerPort();
+        String baseUrl = "http://localhost:" + serverPort;
+        
+        // Create new transport provider with updated baseUrl
+        currentTransportProvider = HttpServletSseServerTransportProvider.builder()
+            .baseUrl(baseUrl)
+            .objectMapper(JSON)
+            .messageEndpoint(MCP_MSG_ENDPOINT)
+            .sseEndpoint(MCP_SSE_ENDPOINT)
+            .build();
+        
+        Msg.info(this, "Recreated transport provider with baseUrl: " + baseUrl);
+    }
+    
+    /**
+     * Stop the MCP server without full shutdown cleanup.
+     * This is used internally for restart operations.
+     */
+    private void stopServer() {
+        Msg.info(this, "Stopping MCP server...");
+        
+        // Mark server as not ready
+        serverReady = false;
+        
+        // Shut down the HTTP server
+        if (httpServer != null) {
+            try {
+                httpServer.stop();
+                httpServer = null;
+            } catch (Exception e) {
+                Msg.error(this, "Error stopping HTTP server", e);
+            }
+        }
+        
+        Msg.info(this, "MCP server stopped");
+    }
+    
+    @Override
+    public void onConfigChanged(String category, String name, Object oldValue, Object newValue) {
+        // Handle server configuration changes
+        if (ConfigManager.SERVER_OPTIONS.equals(category)) {
+            if (ConfigManager.SERVER_PORT.equals(name)) {
+                Msg.info(this, "Server port changed from " + oldValue + " to " + newValue + ". Restarting server...");
+                restartServer();
+            } else if (ConfigManager.SERVER_ENABLED.equals(name)) {
+                Msg.info(this, "Server enabled setting changed from " + oldValue + " to " + newValue + ". Restarting server...");
+                restartServer();
+            }
+        }
+    }
 
     /**
      * Shut down the MCP server and clean up resources
      */
     public void shutdown() {
         Msg.info(this, "Shutting down MCP server...");
+        
+        // Remove config change listener
+        if (configManager != null) {
+            configManager.removeConfigChangeListener(this);
+        }
 
         // Clear all tool registrations
         registeredTools.clear();

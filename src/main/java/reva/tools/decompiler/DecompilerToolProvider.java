@@ -825,7 +825,24 @@ public class DecompilerToolProvider extends AbstractToolProvider {
                 List<Map<String, Object>> incomingRefs = DecompilationContextUtil
                     .getEnhancedIncomingReferences(program, function, includeReferenceContext);
                 if (!incomingRefs.isEmpty()) {
-                    result.put("incomingReferences", incomingRefs);
+                    // Limit the number of incoming references to prevent overwhelming output
+                    int maxIncomingRefs = 10;
+                    if (incomingRefs.size() > maxIncomingRefs) {
+                        // Include only the first few references
+                        List<Map<String, Object>> limitedRefs = new ArrayList<>(incomingRefs.subList(0, maxIncomingRefs));
+                        result.put("incomingReferences", limitedRefs);
+                        
+                        // Add metadata about the limitation
+                        result.put("incomingReferencesLimited", true);
+                        result.put("totalIncomingReferences", incomingRefs.size());
+                        result.put("incomingReferencesMessage", String.format(
+                            "Showing first %d of %d references. Use 'find-cross-references' tool with location='%s' and direction='to' to see all references.",
+                            maxIncomingRefs, incomingRefs.size(), function.getName()
+                        ));
+                    } else {
+                        result.put("incomingReferences", incomingRefs);
+                        result.put("totalIncomingReferences", incomingRefs.size());
+                    }
                 }
             }
 

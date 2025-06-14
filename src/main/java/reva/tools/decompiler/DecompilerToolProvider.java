@@ -51,8 +51,12 @@ import ghidra.program.model.pcode.HighFunctionDBUtil;
 import ghidra.program.model.pcode.HighSymbol;
 import ghidra.program.model.data.DataType;
 import ghidra.util.task.TaskMonitor;
+import ghidra.util.task.TimeoutTaskMonitor;
+import java.util.concurrent.TimeUnit;
+import ghidra.util.exception.CancelledException;
 import ghidra.util.exception.DuplicateNameException;
 import ghidra.util.exception.InvalidInputException;
+import ghidra.util.Msg;
 import io.modelcontextprotocol.spec.McpError;
 import io.modelcontextprotocol.server.McpSyncServer;
 import io.modelcontextprotocol.spec.McpSchema;
@@ -62,6 +66,7 @@ import reva.util.AddressUtil;
 import reva.util.DataTypeParserUtil;
 import reva.util.DecompilationContextUtil;
 import reva.util.DecompilationDiffUtil;
+import reva.util.DebugLogger;
 import reva.util.RevaInternalServiceRegistry;
 
 /**
@@ -86,6 +91,24 @@ public class DecompilerToolProvider extends AbstractToolProvider {
         registerRenameVariablesTool();
         registerChangeVariableDataTypesTool();
         registerSetDecompilationCommentTool();
+    }
+
+    /**
+     * Creates a TaskMonitor with timeout configured from settings
+     * @return TaskMonitor with timeout from configuration
+     */
+    private TaskMonitor createTimeoutMonitor() {
+        ConfigManager configManager = RevaInternalServiceRegistry.getService(ConfigManager.class);
+        int timeoutSeconds = configManager.getDecompilerTimeoutSeconds();
+        return TimeoutTaskMonitor.timeoutIn(timeoutSeconds, TimeUnit.SECONDS);
+    }
+
+    private boolean isTimedOut(TaskMonitor monitor) {
+        return monitor.isCancelled();
+    }
+
+    private int getTimeoutSeconds() {
+        return RevaInternalServiceRegistry.getService(ConfigManager.class).getDecompilerTimeoutSeconds();
     }
 
     /**
@@ -139,7 +162,7 @@ public class DecompilerToolProvider extends AbstractToolProvider {
         // Create the tool
         McpSchema.Tool tool = new McpSchema.Tool(
             "get-decompilation",
-            "Get decompiled code for a function with line range support. Defaults to 50 lines to conserve context - start with small chunks (10-20 lines) then expand as needed using offset/limit.",
+            "Get decompiled code for a function with line range support. Defaults to 50 lines to conserve context - start with small chunks (10-20 lines) then expand as needed using offset/limit. Updating variable data types and names can significantly improve decompilation quality.",
             createSchema(properties, required)
         );
 
@@ -251,8 +274,12 @@ public class DecompilerToolProvider extends AbstractToolProvider {
                     resultData.put("decompilationError", "Failed to initialize decompiler");
                     resultData.put("decompilation", "");
                 } else {
-                    // Decompile the function
-                    DecompileResults decompileResults = decompiler.decompileFunction(function, 0, TaskMonitor.DUMMY);
+                    // Decompile the function with timeout
+                    TaskMonitor timeoutMonitor = createTimeoutMonitor();
+                    DecompileResults decompileResults = decompiler.decompileFunction(function, 0, timeoutMonitor);
+                    if (isTimedOut(timeoutMonitor)) {
+                        return createErrorResult("Decompilation timed out after " + getTimeoutSeconds() + " seconds");
+                    }
 
                     if (decompileResults.decompileCompleted()) {
                         // Get the decompiled code and markup
@@ -445,7 +472,12 @@ public class DecompilerToolProvider extends AbstractToolProvider {
             }
 
             // Decompile the function to get the "before" state
-            DecompileResults decompileResults = decompiler.decompileFunction(function, 0, TaskMonitor.DUMMY);
+            TaskMonitor timeoutMonitor = createTimeoutMonitor();
+            DecompileResults decompileResults = decompiler.decompileFunction(function, 0, timeoutMonitor);
+            if (isTimedOut(timeoutMonitor)) {
+                decompiler.dispose();
+                return createErrorResult("Decompilation timed out after " + getTimeoutSeconds() + " seconds");
+            }
             if (!decompileResults.decompileCompleted()) {
                 decompiler.dispose();
                 return createErrorResult("Decompilation failed: " + decompileResults.getErrorMessage());
@@ -533,7 +565,12 @@ public class DecompilerToolProvider extends AbstractToolProvider {
             newDecompiler.openProgram(program);
 
             try {
-                DecompileResults newResults = newDecompiler.decompileFunction(function, 0, TaskMonitor.DUMMY);
+                TaskMonitor newTimeoutMonitor = createTimeoutMonitor();
+                DecompileResults newResults = newDecompiler.decompileFunction(function, 0, newTimeoutMonitor);
+                if (isTimedOut(newTimeoutMonitor)) {
+                    newDecompiler.dispose();
+                    return createErrorResult("Decompilation timed out after " + getTimeoutSeconds() + " seconds");
+                }
                 if (newResults.decompileCompleted()) {
                     DecompiledFunction decompiledFunction = newResults.getDecompiledFunction();
                     String afterDecompilation = decompiledFunction.getC();
@@ -638,7 +675,12 @@ public class DecompilerToolProvider extends AbstractToolProvider {
             }
 
             // Decompile the function to get the "before" state
-            DecompileResults decompileResults = decompiler.decompileFunction(function, 0, TaskMonitor.DUMMY);
+            TaskMonitor timeoutMonitor = createTimeoutMonitor();
+            DecompileResults decompileResults = decompiler.decompileFunction(function, 0, timeoutMonitor);
+            if (isTimedOut(timeoutMonitor)) {
+                decompiler.dispose();
+                return createErrorResult("Decompilation timed out after " + getTimeoutSeconds() + " seconds");
+            }
             if (!decompileResults.decompileCompleted()) {
                 decompiler.dispose();
                 return createErrorResult("Decompilation failed: " + decompileResults.getErrorMessage());
@@ -756,7 +798,12 @@ public class DecompilerToolProvider extends AbstractToolProvider {
             newDecompiler.openProgram(program);
 
             try {
-                DecompileResults newResults = newDecompiler.decompileFunction(function, 0, TaskMonitor.DUMMY);
+                TaskMonitor newTimeoutMonitor = createTimeoutMonitor();
+                DecompileResults newResults = newDecompiler.decompileFunction(function, 0, newTimeoutMonitor);
+                if (isTimedOut(newTimeoutMonitor)) {
+                    newDecompiler.dispose();
+                    return createErrorResult("Decompilation timed out after " + getTimeoutSeconds() + " seconds");
+                }
                 if (newResults.decompileCompleted()) {
                     DecompiledFunction decompiledFunction = newResults.getDecompiledFunction();
                     String afterDecompilation = decompiledFunction.getC();
@@ -831,7 +878,7 @@ public class DecompilerToolProvider extends AbstractToolProvider {
                         // Include only the first few references
                         List<Map<String, Object>> limitedRefs = new ArrayList<>(incomingRefs.subList(0, maxIncomingRefs));
                         result.put("incomingReferences", limitedRefs);
-                        
+
                         // Add metadata about the limitation
                         result.put("incomingReferencesLimited", true);
                         result.put("totalIncomingReferences", incomingRefs.size());
@@ -1028,7 +1075,13 @@ public class DecompilerToolProvider extends AbstractToolProvider {
 
                     try {
                         // Decompile the function
-                        DecompileResults decompileResults = decompiler.decompileFunction(function, 0, TaskMonitor.DUMMY);
+                        TaskMonitor functionTimeoutMonitor = createTimeoutMonitor();
+                        DecompileResults decompileResults = decompiler.decompileFunction(function, 0, functionTimeoutMonitor);
+                        if (isTimedOut(functionTimeoutMonitor)) {
+                            Msg.warn(DecompilerToolProvider.class, "Decompilation timed out for function " + function.getName() +
+                                " after " + getTimeoutSeconds() + " seconds");
+                            continue; // Skip this function and continue with the next one
+                        }
 
                         if (decompileResults.decompileCompleted()) {
                             DecompiledFunction decompiledFunction = decompileResults.getDecompiledFunction();
@@ -1287,7 +1340,12 @@ public class DecompilerToolProvider extends AbstractToolProvider {
 
             try {
                 // Decompile the function
-                DecompileResults decompileResults = decompiler.decompileFunction(function, 0, TaskMonitor.DUMMY);
+                TaskMonitor lastTimeoutMonitor = createTimeoutMonitor();
+                DecompileResults decompileResults = decompiler.decompileFunction(function, 0, lastTimeoutMonitor);
+                if (isTimedOut(lastTimeoutMonitor)) {
+                    decompiler.dispose();
+                    return createErrorResult("Decompilation timed out after " + getTimeoutSeconds() + " seconds");
+                }
                 if (!decompileResults.decompileCompleted()) {
                     return createErrorResult("Decompilation failed: " + decompileResults.getErrorMessage());
                 }

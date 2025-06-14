@@ -22,14 +22,30 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import ghidra.app.util.cparser.C.ParseException;
+import ghidra.app.util.parser.FunctionSignatureParser;
+import ghidra.program.model.address.Address;
+import ghidra.program.model.address.AddressSet;
 import ghidra.program.model.address.AddressSetView;
+import ghidra.program.model.data.FunctionDefinitionDataType;
+import ghidra.program.model.data.ParameterDefinition;
+import ghidra.program.model.data.ParameterDefinitionImpl;
 import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.FunctionIterator;
+import ghidra.program.model.listing.FunctionManager;
+import ghidra.program.model.listing.Parameter;
+import ghidra.program.model.listing.ParameterImpl;
 import ghidra.program.model.listing.Program;
+import ghidra.program.model.listing.Variable;
+import ghidra.program.model.symbol.SourceType;
+import ghidra.util.exception.CancelledException;
+import ghidra.util.exception.DuplicateNameException;
+import ghidra.util.exception.InvalidInputException;
 import io.modelcontextprotocol.spec.McpError;
 import io.modelcontextprotocol.server.McpSyncServer;
 import io.modelcontextprotocol.spec.McpSchema;
 import reva.tools.AbstractToolProvider;
+import reva.util.AddressUtil;
 import reva.util.SimilarityComparator;
 import reva.util.SymbolUtil;
 
@@ -50,6 +66,7 @@ public class FunctionToolProvider extends AbstractToolProvider {
         registerFunctionCountTool();
         registerFunctionsTool();
         registerFunctionsBySimilarityTool();
+        registerSetFunctionPrototypeTool();
     }
 
     /**
@@ -93,7 +110,7 @@ public class FunctionToolProvider extends AbstractToolProvider {
                 if (filterDefaultNames && SymbolUtil.isDefaultSymbolName(function.getName())) {
                     return;
                 }
-                
+
                 count.incrementAndGet();
             });
 
@@ -161,7 +178,7 @@ public class FunctionToolProvider extends AbstractToolProvider {
                 if (filterDefaultNames && SymbolUtil.isDefaultSymbolName(function.getName())) {
                     return;
                 }
-                
+
                 int index = currentIndex.getAndIncrement();
                 // Skip functions before the start index
                 if (index < pagination.startIndex()) {
@@ -276,7 +293,7 @@ public class FunctionToolProvider extends AbstractToolProvider {
 
             // Apply pagination to sorted results
             List<Map<String, Object>> paginatedFunctionData = similarFunctionData.subList(
-                pagination.startIndex(), 
+                pagination.startIndex(),
                 Math.min(pagination.startIndex() + pagination.maxCount(), similarFunctionData.size())
             );
 
@@ -337,5 +354,162 @@ public class FunctionToolProvider extends AbstractToolProvider {
         functionInfo.put("parameters", parameters);
 
         return functionInfo;
+    }
+
+    /**
+     * Register a tool to set or update a function prototype using C-style signatures
+     * @throws McpError if there's an error registering the tool
+     */
+    private void registerSetFunctionPrototypeTool() throws McpError {
+        // Define schema for the tool
+        Map<String, Object> properties = new HashMap<>();
+        properties.put("programPath", Map.of(
+            "type", "string",
+            "description", "Path in the Ghidra Project to the program"
+        ));
+        properties.put("location", Map.of(
+            "type", "string",
+            "description", "Address or symbol name where the function is located"
+        ));
+        properties.put("signature", Map.of(
+            "type", "string",
+            "description", "C-style function signature (e.g., 'int main(int argc, char** argv)')"
+        ));
+        properties.put("createIfNotExists", Map.of(
+            "type", "boolean",
+            "description", "Create function if it doesn't exist at the location",
+            "default", true
+        ));
+
+        List<String> required = List.of("programPath", "location", "signature");
+
+        // Create the tool
+        McpSchema.Tool tool = new McpSchema.Tool(
+            "set-function-prototype",
+            "Set or update a function prototype using C-style function signatures. Can create new functions or update existing ones.",
+            createSchema(properties, required)
+        );
+
+        // Register the tool with a handler
+        registerTool(tool, (exchange, args) -> {
+            try {
+                // Get program and parameters using helper methods
+                Program program = getProgramFromArgs(args);
+                String location = getString(args, "location");
+                String signature = getString(args, "signature");
+                boolean createIfNotExists = getOptionalBoolean(args, "createIfNotExists", true);
+
+                // Resolve the address from location
+                Address address = getAddressFromArgs(args, program, "location");
+                if (address == null) {
+                    return createErrorResult("Invalid address or symbol: " + location);
+                }
+
+                FunctionManager functionManager = program.getFunctionManager();
+                Function existingFunction = functionManager.getFunctionAt(address);
+
+                // Parse the function signature using Ghidra's parser
+                FunctionSignatureParser parser = new FunctionSignatureParser(
+                    program.getDataTypeManager(), null);
+
+                FunctionDefinitionDataType functionDef;
+                try {
+                    // Create original signature from existing function if it exists
+                    FunctionDefinitionDataType originalSignature = null;
+                    if (existingFunction != null) {
+                        originalSignature = new FunctionDefinitionDataType(existingFunction.getName());
+                        originalSignature.setReturnType(existingFunction.getReturnType());
+
+                        // Convert parameters
+                        List<ParameterDefinition> paramDefs = new ArrayList<>();
+                        for (Parameter param : existingFunction.getParameters()) {
+                            paramDefs.add(new ParameterDefinitionImpl(
+                                param.getName(), param.getDataType(), param.getComment()));
+                        }
+                        originalSignature.setArguments(paramDefs.toArray(new ParameterDefinition[0]));
+                        originalSignature.setVarArgs(existingFunction.hasVarArgs());
+                    }
+
+                    functionDef = parser.parse(originalSignature, signature);
+                } catch (ParseException e) {
+                    return createErrorResult("Failed to parse function signature: " + e.getMessage());
+                } catch (CancelledException e) {
+                    return createErrorResult("Function signature parsing was cancelled");
+                }
+
+                int txId = program.startTransaction("Set Function Prototype");
+                try {
+                    Function function = existingFunction;
+
+                    // Create function if it doesn't exist and creation is allowed
+                    if (function == null) {
+                        if (!createIfNotExists) {
+                            return createErrorResult("Function does not exist at " +
+                                AddressUtil.formatAddress(address) + " and createIfNotExists is false");
+                        }
+
+                        // Create a new function with minimal body (just the entry point)
+                        AddressSet body = new AddressSet(address, address);
+                        function = functionManager.createFunction(
+                            functionDef.getName(), address, body, SourceType.USER_DEFINED);
+
+                        if (function == null) {
+                            return createErrorResult("Failed to create function at " +
+                                AddressUtil.formatAddress(address));
+                        }
+                    }
+
+                    // Update function name if it's different
+                    if (!function.getName().equals(functionDef.getName())) {
+                        function.setName(functionDef.getName(), SourceType.USER_DEFINED);
+                    }
+
+                    // Convert ParameterDefinitions to Variables (Parameters extend Variable)
+                    List<Variable> parameters = new ArrayList<>();
+                    ParameterDefinition[] paramDefs = functionDef.getArguments();
+                    for (ParameterDefinition paramDef : paramDefs) {
+                        parameters.add(new ParameterImpl(
+                            paramDef.getName(),
+                            paramDef.getDataType(),
+                            program));
+                    }
+
+                    // Update the function signature
+                    // First update return type separately
+                    function.setReturnType(functionDef.getReturnType(), SourceType.USER_DEFINED);
+
+                    // Then update parameters
+                    function.replaceParameters(parameters,
+                        Function.FunctionUpdateType.DYNAMIC_STORAGE_ALL_PARAMS,
+                        true, SourceType.USER_DEFINED);
+
+                    // Set varargs if needed
+                    if (functionDef.hasVarArgs() != function.hasVarArgs()) {
+                        function.setVarArgs(functionDef.hasVarArgs());
+                    }
+
+                    program.endTransaction(txId, true);
+
+                    // Return updated function information
+                    Map<String, Object> result = new HashMap<>();
+                    result.put("success", true);
+                    result.put("created", existingFunction == null);
+                    result.put("function", createFunctionInfo(function));
+                    result.put("address", AddressUtil.formatAddress(address));
+                    result.put("parsedSignature", functionDef.toString());
+
+                    return createJsonResult(result);
+
+                } catch (Exception e) {
+                    program.endTransaction(txId, false);
+                    return createErrorResult("Failed to set function prototype: " + e.getMessage());
+                }
+
+            } catch (IllegalArgumentException e) {
+                return createErrorResult(e.getMessage());
+            } catch (Exception e) {
+                return createErrorResult("Unexpected error: " + e.getMessage());
+            }
+        });
     }
 }

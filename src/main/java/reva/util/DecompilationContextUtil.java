@@ -35,6 +35,10 @@ import ghidra.program.model.symbol.ReferenceIterator;
 import ghidra.program.model.symbol.Symbol;
 import ghidra.util.Msg;
 import ghidra.util.task.TaskMonitor;
+import ghidra.util.task.TimeoutTaskMonitor;
+import java.util.concurrent.TimeUnit;
+import reva.plugin.ConfigManager;
+import reva.util.RevaInternalServiceRegistry;
 
 /**
  * Utility class for working with decompilation context and cross references.
@@ -67,8 +71,14 @@ public class DecompilationContextUtil {
         }
 
         try {
-            // Decompile the function
-            DecompileResults decompileResults = decompiler.decompileFunction(function, 0, TaskMonitor.DUMMY);
+            // Decompile the function with timeout
+            int timeoutSeconds = RevaInternalServiceRegistry.getService(ConfigManager.class).getDecompilerTimeoutSeconds();
+            TaskMonitor timeoutMonitor = TimeoutTaskMonitor.timeoutIn(timeoutSeconds, TimeUnit.SECONDS);
+            DecompileResults decompileResults = decompiler.decompileFunction(function, 0, timeoutMonitor);
+            if (timeoutMonitor.isCancelled()) {
+                Msg.error(DecompilationContextUtil.class, "Decompilation timed out for address " + address + " after " + timeoutSeconds + " seconds");
+                return -1;
+            }
             if (!decompileResults.decompileCompleted()) {
                 return -1;
             }
@@ -130,8 +140,14 @@ public class DecompilationContextUtil {
         }
 
         try {
-            // Decompile the function
-            DecompileResults decompileResults = decompiler.decompileFunction(function, 0, TaskMonitor.DUMMY);
+            // Decompile the function with timeout
+            int timeoutSeconds = RevaInternalServiceRegistry.getService(ConfigManager.class).getDecompilerTimeoutSeconds();
+            TaskMonitor timeoutMonitor = TimeoutTaskMonitor.timeoutIn(timeoutSeconds, TimeUnit.SECONDS);
+            DecompileResults decompileResults = decompiler.decompileFunction(function, 0, timeoutMonitor);
+            if (timeoutMonitor.isCancelled()) {
+                Msg.error(DecompilationContextUtil.class, "Decompilation timed out while getting context after " + timeoutSeconds + " seconds");
+                return null;
+            }
             if (!decompileResults.decompileCompleted()) {
                 return null;
             }

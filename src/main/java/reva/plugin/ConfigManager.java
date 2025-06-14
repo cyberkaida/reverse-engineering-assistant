@@ -35,12 +35,14 @@ public class ConfigManager {
     public static final String SERVER_ENABLED = "Server Enabled";
     public static final String DEBUG_MODE = "Debug Mode";
     public static final String MAX_DECOMPILER_SEARCH_FUNCTIONS = "Max Decompiler Search Functions";
+    public static final String DECOMPILER_TIMEOUT_SECONDS = "Decompiler Timeout Seconds";
 
     // Default values
     private static final int DEFAULT_PORT = 8080;
     private static final boolean DEFAULT_SERVER_ENABLED = true;
     private static final boolean DEFAULT_DEBUG_MODE = false;
     private static final int DEFAULT_MAX_DECOMPILER_SEARCH_FUNCTIONS = 1000;
+    private static final int DEFAULT_DECOMPILER_TIMEOUT_SECONDS = 10;
 
     private final PluginTool tool;
     private final Map<String, Object> cachedOptions = new HashMap<>();
@@ -69,6 +71,8 @@ public class ConfigManager {
             "Whether debug mode is enabled");
         options.registerOption(MAX_DECOMPILER_SEARCH_FUNCTIONS, DEFAULT_MAX_DECOMPILER_SEARCH_FUNCTIONS, null,
             "Maximum number of functions before discouraging decompiler search");
+        options.registerOption(DECOMPILER_TIMEOUT_SECONDS, DEFAULT_DECOMPILER_TIMEOUT_SECONDS, null,
+            "Timeout in seconds for decompiler operations");
 
         // Cache the options
         cachedOptions.put(SERVER_PORT, options.getInt(SERVER_PORT, DEFAULT_PORT));
@@ -76,6 +80,8 @@ public class ConfigManager {
         cachedOptions.put(DEBUG_MODE, options.getBoolean(DEBUG_MODE, DEFAULT_DEBUG_MODE));
         cachedOptions.put(MAX_DECOMPILER_SEARCH_FUNCTIONS,
             options.getInt(MAX_DECOMPILER_SEARCH_FUNCTIONS, DEFAULT_MAX_DECOMPILER_SEARCH_FUNCTIONS));
+        cachedOptions.put(DECOMPILER_TIMEOUT_SECONDS,
+            options.getInt(DECOMPILER_TIMEOUT_SECONDS, DEFAULT_DECOMPILER_TIMEOUT_SECONDS));
 
         Msg.debug(this, "Loaded ReVa configuration settings");
     }
@@ -165,5 +171,21 @@ public class ConfigManager {
      */
     public void setMaxDecompilerSearchFunctions(int maxFunctions) {
         saveOption(SERVER_OPTIONS, MAX_DECOMPILER_SEARCH_FUNCTIONS, maxFunctions);
+    }
+
+    /**
+     * Get the decompiler timeout in seconds
+     * @return The configured timeout in seconds
+     */
+    public int getDecompilerTimeoutSeconds() {
+        return (Integer) cachedOptions.getOrDefault(DECOMPILER_TIMEOUT_SECONDS, DEFAULT_DECOMPILER_TIMEOUT_SECONDS);
+    }
+
+    /**
+     * Set the decompiler timeout in seconds
+     * @param timeoutSeconds The timeout in seconds
+     */
+    public void setDecompilerTimeoutSeconds(int timeoutSeconds) {
+        saveOption(SERVER_OPTIONS, DECOMPILER_TIMEOUT_SECONDS, timeoutSeconds);
     }
 }

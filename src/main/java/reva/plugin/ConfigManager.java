@@ -17,16 +17,23 @@ package reva.plugin;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 import ghidra.framework.options.Options;
+import ghidra.framework.options.OptionsChangeListener;
+import ghidra.framework.options.ToolOptions;
 import ghidra.framework.plugintool.PluginTool;
+import ghidra.util.HelpLocation;
 import ghidra.util.Msg;
+import ghidra.util.bean.opteditor.OptionsVetoException;
 
 /**
  * Configuration manager for the ReVa plugin.
- * Handles saving and loading configuration settings.
+ * Uses Ghidra's official OptionsChangeListener to detect configuration changes
+ * from both programmatic updates and the Ghidra options dialog.
  */
-public class ConfigManager {
+public class ConfigManager implements OptionsChangeListener {
     // Configuration option categories
     public static final String SERVER_OPTIONS = "ReVa Server Options";
 
@@ -45,7 +52,9 @@ public class ConfigManager {
     private static final int DEFAULT_DECOMPILER_TIMEOUT_SECONDS = 10;
 
     private final PluginTool tool;
+    private final ToolOptions toolOptions;
     private final Map<String, Object> cachedOptions = new HashMap<>();
+    private final Set<ConfigChangeListener> configChangeListeners = ConcurrentHashMap.newKeySet();
 
     /**
      * Constructor
@@ -53,60 +62,124 @@ public class ConfigManager {
      */
     public ConfigManager(PluginTool tool) {
         this.tool = tool;
+        this.toolOptions = tool.getOptions(SERVER_OPTIONS);
+        
+        // Register options with Ghidra
+        registerOptionsWithGhidra();
+        
+        // Add ourselves as listener to Ghidra's option change system
+        toolOptions.addOptionsChangeListener(this);
+        
+        // Load initial values
         loadOptions();
     }
 
     /**
-     * Load options from the tool options
+     * Register all options with Ghidra's options system
+     */
+    private void registerOptionsWithGhidra() {
+        HelpLocation help = new HelpLocation("ReVa", "Configuration");
+        
+        toolOptions.registerOption(SERVER_PORT, DEFAULT_PORT, help,
+            "Port number for the ReVa MCP server");
+        toolOptions.registerOption(SERVER_ENABLED, DEFAULT_SERVER_ENABLED, help,
+            "Whether the ReVa MCP server is enabled");
+        toolOptions.registerOption(DEBUG_MODE, DEFAULT_DEBUG_MODE, help,
+            "Whether debug mode is enabled");
+        toolOptions.registerOption(MAX_DECOMPILER_SEARCH_FUNCTIONS, DEFAULT_MAX_DECOMPILER_SEARCH_FUNCTIONS, help,
+            "Maximum number of functions before discouraging decompiler search");
+        toolOptions.registerOption(DECOMPILER_TIMEOUT_SECONDS, DEFAULT_DECOMPILER_TIMEOUT_SECONDS, help,
+            "Timeout in seconds for decompiler operations");
+    }
+
+    /**
+     * Load options from the tool options and cache them
      */
     protected void loadOptions() {
-        Options options = tool.getOptions(SERVER_OPTIONS);
-
-        // Register options with default values if they don't exist
-        options.registerOption(SERVER_PORT, DEFAULT_PORT, null,
-            "Port number for the ReVa MCP server");
-        options.registerOption(SERVER_ENABLED, DEFAULT_SERVER_ENABLED, null,
-            "Whether the ReVa MCP server is enabled");
-        options.registerOption(DEBUG_MODE, DEFAULT_DEBUG_MODE, null,
-            "Whether debug mode is enabled");
-        options.registerOption(MAX_DECOMPILER_SEARCH_FUNCTIONS, DEFAULT_MAX_DECOMPILER_SEARCH_FUNCTIONS, null,
-            "Maximum number of functions before discouraging decompiler search");
-        options.registerOption(DECOMPILER_TIMEOUT_SECONDS, DEFAULT_DECOMPILER_TIMEOUT_SECONDS, null,
-            "Timeout in seconds for decompiler operations");
-
         // Cache the options
-        cachedOptions.put(SERVER_PORT, options.getInt(SERVER_PORT, DEFAULT_PORT));
-        cachedOptions.put(SERVER_ENABLED, options.getBoolean(SERVER_ENABLED, DEFAULT_SERVER_ENABLED));
-        cachedOptions.put(DEBUG_MODE, options.getBoolean(DEBUG_MODE, DEFAULT_DEBUG_MODE));
+        cachedOptions.put(SERVER_PORT, toolOptions.getInt(SERVER_PORT, DEFAULT_PORT));
+        cachedOptions.put(SERVER_ENABLED, toolOptions.getBoolean(SERVER_ENABLED, DEFAULT_SERVER_ENABLED));
+        cachedOptions.put(DEBUG_MODE, toolOptions.getBoolean(DEBUG_MODE, DEFAULT_DEBUG_MODE));
         cachedOptions.put(MAX_DECOMPILER_SEARCH_FUNCTIONS,
-            options.getInt(MAX_DECOMPILER_SEARCH_FUNCTIONS, DEFAULT_MAX_DECOMPILER_SEARCH_FUNCTIONS));
+            toolOptions.getInt(MAX_DECOMPILER_SEARCH_FUNCTIONS, DEFAULT_MAX_DECOMPILER_SEARCH_FUNCTIONS));
         cachedOptions.put(DECOMPILER_TIMEOUT_SECONDS,
-            options.getInt(DECOMPILER_TIMEOUT_SECONDS, DEFAULT_DECOMPILER_TIMEOUT_SECONDS));
+            toolOptions.getInt(DECOMPILER_TIMEOUT_SECONDS, DEFAULT_DECOMPILER_TIMEOUT_SECONDS));
 
         Msg.debug(this, "Loaded ReVa configuration settings");
     }
 
     /**
-     * Save an option value
-     * @param category Option category
+     * Ghidra's official options change callback.
+     * This gets called whenever options change through ANY method:
+     * - Ghidra options dialog
+     * - Programmatic calls to toolOptions.setXXX()
+     * - Our saveOption() method
+     */
+    @Override
+    public void optionsChanged(ToolOptions options, String optionName, Object oldValue, Object newValue) 
+            throws OptionsVetoException {
+        
+        Msg.debug(this, "Option changed: " + optionName + " from " + oldValue + " to " + newValue);
+        
+        // Update our cache
+        cachedOptions.put(optionName, newValue);
+        
+        // Notify our custom listeners
+        notifyConfigChangeListeners(SERVER_OPTIONS, optionName, oldValue, newValue);
+    }
+
+    /**
+     * Save an option value using Ghidra's standard methods
+     * This will automatically trigger optionsChanged() callback
+     * @param category Option category (ignored, uses SERVER_OPTIONS)
      * @param name Option name
      * @param value Option value
      */
     public void saveOption(String category, String name, Object value) {
-        Options options = tool.getOptions(category);
-
         if (value instanceof Integer) {
-            options.setInt(name, (Integer) value);
+            toolOptions.setInt(name, (Integer) value);
         } else if (value instanceof Boolean) {
-            options.setBoolean(name, (Boolean) value);
+            toolOptions.setBoolean(name, (Boolean) value);
         } else if (value instanceof String) {
-            options.setString(name, (String) value);
+            toolOptions.setString(name, (String) value);
         }
-
-        // Update cache
-        cachedOptions.put(name, value);
-
-        Msg.debug(this, "Saved option: " + category + "." + name + " = " + value);
+        // Note: optionsChanged() will be called automatically by Ghidra
+        Msg.debug(this, "Saved option: " + name + " = " + value);
+    }
+    
+    /**
+     * Add a configuration change listener
+     * @param listener The listener to add
+     */
+    public void addConfigChangeListener(ConfigChangeListener listener) {
+        configChangeListeners.add(listener);
+        Msg.debug(this, "Added config change listener: " + listener.getClass().getSimpleName());
+    }
+    
+    /**
+     * Remove a configuration change listener
+     * @param listener The listener to remove
+     */
+    public void removeConfigChangeListener(ConfigChangeListener listener) {
+        configChangeListeners.remove(listener);
+        Msg.debug(this, "Removed config change listener: " + listener.getClass().getSimpleName());
+    }
+    
+    /**
+     * Notify all registered listeners about a configuration change
+     * @param category The category of the changed option
+     * @param name The name of the changed option
+     * @param oldValue The old value
+     * @param newValue The new value
+     */
+    private void notifyConfigChangeListeners(String category, String name, Object oldValue, Object newValue) {
+        for (ConfigChangeListener listener : configChangeListeners) {
+            try {
+                listener.onConfigChanged(category, name, oldValue, newValue);
+            } catch (Exception e) {
+                Msg.error(this, "Error notifying config change listener: " + listener.getClass().getSimpleName(), e);
+            }
+        }
     }
 
     /**
@@ -122,7 +195,8 @@ public class ConfigManager {
      * @param port The port number to use
      */
     public void setServerPort(int port) {
-        saveOption(SERVER_OPTIONS, SERVER_PORT, port);
+        toolOptions.setInt(SERVER_PORT, port);
+        // optionsChanged() will be called automatically
     }
 
     /**
@@ -138,7 +212,8 @@ public class ConfigManager {
      * @param enabled True to enable the server
      */
     public void setServerEnabled(boolean enabled) {
-        saveOption(SERVER_OPTIONS, SERVER_ENABLED, enabled);
+        toolOptions.setBoolean(SERVER_ENABLED, enabled);
+        // optionsChanged() will be called automatically
     }
 
     /**
@@ -154,7 +229,8 @@ public class ConfigManager {
      * @param enabled True to enable debug mode
      */
     public void setDebugMode(boolean enabled) {
-        saveOption(SERVER_OPTIONS, DEBUG_MODE, enabled);
+        toolOptions.setBoolean(DEBUG_MODE, enabled);
+        // optionsChanged() will be called automatically
     }
 
     /**
@@ -170,7 +246,8 @@ public class ConfigManager {
      * @param maxFunctions The maximum number of functions
      */
     public void setMaxDecompilerSearchFunctions(int maxFunctions) {
-        saveOption(SERVER_OPTIONS, MAX_DECOMPILER_SEARCH_FUNCTIONS, maxFunctions);
+        toolOptions.setInt(MAX_DECOMPILER_SEARCH_FUNCTIONS, maxFunctions);
+        // optionsChanged() will be called automatically
     }
 
     /**
@@ -186,6 +263,16 @@ public class ConfigManager {
      * @param timeoutSeconds The timeout in seconds
      */
     public void setDecompilerTimeoutSeconds(int timeoutSeconds) {
-        saveOption(SERVER_OPTIONS, DECOMPILER_TIMEOUT_SECONDS, timeoutSeconds);
+        toolOptions.setInt(DECOMPILER_TIMEOUT_SECONDS, timeoutSeconds);
+        // optionsChanged() will be called automatically
+    }
+    
+    /**
+     * Clean up when the plugin is disposed
+     */
+    public void dispose() {
+        if (toolOptions != null) {
+            toolOptions.removeOptionsChangeListener(this);
+        }
     }
 }

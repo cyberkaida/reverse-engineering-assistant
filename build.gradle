@@ -94,7 +94,7 @@ dependencies {
 	// Testing dependencies
 	testImplementation "org.mockito:mockito-core:5.18.0"
 	testImplementation "org.mockito:mockito-inline:5.2.0"
-	testImplementation "com.fasterxml.jackson.core:jackson-databind:2.19.0"
+	testImplementation "com.fasterxml.jackson.core:jackson-databind:2.19.1"
 
 	// Ghidra test dependencies
 	testImplementation "org.hamcrest:hamcrest:3.0"

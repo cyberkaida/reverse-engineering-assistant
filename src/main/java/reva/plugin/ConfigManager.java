@@ -113,7 +113,6 @@ public class ConfigManager implements OptionsChangeListener {
      * This gets called whenever options change through ANY method:
      * - Ghidra options dialog
      * - Programmatic calls to toolOptions.setXXX()
-     * - Our saveOption() method
      */
     @Override
     public void optionsChanged(ToolOptions options, String optionName, Object oldValue, Object newValue) 
@@ -126,25 +125,6 @@ public class ConfigManager implements OptionsChangeListener {
         
         // Notify our custom listeners
         notifyConfigChangeListeners(SERVER_OPTIONS, optionName, oldValue, newValue);
-    }
-
-    /**
-     * Save an option value using Ghidra's standard methods
-     * This will automatically trigger optionsChanged() callback
-     * @param category Option category (ignored, uses SERVER_OPTIONS)
-     * @param name Option name
-     * @param value Option value
-     */
-    public void saveOption(String category, String name, Object value) {
-        if (value instanceof Integer) {
-            toolOptions.setInt(name, (Integer) value);
-        } else if (value instanceof Boolean) {
-            toolOptions.setBoolean(name, (Boolean) value);
-        } else if (value instanceof String) {
-            toolOptions.setString(name, (String) value);
-        }
-        // Note: optionsChanged() will be called automatically by Ghidra
-        Msg.debug(this, "Saved option: " + name + " = " + value);
     }
     
     /**

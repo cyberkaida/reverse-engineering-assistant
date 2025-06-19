@@ -4,6 +4,7 @@
 - **CRITICAL**: Integration tests should validate actual Ghidra program state changes, not just MCP tool responses
 - Use `Function.getParameters()` and `Function.getAllVariables()` to validate variable changes
 - Use `DataType.isEquivalent()` to compare datatypes before/after changes
+- **You are not finished until all the tests pass!**
 
 # Address Formatting
 - **ALWAYS use `AddressUtil.formatAddress(address)`** for consistent address formatting in JSON output

@@ -46,6 +46,7 @@ import io.modelcontextprotocol.spec.McpSchema.ListToolsResult;
 import io.modelcontextprotocol.spec.McpSchema.TextContent;
 import reva.plugin.ConfigManager;
 import reva.plugin.RevaPlugin;
+import reva.plugin.RevaProgramManager;
 import reva.server.McpServerManager;
 
 /**

@@ -22,6 +22,7 @@ import java.util.List;
 import java.util.Map;
 
 import ghidra.app.services.DataTypeArchiveService;
+import ghidra.program.model.data.BuiltInDataTypeManager;
 import ghidra.program.model.data.DataType;
 import ghidra.program.model.data.DataTypeManager;
 import ghidra.program.model.listing.Program;
@@ -39,7 +40,28 @@ public class DataTypeParserUtil {
      * @return The data type manager or null if not found
      */
     public static DataTypeManager findDataTypeManager(String name) {
-        // First check open programs
+        return findDataTypeManager(name, null);
+    }
+
+    /**
+     * Find a data type manager by name, prioritizing the specified program
+     * @param name Name of the data type manager
+     * @param programPath Path to the program to prioritize (can be null)
+     * @return The data type manager or null if not found
+     */
+    public static DataTypeManager findDataTypeManager(String name, String programPath) {
+        // First check the specified program (highest priority)
+        if (programPath != null && !programPath.isEmpty()) {
+            Program targetProgram = RevaProgramManager.getProgramByPath(programPath);
+            if (targetProgram != null) {
+                DataTypeManager dtm = targetProgram.getDataTypeManager();
+                if (dtm.getName().equals(name)) {
+                    return dtm;
+                }
+            }
+        }
+
+        // Then check all open programs (program-specific data types)
         List<Program> openPrograms = RevaProgramManager.getOpenPrograms();
         for (Program program : openPrograms) {
             DataTypeManager dtm = program.getDataTypeManager();
@@ -48,7 +70,7 @@ public class DataTypeParserUtil {
             }
         }
 
-        // Then check standalone data type managers
+        // Then check standalone data type managers (loaded/associated archives)
         reva.plugin.RevaPlugin plugin = RevaInternalServiceRegistry.getService(reva.plugin.RevaPlugin.class);
         if (plugin != null) {
             DataTypeArchiveService archiveService = plugin.getTool().getService(DataTypeArchiveService.class);
@@ -60,6 +82,12 @@ public class DataTypeParserUtil {
                     }
                 }
             }
+        }
+
+        // Finally check built-in data type manager (fallback)
+        DataTypeManager builtInDTM = BuiltInDataTypeManager.getDataTypeManager();
+        if (builtInDTM.getName().equals(name)) {
+            return builtInDTM;
         }
 
         return null;
@@ -81,8 +109,8 @@ public class DataTypeParserUtil {
             throw new IllegalArgumentException("No data type string provided");
         }
 
-        // Get data type managers to search in
-        List<DataTypeManager> managersToSearch = getDataTypeManagersToSearch(archiveName);
+        // Get data type managers to search in - for this method we use empty programPath since it's the legacy method
+        List<DataTypeManager> managersToSearch = getDataTypeManagersToSearch(archiveName, "");
         if (managersToSearch.isEmpty()) {
             throw new IllegalStateException("No data type managers available");
         }
@@ -106,21 +134,23 @@ public class DataTypeParserUtil {
         return null;
     }
 
+
     /**
-     * Parse a data type from its string representation
+     * Parse a data type from its string representation with program context
      * @param dataTypeString String representation of the data type (e.g., "char**", "int[10]")
      * @param archiveName Optional name of specific archive to search in, or empty string to search all
+     * @param programPath Path to the program to prioritize for searching
      * @return Map containing the found data type information or null if not found
      * @throws Exception if there's an error parsing the data type
      */
-    public static Map<String, Object> parseDataTypeFromString(String dataTypeString, String archiveName)
+    public static Map<String, Object> parseDataTypeFromString(String dataTypeString, String archiveName, String programPath)
             throws Exception {
         if (dataTypeString == null || dataTypeString.isEmpty()) {
             throw new IllegalArgumentException("No data type string provided");
         }
 
         // Get data type managers to search in
-        List<DataTypeManager> managersToSearch = getDataTypeManagersToSearch(archiveName);
+        List<DataTypeManager> managersToSearch = getDataTypeManagersToSearch(archiveName, programPath);
         if (managersToSearch.isEmpty()) {
             throw new IllegalStateException("No data type managers available");
         }
@@ -161,34 +191,54 @@ public class DataTypeParserUtil {
         return dataTypeInfo;
     }
 
+
     /**
-     * Get list of data type managers to search based on the archive name
+     * Get list of data type managers to search based on the archive name and program context
      * @param archiveName Name of archive to search in, or empty string to search all
+     * @param programPath Path to the program to search in (required)
      * @return List of data type managers to search
      */
-    private static List<DataTypeManager> getDataTypeManagersToSearch(String archiveName) {
+    private static List<DataTypeManager> getDataTypeManagersToSearch(String archiveName, String programPath) {
         List<DataTypeManager> managersToSearch = new ArrayList<>();
 
         if (archiveName != null && !archiveName.isEmpty()) {
-            // Search in the specified archive only
-            DataTypeManager dtm = findDataTypeManager(archiveName);
+            // Search in the specified archive only, prioritizing the specified program
+            DataTypeManager dtm = findDataTypeManager(archiveName, programPath);
             if (dtm != null) {
                 managersToSearch.add(dtm);
             }
+            // If looking for a specific archive but not found, still include built-in types as fallback
+            if (managersToSearch.isEmpty()) {
+                managersToSearch.add(BuiltInDataTypeManager.getDataTypeManager());
+            }
         } else {
-            // Search in all available data type managers
+            // Always add built-in data type manager first - it contains basic types like int, char, etc.
+            managersToSearch.add(BuiltInDataTypeManager.getDataTypeManager());
+            
+            // Add the specified program's data type manager first
+            Program targetProgram = RevaProgramManager.getProgramByPath(programPath);
+            if (targetProgram != null) {
+                managersToSearch.add(targetProgram.getDataTypeManager());
+            }
+            
+            // Add other open program data type managers
+            List<Program> openPrograms = RevaProgramManager.getOpenPrograms();
+            for (Program program : openPrograms) {
+                // Skip if this is the target program (already added)
+                if (targetProgram != null && program.getDomainFile().getPathname().equals(targetProgram.getDomainFile().getPathname())) {
+                    continue;
+                }
+                managersToSearch.add(program.getDataTypeManager());
+            }
+
+            // Try to add standalone data type managers if RevaPlugin is available
+            // This is optional - if not available, we can still work with built-in and program types
             reva.plugin.RevaPlugin plugin = RevaInternalServiceRegistry.getService(reva.plugin.RevaPlugin.class);
             if (plugin != null) {
                 DataTypeArchiveService archiveService = plugin.getTool().getService(DataTypeArchiveService.class);
                 if (archiveService != null) {
-                    // Add program data type managers
-                    List<Program> openPrograms = RevaProgramManager.getOpenPrograms();
-                    for (Program program : openPrograms) {
-                        managersToSearch.add(program.getDataTypeManager());
-                    }
-
-                // Add standalone data type managers
-                Collections.addAll(managersToSearch, archiveService.getDataTypeManagers());
+                    // Add standalone data type managers
+                    Collections.addAll(managersToSearch, archiveService.getDataTypeManagers());
                 }
             }
         }

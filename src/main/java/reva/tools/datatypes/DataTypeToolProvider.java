@@ -21,6 +21,7 @@ import java.util.List;
 import java.util.Map;
 
 import ghidra.app.services.DataTypeArchiveService;
+import ghidra.program.model.data.BuiltInDataTypeManager;
 import ghidra.program.model.data.Category;
 import ghidra.program.model.data.DataType;
 import ghidra.program.model.data.DataTypeManager;
@@ -49,88 +50,124 @@ public class DataTypeToolProvider extends AbstractToolProvider {
 
     @Override
     public void registerTools() throws McpError {
-        registerGetOpenArchivesTool();
+        registerGetDataTypeArchivesTool();
         registerGetDataTypesTool();
         registerGetDataTypeByStringTool();
     }
 
     /**
-     * Register a tool to get open data type archives
+     * Register a tool to get data type archives for a specific program
      * @throws McpError if there's an error registering the tool
      */
-    private void registerGetOpenArchivesTool() throws McpError {
+    private void registerGetDataTypeArchivesTool() throws McpError {
         // Define schema for the tool
         Map<String, Object> properties = new HashMap<>();
-        // This tool doesn't require any parameters
-        List<String> required = new ArrayList<>();
+        properties.put("programPath", Map.of(
+            "type", "string",
+            "description", "Path in the Ghidra Project to get data type archives for"
+        ));
+        List<String> required = List.of("programPath");
 
         // Create the tool
         McpSchema.Tool tool = new McpSchema.Tool(
             "get-data-type-archives",
-            "Get all open data type archives",
+            "Get data type archives for a specific program",
             createSchema(properties, required)
         );
 
         // Register the tool with a handler
         registerTool(tool, (exchange, args) -> {
-            // Get the RevaPlugin to access the PluginTool
-            reva.plugin.RevaPlugin plugin = RevaInternalServiceRegistry.getService(reva.plugin.RevaPlugin.class);
-            if (plugin == null) {
-                Msg.error(this, "RevaPlugin is not available");
-                return createErrorResult("RevaPlugin is not available");
+            // Get the required program path from the request
+            String programPath;
+            try {
+                programPath = getString(args, "programPath");
+            } catch (IllegalArgumentException e) {
+                return createErrorResult(e.getMessage());
             }
-
-            // Get data type archive service from the plugin tool
-            DataTypeArchiveService archiveService = plugin.getTool().getService(DataTypeArchiveService.class);
-            if (archiveService == null) {
-                Msg.error(this, "Data type archive service is not available");
-                return createErrorResult("Data type archive service is not available");
-            }
-
-            // Get all data type managers
-            DataTypeManager[] managers = archiveService.getDataTypeManagers();
 
             // Create result data
             List<Map<String, Object>> archivesData = new ArrayList<>();
 
-            // Add program data type managers
+            // Always add built-in data type manager first
+            DataTypeManager builtInDTM = BuiltInDataTypeManager.getDataTypeManager();
+            Map<String, Object> builtInInfo = new HashMap<>();
+            builtInInfo.put("name", builtInDTM.getName());
+            builtInInfo.put("type", "BUILT_IN");
+            builtInInfo.put("id", builtInDTM.getUniversalID() != null ? builtInDTM.getUniversalID().getValue() : null);
+            builtInInfo.put("dataTypeCount", builtInDTM.getDataTypeCount(true));
+            builtInInfo.put("categoryCount", builtInDTM.getCategoryCount());
+            archivesData.add(builtInInfo);
+
+            // Add the specified program first
+            Program targetProgram = RevaProgramManager.getProgramByPath(programPath);
+            if (targetProgram == null) {
+                return createErrorResult("Could not find program: " + programPath);
+            }
+            
+            DataTypeManager dtm = targetProgram.getDataTypeManager();
+            Map<String, Object> archiveInfo = new HashMap<>();
+            archiveInfo.put("name", dtm.getName());
+            archiveInfo.put("type", "PROGRAM");
+            archiveInfo.put("id", dtm.getUniversalID() != null ? dtm.getUniversalID().getValue() : null);
+            archiveInfo.put("dataTypeCount", dtm.getDataTypeCount(true));
+            archiveInfo.put("categoryCount", dtm.getCategoryCount());
+            archiveInfo.put("programPath", targetProgram.getDomainFile().getPathname());
+            archivesData.add(archiveInfo);
+
+            // Add any other open programs 
             List<Program> openPrograms = RevaProgramManager.getOpenPrograms();
             for (Program program : openPrograms) {
-                DataTypeManager dtm = program.getDataTypeManager();
-
-                Map<String, Object> archiveInfo = new HashMap<>();
-                archiveInfo.put("name", dtm.getName());
-                archiveInfo.put("type", "PROGRAM");
-                archiveInfo.put("id", dtm.getUniversalID() != null ? dtm.getUniversalID().getValue() : null);
-                archiveInfo.put("dataTypeCount", dtm.getDataTypeCount(true));
-                archiveInfo.put("categoryCount", dtm.getCategoryCount());
-                archiveInfo.put("programPath", program.getDomainFile().getPathname());
-
-                archivesData.add(archiveInfo);
-            }
-
-            // Add standalone data type managers
-            for (DataTypeManager dtm : managers) {
-                // Skip if this is a program data type manager (already added)
-                boolean isProgramDTM = false;
-                for (Program program : openPrograms) {
-                    if (dtm == program.getDataTypeManager()) {
-                        isProgramDTM = true;
-                        break;
-                    }
-                }
-                if (isProgramDTM) {
+                // Skip if this is the target program (already added)
+                if (program.getDomainFile().getPathname().equals(targetProgram.getDomainFile().getPathname())) {
                     continue;
                 }
 
-                Map<String, Object> archiveInfo = new HashMap<>();
-                archiveInfo.put("name", dtm.getName());
-                archiveInfo.put("type", dtm.getType().toString());
-                archiveInfo.put("id", dtm.getUniversalID() != null ? dtm.getUniversalID().getValue() : null);
-                archiveInfo.put("dataTypeCount", dtm.getDataTypeCount(true));
-                archiveInfo.put("categoryCount", dtm.getCategoryCount());
+                DataTypeManager programDtm = program.getDataTypeManager();
 
-                archivesData.add(archiveInfo);
+                Map<String, Object> programArchiveInfo = new HashMap<>();
+                programArchiveInfo.put("name", programDtm.getName());
+                programArchiveInfo.put("type", "PROGRAM");
+                programArchiveInfo.put("id", programDtm.getUniversalID() != null ? programDtm.getUniversalID().getValue() : null);
+                programArchiveInfo.put("dataTypeCount", programDtm.getDataTypeCount(true));
+                programArchiveInfo.put("categoryCount", programDtm.getCategoryCount());
+                programArchiveInfo.put("programPath", program.getDomainFile().getPathname());
+
+                archivesData.add(programArchiveInfo);
+            }
+
+            // Try to add standalone data type managers if RevaPlugin is available
+            // This is optional - if not available, we still have built-in and program types
+            reva.plugin.RevaPlugin plugin = RevaInternalServiceRegistry.getService(reva.plugin.RevaPlugin.class);
+            if (plugin != null) {
+                DataTypeArchiveService archiveService = plugin.getTool().getService(DataTypeArchiveService.class);
+                if (archiveService != null) {
+                    // Get all data type managers
+                    DataTypeManager[] managers = archiveService.getDataTypeManagers();
+
+                    // Add standalone data type managers
+                    for (DataTypeManager standaloneDtm : managers) {
+                        // Skip if this is a program data type manager (already added)
+                        boolean isProgramDTM = false;
+                        for (Program program : openPrograms) {
+                            if (standaloneDtm == program.getDataTypeManager()) {
+                                isProgramDTM = true;
+                                break;
+                            }
+                        }
+                        if (isProgramDTM) {
+                            continue;
+                        }
+
+                        Map<String, Object> standaloneArchiveInfo = new HashMap<>();
+                        standaloneArchiveInfo.put("name", standaloneDtm.getName());
+                        standaloneArchiveInfo.put("type", standaloneDtm.getType().toString());
+                        standaloneArchiveInfo.put("id", standaloneDtm.getUniversalID() != null ? standaloneDtm.getUniversalID().getValue() : null);
+                        standaloneArchiveInfo.put("dataTypeCount", standaloneDtm.getDataTypeCount(true));
+                        standaloneArchiveInfo.put("categoryCount", standaloneDtm.getCategoryCount());
+
+                        archivesData.add(standaloneArchiveInfo);
+                    }
+                }
             }
 
             // Create metadata about the result
@@ -153,6 +190,10 @@ public class DataTypeToolProvider extends AbstractToolProvider {
     private void registerGetDataTypesTool() throws McpError {
         // Define schema for the tool
         Map<String, Object> properties = new HashMap<>();
+        properties.put("programPath", Map.of(
+            "type", "string",
+            "description", "Path in the Ghidra Project to get data types from"
+        ));
         properties.put("archiveName", Map.of(
             "type", "string",
             "description", "Name of the data type archive"
@@ -178,7 +219,7 @@ public class DataTypeToolProvider extends AbstractToolProvider {
             "default", 100
         ));
 
-        List<String> required = List.of("archiveName");
+        List<String> required = List.of("programPath", "archiveName");
 
         // Create the tool
         McpSchema.Tool tool = new McpSchema.Tool(
@@ -189,9 +230,11 @@ public class DataTypeToolProvider extends AbstractToolProvider {
 
         // Register the tool with a handler
         registerTool(tool, (exchange, args) -> {
-            // Get the archive name from the request
+            // Get the required parameters from the request  
+            String programPath;
             String archiveName;
             try {
+                programPath = getString(args, "programPath");
                 archiveName = getString(args, "archiveName");
             } catch (IllegalArgumentException e) {
                 return createErrorResult(e.getMessage());
@@ -203,8 +246,14 @@ public class DataTypeToolProvider extends AbstractToolProvider {
             int startIndex = getOptionalInt(args, "startIndex", 0);
             int maxCount = getOptionalInt(args, "maxCount", 100);
 
-            // Find the data type manager
-            DataTypeManager dtm = DataTypeParserUtil.findDataTypeManager(archiveName);
+            // Validate that the program exists
+            Program targetProgram = RevaProgramManager.getProgramByPath(programPath);
+            if (targetProgram == null) {
+                return createErrorResult("Could not find program: " + programPath);
+            }
+            
+            // Find the data type manager for the specified program
+            DataTypeManager dtm = DataTypeParserUtil.findDataTypeManager(archiveName, programPath);
             if (dtm == null) {
                 return createErrorResult("Data type archive not found: " + archiveName);
             }
@@ -270,6 +319,10 @@ public class DataTypeToolProvider extends AbstractToolProvider {
     private void registerGetDataTypeByStringTool() throws McpError {
         // Define schema for the tool
         Map<String, Object> properties = new HashMap<>();
+        properties.put("programPath", Map.of(
+            "type", "string",
+            "description", "Path in the Ghidra Project to search for data types in"
+        ));
         properties.put("dataTypeString", Map.of(
             "type", "string",
             "description", "String representation of the data type (e.g., 'char**', 'int[10]')"
@@ -280,7 +333,7 @@ public class DataTypeToolProvider extends AbstractToolProvider {
             "default", ""
         ));
 
-        List<String> required = List.of("dataTypeString");
+        List<String> required = List.of("programPath", "dataTypeString");
 
         // Create the tool
         McpSchema.Tool tool = new McpSchema.Tool(
@@ -291,16 +344,28 @@ public class DataTypeToolProvider extends AbstractToolProvider {
 
         // Register the tool with a handler
         registerTool(tool, (exchange, args) -> {
-            // Get the data type string from the request
-            String dataTypeString = (String) args.get("dataTypeString");
+            // Get the required parameters from the request
+            String programPath;
+            String dataTypeString;
+            try {
+                programPath = getString(args, "programPath");
+                dataTypeString = getString(args, "dataTypeString");
+            } catch (IllegalArgumentException e) {
+                return createErrorResult(e.getMessage());
+            }
 
             // Get the optional archive name
-            String archiveName = args.containsKey("archiveName") ?
-                (String) args.get("archiveName") : "";
+            String archiveName = getOptionalString(args, "archiveName", "");
+
+            // Validate that the program exists
+            Program targetProgram = RevaProgramManager.getProgramByPath(programPath);
+            if (targetProgram == null) {
+                return createErrorResult("Could not find program: " + programPath);
+            }
 
             try {
-                // Use the utility class to parse the data type
-                Map<String, Object> result = DataTypeParserUtil.parseDataTypeFromString(dataTypeString, archiveName);
+                // Use the utility class to parse the data type with program context
+                Map<String, Object> result = DataTypeParserUtil.parseDataTypeFromString(dataTypeString, archiveName, programPath);
 
                 if (result == null) {
                     return createErrorResult("Could not find or parse data type: " + dataTypeString);

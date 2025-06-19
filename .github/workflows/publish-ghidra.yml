@@ -4,16 +4,24 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Release tag to update (e.g., v4.1.0). If not provided, uses the current ref.'
+        required: false
+        type: string
+      update_existing:
+        description: 'Update existing release instead of creating new one'
+        required: false
+        type: boolean
+        default: true
 jobs:
   build:
     permissions:
       contents: read
     strategy:
       matrix:
-        # The extension is Java only, so it should work on all platforms
-        # but there have been issues with building on Windows (#73, #72)
-        # that are related to protobufs, so we will build on all platforms
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        # Build only on Linux since the extension is Java-only and platform-independent
+        # This simplifies the build process and reduces CI time
         ghidra-version: [
             "11.3.2",
             "11.3.1",
@@ -21,7 +29,7 @@ jobs:
             "latest",
         ]
     name: Build distribution 📦
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
     - name: Set up Java 🍵
@@ -51,6 +59,8 @@ jobs:
     permissions:
       contents: write  # IMPORTANT: mandatory for making GitHub Releases
       id-token: write  # IMPORTANT: mandatory for sigstore
+    env:
+      RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
     steps:
     - name: Download all the dists
       uses: actions/download-artifact@v4
@@ -66,19 +76,23 @@ jobs:
           ./dist/*.zip
         upload-signing-artifacts: true
 
-    - name: Create GitHub Release
+    - name: Create or update GitHub Release
       env:
         GITHUB_TOKEN: ${{ github.token }}
-      run: >-
-        gh release create
-        '${{ github.ref_name }}'
-        --repo '${{ github.repository }}'
-        --notes ""
+      run: |
+        if [[ "${{ inputs.update_existing }}" == "true" ]] && gh release view "$RELEASE_TAG" --repo '${{ github.repository }}' >/dev/null 2>&1; then
+          echo "Release $RELEASE_TAG already exists, will update it"
+        else
+          echo "Creating new release $RELEASE_TAG"
+          gh release create "$RELEASE_TAG" \
+            --repo '${{ github.repository }}' \
+            --notes-from-tag
+        fi
 
-    - name: Upload artifact signatures to GitHub Release
+    - name: Upload build artifacts and signatures to GitHub Release
       env:
         GITHUB_TOKEN: ${{ github.token }}
       run: >-
         gh release upload
-        '${{ github.ref_name }}' ./dist/**
+        "$RELEASE_TAG" ./dist/* --clobber
         --repo '${{ github.repository }}'

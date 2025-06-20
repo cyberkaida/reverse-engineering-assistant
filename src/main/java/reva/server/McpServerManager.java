@@ -56,6 +56,7 @@ import reva.tools.xrefs.CrossReferencesToolProvider;
 import reva.tools.comments.CommentToolProvider;
 import reva.tools.bookmarks.BookmarkToolProvider;
 import reva.util.RevaInternalServiceRegistry;
+import reva.util.DebugLogger;
 
 /**
  * Manages the Model Context Protocol server at the application level.
@@ -214,15 +215,16 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
             try {
                 httpServer.start();
                 Msg.info(this, "MCP server started successfully");
+                DebugLogger.debugConnection(this, "HTTP server started on port " + serverPort);
 
                 // Mark server as ready
                 serverReady = true;
-
 
                 // join() blocks until the server stops, which is expected behavior
                 httpServer.join();
             } catch (Exception e) {
                 Msg.error(this, "Error starting MCP server", e);
+                DebugLogger.debugConnection(this, "HTTP server startup failed: " + e.getMessage());
             }
         });
 
@@ -243,8 +245,10 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
         }
 
         if (serverReady) {
+            DebugLogger.debugConnection(this, "Server startup completed and ready for connections");
         } else {
             Msg.error(this, "Server failed to start within timeout");
+            DebugLogger.debugConnection(this, "Server startup timeout after " + maxWaitTime + "ms");
         }
 
     }
@@ -409,6 +413,7 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
      */
     private void stopServer() {
         Msg.info(this, "Stopping MCP server...");
+        DebugLogger.debugConnection(this, "Beginning server shutdown sequence");
         
         // Mark server as not ready
         serverReady = false;
@@ -418,8 +423,10 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
             try {
                 httpServer.stop();
                 httpServer = null;
+                DebugLogger.debugConnection(this, "HTTP server stopped successfully");
             } catch (Exception e) {
                 Msg.error(this, "Error stopping HTTP server", e);
+                DebugLogger.debugConnection(this, "HTTP server shutdown failed: " + e.getMessage());
             }
         }
         

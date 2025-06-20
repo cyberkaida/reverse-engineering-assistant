@@ -98,6 +98,90 @@ public class DebugLogger {
     }
     
     /**
+     * Log an MCP request lifecycle event if debug mode is enabled
+     * @param source The source object for the log message
+     * @param sessionId The MCP session ID
+     * @param requestId The request ID (can be null for notifications)
+     * @param method The MCP method name
+     * @param status The status (START, SUCCESS, ERROR, TIMEOUT, CANCEL)
+     * @param durationMs The duration in milliseconds (null for START events)
+     * @param details Additional details or error message
+     */
+    public static void debugMcpRequest(Object source, String sessionId, Object requestId, 
+                                      String method, String status, Long durationMs, String details) {
+        ConfigManager config = getConfigManager();
+        if (config != null && config.isDebugMode()) {
+            StringBuilder message = new StringBuilder("[DEBUG-MCP] ");
+            message.append("Session:").append(sessionId);
+            if (requestId != null) {
+                message.append(" Request:").append(requestId);
+            }
+            message.append(" ").append(method).append(" - ").append(status);
+            if (durationMs != null) {
+                message.append(" (").append(durationMs).append("ms)");
+            }
+            if (details != null && !details.isEmpty()) {
+                message.append(": ").append(details);
+            }
+            Msg.info(source, message.toString());
+        }
+    }
+    
+    /**
+     * Log an MCP request start event
+     * @param source The source object for the log message
+     * @param sessionId The MCP session ID
+     * @param requestId The request ID
+     * @param method The MCP method name
+     * @param details Additional request details
+     */
+    public static void debugMcpRequestStart(Object source, String sessionId, Object requestId, 
+                                           String method, String details) {
+        debugMcpRequest(source, sessionId, requestId, method, "START", null, details);
+    }
+    
+    /**
+     * Log an MCP request success event
+     * @param source The source object for the log message
+     * @param sessionId The MCP session ID
+     * @param requestId The request ID
+     * @param method The MCP method name
+     * @param durationMs The duration in milliseconds
+     */
+    public static void debugMcpRequestSuccess(Object source, String sessionId, Object requestId, 
+                                             String method, long durationMs) {
+        debugMcpRequest(source, sessionId, requestId, method, "SUCCESS", durationMs, null);
+    }
+    
+    /**
+     * Log an MCP request error event
+     * @param source The source object for the log message
+     * @param sessionId The MCP session ID
+     * @param requestId The request ID
+     * @param method The MCP method name
+     * @param durationMs The duration in milliseconds
+     * @param error The error message
+     */
+    public static void debugMcpRequestError(Object source, String sessionId, Object requestId, 
+                                           String method, long durationMs, String error) {
+        debugMcpRequest(source, sessionId, requestId, method, "ERROR", durationMs, error);
+    }
+    
+    /**
+     * Log an MCP request timeout event
+     * @param source The source object for the log message
+     * @param sessionId The MCP session ID
+     * @param requestId The request ID
+     * @param method The MCP method name
+     * @param timeoutMs The timeout duration in milliseconds
+     */
+    public static void debugMcpRequestTimeout(Object source, String sessionId, Object requestId, 
+                                             String method, long timeoutMs) {
+        debugMcpRequest(source, sessionId, requestId, method, "TIMEOUT", timeoutMs, 
+                       "Request timed out after " + timeoutMs + "ms");
+    }
+    
+    /**
      * Check if debug mode is currently enabled
      * @return true if debug mode is enabled, false otherwise
      */

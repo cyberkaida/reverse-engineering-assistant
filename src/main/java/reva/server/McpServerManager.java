@@ -121,11 +121,15 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
             .tools(true)
             .build();
 
-        // Initialize MCP server
+        // Initialize MCP server with request timeout
+        int timeoutSeconds = configManager.getMcpRequestTimeoutSeconds();
         server = McpServer.sync(transportProvider)
             .serverInfo(MCP_SERVER_NAME, MCP_SERVER_VERSION)
             .capabilities(serverCapabilities)
+            .requestTimeout(java.time.Duration.ofSeconds(timeoutSeconds))
             .build();
+        
+        Msg.info(this, "MCP server configured with request timeout: " + timeoutSeconds + " seconds");
 
         // Make server and server manager available via service registry
         RevaInternalServiceRegistry.registerService(McpSyncServer.class, server);
@@ -431,6 +435,9 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
                 restartServer();
             } else if (ConfigManager.SERVER_ENABLED.equals(name)) {
                 Msg.info(this, "Server enabled setting changed from " + oldValue + " to " + newValue + ". Restarting server...");
+                restartServer();
+            } else if (ConfigManager.MCP_REQUEST_TIMEOUT_SECONDS.equals(name)) {
+                Msg.info(this, "MCP request timeout changed from " + oldValue + " to " + newValue + " seconds. Restarting server...");
                 restartServer();
             }
         }

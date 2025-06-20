@@ -43,6 +43,7 @@ public class ConfigManager implements OptionsChangeListener {
     public static final String DEBUG_MODE = "Debug Mode";
     public static final String MAX_DECOMPILER_SEARCH_FUNCTIONS = "Max Decompiler Search Functions";
     public static final String DECOMPILER_TIMEOUT_SECONDS = "Decompiler Timeout Seconds";
+    public static final String MCP_REQUEST_TIMEOUT_SECONDS = "MCP Request Timeout Seconds";
 
     // Default values
     private static final int DEFAULT_PORT = 8080;
@@ -50,6 +51,7 @@ public class ConfigManager implements OptionsChangeListener {
     private static final boolean DEFAULT_DEBUG_MODE = false;
     private static final int DEFAULT_MAX_DECOMPILER_SEARCH_FUNCTIONS = 1000;
     private static final int DEFAULT_DECOMPILER_TIMEOUT_SECONDS = 10;
+    private static final int DEFAULT_MCP_REQUEST_TIMEOUT_SECONDS = 30;
 
     private final PluginTool tool;
     private final ToolOptions toolOptions;
@@ -90,6 +92,8 @@ public class ConfigManager implements OptionsChangeListener {
             "Maximum number of functions before discouraging decompiler search");
         toolOptions.registerOption(DECOMPILER_TIMEOUT_SECONDS, DEFAULT_DECOMPILER_TIMEOUT_SECONDS, help,
             "Timeout in seconds for decompiler operations");
+        toolOptions.registerOption(MCP_REQUEST_TIMEOUT_SECONDS, DEFAULT_MCP_REQUEST_TIMEOUT_SECONDS, help,
+            "Timeout in seconds for MCP client requests");
     }
 
     /**
@@ -104,6 +108,8 @@ public class ConfigManager implements OptionsChangeListener {
             toolOptions.getInt(MAX_DECOMPILER_SEARCH_FUNCTIONS, DEFAULT_MAX_DECOMPILER_SEARCH_FUNCTIONS));
         cachedOptions.put(DECOMPILER_TIMEOUT_SECONDS,
             toolOptions.getInt(DECOMPILER_TIMEOUT_SECONDS, DEFAULT_DECOMPILER_TIMEOUT_SECONDS));
+        cachedOptions.put(MCP_REQUEST_TIMEOUT_SECONDS,
+            toolOptions.getInt(MCP_REQUEST_TIMEOUT_SECONDS, DEFAULT_MCP_REQUEST_TIMEOUT_SECONDS));
 
         Msg.debug(this, "Loaded ReVa configuration settings");
     }
@@ -244,6 +250,23 @@ public class ConfigManager implements OptionsChangeListener {
      */
     public void setDecompilerTimeoutSeconds(int timeoutSeconds) {
         toolOptions.setInt(DECOMPILER_TIMEOUT_SECONDS, timeoutSeconds);
+        // optionsChanged() will be called automatically
+    }
+
+    /**
+     * Get the MCP request timeout in seconds
+     * @return The configured timeout in seconds
+     */
+    public int getMcpRequestTimeoutSeconds() {
+        return (Integer) cachedOptions.getOrDefault(MCP_REQUEST_TIMEOUT_SECONDS, DEFAULT_MCP_REQUEST_TIMEOUT_SECONDS);
+    }
+
+    /**
+     * Set the MCP request timeout in seconds
+     * @param timeoutSeconds The timeout in seconds
+     */
+    public void setMcpRequestTimeoutSeconds(int timeoutSeconds) {
+        toolOptions.setInt(MCP_REQUEST_TIMEOUT_SECONDS, timeoutSeconds);
         // optionsChanged() will be called automatically
     }
     

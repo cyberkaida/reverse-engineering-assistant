@@ -1,5 +1,6 @@
 {
   "permissions": {
+    "additionalDirectories": ["../ghidra"],
     "allow": [
       "Search(path:../ghidra)",
       "Read(../ghidra/**)"

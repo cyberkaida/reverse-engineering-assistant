@@ -16,7 +16,7 @@
 package reva.plugin;
 
 import ghidra.app.plugin.PluginCategoryNames;
-import ghidra.framework.main.ApplicationLevelPlugin;
+import ghidra.framework.main.ApplicationLevelOnlyPlugin;
 import ghidra.framework.main.FrontEndService;
 import ghidra.framework.model.Project;
 import ghidra.framework.model.ProjectListener;
@@ -38,7 +38,7 @@ import reva.util.RevaInternalServiceRegistry;
  * running even when individual analysis tools are closed and reopened.
  */
 @PluginInfo(
-    status = PluginStatus.STABLE,
+    status = PluginStatus.RELEASED,
     packageName = "ReVa",
     category = PluginCategoryNames.COMMON,
     shortDescription = "ReVa Application Manager",
@@ -46,7 +46,7 @@ import reva.util.RevaInternalServiceRegistry;
     servicesProvided = { RevaMcpService.class },
     servicesRequired = { FrontEndService.class }
 )
-public class RevaApplicationPlugin extends Plugin implements ApplicationLevelPlugin, ProjectListener {
+public class RevaApplicationPlugin extends Plugin implements ApplicationLevelOnlyPlugin, ProjectListener {
     private McpServerManager serverManager;
     private FrontEndService frontEndService;
     private Project currentProject;
@@ -66,10 +66,10 @@ public class RevaApplicationPlugin extends Plugin implements ApplicationLevelPlu
 
         // Initialize the MCP server manager
         serverManager = new McpServerManager(tool);
-        
+
         // Register the service
         registerServiceProvided(RevaMcpService.class, serverManager);
-        
+
         // Make server manager available via service registry for backward compatibility
         RevaInternalServiceRegistry.registerService(McpServerManager.class, serverManager);
         RevaInternalServiceRegistry.registerService(RevaMcpService.class, serverManager);
@@ -95,7 +95,7 @@ public class RevaApplicationPlugin extends Plugin implements ApplicationLevelPlu
                 if (serverManager != null) {
                     serverManager.shutdown();
                 }
-            }, 
+            },
             ShutdownPriority.FIRST.after()
         );
 
@@ -105,28 +105,28 @@ public class RevaApplicationPlugin extends Plugin implements ApplicationLevelPlu
     @Override
     protected void dispose() {
         Msg.info(this, "ReVa Application Plugin disposing...");
-        
+
         // Remove project listener
         if (frontEndService != null) {
             frontEndService.removeProjectListener(this);
             frontEndService = null;
         }
-        
+
         // Clean up any active project state
         Project activeProject = tool.getProjectManager().getActiveProject();
         if (activeProject != null) {
             projectClosed(activeProject);
         }
-        
+
         // Shutdown the MCP server
         if (serverManager != null) {
             serverManager.shutdown();
             serverManager = null;
         }
-        
+
         // Clear service registry
         RevaInternalServiceRegistry.clearAllServices();
-        
+
         super.dispose();
         Msg.info(this, "ReVa Application Plugin disposed");
     }

@@ -35,9 +35,9 @@ import reva.util.RevaInternalServiceRegistry;
  * and handles program lifecycle events for this specific tool.
  */
 @PluginInfo(
-    status = PluginStatus.STABLE,
+    status = PluginStatus.RELEASED,
     packageName = "ReVa",
-    category = PluginCategoryNames.ANALYSIS,
+    category = PluginCategoryNames.COMMON,
     shortDescription = "Reverse Engineering Assistant (Tool)",
     description = "Tool-level ReVa plugin that connects to the application-level MCP server"
 )
@@ -63,12 +63,12 @@ public class RevaPlugin extends ProgramPlugin {
 
         // Get the MCP service from the application plugin
         mcpService = tool.getService(RevaMcpService.class);
-        
+
         // Fallback for testing environments where ApplicationLevelPlugin isn't available
         if (mcpService == null) {
             mcpService = RevaInternalServiceRegistry.getService(RevaMcpService.class);
         }
-        
+
         if (mcpService == null) {
             Msg.error(this, "RevaMcpService not available - RevaApplicationPlugin may not be loaded and no fallback service found");
             return;
@@ -89,7 +89,7 @@ public class RevaPlugin extends ProgramPlugin {
         Msg.info(this, "Program opened: " + program.getName());
         // Notify the program manager to handle cache management
         RevaProgramManager.programOpened(program);
-        
+
         // Notify the MCP service about the program opening in this tool
         if (mcpService != null) {
             mcpService.programOpened(program, tool);
@@ -101,7 +101,7 @@ public class RevaPlugin extends ProgramPlugin {
         Msg.info(this, "Program closed: " + program.getName());
         // Notify the program manager to clear stale cache
         RevaProgramManager.programClosed(program);
-        
+
         // Notify the MCP service about the program closing in this tool
         if (mcpService != null) {
             mcpService.programClosed(program, tool);

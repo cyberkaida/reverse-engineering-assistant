@@ -51,7 +51,12 @@ export GHIDRA_INSTALL_DIR=/path/to/ghidra
 gradle
 ```
 
-Then install the extension (in `dist/`) using the Ghidra extension manager.
+Then install the extension (in `dist/`) using the Ghidra extension manager. You can also extract the release zip to
+the Ghidra extensions directory globally at `${GHIDRA_INSTALL_DIR}/Ghidra/Extensions`.
+
+After installing the extension you need to activate it in two places:
+1. In the Project view, open the File menu and select "Configure". Click the "Configure all plugins" button on the top right of the menu (it looks like a plug). Check the "ReVa Application Plugin"
+2. In the Code Browser tool (Click the Dragon icon or open a File), open the File menu and select "Configure". Click the "Configure all plugins" button on the top right of the menu (it looks like a plug). Check the "ReVa Plugin". Then Press File and select "Save Tool". This will enable ReVa by default.
 
 ## MCP configuration
 ReVa uses the [Model Context Protocol (MCP)](https://modelcontextprotocol.io/faqs) to communicate with the LLM.

@@ -31,6 +31,7 @@ import ghidra.program.model.symbol.Symbol;
 import ghidra.program.model.symbol.SymbolTable;
 import ghidra.util.Msg;
 import reva.util.AddressUtil;
+import reva.util.DebugLogger;
 import io.modelcontextprotocol.server.McpServerFeatures.SyncToolSpecification;
 import reva.plugin.RevaProgramManager;
 import io.modelcontextprotocol.server.McpSyncServer;
@@ -49,6 +50,7 @@ public abstract class AbstractToolProvider implements ToolProvider {
     protected static final ObjectMapper JSON = new ObjectMapper();
     protected final McpSyncServer server;
     protected final List<Tool> registeredTools = new ArrayList<>();
+    private static final java.util.concurrent.atomic.AtomicLong requestCounter = new java.util.concurrent.atomic.AtomicLong(0);
 
     /**
      * Constructor
@@ -135,16 +137,44 @@ public abstract class AbstractToolProvider implements ToolProvider {
      * @throws McpError if there's an error registering the tool
      */
     protected void registerTool(Tool tool, java.util.function.BiFunction<io.modelcontextprotocol.server.McpSyncServerExchange, java.util.Map<String, Object>, McpSchema.CallToolResult> handler) throws McpError {
-        // Wrap the handler with safe execution
+        // Wrap the handler with safe execution and request lifecycle logging
         java.util.function.BiFunction<io.modelcontextprotocol.server.McpSyncServerExchange, java.util.Map<String, Object>, McpSchema.CallToolResult> safeHandler = 
             (exchange, args) -> {
+                long startTime = System.currentTimeMillis();
+                long requestId = requestCounter.incrementAndGet();
+                String sessionId = "req-" + requestId; // Generate a request-specific ID for tracking
+                String toolName = tool.name();
+                
+                // Log request start with key parameters
+                String details = summarizeToolArgs(args);
+                DebugLogger.debugMcpRequestStart(this, sessionId, requestId, "tools/call[" + toolName + "]", details);
+                
                 try {
-                    return handler.apply(exchange, args);
+                    McpSchema.CallToolResult result = handler.apply(exchange, args);
+                    long duration = System.currentTimeMillis() - startTime;
+                    
+                    if (result.isError()) {
+                        DebugLogger.debugMcpRequestError(this, sessionId, requestId, "tools/call[" + toolName + "]", 
+                                                        duration, "Tool returned error result");
+                    } else {
+                        DebugLogger.debugMcpRequestSuccess(this, sessionId, requestId, "tools/call[" + toolName + "]", duration);
+                    }
+                    
+                    return result;
                 } catch (IllegalArgumentException e) {
+                    long duration = System.currentTimeMillis() - startTime;
+                    DebugLogger.debugMcpRequestError(this, sessionId, requestId, "tools/call[" + toolName + "]", 
+                                                    duration, "Invalid arguments: " + e.getMessage());
                     return createErrorResult(e.getMessage());
                 } catch (ProgramValidationException e) {
+                    long duration = System.currentTimeMillis() - startTime;
+                    DebugLogger.debugMcpRequestError(this, sessionId, requestId, "tools/call[" + toolName + "]", 
+                                                    duration, "Program validation failed: " + e.getMessage());
                     return createErrorResult(e.getMessage());
                 } catch (Exception e) {
+                    long duration = System.currentTimeMillis() - startTime;
+                    DebugLogger.debugMcpRequestError(this, sessionId, requestId, "tools/call[" + toolName + "]", 
+                                                    duration, "Unexpected error: " + e.getMessage());
                     logError("Unexpected error in tool execution", e);
                     return createErrorResult("Tool execution failed: " + e.getMessage());
                 }
@@ -179,6 +209,41 @@ public abstract class AbstractToolProvider implements ToolProvider {
      */
     protected void logInfo(String message) {
         Msg.info(this, message);
+    }
+
+    /**
+     * Create a summary of tool arguments for logging
+     * @param args The tool arguments
+     * @return A concise summary string
+     */
+    private String summarizeToolArgs(Map<String, Object> args) {
+        if (args == null || args.isEmpty()) {
+            return "no args";
+        }
+        
+        // For key parameters, show their values; for others just show presence
+        StringBuilder summary = new StringBuilder();
+        String[] keyParams = {"programPath", "functionNameOrAddress", "address", "name", "toolName", "method"};
+        
+        for (String param : keyParams) {
+            Object value = args.get(param);
+            if (value != null) {
+                if (summary.length() > 0) summary.append(", ");
+                summary.append(param).append("=").append(value);
+            }
+        }
+        
+        if (summary.length() == 0) {
+            // If no key params found, show first few param names
+            int count = 0;
+            for (String key : args.keySet()) {
+                if (count > 0) summary.append(", ");
+                summary.append(key);
+                if (++count >= 3) break;
+            }
+        }
+        
+        return summary.toString();
     }
 
     /**

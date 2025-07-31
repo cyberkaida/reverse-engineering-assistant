@@ -421,12 +421,37 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
         // Shut down the HTTP server
         if (httpServer != null) {
             try {
+                // Stop the server and wait for it to fully shut down
                 httpServer.stop();
+                
+                // Wait for the server to completely stop and release the port
+                int maxWaitTime = 5000; // 5 seconds
+                int waitInterval = 100; // 100ms
+                int totalWait = 0;
+                
+                while (httpServer.isRunning() && totalWait < maxWaitTime) {
+                    try {
+                        Thread.sleep(waitInterval);
+                        totalWait += waitInterval;
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        Msg.warn(this, "Interrupted while waiting for server shutdown");
+                        break;
+                    }
+                }
+                
+                if (httpServer.isRunning()) {
+                    Msg.warn(this, "Server did not stop within timeout, proceeding anyway");
+                    DebugLogger.debugConnection(this, "Server shutdown timeout after " + maxWaitTime + "ms");
+                } else {
+                    DebugLogger.debugConnection(this, "HTTP server stopped successfully");
+                }
+                
                 httpServer = null;
-                DebugLogger.debugConnection(this, "HTTP server stopped successfully");
             } catch (Exception e) {
                 Msg.error(this, "Error stopping HTTP server", e);
                 DebugLogger.debugConnection(this, "HTTP server shutdown failed: " + e.getMessage());
+                httpServer = null; // Set to null anyway to avoid inconsistent state
             }
         }
         

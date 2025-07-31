@@ -116,7 +116,7 @@ public class DataToolProviderIntegrationTest extends RevaIntegrationTestBase {
 
         // Verify the config manager and server port are available
         assertNotNull("Config manager should be available", configManager);
-        assertEquals("Server port should be 8080", 8080, configManager.getServerPort());
+        assertTrue("Server port should be set", configManager.getServerPort() > 0);
 
         // Verify that addresses are in the expected memory space
         assertEquals("Test address 1 should be in default space",

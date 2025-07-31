@@ -98,6 +98,11 @@ public abstract class RevaIntegrationTestBase extends AbstractGhidraHeadedIntegr
     private static void setupSharedMcpServices() {
         // Create and register shared ConfigManager
         sharedConfigManager = new ConfigManager(sharedTool);
+        
+        // Use a random port to avoid conflicts with other tests or running servers
+        int randomPort = 8080 + (int)(Math.random() * 1000);
+        sharedConfigManager.setServerPort(randomPort);
+        
         reva.util.RevaInternalServiceRegistry.registerService(ConfigManager.class, sharedConfigManager);
 
         // Create and register shared McpServerManager

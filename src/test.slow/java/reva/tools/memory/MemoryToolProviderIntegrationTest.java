@@ -73,7 +73,7 @@ public class MemoryToolProviderIntegrationTest extends RevaIntegrationTestBase {
         
         // Verify the config manager and server port are available
         assertNotNull("Config manager should be available", configManager);
-        assertEquals("Server port should be 8080", 8080, configManager.getServerPort());
+        assertTrue("Server port should be set", configManager.getServerPort() > 0);
         
         // Verify that we have a usable memory space
         assertNotNull("Program should have memory", program.getMemory());

@@ -81,6 +81,7 @@ public class DataToolProvider extends AbstractToolProvider {
         // Create the tool
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("get-data")
+            .title("Get Data")
             .description("Get data at a specific address or symbol in a program")
             .inputSchema(createSchema(properties, required))
             .build();
@@ -125,6 +126,7 @@ public class DataToolProvider extends AbstractToolProvider {
         // Create the tool
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("apply-data-type")
+            .title("Apply Data Type")
             .description("Apply a data type to a specific address or symbol in a program")
             .inputSchema(createSchema(properties, required))
             .build();
@@ -227,6 +229,7 @@ public class DataToolProvider extends AbstractToolProvider {
         // Create the tool
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("create-label")
+            .title("Create Label")
             .description("Create a label at a specific address in a program")
             .inputSchema(createSchema(properties, required))
             .build();

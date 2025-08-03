@@ -74,6 +74,7 @@ public class ProjectToolProvider extends AbstractToolProvider {
         // Create the tool
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("get-current-program")
+            .title("Get Current Program")
             .description("Get the currently active program in Ghidra")
             .inputSchema(createSchema(properties, required))
             .build();
@@ -128,6 +129,7 @@ public class ProjectToolProvider extends AbstractToolProvider {
         // Create the tool
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("list-project-files")
+            .title("List Project Files")
             .description("List files and folders in the Ghidra project")
             .inputSchema(createSchema(properties, required))
             .build();
@@ -204,6 +206,7 @@ public class ProjectToolProvider extends AbstractToolProvider {
         // Create the tool
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("list-open-programs")
+            .title("List Open Programs")
             .description("List all programs currently open in Ghidra across all tools")
             .inputSchema(createSchema(properties, required))
             .build();
@@ -271,6 +274,7 @@ public class ProjectToolProvider extends AbstractToolProvider {
         // Create the tool
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("checkin-program")
+            .title("Check In Program")
             .description("Check in (commit) a program to version control with a message")
             .inputSchema(createSchema(properties, required))
             .build();

@@ -65,6 +65,7 @@ public class MemoryToolProvider extends AbstractToolProvider {
         // Create the tool
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("get-memory-blocks")
+            .title("Get Memory Blocks")
             .description("Get memory blocks from the selected program")
             .inputSchema(createSchema(properties, required))
             .build();
@@ -117,6 +118,7 @@ public class MemoryToolProvider extends AbstractToolProvider {
         // Create the tool
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("read-memory")
+            .title("Read Memory")
             .description("Read memory at a specific address")
             .inputSchema(createSchema(properties, required))
             .build();

@@ -77,6 +77,7 @@ public class SymbolToolProvider extends AbstractToolProvider {
         // Create the tool
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("get-symbols-count")
+            .title("Get Symbols Count")
             .description("Get the total count of symbols in the program (use this before calling get-symbols to plan pagination)")
             .inputSchema(createSchema(properties, required))
             .build();
@@ -151,6 +152,7 @@ public class SymbolToolProvider extends AbstractToolProvider {
         // Create the tool
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("get-symbols")
+            .title("Get Symbols")
             .description("Get symbols from the selected program with pagination (use get-symbols-count first to determine total count)")
             .inputSchema(createSchema(properties, required))
             .build();

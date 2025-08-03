@@ -72,6 +72,7 @@ public class BookmarkToolProvider extends AbstractToolProvider {
 
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("set-bookmark")
+            .title("Set Bookmark")
             .description("Set or update a bookmark at a specific address. Used to keep track of important locations in the program.")
             .inputSchema(createSchema(properties, required))
             .build();
@@ -144,6 +145,7 @@ public class BookmarkToolProvider extends AbstractToolProvider {
 
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("get-bookmarks")
+            .title("Get Bookmarks")
             .description("Get bookmarks at a specific address or within an address range")
             .inputSchema(createSchema(properties, required))
             .build();
@@ -233,6 +235,7 @@ public class BookmarkToolProvider extends AbstractToolProvider {
 
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("remove-bookmark")
+            .title("Remove Bookmark")
             .description("Remove a specific bookmark")
             .inputSchema(createSchema(properties, required))
             .build();
@@ -310,6 +313,7 @@ public class BookmarkToolProvider extends AbstractToolProvider {
 
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("search-bookmarks")
+            .title("Search Bookmarks")
             .description("Search for bookmarks by text, type, category, or address range")
             .inputSchema(createSchema(properties, required))
             .build();
@@ -394,6 +398,7 @@ public class BookmarkToolProvider extends AbstractToolProvider {
 
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("list-bookmark-categories")
+            .title("List Bookmark Categories")
             .description("List all categories for a given bookmark type")
             .inputSchema(createSchema(properties, required))
             .build();

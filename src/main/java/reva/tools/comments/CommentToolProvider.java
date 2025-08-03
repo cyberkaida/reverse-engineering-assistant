@@ -81,6 +81,7 @@ public class CommentToolProvider extends AbstractToolProvider {
 
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("set-comment")
+            .title("Set Comment")
             .description("Set or update a comment at a specific address. Use this to keep notes or annotations for yourself and the human.")
             .inputSchema(createSchema(properties, required))
             .build();
@@ -151,6 +152,7 @@ public class CommentToolProvider extends AbstractToolProvider {
 
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("get-comments")
+            .title("Get Comments")
             .description("Get comments at a specific address or within an address range")
             .inputSchema(createSchema(properties, required))
             .build();
@@ -241,6 +243,7 @@ public class CommentToolProvider extends AbstractToolProvider {
 
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("remove-comment")
+            .title("Remove Comment")
             .description("Remove a specific comment at an address")
             .inputSchema(createSchema(properties, required))
             .build();
@@ -301,6 +304,7 @@ public class CommentToolProvider extends AbstractToolProvider {
 
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("search-comments")
+            .title("Search Comments")
             .description("Search for comments containing specific text")
             .inputSchema(createSchema(properties, required))
             .build();

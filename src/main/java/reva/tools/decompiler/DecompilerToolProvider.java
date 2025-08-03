@@ -162,6 +162,7 @@ public class DecompilerToolProvider extends AbstractToolProvider {
         // Create the tool
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("get-decompilation")
+            .title("Get Function Decompilation")
             .description("Get decompiled code for a function with line range support. Defaults to 50 lines to conserve context - start with small chunks (10-20 lines) then expand as needed using offset/limit. Updating variable data types and names can significantly improve decompilation quality.")
             .inputSchema(createSchema(properties, required))
             .build();
@@ -357,6 +358,7 @@ public class DecompilerToolProvider extends AbstractToolProvider {
         // Create the tool
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("search-decompilation")
+            .title("Search Function Decompilations")
             .description("Search for patterns across all function decompilations in a program. Returns function names and line numbers where patterns match. If looking for calls or references to data, try the cross reference tools first.")
             .inputSchema(createSchema(properties, required))
             .build();
@@ -428,6 +430,7 @@ public class DecompilerToolProvider extends AbstractToolProvider {
         // Create the tool
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("rename-variables")
+            .title("Rename Function Variables")
             .description("Rename variables in a decompiled function")
             .inputSchema(createSchema(properties, required))
             .build();
@@ -630,6 +633,7 @@ public class DecompilerToolProvider extends AbstractToolProvider {
         // Create the tool
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("change-variable-datatypes")
+            .title("Change Variable Data Types")
             .description("Change data types of variables in a decompiled function")
             .inputSchema(createSchema(properties, required))
             .build();
@@ -1288,6 +1292,7 @@ public class DecompilerToolProvider extends AbstractToolProvider {
         // Create the tool
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("set-decompilation-comment")
+            .title("Add Decompilation Comment")
             .description("Set a comment at a specific line in decompiled code. The comment will be placed at the address corresponding to the decompilation line.")
             .inputSchema(createSchema(properties, required))
             .build();

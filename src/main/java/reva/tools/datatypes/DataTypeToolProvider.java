@@ -71,6 +71,7 @@ public class DataTypeToolProvider extends AbstractToolProvider {
         // Create the tool
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("get-data-type-archives")
+            .title("Get Data Type Archives")
             .description("Get data type archives for a specific program")
             .inputSchema(createSchema(properties, required))
             .build();
@@ -224,6 +225,7 @@ public class DataTypeToolProvider extends AbstractToolProvider {
         // Create the tool
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("get-data-types")
+            .title("Get Data Types")
             .description("Get data types from a data type archive")
             .inputSchema(createSchema(properties, required))
             .build();
@@ -338,6 +340,7 @@ public class DataTypeToolProvider extends AbstractToolProvider {
         // Create the tool
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("get-data-type-by-string")
+            .title("Get Data Type by String")
             .description("Get a data type by its string representation")
             .inputSchema(createSchema(properties, required))
             .build();

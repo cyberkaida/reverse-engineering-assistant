@@ -113,6 +113,7 @@ public class CrossReferencesToolProvider extends AbstractToolProvider {
         // Create the tool
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("find-cross-references")
+            .title("Find Cross References")
             .description("Find all references to or from a memory location, symbol, or function. Returns incoming and/or outgoing references with optional decompilation context.")
             .inputSchema(createSchema(properties, required))
             .build();

@@ -80,6 +80,7 @@ public class StructureToolProvider extends AbstractToolProvider {
 
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("parse-c-structure")
+            .title("Parse C Structure")
             .description("Parse and create structures from C-style definitions")
             .inputSchema(createSchema(properties, required))
             .build();
@@ -142,6 +143,7 @@ public class StructureToolProvider extends AbstractToolProvider {
 
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("validate-c-structure")
+            .title("Validate C Structure")
             .description("Validate C-style structure definition without creating it")
             .inputSchema(createSchema(properties, required))
             .build();
@@ -211,6 +213,7 @@ public class StructureToolProvider extends AbstractToolProvider {
 
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("create-structure")
+            .title("Create Structure")
             .description("Create a new empty structure or union")
             .inputSchema(createSchema(properties, required))
             .build();
@@ -295,6 +298,7 @@ public class StructureToolProvider extends AbstractToolProvider {
 
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("add-structure-field")
+            .title("Add Structure Field")
             .description("Add a field to an existing structure")
             .inputSchema(createSchema(properties, required))
             .build();
@@ -412,6 +416,7 @@ public class StructureToolProvider extends AbstractToolProvider {
 
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("get-structure-info")
+            .title("Get Structure Info")
             .description("Get detailed information about a structure")
             .inputSchema(createSchema(properties, required))
             .build();
@@ -456,6 +461,7 @@ public class StructureToolProvider extends AbstractToolProvider {
 
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("list-structures")
+            .title("List Structures")
             .description("List all structures in a program")
             .inputSchema(createSchema(properties, required))
             .build();
@@ -526,6 +532,7 @@ public class StructureToolProvider extends AbstractToolProvider {
 
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("apply-structure")
+            .title("Apply Structure")
             .description("Apply a structure at a specific address")
             .inputSchema(createSchema(properties, required))
             .build();
@@ -605,6 +612,7 @@ public class StructureToolProvider extends AbstractToolProvider {
 
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("delete-structure")
+            .title("Delete Structure")
             .description("Delete a structure from the program")
             .inputSchema(createSchema(properties, required))
             .build();
@@ -663,6 +671,7 @@ public class StructureToolProvider extends AbstractToolProvider {
 
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("parse-c-header")
+            .title("Parse C Header")
             .description("Parse an entire C header file and create all structures")
             .inputSchema(createSchema(properties, required))
             .build();

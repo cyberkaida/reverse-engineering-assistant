@@ -6,5 +6,8 @@
       "Read(../ghidra/**)"
     ],
     "deny": []
+  },
+  "hooks": {
+    "afterWrite": "gradle compileJava"
   }
 }

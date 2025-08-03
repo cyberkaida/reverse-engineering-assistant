@@ -96,6 +96,24 @@ public abstract class RevaIntegrationTestBase extends AbstractGhidraHeadedIntegr
      * Set up shared MCP server services for the entire test class.
      */
     private static void setupSharedMcpServices() {
+        // Check if an MCP server is already running from the main plugin
+        McpServerManager existingServerManager = reva.util.RevaInternalServiceRegistry.getService(McpServerManager.class);
+        ConfigManager existingConfigManager = reva.util.RevaInternalServiceRegistry.getService(ConfigManager.class);
+        
+        if (existingServerManager != null && existingServerManager.isServerRunning()) {
+            // Gracefully shutdown the existing server before starting test server
+            System.out.println("Found existing MCP server, shutting it down gracefully...");
+            existingServerManager.shutdown();
+            
+            // Clear the existing services to avoid conflicts
+            reva.util.RevaInternalServiceRegistry.unregisterService(McpServerManager.class);
+            reva.util.RevaInternalServiceRegistry.unregisterService(reva.services.RevaMcpService.class);
+        }
+        
+        if (existingConfigManager != null) {
+            reva.util.RevaInternalServiceRegistry.unregisterService(ConfigManager.class);
+        }
+
         // Create and register shared ConfigManager
         sharedConfigManager = new ConfigManager(sharedTool);
         reva.util.RevaInternalServiceRegistry.registerService(ConfigManager.class, sharedConfigManager);

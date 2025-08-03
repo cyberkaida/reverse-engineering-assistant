@@ -69,18 +69,18 @@ public class DataTypeToolProvider extends AbstractToolProvider {
         List<String> required = List.of("programPath");
 
         // Create the tool
-        McpSchema.Tool tool = new McpSchema.Tool(
-            "get-data-type-archives",
-            "Get data type archives for a specific program",
-            createSchema(properties, required)
-        );
+        McpSchema.Tool tool = McpSchema.Tool.builder()
+            .name("get-data-type-archives")
+            .description("Get data type archives for a specific program")
+            .inputSchema(createSchema(properties, required))
+            .build();
 
         // Register the tool with a handler
-        registerTool(tool, (exchange, args) -> {
+        registerTool(tool, (exchange, request) -> {
             // Get the required program path from the request
             String programPath;
             try {
-                programPath = getString(args, "programPath");
+                programPath = getString(request, "programPath");
             } catch (IllegalArgumentException e) {
                 return createErrorResult(e.getMessage());
             }
@@ -222,29 +222,29 @@ public class DataTypeToolProvider extends AbstractToolProvider {
         List<String> required = List.of("programPath", "archiveName");
 
         // Create the tool
-        McpSchema.Tool tool = new McpSchema.Tool(
-            "get-data-types",
-            "Get data types from a data type archive",
-            createSchema(properties, required)
-        );
+        McpSchema.Tool tool = McpSchema.Tool.builder()
+            .name("get-data-types")
+            .description("Get data types from a data type archive")
+            .inputSchema(createSchema(properties, required))
+            .build();
 
         // Register the tool with a handler
-        registerTool(tool, (exchange, args) -> {
+        registerTool(tool, (exchange, request) -> {
             // Get the required parameters from the request  
             String programPath;
             String archiveName;
             try {
-                programPath = getString(args, "programPath");
-                archiveName = getString(args, "archiveName");
+                programPath = getString(request, "programPath");
+                archiveName = getString(request, "archiveName");
             } catch (IllegalArgumentException e) {
                 return createErrorResult(e.getMessage());
             }
 
             // Get pagination parameters
-            String categoryPath = getOptionalString(args, "categoryPath", "/");
-            boolean includeSubcategories = getOptionalBoolean(args, "includeSubcategories", false);
-            int startIndex = getOptionalInt(args, "startIndex", 0);
-            int maxCount = getOptionalInt(args, "maxCount", 100);
+            String categoryPath = getOptionalString(request, "categoryPath", "/");
+            boolean includeSubcategories = getOptionalBoolean(request, "includeSubcategories", false);
+            int startIndex = getOptionalInt(request, "startIndex", 0);
+            int maxCount = getOptionalInt(request, "maxCount", 100);
 
             // Validate that the program exists
             Program targetProgram = RevaProgramManager.getProgramByPath(programPath);
@@ -336,26 +336,26 @@ public class DataTypeToolProvider extends AbstractToolProvider {
         List<String> required = List.of("programPath", "dataTypeString");
 
         // Create the tool
-        McpSchema.Tool tool = new McpSchema.Tool(
-            "get-data-type-by-string",
-            "Get a data type by its string representation",
-            createSchema(properties, required)
-        );
+        McpSchema.Tool tool = McpSchema.Tool.builder()
+            .name("get-data-type-by-string")
+            .description("Get a data type by its string representation")
+            .inputSchema(createSchema(properties, required))
+            .build();
 
         // Register the tool with a handler
-        registerTool(tool, (exchange, args) -> {
+        registerTool(tool, (exchange, request) -> {
             // Get the required parameters from the request
             String programPath;
             String dataTypeString;
             try {
-                programPath = getString(args, "programPath");
-                dataTypeString = getString(args, "dataTypeString");
+                programPath = getString(request, "programPath");
+                dataTypeString = getString(request, "dataTypeString");
             } catch (IllegalArgumentException e) {
                 return createErrorResult(e.getMessage());
             }
 
             // Get the optional archive name
-            String archiveName = getOptionalString(args, "archiveName", "");
+            String archiveName = getOptionalString(request, "archiveName", "");
 
             // Validate that the program exists
             Program targetProgram = RevaProgramManager.getProgramByPath(programPath);

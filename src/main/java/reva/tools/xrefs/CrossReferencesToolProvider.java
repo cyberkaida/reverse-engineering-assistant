@@ -111,27 +111,27 @@ public class CrossReferencesToolProvider extends AbstractToolProvider {
         List<String> required = List.of("programPath", "location");
 
         // Create the tool
-        McpSchema.Tool tool = new McpSchema.Tool(
-            "find-cross-references",
-            "Find all references to or from a memory location, symbol, or function. Returns incoming and/or outgoing references with optional decompilation context.",
-            createSchema(properties, required)
-        );
+        McpSchema.Tool tool = McpSchema.Tool.builder()
+            .name("find-cross-references")
+            .description("Find all references to or from a memory location, symbol, or function. Returns incoming and/or outgoing references with optional decompilation context.")
+            .inputSchema(createSchema(properties, required))
+            .build();
 
         // Register the tool with a handler
-        registerTool(tool, (exchange, args) -> {
+        registerTool(tool, (exchange, request) -> {
             try {
                 // Get program and parameters using helper methods
-                Program program = getProgramFromArgs(args);
-                Address address = getAddressFromArgs(args, program, "location");
+                Program program = getProgramFromArgs(request);
+                Address address = getAddressFromArgs(request, program, "location");
                 
                 // Get parameters
-                String direction = getOptionalString(args, "direction", "both");
-                boolean includeFlow = getOptionalBoolean(args, "includeFlow", true);
-                boolean includeData = getOptionalBoolean(args, "includeData", true);
-                boolean includeContext = getOptionalBoolean(args, "includeContext", false);
-                int contextLines = getOptionalInt(args, "contextLines", 2);
-                int offset = getOptionalInt(args, "offset", 0);
-                int limit = getOptionalInt(args, "limit", 100);
+                String direction = getOptionalString(request, "direction", "both");
+                boolean includeFlow = getOptionalBoolean(request, "includeFlow", true);
+                boolean includeData = getOptionalBoolean(request, "includeData", true);
+                boolean includeContext = getOptionalBoolean(request, "includeContext", false);
+                int contextLines = getOptionalInt(request, "contextLines", 2);
+                int offset = getOptionalInt(request, "offset", 0);
+                int limit = getOptionalInt(request, "limit", 100);
                 
                 // Validate parameters
                 if (offset < 0) offset = 0;

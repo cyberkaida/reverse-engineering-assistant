@@ -89,17 +89,17 @@ public class FunctionToolProvider extends AbstractToolProvider {
         List<String> required = List.of("programPath");
 
         // Create the tool
-        McpSchema.Tool tool = new McpSchema.Tool(
-            "get-function-count",
-            "Get the total count of functions in the program (use this before calling get-functions to plan pagination)",
-            createSchema(properties, required)
-        );
+        McpSchema.Tool tool = McpSchema.Tool.builder()
+            .name("get-function-count")
+            .description("Get the total count of functions in the program (use this before calling get-functions to plan pagination)")
+            .inputSchema(createSchema(properties, required))
+            .build();
 
         // Register the tool with a handler
-        registerTool(tool, (exchange, args) -> {
+        registerTool(tool, (exchange, request) -> {
             // Get program and parameters using helper methods
-            Program program = getProgramFromArgs(args);
-            boolean filterDefaultNames = getOptionalBoolean(args, "filterDefaultNames", true);
+            Program program = getProgramFromArgs(request);
+            boolean filterDefaultNames = getOptionalBoolean(request, "filterDefaultNames", true);
 
             AtomicInteger count = new AtomicInteger(0);
 
@@ -153,18 +153,18 @@ public class FunctionToolProvider extends AbstractToolProvider {
         List<String> required = List.of("programPath");
 
         // Create the tool
-        McpSchema.Tool tool = new McpSchema.Tool(
-            "get-functions",
-            "Get functions from the selected program (use get-function-count to determine the total count)",
-            createSchema(properties, required)
-        );
+        McpSchema.Tool tool = McpSchema.Tool.builder()
+            .name("get-functions")
+            .description("Get functions from the selected program (use get-function-count to determine the total count)")
+            .inputSchema(createSchema(properties, required))
+            .build();
 
         // Register the tool with a handler
-        registerTool(tool, (exchange, args) -> {
+        registerTool(tool, (exchange, request) -> {
             // Get program and parameters using helper methods
-            Program program = getProgramFromArgs(args);
-            PaginationParams pagination = getPaginationParams(args);
-            boolean filterDefaultNames = getOptionalBoolean(args, "filterDefaultNames", true);
+            Program program = getProgramFromArgs(request);
+            PaginationParams pagination = getPaginationParams(request);
+            boolean filterDefaultNames = getOptionalBoolean(request, "filterDefaultNames", true);
 
             // Get the functions from the program
             List<Map<String, Object>> functionData = new ArrayList<>();
@@ -247,19 +247,19 @@ public class FunctionToolProvider extends AbstractToolProvider {
         List<String> required = List.of("programPath", "searchString");
 
         // Create the tool
-        McpSchema.Tool tool = new McpSchema.Tool(
-            "get-functions-by-similarity",
-            "Get functions from the selected program with pagination, sorted by similarity to a given function name (use get-function-count first to determine total count)",
-            createSchema(properties, required)
-        );
+        McpSchema.Tool tool = McpSchema.Tool.builder()
+            .name("get-functions-by-similarity")
+            .description("Get functions from the selected program with pagination, sorted by similarity to a given function name (use get-function-count first to determine total count)")
+            .inputSchema(createSchema(properties, required))
+            .build();
 
         // Register the tool with a handler
-        registerTool(tool, (exchange, args) -> {
+        registerTool(tool, (exchange, request) -> {
             // Get program and parameters using helper methods
-            Program program = getProgramFromArgs(args);
-            String searchString = getString(args, "searchString");
-            PaginationParams pagination = getPaginationParams(args);
-            boolean filterDefaultNames = getOptionalBoolean(args, "filterDefaultNames", true);
+            Program program = getProgramFromArgs(request);
+            String searchString = getString(request, "searchString");
+            PaginationParams pagination = getPaginationParams(request);
+            boolean filterDefaultNames = getOptionalBoolean(request, "filterDefaultNames", true);
 
             if (searchString.trim().isEmpty()) {
                 return createErrorResult("Search string cannot be empty");
@@ -384,23 +384,23 @@ public class FunctionToolProvider extends AbstractToolProvider {
         List<String> required = List.of("programPath", "location", "signature");
 
         // Create the tool
-        McpSchema.Tool tool = new McpSchema.Tool(
-            "set-function-prototype",
-            "Set or update a function prototype using C-style function signatures. Can create new functions or update existing ones.",
-            createSchema(properties, required)
-        );
+        McpSchema.Tool tool = McpSchema.Tool.builder()
+            .name("set-function-prototype")
+            .description("Set or update a function prototype using C-style function signatures. Can create new functions or update existing ones.")
+            .inputSchema(createSchema(properties, required))
+            .build();
 
         // Register the tool with a handler
-        registerTool(tool, (exchange, args) -> {
+        registerTool(tool, (exchange, request) -> {
             try {
                 // Get program and parameters using helper methods
-                Program program = getProgramFromArgs(args);
-                String location = getString(args, "location");
-                String signature = getString(args, "signature");
-                boolean createIfNotExists = getOptionalBoolean(args, "createIfNotExists", true);
+                Program program = getProgramFromArgs(request);
+                String location = getString(request, "location");
+                String signature = getString(request, "signature");
+                boolean createIfNotExists = getOptionalBoolean(request, "createIfNotExists", true);
 
                 // Resolve the address from location
-                Address address = getAddressFromArgs(args, program, "location");
+                Address address = getAddressFromArgs(request, program, "location");
                 if (address == null) {
                     return createErrorResult("Invalid address or symbol: " + location);
                 }

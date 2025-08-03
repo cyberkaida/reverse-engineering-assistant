@@ -79,17 +79,17 @@ public class DataToolProvider extends AbstractToolProvider {
         List<String> required = List.of("programPath", "addressOrSymbol");
 
         // Create the tool
-        McpSchema.Tool tool = new McpSchema.Tool(
-            "get-data",
-            "Get data at a specific address or symbol in a program",
-            createSchema(properties, required)
-        );
+        McpSchema.Tool tool = McpSchema.Tool.builder()
+            .name("get-data")
+            .description("Get data at a specific address or symbol in a program")
+            .inputSchema(createSchema(properties, required))
+            .build();
 
         // Register the tool with a handler
-        registerTool(tool, (exchange, args) -> {
+        registerTool(tool, (exchange, request) -> {
             // Get program and address using helper methods
-            Program program = getProgramFromArgs(args);
-            Address address = getAddressFromArgs(args, program, "addressOrSymbol");
+            Program program = getProgramFromArgs(request);
+            Address address = getAddressFromArgs(request, program, "addressOrSymbol");
 
             return getDataAtAddressResult(program, address);
         });
@@ -123,19 +123,19 @@ public class DataToolProvider extends AbstractToolProvider {
         List<String> required = List.of("programPath", "addressOrSymbol", "dataTypeString");
 
         // Create the tool
-        McpSchema.Tool tool = new McpSchema.Tool(
-            "apply-data-type",
-            "Apply a data type to a specific address or symbol in a program",
-            createSchema(properties, required)
-        );
+        McpSchema.Tool tool = McpSchema.Tool.builder()
+            .name("apply-data-type")
+            .description("Apply a data type to a specific address or symbol in a program")
+            .inputSchema(createSchema(properties, required))
+            .build();
 
         // Register the tool with a handler
-        registerTool(tool, (exchange, args) -> {
+        registerTool(tool, (exchange, request) -> {
             // Get program and parameters using helper methods
-            Program program = getProgramFromArgs(args);
-            Address targetAddress = getAddressFromArgs(args, program, "addressOrSymbol");
-            String dataTypeString = getString(args, "dataTypeString");
-            String archiveName = getOptionalString(args, "archiveName", "");
+            Program program = getProgramFromArgs(request);
+            Address targetAddress = getAddressFromArgs(request, program, "addressOrSymbol");
+            String dataTypeString = getString(request, "dataTypeString");
+            String archiveName = getOptionalString(request, "archiveName", "");
 
             if (dataTypeString.trim().isEmpty()) {
                 return createErrorResult("Data type string cannot be empty");
@@ -225,26 +225,26 @@ public class DataToolProvider extends AbstractToolProvider {
         List<String> required = List.of("programPath", "addressOrSymbol", "labelName");
 
         // Create the tool
-        McpSchema.Tool tool = new McpSchema.Tool(
-            "create-label",
-            "Create a label at a specific address in a program",
-            createSchema(properties, required)
-        );
+        McpSchema.Tool tool = McpSchema.Tool.builder()
+            .name("create-label")
+            .description("Create a label at a specific address in a program")
+            .inputSchema(createSchema(properties, required))
+            .build();
 
         // Register the tool with a handler
-        registerTool(tool, (exchange, args) -> {
+        registerTool(tool, (exchange, request) -> {
             // Get program and parameters using helper methods
             Program program;
             String labelName;
             Address address;
             try {
-                program = getProgramFromArgs(args);
-                labelName = getString(args, "labelName");
-                address = getAddressFromArgs(args, program, "addressOrSymbol");
+                program = getProgramFromArgs(request);
+                labelName = getString(request, "labelName");
+                address = getAddressFromArgs(request, program, "addressOrSymbol");
             } catch (IllegalArgumentException | ProgramValidationException e) {
                 return createErrorResult(e.getMessage());
             }
-            boolean setAsPrimary = getOptionalBoolean(args, "setAsPrimary", true);
+            boolean setAsPrimary = getOptionalBoolean(request, "setAsPrimary", true);
 
             if (labelName.trim().isEmpty()) {
                 return createErrorResult("Label name cannot be empty");

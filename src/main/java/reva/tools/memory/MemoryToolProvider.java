@@ -63,16 +63,16 @@ public class MemoryToolProvider extends AbstractToolProvider {
         List<String> required = List.of("programPath");
 
         // Create the tool
-        McpSchema.Tool tool = new McpSchema.Tool(
-            "get-memory-blocks",
-            "Get memory blocks from the selected program",
-            createSchema(properties, required)
-        );
+        McpSchema.Tool tool = McpSchema.Tool.builder()
+            .name("get-memory-blocks")
+            .description("Get memory blocks from the selected program")
+            .inputSchema(createSchema(properties, required))
+            .build();
 
         // Add the tool using the parent's method
-        super.registerTool(tool, (exchange, args) -> {
+        super.registerTool(tool, (exchange, request) -> {
             // Get program using helper method
-            Program program = getProgramFromArgs(args);
+            Program program = getProgramFromArgs(request);
 
             // Get the memory from the program
             Memory memory = program.getMemory();
@@ -115,26 +115,26 @@ public class MemoryToolProvider extends AbstractToolProvider {
         List<String> required = List.of("programPath", "addressOrSymbol");
 
         // Create the tool
-        McpSchema.Tool tool = new McpSchema.Tool(
-            "read-memory",
-            "Read memory at a specific address",
-            createSchema(properties, required)
-        );
+        McpSchema.Tool tool = McpSchema.Tool.builder()
+            .name("read-memory")
+            .description("Read memory at a specific address")
+            .inputSchema(createSchema(properties, required))
+            .build();
 
         // Add the tool using the parent's method
-        super.registerTool(tool, (exchange, args) -> {
+        super.registerTool(tool, (exchange, request) -> {
             // Get program and address using helper methods
-            Program program = getProgramFromArgs(args);
-            Address address = getAddressFromArgs(args, program, "addressOrSymbol");
+            Program program = getProgramFromArgs(request);
+            Address address = getAddressFromArgs(request, program, "addressOrSymbol");
 
             // Get the length from the request
-            int length = getOptionalInt(args, "length", 16);
+            int length = getOptionalInt(request, "length", 16);
             if (length <= 0) {
                 return createErrorResult("Invalid length: " + length);
             }
 
             // Get the format from the request
-            String format = getOptionalString(args, "format", "hex");
+            String format = getOptionalString(request, "format", "hex");
 
             // Read the memory
             byte[] bytes = MemoryUtil.readMemoryBytes(program, address, length);

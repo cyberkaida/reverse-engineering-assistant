@@ -73,7 +73,7 @@ After installing the extension you need to activate it in two places:
 
 ReVa uses the [Model Context Protocol (MCP)](https://modelcontextprotocol.io/faqs) to communicate with the LLM.
 
-ReVa uses the [SSE MCP transport](https://modelcontextprotocol.io/docs/concepts/transports#server-sent-events-sse)
+ReVa uses the [streamable MCP transport](https://modelcontextprotocol.io/docs/concepts/transports#server-sent-events-sse)
 and will listen on port `8080` by default, you can change this in the Ghidra settings from the project view.
 
 You will need to configure your MCP client to connect to ReVa, this depends on the client you are using.

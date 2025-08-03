@@ -34,7 +34,7 @@ import ghidra.util.Msg;
 
 import io.modelcontextprotocol.server.McpServer;
 import io.modelcontextprotocol.server.McpSyncServer;
-import io.modelcontextprotocol.server.transport.HttpServletSseServerTransportProvider;
+import io.modelcontextprotocol.server.transport.HttpServletStreamableServerTransportProvider;
 import io.modelcontextprotocol.spec.McpError;
 import io.modelcontextprotocol.spec.McpSchema;
 import reva.plugin.ConfigManager;
@@ -66,12 +66,11 @@ import reva.util.RevaInternalServiceRegistry;
 public class McpServerManager implements RevaMcpService, ConfigChangeListener {
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final String MCP_MSG_ENDPOINT = "/mcp/message";
-    private static final String MCP_SSE_ENDPOINT = "/mcp/sse";
     private static final String MCP_SERVER_NAME = "ReVa";
     private static final String MCP_SERVER_VERSION = "1.0.0";
 
     private final McpSyncServer server;
-    private HttpServletSseServerTransportProvider currentTransportProvider;
+    private HttpServletStreamableServerTransportProvider currentTransportProvider;
     private Server httpServer;
     private final GThreadPool threadPool;
     private final ConfigManager configManager;
@@ -378,12 +377,10 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
         int serverPort = configManager.getServerPort();
         String baseUrl = "http://localhost:" + serverPort;
 
-        // Create new transport provider with updated baseUrl
-        currentTransportProvider = HttpServletSseServerTransportProvider.builder()
-            .baseUrl(baseUrl)
+        // Create new transport provider with updated configuration
+        currentTransportProvider = HttpServletStreamableServerTransportProvider.builder()
             .objectMapper(JSON)
-            .messageEndpoint(MCP_MSG_ENDPOINT)
-            .sseEndpoint(MCP_SSE_ENDPOINT)
+            .mcpEndpoint(MCP_MSG_ENDPOINT)
             .build();
 
         Msg.info(this, "Recreated transport provider with baseUrl: " + baseUrl);

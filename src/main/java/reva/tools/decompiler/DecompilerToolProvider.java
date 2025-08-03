@@ -386,10 +386,8 @@ public class DecompilerToolProvider extends AbstractToolProvider {
                     ". Use 'overrideMaxFunctionsLimit' to bypass this check, but be aware it may take a long time. If possible, try the cross reference tools.");
             }
 
-            // TODO: In the future, when MCP's Java SDK supports it, we should report progress to the MCP client
-
-            // Perform the search
-            List<Map<String, Object>> searchResults = searchDecompilationInProgram(program, pattern, maxResults, caseSensitive);
+            // Perform the search with progress reporting
+            List<Map<String, Object>> searchResults = searchDecompilationInProgram(program, pattern, maxResults, caseSensitive, exchange);
 
             // Create result data
             Map<String, Object> resultData = new HashMap<>();
@@ -1048,7 +1046,7 @@ public class DecompilerToolProvider extends AbstractToolProvider {
      * @return List of search results
      */
     private List<Map<String, Object>> searchDecompilationInProgram(Program program, String pattern,
-            int maxResults, boolean caseSensitive) {
+            int maxResults, boolean caseSensitive, io.modelcontextprotocol.server.McpSyncServerExchange exchange) {
         List<Map<String, Object>> results = new ArrayList<>();
 
         try {
@@ -1067,10 +1065,24 @@ public class DecompilerToolProvider extends AbstractToolProvider {
             }
 
             try {
+                // Count total functions for progress tracking
+                int totalFunctions = program.getFunctionManager().getFunctionCount();
+                int processedFunctions = 0;
+                
+                // Generate unique progress token for this search
+                String progressToken = "search-" + System.currentTimeMillis();
+                
+                // Send initial progress notification
+                if (exchange != null) {
+                    exchange.progressNotification(new McpSchema.ProgressNotification(
+                        progressToken, 0.0, (double) totalFunctions, "Starting decompilation search..."));
+                }
+                
                 // Iterate through all functions
                 FunctionIterator functions = program.getFunctionManager().getFunctions(true);
                 while (functions.hasNext() && results.size() < maxResults) {
                     Function function = functions.next();
+                    processedFunctions++;
 
                     // Skip external functions
                     if (function.isExternal()) {
@@ -1115,6 +1127,22 @@ public class DecompilerToolProvider extends AbstractToolProvider {
                         // Skip this function if decompilation fails
                         logError("Failed to decompile function: " + function.getName(), e);
                         continue;
+                    }
+                    
+                    // Send progress update every 10 functions or when search is complete
+                    if (exchange != null && (processedFunctions % 10 == 0 || results.size() >= maxResults || !functions.hasNext())) {
+                        String message;
+                        if (results.size() >= maxResults) {
+                            message = String.format("Found %d matches (max results reached)", results.size());
+                        } else if (!functions.hasNext()) {
+                            message = String.format("Search complete - found %d matches", results.size());
+                        } else {
+                            message = String.format("Processed %d/%d functions - found %d matches so far", 
+                                processedFunctions, totalFunctions, results.size());
+                        }
+                        
+                        exchange.progressNotification(new McpSchema.ProgressNotification(
+                            progressToken, (double) processedFunctions, (double) totalFunctions, message));
                     }
                 }
             } finally {

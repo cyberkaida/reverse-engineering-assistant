@@ -88,8 +88,8 @@ dependencies {
 	implementation "io.modelcontextprotocol.sdk:mcp"
 	implementation "jakarta.servlet:jakarta.servlet-api:6.1.0"
 	// Add Jetty for embedded servlet support
-	implementation "org.eclipse.jetty:jetty-server:11.0.25"
-	implementation "org.eclipse.jetty:jetty-servlet:11.0.25"
+	implementation "org.eclipse.jetty:jetty-server:12.0.23"
+	implementation "org.eclipse.jetty:jetty-servlet:12.0.23"
 
 	// Testing dependencies
 	testImplementation "org.mockito:mockito-core:5.18.0"

@@ -65,6 +65,15 @@ sourceSets {
 
 configurations {
 	integrationTestImplementation.extendsFrom testImplementation
+	
+	// Force Jackson 2.17.0 to be compatible with MCP SDK requirements
+	all {
+		resolutionStrategy {
+			force 'com.fasterxml.jackson.core:jackson-core:2.17.0'
+			force 'com.fasterxml.jackson.core:jackson-databind:2.17.0'
+			force 'com.fasterxml.jackson.core:jackson-annotations:2.17.0'
+		}
+	}
 }
 
 repositories {
@@ -90,11 +99,15 @@ dependencies {
 	// Add Jetty for embedded servlet support
 	implementation "org.eclipse.jetty:jetty-server:11.0.25"
 	implementation "org.eclipse.jetty:jetty-servlet:11.0.25"
+	
+	// Force Jackson 2.17.0 to be compatible with MCP SDK requirements
+	implementation "com.fasterxml.jackson.core:jackson-core:2.17.0"
+	implementation "com.fasterxml.jackson.core:jackson-databind:2.17.0" 
+	implementation "com.fasterxml.jackson.core:jackson-annotations:2.17.0"
 
 	// Testing dependencies
 	testImplementation "org.mockito:mockito-core:5.18.0"
 	testImplementation "org.mockito:mockito-inline:5.2.0"
-	testImplementation "com.fasterxml.jackson.core:jackson-databind:2.19.1"
 
 	// Ghidra test dependencies
 	testImplementation "org.hamcrest:hamcrest:3.0"

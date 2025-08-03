@@ -1,3 +1,4 @@
 - To run the tests, don't use a gradle wrapper. You can do commands like `gradle test --info`.
 - When working on tools, you can run the integration tests with `gradle integrationTest --info`
 - The ghidra source code is at "../ghidra"
+- You can't use curl during the tests to test the MCP server, you need to debug from within the tests. Try increasing logging or modifying a test.

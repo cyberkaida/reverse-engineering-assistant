@@ -123,8 +123,26 @@ public class DecompilerToolProviderIntegrationTest extends RevaIntegrationTestBa
 
     @Test
     public void testGetDecompiledFunctionSuccess() throws Exception {
+        // First test basic HTTP connectivity
+        try {
+            java.net.URL url = java.net.URI.create("http://localhost:8080/").toURL();
+            java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
+            conn.setRequestMethod("GET");
+            conn.setConnectTimeout(1000);
+            conn.setReadTimeout(1000);
+            int responseCode = conn.getResponseCode();
+            System.out.println("DEBUG: Basic HTTP GET to / returned: " + responseCode);
+            conn.disconnect();
+        } catch (Exception e) {
+            System.out.println("DEBUG: Basic HTTP GET failed: " + e.getMessage());
+        }
+
         withMcpClient(createMcpTransport(), client -> {
+            System.out.println("DEBUG: Test about to initialize client, waiting 1 second...");
+            try { Thread.sleep(1000); } catch (InterruptedException e) {}
+            System.out.println("DEBUG: Test starting client.initialize()...");
             client.initialize();
+            System.out.println("DEBUG: Test client initialized successfully!");
 
             // Test the get-decompilation tool with our real function
             Map<String, Object> args = new HashMap<>();

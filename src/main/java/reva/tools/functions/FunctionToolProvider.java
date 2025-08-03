@@ -91,6 +91,7 @@ public class FunctionToolProvider extends AbstractToolProvider {
         // Create the tool
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("get-function-count")
+            .title("Get Function Count")
             .description("Get the total count of functions in the program (use this before calling get-functions to plan pagination)")
             .inputSchema(createSchema(properties, required))
             .build();
@@ -155,6 +156,7 @@ public class FunctionToolProvider extends AbstractToolProvider {
         // Create the tool
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("get-functions")
+            .title("Get Functions")
             .description("Get functions from the selected program (use get-function-count to determine the total count)")
             .inputSchema(createSchema(properties, required))
             .build();
@@ -249,6 +251,7 @@ public class FunctionToolProvider extends AbstractToolProvider {
         // Create the tool
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("get-functions-by-similarity")
+            .title("Get Functions by Similarity")
             .description("Get functions from the selected program with pagination, sorted by similarity to a given function name (use get-function-count first to determine total count)")
             .inputSchema(createSchema(properties, required))
             .build();
@@ -386,6 +389,7 @@ public class FunctionToolProvider extends AbstractToolProvider {
         // Create the tool
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("set-function-prototype")
+            .title("Set Function Prototype")
             .description("Set or update a function prototype using C-style function signatures. Can create new functions or update existing ones.")
             .inputSchema(createSchema(properties, required))
             .build();

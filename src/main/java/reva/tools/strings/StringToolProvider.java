@@ -73,6 +73,7 @@ public class StringToolProvider extends AbstractToolProvider {
         // Create the tool
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("get-strings-count")
+            .title("Get Strings Count")
             .description("Get the total count of strings in the program (use this before calling get-strings to plan pagination)")
             .inputSchema(createSchema(properties, required))
             .build();
@@ -126,6 +127,7 @@ public class StringToolProvider extends AbstractToolProvider {
         // Create the tool
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("get-strings")
+            .title("Get Strings")
             .description("Get strings from the selected program with pagination (use get-strings-count first to determine total count)")
             .inputSchema(createSchema(properties, required))
             .build();
@@ -212,6 +214,7 @@ public class StringToolProvider extends AbstractToolProvider {
         // Create the tool
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("get-strings-by-similarity")
+            .title("Get Strings by Similarity")
             .description("Get strings from the selected program with pagination, sorted by similarity to a given string (use get-strings-count first to determine total count)")
             .inputSchema(createSchema(properties, required))
             .build();
@@ -299,6 +302,7 @@ public class StringToolProvider extends AbstractToolProvider {
         // Create the tool
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("search-strings-regex")
+            .title("Search Strings by Regex")
             .description("Search for strings matching a regex pattern in the program (use this only if you know the string is contained in the program, otherwise use get-strings-by-similarity)")
             .inputSchema(createSchema(properties, required))
             .build();

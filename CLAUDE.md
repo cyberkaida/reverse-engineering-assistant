@@ -1,3 +1,3 @@
 - To run the tests, don't use a gradle wrapper. You can do commands like `gradle test --info`.
 - When working on tools, you can run the integration tests with `gradle integrationTest --info`
-- The ghidra source code is at "~/dev/ghidra"
+- The ghidra source code is at "../ghidra"

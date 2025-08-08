@@ -73,7 +73,7 @@ After installing the extension you need to activate it in two places:
 
 ReVa uses the [Model Context Protocol (MCP)](https://modelcontextprotocol.io/faqs) to communicate with the LLM.
 
-ReVa uses the [streamable MCP transport](https://modelcontextprotocol.io/docs/concepts/transports#server-sent-events-sse)
+ReVa uses the [streamable MCP transport](https://modelcontextprotocol.io/docs/concepts/transports#streamable-http)
 and will listen on port `8080` by default, you can change this in the Ghidra settings from the project view.
 
 You will need to configure your MCP client to connect to ReVa, this depends on the client you are using.
@@ -84,7 +84,7 @@ Claude Code is the recommended client for ReVa, performance is excellent and Cla
 handles large binaries and projects well.
 
 ```sh
-claude mcp add --scope user --transport sse ReVa -- http://localhost:8080/mcp/sse
+claude mcp add --scope user --transport http ReVa -- http://localhost:8080/mcp/message
 ```
 
 When you use the `claude` command with Ghidra open it will connect to the ReVa MCP server.
@@ -126,14 +126,14 @@ Add a block to the `mcpServers` section of the configuration file:
 VSCode has a built in MCP client, instructions to configure it can be found
 in the [GitHub Copilot documentation](https://code.visualstudio.com/docs/copilot/chat/mcp-servers#_add-an-mcp-server-to-your-user-settings).
 
-Note that VSCode supports `sse` natively, so you do not need to use `mcp-remote`.
+Note that VSCode supports streamable transports natively, so you do not need to use `mcp-remote`.
 
 ```json
 {
   "mcp": {
     "servers": {
       "ReVa": {
-        "type": "sse",
+        "type": "http",
         "url": "http://localhost:8080/mcp/message"
       }
     }
@@ -147,8 +147,10 @@ Note that VSCode supports `sse` natively, so you do not need to use `mcp-remote`
 
 For best results, use a reasoning model like `Qwen3`.
 
-See the [oterm documentation](https://ggozad.github.io/oterm/mcp/#sse-transport) for instructions on how to configure
+See the [oterm documentation](https://ggozad.github.io/oterm/mcp/) for instructions on how to configure
 oterm to use ReVa.
+
+Add ReVa to your oterm `config.json` file:
 
 ```json
 {

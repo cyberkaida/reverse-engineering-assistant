@@ -59,7 +59,7 @@ sourceSets {
 			srcDirs = ['src/test.slow/resources']
 		}
 		compileClasspath += main.output + test.output
-		runtimeClasspath += main.output + test.output
+		runtimeClasspath += test.output + jar.outputs.files
 	}
 }
 

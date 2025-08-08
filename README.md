@@ -110,7 +110,7 @@ Add a block to the `mcpServers` section of the configuration file:
       "args": [
         "-y",
         "mcp-remote",
-        "http://localhost:8080/mcp/sse"
+        "http://localhost:8080/mcp/message"
       ]
     }
   }
@@ -134,7 +134,7 @@ Note that VSCode supports `sse` natively, so you do not need to use `mcp-remote`
     "servers": {
       "ReVa": {
         "type": "sse",
-        "url": "http://localhost:8080/mcp/sse"
+        "url": "http://localhost:8080/mcp/message"
       }
     }
   }
@@ -154,7 +154,7 @@ oterm to use ReVa.
 {
   "mcpServers": {
     "ReVa": {
-      "url": "http://localhost:8080/mcp/sse"
+      "url": "http://localhost:8080/mcp/message"
     }
   }
 }

@@ -190,6 +190,7 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
         ServletContextHandler servletContextHandler = new ServletContextHandler(ServletContextHandler.SESSIONS);
         servletContextHandler.setContextPath("/");
         ServletHolder servletHolder = new ServletHolder(currentTransportProvider);
+        servletHolder.setAsyncSupported(true);
         servletContextHandler.addServlet(servletHolder, "/*");
 
         httpServer = new Server(serverPort);
@@ -203,11 +204,15 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
                 // Mark server as ready
                 serverReady = true;
 
-
                 // join() blocks until the server stops, which is expected behavior
                 httpServer.join();
             } catch (Exception e) {
-                Msg.error(this, "Error starting MCP server", e);
+                if (e instanceof InterruptedException) {
+                    Msg.info(this, "MCP server was interrupted - this is normal during shutdown");
+                    Thread.currentThread().interrupt(); // Restore interrupt status
+                } else {
+                    Msg.error(this, "Error starting MCP server", e);
+                }
             }
         });
 
@@ -381,9 +386,8 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
         currentTransportProvider = HttpServletStreamableServerTransportProvider.builder()
             .objectMapper(JSON)
             .mcpEndpoint(MCP_MSG_ENDPOINT)
+            .keepAliveInterval(java.time.Duration.ofSeconds(30))
             .build();
-
-        Msg.info(this, "Recreated transport provider with baseUrl: " + baseUrl);
     }
 
     /**

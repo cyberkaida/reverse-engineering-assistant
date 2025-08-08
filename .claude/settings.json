@@ -8,6 +8,18 @@
     "deny": []
   },
   "hooks": {
-    "afterWrite": "gradle compileJava"
+    "PostToolUse": [
+      {
+        "matcher": {
+          "tools": ["Edit", "MultiEdit", "Write"]
+        },
+        "hooks": [
+          {
+            "type": "command",
+            "command": "gradle compileJava"
+          }
+        ]
+      }
+    ]
   }
 }

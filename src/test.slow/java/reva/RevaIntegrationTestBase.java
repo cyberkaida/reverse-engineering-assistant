@@ -101,15 +101,18 @@ public abstract class RevaIntegrationTestBase extends AbstractGhidraHeadedIntegr
         ConfigManager existingConfigManager = reva.util.RevaInternalServiceRegistry.getService(ConfigManager.class);
         
         if (existingServerManager != null && existingServerManager.isServerRunning()) {
-            // Gracefully shutdown the existing server before starting test server
-            System.out.println("Found existing MCP server, shutting it down gracefully...");
-            existingServerManager.shutdown();
-            
-            // Clear the existing services to avoid conflicts
+            // If there's already a running server, reuse it instead of shutting it down
+            System.out.println("Found existing MCP server, reusing it for tests...");
+            sharedServerManager = existingServerManager;
+            sharedConfigManager = existingConfigManager;
+            return;
+        }
+        
+        // Clear any existing services if they're not running
+        if (existingServerManager != null) {
             reva.util.RevaInternalServiceRegistry.unregisterService(McpServerManager.class);
             reva.util.RevaInternalServiceRegistry.unregisterService(reva.services.RevaMcpService.class);
         }
-        
         if (existingConfigManager != null) {
             reva.util.RevaInternalServiceRegistry.unregisterService(ConfigManager.class);
         }

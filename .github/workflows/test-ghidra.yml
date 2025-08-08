@@ -18,6 +18,7 @@ jobs:
       matrix:
         os: [ubuntu-latest]
         ghidra-version: [
+            "11.4.1",
             "11.4",
             "11.3.2",
             "11.3.1",

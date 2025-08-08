@@ -93,3 +93,4 @@ The server uses streamable transport (SSE) on port 8080 by default. Configuratio
 - The extension requires Ghidra 11.3 or above
 - Fork every integration test to prevent configuration conflicts
 - Integration tests run with `java.awt.headless=false`
+- Don't use the old vYYYY-MM-DD tag style, use the new semantic versioning style. Check the github releases for hints.

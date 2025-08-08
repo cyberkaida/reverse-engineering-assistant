@@ -75,18 +75,19 @@ public class SymbolToolProvider extends AbstractToolProvider {
         List<String> required = List.of("programPath");
 
         // Create the tool
-        McpSchema.Tool tool = new McpSchema.Tool(
-            "get-symbols-count",
-            "Get the total count of symbols in the program (use this before calling get-symbols to plan pagination)",
-            createSchema(properties, required)
-        );
+        McpSchema.Tool tool = McpSchema.Tool.builder()
+            .name("get-symbols-count")
+            .title("Get Symbols Count")
+            .description("Get the total count of symbols in the program (use this before calling get-symbols to plan pagination)")
+            .inputSchema(createSchema(properties, required))
+            .build();
 
         // Register the tool with a handler
-        registerTool(tool, (exchange, args) -> {
+        registerTool(tool, (exchange, request) -> {
             // Get program and parameters using helper methods
-            Program program = getProgramFromArgs(args);
-            boolean includeExternal = getOptionalBoolean(args, "includeExternal", false);
-            boolean filterDefaultNames = getOptionalBoolean(args, "filterDefaultNames", true);
+            Program program = getProgramFromArgs(request);
+            boolean includeExternal = getOptionalBoolean(request, "includeExternal", false);
+            boolean filterDefaultNames = getOptionalBoolean(request, "filterDefaultNames", true);
 
             // Count the symbols
             SymbolTable symbolTable = program.getSymbolTable();
@@ -149,19 +150,20 @@ public class SymbolToolProvider extends AbstractToolProvider {
         List<String> required = List.of("programPath");
 
         // Create the tool
-        McpSchema.Tool tool = new McpSchema.Tool(
-            "get-symbols",
-            "Get symbols from the selected program with pagination (use get-symbols-count first to determine total count)",
-            createSchema(properties, required)
-        );
+        McpSchema.Tool tool = McpSchema.Tool.builder()
+            .name("get-symbols")
+            .title("Get Symbols")
+            .description("Get symbols from the selected program with pagination (use get-symbols-count first to determine total count)")
+            .inputSchema(createSchema(properties, required))
+            .build();
 
         // Register the tool with a handler
-        registerTool(tool, (exchange, args) -> {
+        registerTool(tool, (exchange, request) -> {
             // Get program and parameters using helper methods
-            Program program = getProgramFromArgs(args);
-            boolean includeExternal = getOptionalBoolean(args, "includeExternal", false);
-            PaginationParams pagination = getPaginationParams(args, 200);
-            boolean filterDefaultNames = getOptionalBoolean(args, "filterDefaultNames", true);
+            Program program = getProgramFromArgs(request);
+            boolean includeExternal = getOptionalBoolean(request, "includeExternal", false);
+            PaginationParams pagination = getPaginationParams(request, 200);
+            boolean filterDefaultNames = getOptionalBoolean(request, "filterDefaultNames", true);
 
             // Get the symbols with pagination
             List<Map<String, Object>> symbolData = new ArrayList<>();

@@ -32,6 +32,7 @@ import ghidra.program.model.symbol.SymbolTable;
 import ghidra.util.Msg;
 import reva.util.AddressUtil;
 import io.modelcontextprotocol.server.McpServerFeatures.SyncToolSpecification;
+import io.modelcontextprotocol.spec.McpSchema.CallToolRequest;
 import reva.plugin.RevaProgramManager;
 import io.modelcontextprotocol.server.McpSyncServer;
 import io.modelcontextprotocol.spec.McpError;
@@ -134,12 +135,12 @@ public abstract class AbstractToolProvider implements ToolProvider {
      * @param handler The handler function for the tool
      * @throws McpError if there's an error registering the tool
      */
-    protected void registerTool(Tool tool, java.util.function.BiFunction<io.modelcontextprotocol.server.McpSyncServerExchange, java.util.Map<String, Object>, McpSchema.CallToolResult> handler) throws McpError {
+    protected void registerTool(Tool tool, java.util.function.BiFunction<io.modelcontextprotocol.server.McpSyncServerExchange, CallToolRequest, McpSchema.CallToolResult> handler) throws McpError {
         // Wrap the handler with safe execution
-        java.util.function.BiFunction<io.modelcontextprotocol.server.McpSyncServerExchange, java.util.Map<String, Object>, McpSchema.CallToolResult> safeHandler = 
-            (exchange, args) -> {
+        java.util.function.BiFunction<io.modelcontextprotocol.server.McpSyncServerExchange, CallToolRequest, McpSchema.CallToolResult> safeHandler = 
+            (exchange, request) -> {
                 try {
-                    return handler.apply(exchange, args);
+                    return handler.apply(exchange, request);
                 } catch (IllegalArgumentException e) {
                     return createErrorResult(e.getMessage());
                 } catch (ProgramValidationException e) {
@@ -150,7 +151,10 @@ public abstract class AbstractToolProvider implements ToolProvider {
                 }
             };
         
-        SyncToolSpecification toolSpec = new SyncToolSpecification(tool, safeHandler);
+        SyncToolSpecification toolSpec = SyncToolSpecification.builder()
+            .tool(tool)
+            .callHandler(safeHandler)
+            .build();
         server.addTool(toolSpec);
         registeredTools.add(tool);
         logInfo("Registered tool: " + tool.name());
@@ -182,6 +186,17 @@ public abstract class AbstractToolProvider implements ToolProvider {
     }
 
     /**
+     * Get a required string parameter from CallToolRequest
+     * @param request The CallToolRequest
+     * @param key The parameter key
+     * @return The string value
+     * @throws IllegalArgumentException if the parameter is missing
+     */
+    protected String getString(CallToolRequest request, String key) {
+        return getString(request.arguments(), key);
+    }
+
+    /**
      * Get a required string parameter from arguments
      * @param args The arguments map
      * @param key The parameter key
@@ -198,6 +213,17 @@ public abstract class AbstractToolProvider implements ToolProvider {
     }
 
     /**
+     * Get an optional string parameter from CallToolRequest
+     * @param request The CallToolRequest
+     * @param key The parameter key
+     * @param defaultValue The default value if not present
+     * @return The string value or default
+     */
+    protected String getOptionalString(CallToolRequest request, String key, String defaultValue) {
+        return getOptionalString(request.arguments(), key, defaultValue);
+    }
+
+    /**
      * Get an optional string parameter from arguments
      * @param args The arguments map
      * @param key The parameter key
@@ -211,6 +237,17 @@ public abstract class AbstractToolProvider implements ToolProvider {
         }
         // Convert non-string values to string for flexibility
         return value.toString();
+    }
+
+    /**
+     * Get a required integer parameter from CallToolRequest
+     * @param request The CallToolRequest
+     * @param key The parameter key
+     * @return The integer value
+     * @throws IllegalArgumentException if the parameter is missing or not a number
+     */
+    protected int getInt(CallToolRequest request, String key) {
+        return getInt(request.arguments(), key);
     }
 
     /**
@@ -237,6 +274,17 @@ public abstract class AbstractToolProvider implements ToolProvider {
             }
         }
         throw new IllegalArgumentException("Parameter '" + key + "' must be a number");
+    }
+
+    /**
+     * Get an optional integer parameter from CallToolRequest
+     * @param request The CallToolRequest
+     * @param key The parameter key
+     * @param defaultValue The default value if not present
+     * @return The integer value or default
+     */
+    protected int getOptionalInt(CallToolRequest request, String key, int defaultValue) {
+        return getOptionalInt(request.arguments(), key, defaultValue);
     }
 
     /**
@@ -318,6 +366,17 @@ public abstract class AbstractToolProvider implements ToolProvider {
             }
         }
         throw new IllegalArgumentException("Parameter '" + key + "' must be a boolean or 'true'/'false' string");
+    }
+
+    /**
+     * Get an optional boolean parameter from CallToolRequest
+     * @param request The CallToolRequest
+     * @param key The parameter key
+     * @param defaultValue The default value if not present
+     * @return The boolean value or default
+     */
+    protected boolean getOptionalBoolean(CallToolRequest request, String key, boolean defaultValue) {
+        return getOptionalBoolean(request.arguments(), key, defaultValue);
     }
 
     /**
@@ -466,6 +525,18 @@ public abstract class AbstractToolProvider implements ToolProvider {
     }
 
     /**
+     * Get a validated program from MCP CallToolRequest. Handles parameter extraction and validation in one call.
+     * @param request The CallToolRequest from MCP tool call
+     * @return A valid Program object
+     * @throws IllegalArgumentException if programPath parameter is missing or invalid
+     * @throws ProgramValidationException if the program is not found, invalid, or in an invalid state
+     */
+    protected Program getProgramFromArgs(CallToolRequest request) throws IllegalArgumentException, ProgramValidationException {
+        String programPath = getString(request, "programPath");
+        return getValidatedProgram(programPath);
+    }
+
+    /**
      * Get a validated program from MCP arguments. Handles parameter extraction and validation in one call.
      * @param args The arguments map from MCP tool call
      * @return A valid Program object
@@ -484,6 +555,18 @@ public abstract class AbstractToolProvider implements ToolProvider {
     protected record PaginationParams(int startIndex, int maxCount) {}
 
     /**
+     * Get pagination parameters from CallToolRequest with common defaults
+     * @param request The CallToolRequest
+     * @param defaultMaxCount Default maximum count (varies by tool type)
+     * @return PaginationParams object
+     */
+    protected PaginationParams getPaginationParams(CallToolRequest request, int defaultMaxCount) {
+        int startIndex = getOptionalInt(request, "startIndex", 0);
+        int maxCount = getOptionalInt(request, "maxCount", defaultMaxCount);
+        return new PaginationParams(startIndex, maxCount);
+    }
+
+    /**
      * Get pagination parameters from arguments with common defaults
      * @param args The arguments map
      * @param defaultMaxCount Default maximum count (varies by tool type)
@@ -496,12 +579,33 @@ public abstract class AbstractToolProvider implements ToolProvider {
     }
 
     /**
+     * Get pagination parameters from CallToolRequest with standard default (100)
+     * @param request The CallToolRequest
+     * @return PaginationParams object
+     */
+    protected PaginationParams getPaginationParams(CallToolRequest request) {
+        return getPaginationParams(request, 100);
+    }
+
+    /**
      * Get pagination parameters from arguments with standard default (100)
      * @param args The arguments map
      * @return PaginationParams object
      */
     protected PaginationParams getPaginationParams(Map<String, Object> args) {
         return getPaginationParams(args, 100);
+    }
+
+    /**
+     * Get and resolve an address from MCP CallToolRequest
+     * @param request The CallToolRequest
+     * @param program The program to resolve the address in
+     * @param addressKey The key for the address parameter (usually "addressOrSymbol")
+     * @return Resolved Address object
+     * @throws IllegalArgumentException if address parameter is missing or address cannot be resolved
+     */
+    protected Address getAddressFromArgs(CallToolRequest request, Program program, String addressKey) throws IllegalArgumentException {
+        return getAddressFromArgs(request.arguments(), program, addressKey);
     }
 
     /**

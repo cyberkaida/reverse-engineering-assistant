@@ -78,18 +78,19 @@ public class StructureToolProvider extends AbstractToolProvider {
         required.add("programPath");
         required.add("cDefinition");
 
-        McpSchema.Tool tool = new McpSchema.Tool(
-            "parse-c-structure",
-            "Parse and create structures from C-style definitions",
-            createSchema(properties, required)
-        );
+        McpSchema.Tool tool = McpSchema.Tool.builder()
+            .name("parse-c-structure")
+            .title("Parse C Structure")
+            .description("Parse and create structures from C-style definitions")
+            .inputSchema(createSchema(properties, required))
+            .build();
 
-        registerTool(tool, (exchange, args) -> {
+        registerTool(tool, (exchange, request) -> {
             try {
                 // Get program and parameters using helper methods
-                Program program = getProgramFromArgs(args);
-                String cDefinition = getString(args, "cDefinition");
-                String category = getOptionalString(args, "category", "/");
+                Program program = getProgramFromArgs(request);
+                String cDefinition = getString(request, "cDefinition");
+                String category = getOptionalString(request, "category", "/");
 
                 DataTypeManager dtm = program.getDataTypeManager();
                 CParser parser = new CParser(dtm);
@@ -140,15 +141,16 @@ public class StructureToolProvider extends AbstractToolProvider {
         List<String> required = new ArrayList<>();
         required.add("cDefinition");
 
-        McpSchema.Tool tool = new McpSchema.Tool(
-            "validate-c-structure",
-            "Validate C-style structure definition without creating it",
-            createSchema(properties, required)
-        );
+        McpSchema.Tool tool = McpSchema.Tool.builder()
+            .name("validate-c-structure")
+            .title("Validate C Structure")
+            .description("Validate C-style structure definition without creating it")
+            .inputSchema(createSchema(properties, required))
+            .build();
 
-        registerTool(tool, (exchange, args) -> {
+        registerTool(tool, (exchange, request) -> {
             try {
-                String cDefinition = getString(args, "cDefinition");
+                String cDefinition = getString(request, "cDefinition");
                 
                 // Create a temporary parser with a standalone DTM
                 DataTypeManager tempDtm = new StandAloneDataTypeManager("temp");
@@ -209,22 +211,23 @@ public class StructureToolProvider extends AbstractToolProvider {
         required.add("programPath");
         required.add("name");
 
-        McpSchema.Tool tool = new McpSchema.Tool(
-            "create-structure",
-            "Create a new empty structure or union",
-            createSchema(properties, required)
-        );
+        McpSchema.Tool tool = McpSchema.Tool.builder()
+            .name("create-structure")
+            .title("Create Structure")
+            .description("Create a new empty structure or union")
+            .inputSchema(createSchema(properties, required))
+            .build();
 
-        registerTool(tool, (exchange, args) -> {
+        registerTool(tool, (exchange, request) -> {
             try {
                 // Get program and parameters using helper methods
-                Program program = getProgramFromArgs(args);
-                String name = getString(args, "name");
-                int size = getOptionalInt(args, "size", 0);
-                String type = getOptionalString(args, "type", "structure");
-                String category = getOptionalString(args, "category", "/");
-                boolean packed = getOptionalBoolean(args, "packed", false);
-                String description = getOptionalString(args, "description", null);
+                Program program = getProgramFromArgs(request);
+                String name = getString(request, "name");
+                int size = getOptionalInt(request, "size", 0);
+                String type = getOptionalString(request, "type", "structure");
+                String category = getOptionalString(request, "category", "/");
+                boolean packed = getOptionalBoolean(request, "packed", false);
+                String description = getOptionalString(request, "description", null);
 
                 DataTypeManager dtm = program.getDataTypeManager();
                 CategoryPath catPath = new CategoryPath(category);
@@ -293,22 +296,23 @@ public class StructureToolProvider extends AbstractToolProvider {
         required.add("fieldName");
         required.add("dataType");
 
-        McpSchema.Tool tool = new McpSchema.Tool(
-            "add-structure-field",
-            "Add a field to an existing structure",
-            createSchema(properties, required)
-        );
+        McpSchema.Tool tool = McpSchema.Tool.builder()
+            .name("add-structure-field")
+            .title("Add Structure Field")
+            .description("Add a field to an existing structure")
+            .inputSchema(createSchema(properties, required))
+            .build();
 
-        registerTool(tool, (exchange, args) -> {
+        registerTool(tool, (exchange, request) -> {
             try {
                 // Get program and parameters using helper methods
-                Program program = getProgramFromArgs(args);
-                String structureName = getString(args, "structureName");
-                String fieldName = getString(args, "fieldName");
-                String dataTypeStr = getString(args, "dataType");
-                Integer offset = getOptionalInteger(args, "offset", null);
-                String comment = getOptionalString(args, "comment", null);
-                Map<String, Object> bitfield = getOptionalMap(args, "bitfield", null);
+                Program program = getProgramFromArgs(request);
+                String structureName = getString(request, "structureName");
+                String fieldName = getString(request, "fieldName");
+                String dataTypeStr = getString(request, "dataType");
+                Integer offset = getOptionalInteger(request.arguments(), "offset", null);
+                String comment = getOptionalString(request, "comment", null);
+                Map<String, Object> bitfield = getOptionalMap(request.arguments(), "bitfield", null);
 
                 DataTypeManager dtm = program.getDataTypeManager();
                 
@@ -410,17 +414,18 @@ public class StructureToolProvider extends AbstractToolProvider {
         required.add("programPath");
         required.add("structureName");
 
-        McpSchema.Tool tool = new McpSchema.Tool(
-            "get-structure-info",
-            "Get detailed information about a structure",
-            createSchema(properties, required)
-        );
+        McpSchema.Tool tool = McpSchema.Tool.builder()
+            .name("get-structure-info")
+            .title("Get Structure Info")
+            .description("Get detailed information about a structure")
+            .inputSchema(createSchema(properties, required))
+            .build();
 
-        registerTool(tool, (exchange, args) -> {
+        registerTool(tool, (exchange, request) -> {
             try {
                 // Get program and parameters using helper methods
-                Program program = getProgramFromArgs(args);
-                String structureName = getString(args, "structureName");
+                Program program = getProgramFromArgs(request);
+                String structureName = getString(request, "structureName");
 
                 DataTypeManager dtm = program.getDataTypeManager();
                 DataType dt = findDataTypeByName(dtm, structureName);
@@ -454,19 +459,20 @@ public class StructureToolProvider extends AbstractToolProvider {
         List<String> required = new ArrayList<>();
         required.add("programPath");
 
-        McpSchema.Tool tool = new McpSchema.Tool(
-            "list-structures",
-            "List all structures in a program",
-            createSchema(properties, required)
-        );
+        McpSchema.Tool tool = McpSchema.Tool.builder()
+            .name("list-structures")
+            .title("List Structures")
+            .description("List all structures in a program")
+            .inputSchema(createSchema(properties, required))
+            .build();
 
-        registerTool(tool, (exchange, args) -> {
+        registerTool(tool, (exchange, request) -> {
             try {
                 // Get program and parameters using helper methods
-                Program program = getProgramFromArgs(args);
-                String categoryFilter = getOptionalString(args, "category", null);
-                String nameFilter = getOptionalString(args, "nameFilter", null);
-                boolean includeBuiltIn = getOptionalBoolean(args, "includeBuiltIn", false);
+                Program program = getProgramFromArgs(request);
+                String categoryFilter = getOptionalString(request, "category", null);
+                String nameFilter = getOptionalString(request, "nameFilter", null);
+                boolean includeBuiltIn = getOptionalBoolean(request, "includeBuiltIn", false);
 
                 DataTypeManager dtm = program.getDataTypeManager();
                 List<Map<String, Object>> structures = new ArrayList<>();
@@ -524,19 +530,20 @@ public class StructureToolProvider extends AbstractToolProvider {
         required.add("structureName");
         required.add("addressOrSymbol");
 
-        McpSchema.Tool tool = new McpSchema.Tool(
-            "apply-structure",
-            "Apply a structure at a specific address",
-            createSchema(properties, required)
-        );
+        McpSchema.Tool tool = McpSchema.Tool.builder()
+            .name("apply-structure")
+            .title("Apply Structure")
+            .description("Apply a structure at a specific address")
+            .inputSchema(createSchema(properties, required))
+            .build();
 
-        registerTool(tool, (exchange, args) -> {
+        registerTool(tool, (exchange, request) -> {
             try {
                 // Get program and parameters using helper methods
-                Program program = getProgramFromArgs(args);
-                String structureName = getString(args, "structureName");
-                Address address = getAddressFromArgs(args, program, "addressOrSymbol");
-                boolean clearExisting = getOptionalBoolean(args, "clearExisting", true);
+                Program program = getProgramFromArgs(request);
+                String structureName = getString(request, "structureName");
+                Address address = getAddressFromArgs(request, program, "addressOrSymbol");
+                boolean clearExisting = getOptionalBoolean(request, "clearExisting", true);
 
                 DataTypeManager dtm = program.getDataTypeManager();
                 DataType dt = findDataTypeByName(dtm, structureName);
@@ -603,17 +610,18 @@ public class StructureToolProvider extends AbstractToolProvider {
         required.add("programPath");
         required.add("structureName");
 
-        McpSchema.Tool tool = new McpSchema.Tool(
-            "delete-structure",
-            "Delete a structure from the program",
-            createSchema(properties, required)
-        );
+        McpSchema.Tool tool = McpSchema.Tool.builder()
+            .name("delete-structure")
+            .title("Delete Structure")
+            .description("Delete a structure from the program")
+            .inputSchema(createSchema(properties, required))
+            .build();
 
-        registerTool(tool, (exchange, args) -> {
+        registerTool(tool, (exchange, request) -> {
             try {
                 // Get program and parameters using helper methods
-                Program program = getProgramFromArgs(args);
-                String structureName = getString(args, "structureName");
+                Program program = getProgramFromArgs(request);
+                String structureName = getString(request, "structureName");
 
                 DataTypeManager dtm = program.getDataTypeManager();
                 DataType dt = findDataTypeByName(dtm, structureName);
@@ -661,18 +669,19 @@ public class StructureToolProvider extends AbstractToolProvider {
         required.add("programPath");
         required.add("headerContent");
 
-        McpSchema.Tool tool = new McpSchema.Tool(
-            "parse-c-header",
-            "Parse an entire C header file and create all structures",
-            createSchema(properties, required)
-        );
+        McpSchema.Tool tool = McpSchema.Tool.builder()
+            .name("parse-c-header")
+            .title("Parse C Header")
+            .description("Parse an entire C header file and create all structures")
+            .inputSchema(createSchema(properties, required))
+            .build();
 
-        registerTool(tool, (exchange, args) -> {
+        registerTool(tool, (exchange, request) -> {
             try {
                 // Get program and parameters using helper methods
-                Program program = getProgramFromArgs(args);
-                String headerContent = getString(args, "headerContent");
-                String category = getOptionalString(args, "category", "/");
+                Program program = getProgramFromArgs(request);
+                String headerContent = getString(request, "headerContent");
+                String category = getOptionalString(request, "category", "/");
 
                 DataTypeManager dtm = program.getDataTypeManager();
                 CParser parser = new CParser(dtm);

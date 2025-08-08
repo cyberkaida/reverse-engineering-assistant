@@ -160,23 +160,24 @@ public class DecompilerToolProvider extends AbstractToolProvider {
         List<String> required = List.of("programPath", "functionNameOrAddress");
 
         // Create the tool
-        McpSchema.Tool tool = new McpSchema.Tool(
-            "get-decompilation",
-            "Get decompiled code for a function with line range support. Defaults to 50 lines to conserve context - start with small chunks (10-20 lines) then expand as needed using offset/limit. Updating variable data types and names can significantly improve decompilation quality.",
-            createSchema(properties, required)
-        );
+        McpSchema.Tool tool = McpSchema.Tool.builder()
+            .name("get-decompilation")
+            .title("Get Function Decompilation")
+            .description("Get decompiled code for a function with line range support. Defaults to 50 lines to conserve context - start with small chunks (10-20 lines) then expand as needed using offset/limit. Updating variable data types and names can significantly improve decompilation quality.")
+            .inputSchema(createSchema(properties, required))
+            .build();
 
         // Register the tool with a handler
-        registerTool(tool, (exchange, args) -> {
+        registerTool(tool, (exchange, request) -> {
             // Get parameters using helper methods
-            Program program = getProgramFromArgs(args);
-            String functionNameOrAddress = getString(args, "functionNameOrAddress");
-            int offset = getOptionalInt(args, "offset", 1);
-            Integer limit = getOptionalInteger(args, "limit", 50); // Default to 50 lines for context conservation
-            boolean includeDisassembly = getOptionalBoolean(args, "includeDisassembly", false);
-            boolean includeComments = getOptionalBoolean(args, "includeComments", false);
-            boolean includeIncomingReferences = getOptionalBoolean(args, "includeIncomingReferences", true);
-            boolean includeReferenceContext = getOptionalBoolean(args, "includeReferenceContext", true);
+            Program program = getProgramFromArgs(request);
+            String functionNameOrAddress = getString(request, "functionNameOrAddress");
+            int offset = getOptionalInt(request, "offset", 1);
+            Integer limit = getOptionalInteger(request.arguments(), "limit", 50); // Default to 50 lines for context conservation
+            boolean includeDisassembly = getOptionalBoolean(request, "includeDisassembly", false);
+            boolean includeComments = getOptionalBoolean(request, "includeComments", false);
+            boolean includeIncomingReferences = getOptionalBoolean(request, "includeIncomingReferences", true);
+            boolean includeReferenceContext = getOptionalBoolean(request, "includeReferenceContext", true);
 
             Map<String, Object> resultData = new HashMap<>();
             resultData.put("programName", program.getName());
@@ -298,7 +299,7 @@ public class DecompilerToolProvider extends AbstractToolProvider {
 
                         // Track that this function's decompilation has been read
                         // Use the program path for consistency with validation checks
-                        String programPath = getString(args, "programPath");
+                        String programPath = getString(request, "programPath");
                         String functionKey = programPath + ":" + function.getName();
                         readDecompilationTracker.put(functionKey, System.currentTimeMillis());
 
@@ -355,20 +356,21 @@ public class DecompilerToolProvider extends AbstractToolProvider {
         List<String> required = List.of("programPath", "pattern");
 
         // Create the tool
-        McpSchema.Tool tool = new McpSchema.Tool(
-            "search-decompilation",
-            "Search for patterns across all function decompilations in a program. Returns function names and line numbers where patterns match. If looking for calls or references to data, try the cross reference tools first.",
-            createSchema(properties, required)
-        );
+        McpSchema.Tool tool = McpSchema.Tool.builder()
+            .name("search-decompilation")
+            .title("Search Function Decompilations")
+            .description("Search for patterns across all function decompilations in a program. Returns function names and line numbers where patterns match. If looking for calls or references to data, try the cross reference tools first.")
+            .inputSchema(createSchema(properties, required))
+            .build();
 
         // Register the tool with a handler
-        registerTool(tool, (exchange, args) -> {
+        registerTool(tool, (exchange, request) -> {
             // Get arguments using helper methods
-            Program program = getProgramFromArgs(args);
-            String pattern = getString(args, "pattern");
-            int maxResults = getOptionalInt(args, "maxResults", 50);
-            boolean caseSensitive = getOptionalBoolean(args, "caseSensitive", false);
-            boolean overrideMaxFunctionsLimit = getOptionalBoolean(args, "overrideMaxFunctionsLimit", false);
+            Program program = getProgramFromArgs(request);
+            String pattern = getString(request, "pattern");
+            int maxResults = getOptionalInt(request, "maxResults", 50);
+            boolean caseSensitive = getOptionalBoolean(request, "caseSensitive", false);
+            boolean overrideMaxFunctionsLimit = getOptionalBoolean(request, "overrideMaxFunctionsLimit", false);
 
             // Validate pattern
             if (pattern.trim().isEmpty()) {
@@ -384,10 +386,8 @@ public class DecompilerToolProvider extends AbstractToolProvider {
                     ". Use 'overrideMaxFunctionsLimit' to bypass this check, but be aware it may take a long time. If possible, try the cross reference tools.");
             }
 
-            // TODO: In the future, when MCP's Java SDK supports it, we should report progress to the MCP client
-
-            // Perform the search
-            List<Map<String, Object>> searchResults = searchDecompilationInProgram(program, pattern, maxResults, caseSensitive);
+            // Perform the search with progress reporting
+            List<Map<String, Object>> searchResults = searchDecompilationInProgram(program, pattern, maxResults, caseSensitive, exchange);
 
             // Create result data
             Map<String, Object> resultData = new HashMap<>();
@@ -426,17 +426,18 @@ public class DecompilerToolProvider extends AbstractToolProvider {
         List<String> required = List.of("programPath", "functionNameOrAddress", "variableMappings");
 
         // Create the tool
-        McpSchema.Tool tool = new McpSchema.Tool(
-            "rename-variables",
-            "Rename variables in a decompiled function",
-            createSchema(properties, required)
-        );
+        McpSchema.Tool tool = McpSchema.Tool.builder()
+            .name("rename-variables")
+            .title("Rename Function Variables")
+            .description("Rename variables in a decompiled function")
+            .inputSchema(createSchema(properties, required))
+            .build();
 
         // Register the tool with a handler
-        registerTool(tool, (exchange, args) -> {
+        registerTool(tool, (exchange, request) -> {
             // Get program and parameters using helper methods
-            Program program = getProgramFromArgs(args);
-            Map<String, String> mappings = getStringMap(args, "variableMappings");
+            Program program = getProgramFromArgs(request);
+            Map<String, String> mappings = getStringMap(request.arguments(), "variableMappings");
 
             // Validate arguments
             if (mappings == null || mappings.isEmpty()) {
@@ -446,14 +447,14 @@ public class DecompilerToolProvider extends AbstractToolProvider {
             // Get function using helper method
             Function function;
             try {
-                function = getFunctionFromArgs(args, program);
+                function = getFunctionFromArgs(request.arguments(), program);
             } catch (IllegalArgumentException e) {
                 return createErrorResult("Function not found: " + e.getMessage() + " in program " + program.getName() +
                     ". Tried as address/symbol and function name. Check you are not using the mangled name and the namespace is correct.");
             }
 
             // Validate that the LLM has read the decompilation for this function first
-            String programPath = getString(args, "programPath");
+            String programPath = getString(request, "programPath");
             String functionKey = programPath + ":" + function.getName();
             if (!hasReadDecompilation(functionKey)) {
                 return createErrorResult("You must read the decompilation for function '" + function.getName() +
@@ -628,18 +629,19 @@ public class DecompilerToolProvider extends AbstractToolProvider {
         List<String> required = List.of("programPath", "functionNameOrAddress", "datatypeMappings");
 
         // Create the tool
-        McpSchema.Tool tool = new McpSchema.Tool(
-            "change-variable-datatypes",
-            "Change data types of variables in a decompiled function",
-            createSchema(properties, required)
-        );
+        McpSchema.Tool tool = McpSchema.Tool.builder()
+            .name("change-variable-datatypes")
+            .title("Change Variable Data Types")
+            .description("Change data types of variables in a decompiled function")
+            .inputSchema(createSchema(properties, required))
+            .build();
 
         // Register the tool with a handler
-        registerTool(tool, (exchange, args) -> {
+        registerTool(tool, (exchange, request) -> {
             // Get program and parameters using helper methods
-            Program program = getProgramFromArgs(args);
-            Map<String, String> mappings = getStringMap(args, "datatypeMappings");
-            String archiveName = getOptionalString(args, "archiveName", "");
+            Program program = getProgramFromArgs(request);
+            Map<String, String> mappings = getStringMap(request.arguments(), "datatypeMappings");
+            String archiveName = getOptionalString(request, "archiveName", "");
 
             // Validate arguments
             if (mappings == null || mappings.isEmpty()) {
@@ -649,14 +651,14 @@ public class DecompilerToolProvider extends AbstractToolProvider {
             // Get function using helper method
             Function function;
             try {
-                function = getFunctionFromArgs(args, program);
+                function = getFunctionFromArgs(request.arguments(), program);
             } catch (IllegalArgumentException e) {
                 return createErrorResult("Function not found: " + e.getMessage() + " in program " + program.getName() +
                     ". Tried as address/symbol and function name. Check you are not using the mangled name and the namespace is correct.");
             }
 
             // Validate that the LLM has read the decompilation for this function first
-            String programPath = getString(args, "programPath");
+            String programPath = getString(request, "programPath");
             String functionKey = programPath + ":" + function.getName();
             if (!hasReadDecompilation(functionKey)) {
                 return createErrorResult("You must read the decompilation for function '" + function.getName() +
@@ -1044,7 +1046,7 @@ public class DecompilerToolProvider extends AbstractToolProvider {
      * @return List of search results
      */
     private List<Map<String, Object>> searchDecompilationInProgram(Program program, String pattern,
-            int maxResults, boolean caseSensitive) {
+            int maxResults, boolean caseSensitive, io.modelcontextprotocol.server.McpSyncServerExchange exchange) {
         List<Map<String, Object>> results = new ArrayList<>();
 
         try {
@@ -1063,10 +1065,24 @@ public class DecompilerToolProvider extends AbstractToolProvider {
             }
 
             try {
+                // Count total functions for progress tracking
+                int totalFunctions = program.getFunctionManager().getFunctionCount();
+                int processedFunctions = 0;
+                
+                // Generate unique progress token for this search
+                String progressToken = "search-" + System.currentTimeMillis();
+                
+                // Send initial progress notification
+                if (exchange != null) {
+                    exchange.progressNotification(new McpSchema.ProgressNotification(
+                        progressToken, 0.0, (double) totalFunctions, "Starting decompilation search..."));
+                }
+                
                 // Iterate through all functions
                 FunctionIterator functions = program.getFunctionManager().getFunctions(true);
                 while (functions.hasNext() && results.size() < maxResults) {
                     Function function = functions.next();
+                    processedFunctions++;
 
                     // Skip external functions
                     if (function.isExternal()) {
@@ -1111,6 +1127,22 @@ public class DecompilerToolProvider extends AbstractToolProvider {
                         // Skip this function if decompilation fails
                         logError("Failed to decompile function: " + function.getName(), e);
                         continue;
+                    }
+                    
+                    // Send progress update every 10 functions or when search is complete
+                    if (exchange != null && (processedFunctions % 10 == 0 || results.size() >= maxResults || !functions.hasNext())) {
+                        String message;
+                        if (results.size() >= maxResults) {
+                            message = String.format("Found %d matches (max results reached)", results.size());
+                        } else if (!functions.hasNext()) {
+                            message = String.format("Search complete - found %d matches", results.size());
+                        } else {
+                            message = String.format("Processed %d/%d functions - found %d matches so far", 
+                                processedFunctions, totalFunctions, results.size());
+                        }
+                        
+                        exchange.progressNotification(new McpSchema.ProgressNotification(
+                            progressToken, (double) processedFunctions, (double) totalFunctions, message));
                     }
                 }
             } finally {
@@ -1286,19 +1318,20 @@ public class DecompilerToolProvider extends AbstractToolProvider {
         List<String> required = List.of("programPath", "functionNameOrAddress", "lineNumber", "comment");
 
         // Create the tool
-        McpSchema.Tool tool = new McpSchema.Tool(
-            "set-decompilation-comment",
-            "Set a comment at a specific line in decompiled code. The comment will be placed at the address corresponding to the decompilation line.",
-            createSchema(properties, required)
-        );
+        McpSchema.Tool tool = McpSchema.Tool.builder()
+            .name("set-decompilation-comment")
+            .title("Add Decompilation Comment")
+            .description("Set a comment at a specific line in decompiled code. The comment will be placed at the address corresponding to the decompilation line.")
+            .inputSchema(createSchema(properties, required))
+            .build();
 
         // Register the tool with a handler
-        registerTool(tool, (exchange, args) -> {
+        registerTool(tool, (exchange, request) -> {
             // Get program and parameters using helper methods
-            Program program = getProgramFromArgs(args);
-            int lineNumber = getInt(args, "lineNumber");
-            String commentTypeStr = getOptionalString(args, "commentType", "eol");
-            String comment = getString(args, "comment");
+            Program program = getProgramFromArgs(request);
+            int lineNumber = getInt(request, "lineNumber");
+            String commentTypeStr = getOptionalString(request, "commentType", "eol");
+            String comment = getString(request, "comment");
 
             // Validate comment type
             int commentType;
@@ -1314,13 +1347,13 @@ public class DecompilerToolProvider extends AbstractToolProvider {
             // Get function using helper method
             Function function;
             try {
-                function = getFunctionFromArgs(args, program);
+                function = getFunctionFromArgs(request.arguments(), program);
             } catch (IllegalArgumentException e) {
                 return createErrorResult("Function not found: " + e.getMessage());
             }
 
             // Validate that the LLM has read the decompilation for this function first
-            String programPath = getString(args, "programPath");
+            String programPath = getString(request, "programPath");
             String functionKey = programPath + ":" + function.getName();
             if (!hasReadDecompilation(functionKey)) {
                 return createErrorResult("You must read the decompilation for function '" + function.getName() +

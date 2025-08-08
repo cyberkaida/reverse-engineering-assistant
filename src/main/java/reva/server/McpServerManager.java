@@ -34,7 +34,7 @@ import ghidra.util.Msg;
 
 import io.modelcontextprotocol.server.McpServer;
 import io.modelcontextprotocol.server.McpSyncServer;
-import io.modelcontextprotocol.server.transport.HttpServletSseServerTransportProvider;
+import io.modelcontextprotocol.server.transport.HttpServletStreamableServerTransportProvider;
 import io.modelcontextprotocol.spec.McpError;
 import io.modelcontextprotocol.spec.McpSchema;
 import reva.plugin.ConfigManager;
@@ -66,13 +66,11 @@ import reva.util.RevaInternalServiceRegistry;
 public class McpServerManager implements RevaMcpService, ConfigChangeListener {
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final String MCP_MSG_ENDPOINT = "/mcp/message";
-    private static final String MCP_SSE_ENDPOINT = "/mcp/sse";
     private static final String MCP_SERVER_NAME = "ReVa";
     private static final String MCP_SERVER_VERSION = "1.0.0";
 
     private final McpSyncServer server;
-    private final HttpServletSseServerTransportProvider transportProvider;
-    private HttpServletSseServerTransportProvider currentTransportProvider;
+    private HttpServletStreamableServerTransportProvider currentTransportProvider;
     private Server httpServer;
     private final GThreadPool threadPool;
     private final ConfigManager configManager;
@@ -95,7 +93,7 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
         // Initialize configuration
         configManager = new ConfigManager(pluginTool);
         RevaInternalServiceRegistry.registerService(ConfigManager.class, configManager);
-        
+
         // Register as a config change listener
         configManager.addConfigChangeListener(this);
         // Initialize thread pool
@@ -103,17 +101,8 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
         RevaInternalServiceRegistry.registerService(GThreadPool.class, threadPool);
 
         // Initialize MCP transport provider with baseUrl
-        int serverPort = configManager.getServerPort();
-        String baseUrl = "http://localhost:" + serverPort;
-        transportProvider = HttpServletSseServerTransportProvider.builder()
-            .baseUrl(baseUrl)
-            .objectMapper(JSON)
-            .messageEndpoint(MCP_MSG_ENDPOINT)
-            .sseEndpoint(MCP_SSE_ENDPOINT)
-            .build();
-        
-        // Initialize current transport provider to the original one
-        currentTransportProvider = transportProvider;
+        recreateTransportProvider();
+
         // Configure server capabilities
         McpSchema.ServerCapabilities serverCapabilities = McpSchema.ServerCapabilities.builder()
             .prompts(true)
@@ -122,7 +111,7 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
             .build();
 
         // Initialize MCP server
-        server = McpServer.sync(transportProvider)
+        server = McpServer.sync(currentTransportProvider)
             .serverInfo(MCP_SERVER_NAME, MCP_SERVER_VERSION)
             .capabilities(serverCapabilities)
             .build();
@@ -201,6 +190,7 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
         ServletContextHandler servletContextHandler = new ServletContextHandler(ServletContextHandler.SESSIONS);
         servletContextHandler.setContextPath("/");
         ServletHolder servletHolder = new ServletHolder(currentTransportProvider);
+        servletHolder.setAsyncSupported(true);
         servletContextHandler.addServlet(servletHolder, "/*");
 
         httpServer = new Server(serverPort);
@@ -214,11 +204,15 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
                 // Mark server as ready
                 serverReady = true;
 
-
                 // join() blocks until the server stops, which is expected behavior
                 httpServer.join();
             } catch (Exception e) {
-                Msg.error(this, "Error starting MCP server", e);
+                if (e instanceof InterruptedException) {
+                    Msg.info(this, "MCP server was interrupted - this is normal during shutdown");
+                    Thread.currentThread().interrupt(); // Restore interrupt status
+                } else {
+                    Msg.error(this, "Error starting MCP server", e);
+                }
             }
         });
 
@@ -353,33 +347,33 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
     public boolean isServerReady() {
         return httpServer != null && httpServer.getState().equals(org.eclipse.jetty.server.Server.STARTED);
     }
-    
+
     /**
      * Restart the MCP server with new configuration.
      * This method gracefully stops the current server and starts a new one.
      */
     public void restartServer() {
         Msg.info(this, "Restarting MCP server...");
-        
+
         // Check if server is enabled in config
         if (!configManager.isServerEnabled()) {
             Msg.info(this, "MCP server is disabled in configuration. Stopping server.");
             stopServer();
             return;
         }
-        
+
         // Stop the current server
         stopServer();
-        
+
         // Recreate transport provider with new port configuration
         recreateTransportProvider();
-        
+
         // Start the server with new configuration
         startServer();
-        
+
         Msg.info(this, "MCP server restart complete");
     }
-    
+
     /**
      * Recreate the transport provider with updated port configuration.
      * This is necessary when the port changes during server restart.
@@ -387,28 +381,25 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
     private void recreateTransportProvider() {
         int serverPort = configManager.getServerPort();
         String baseUrl = "http://localhost:" + serverPort;
-        
-        // Create new transport provider with updated baseUrl
-        currentTransportProvider = HttpServletSseServerTransportProvider.builder()
-            .baseUrl(baseUrl)
+
+        // Create new transport provider with updated configuration
+        currentTransportProvider = HttpServletStreamableServerTransportProvider.builder()
             .objectMapper(JSON)
-            .messageEndpoint(MCP_MSG_ENDPOINT)
-            .sseEndpoint(MCP_SSE_ENDPOINT)
+            .mcpEndpoint(MCP_MSG_ENDPOINT)
+            .keepAliveInterval(java.time.Duration.ofSeconds(30))
             .build();
-        
-        Msg.info(this, "Recreated transport provider with baseUrl: " + baseUrl);
     }
-    
+
     /**
      * Stop the MCP server without full shutdown cleanup.
      * This is used internally for restart operations.
      */
     private void stopServer() {
         Msg.info(this, "Stopping MCP server...");
-        
+
         // Mark server as not ready
         serverReady = false;
-        
+
         // Shut down the HTTP server
         if (httpServer != null) {
             try {
@@ -418,10 +409,10 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
                 Msg.error(this, "Error stopping HTTP server", e);
             }
         }
-        
+
         Msg.info(this, "MCP server stopped");
     }
-    
+
     @Override
     public void onConfigChanged(String category, String name, Object oldValue, Object newValue) {
         // Handle server configuration changes
@@ -441,11 +432,10 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
      */
     public void shutdown() {
         Msg.info(this, "Shutting down MCP server...");
-        
+
         // Remove config change listener and dispose
         if (configManager != null) {
             configManager.removeConfigChangeListener(this);
-            configManager.dispose();
         }
 
         // Clear all tool registrations

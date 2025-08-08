@@ -37,7 +37,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import io.modelcontextprotocol.client.McpSyncClient;
 import io.modelcontextprotocol.client.McpClient;
-import io.modelcontextprotocol.client.transport.HttpClientSseClientTransport;
+import io.modelcontextprotocol.client.transport.HttpClientStreamableHttpTransport;
 import io.modelcontextprotocol.spec.McpClientTransport;
 import io.modelcontextprotocol.spec.McpSchema.CallToolRequest;
 import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
@@ -96,6 +96,27 @@ public abstract class RevaIntegrationTestBase extends AbstractGhidraHeadedIntegr
      * Set up shared MCP server services for the entire test class.
      */
     private static void setupSharedMcpServices() {
+        // Check if an MCP server is already running from the main plugin
+        McpServerManager existingServerManager = reva.util.RevaInternalServiceRegistry.getService(McpServerManager.class);
+        ConfigManager existingConfigManager = reva.util.RevaInternalServiceRegistry.getService(ConfigManager.class);
+        
+        if (existingServerManager != null && existingServerManager.isServerRunning()) {
+            // If there's already a running server, reuse it instead of shutting it down
+            System.out.println("Found existing MCP server, reusing it for tests...");
+            sharedServerManager = existingServerManager;
+            sharedConfigManager = existingConfigManager;
+            return;
+        }
+        
+        // Clear any existing services if they're not running
+        if (existingServerManager != null) {
+            reva.util.RevaInternalServiceRegistry.unregisterService(McpServerManager.class);
+            reva.util.RevaInternalServiceRegistry.unregisterService(reva.services.RevaMcpService.class);
+        }
+        if (existingConfigManager != null) {
+            reva.util.RevaInternalServiceRegistry.unregisterService(ConfigManager.class);
+        }
+
         // Create and register shared ConfigManager
         sharedConfigManager = new ConfigManager(sharedTool);
         reva.util.RevaInternalServiceRegistry.registerService(ConfigManager.class, sharedConfigManager);
@@ -139,7 +160,7 @@ public abstract class RevaIntegrationTestBase extends AbstractGhidraHeadedIntegr
     }
 
     /**
-     * Create the MCP transport - provides a default HTTP SSE implementation.
+     * Create the MCP transport - provides a default HTTP Streamable implementation.
      * Subclasses can override this to use different transport types (WebSocket, etc.)
      */
     protected McpClientTransport createMcpTransport() {
@@ -147,9 +168,11 @@ public abstract class RevaIntegrationTestBase extends AbstractGhidraHeadedIntegr
         int serverPort = sharedConfigManager != null ? sharedConfigManager.getServerPort() : 8080;
         String serverUrl = "http://localhost:" + serverPort;
 
-        HttpClientSseClientTransport transport = HttpClientSseClientTransport.builder(serverUrl)
-            .sseEndpoint("/mcp/sse")
+        System.out.println("DEBUG: Creating transport to " + serverUrl + "/mcp/message");
+        HttpClientStreamableHttpTransport transport = HttpClientStreamableHttpTransport.builder(serverUrl)
+            .endpoint("/mcp/message")
             .build();
+        System.out.println("DEBUG: Transport created successfully");
         return transport;
     }
 
@@ -176,7 +199,7 @@ public abstract class RevaIntegrationTestBase extends AbstractGhidraHeadedIntegr
      * Get initialization timeout for MCP client
      */
     protected Duration getInitializationTimeout() {
-        return Duration.ofSeconds(10);
+        return Duration.ofSeconds(30);
     }
 
     /**
@@ -197,7 +220,9 @@ public abstract class RevaIntegrationTestBase extends AbstractGhidraHeadedIntegr
                 .capabilities(ClientCapabilities.builder().roots(true).build());
 
         builder = customizer.apply(builder);
-        return builder.build();
+        McpSyncClient client = builder.build();
+        System.out.println("DEBUG: Created MCP client with transport: " + transport.getClass().getSimpleName());
+        return client;
     }
 
     /**
@@ -380,58 +405,28 @@ public abstract class RevaIntegrationTestBase extends AbstractGhidraHeadedIntegr
      * @throws Exception if the request fails
      */
     protected ListToolsResult getAvailableTools() throws Exception {
-
-        // First, let's verify server is accessible via simple HTTP check
-        int serverPort = sharedConfigManager.getServerPort();
-        String baseServerUrl = "http://localhost:" + serverPort;
-
-        try {
-            java.net.URL url = java.net.URI.create(baseServerUrl + "/").toURL();
-            java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
-            conn.setRequestMethod("GET");
-            conn.setConnectTimeout(2000);
-            conn.setReadTimeout(2000);
-            conn.getResponseCode(); // Check server availability
-            conn.disconnect();
-        } catch (Exception e) {
-        }
-
-        // Try the MCP message endpoint
-        try {
-            java.net.URL url = java.net.URI.create(baseServerUrl + "/mcp/message").toURL();
-            java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
-            conn.setRequestMethod("GET");
-            conn.setConnectTimeout(2000);
-            conn.setReadTimeout(2000);
-            conn.getResponseCode(); // Check server availability
-            conn.disconnect();
-        } catch (Exception e) {
-        }
-
-        // Try the MCP SSE endpoint
-        try {
-            java.net.URL url = java.net.URI.create(baseServerUrl + "/mcp/sse").toURL();
-            java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
-            conn.setRequestMethod("GET");
-            conn.setConnectTimeout(2000);
-            conn.setReadTimeout(2000);
-            conn.getResponseCode(); // Check server availability
-            conn.disconnect();
-        } catch (Exception e) {
-        }
-
+        System.out.println("DEBUG: About to initialize MCP client...");
+        System.out.println("DEBUG: Server status: " + (sharedServerManager != null ? sharedServerManager.isServerRunning() : "null manager"));
         return withMcpClient(createMcpTransport(), (McpClientFunction<ListToolsResult>) client -> {
             try {
+                System.out.println("DEBUG: MCP client created, initializing...");
+                System.out.println("DEBUG: Server still running: " + (sharedServerManager != null ? sharedServerManager.isServerRunning() : "null manager"));
                 client.initialize();
+                System.out.println("DEBUG: MCP client initialized successfully!");
             } catch (Exception e) {
+                System.out.println("DEBUG: MCP client initialization failed: " + e.getMessage());
+                System.out.println("DEBUG: Server status after failure: " + (sharedServerManager != null ? sharedServerManager.isServerRunning() : "null manager"));
                 e.printStackTrace();
                 throw e;
             }
 
             try {
+                System.out.println("DEBUG: Calling listTools...");
                 ListToolsResult result = client.listTools(null);
+                System.out.println("DEBUG: listTools returned " + result.tools().size() + " tools");
                 return result;
             } catch (Exception e) {
+                System.out.println("DEBUG: listTools failed: " + e.getMessage());
                 e.printStackTrace();
                 throw e;
             }

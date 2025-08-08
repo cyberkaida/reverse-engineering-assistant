@@ -79,18 +79,19 @@ public class CommentToolProvider extends AbstractToolProvider {
 
         List<String> required = List.of("programPath", "addressOrSymbol", "comment");
 
-        McpSchema.Tool tool = new McpSchema.Tool(
-            "set-comment",
-            "Set or update a comment at a specific address. Use this to keep notes or annotations for yourself and the human.",
-            createSchema(properties, required)
-        );
+        McpSchema.Tool tool = McpSchema.Tool.builder()
+            .name("set-comment")
+            .title("Set Comment")
+            .description("Set or update a comment at a specific address. Use this to keep notes or annotations for yourself and the human.")
+            .inputSchema(createSchema(properties, required))
+            .build();
 
-        registerTool(tool, (exchange, args) -> {
+        registerTool(tool, (exchange, request) -> {
             // Get program and parameters using helper methods
-            Program program = getProgramFromArgs(args);
-            Address address = getAddressFromArgs(args, program, "addressOrSymbol");
-            String commentTypeStr = getOptionalString(args, "commentType", "eol");
-            String comment = getString(args, "comment");
+            Program program = getProgramFromArgs(request);
+            Address address = getAddressFromArgs(request, program, "addressOrSymbol");
+            String commentTypeStr = getOptionalString(request, "commentType", "eol");
+            String comment = getString(request, "comment");
 
             Integer commentType = COMMENT_TYPES.get(commentTypeStr.toLowerCase());
             if (commentType == null) {
@@ -149,18 +150,19 @@ public class CommentToolProvider extends AbstractToolProvider {
 
         List<String> required = List.of("programPath");
 
-        McpSchema.Tool tool = new McpSchema.Tool(
-            "get-comments",
-            "Get comments at a specific address or within an address range",
-            createSchema(properties, required)
-        );
+        McpSchema.Tool tool = McpSchema.Tool.builder()
+            .name("get-comments")
+            .title("Get Comments")
+            .description("Get comments at a specific address or within an address range")
+            .inputSchema(createSchema(properties, required))
+            .build();
 
-        registerTool(tool, (exchange, args) -> {
+        registerTool(tool, (exchange, request) -> {
             // Get program and parameters using helper methods
-            Program program = getProgramFromArgs(args);
-            String addressStr = getOptionalString(args, "addressOrSymbol", null);
-            Map<String, Object> addressRange = getOptionalMap(args, "addressRange", null);
-            List<String> commentTypes = getOptionalStringList(args, "commentTypes", null);
+            Program program = getProgramFromArgs(request);
+            String addressStr = getOptionalString(request, "addressOrSymbol", null);
+            Map<String, Object> addressRange = getOptionalMap(request.arguments(), "addressRange", null);
+            List<String> commentTypes = getOptionalStringList(request.arguments(), "commentTypes", null);
 
             AddressSetView addresses;
             if (addressStr != null) {
@@ -239,17 +241,18 @@ public class CommentToolProvider extends AbstractToolProvider {
 
         List<String> required = List.of("programPath", "addressOrSymbol", "commentType");
 
-        McpSchema.Tool tool = new McpSchema.Tool(
-            "remove-comment",
-            "Remove a specific comment at an address",
-            createSchema(properties, required)
-        );
+        McpSchema.Tool tool = McpSchema.Tool.builder()
+            .name("remove-comment")
+            .title("Remove Comment")
+            .description("Remove a specific comment at an address")
+            .inputSchema(createSchema(properties, required))
+            .build();
 
-        registerTool(tool, (exchange, args) -> {
+        registerTool(tool, (exchange, request) -> {
             // Get program and parameters using helper methods
-            Program program = getProgramFromArgs(args);
-            Address address = getAddressFromArgs(args, program, "addressOrSymbol");
-            String commentTypeStr = getString(args, "commentType");
+            Program program = getProgramFromArgs(request);
+            Address address = getAddressFromArgs(request, program, "addressOrSymbol");
+            String commentTypeStr = getString(request, "commentType");
 
             Integer commentType = COMMENT_TYPES.get(commentTypeStr.toLowerCase());
             if (commentType == null) {
@@ -299,19 +302,20 @@ public class CommentToolProvider extends AbstractToolProvider {
 
         List<String> required = List.of("programPath", "searchText");
 
-        McpSchema.Tool tool = new McpSchema.Tool(
-            "search-comments",
-            "Search for comments containing specific text",
-            createSchema(properties, required)
-        );
+        McpSchema.Tool tool = McpSchema.Tool.builder()
+            .name("search-comments")
+            .title("Search Comments")
+            .description("Search for comments containing specific text")
+            .inputSchema(createSchema(properties, required))
+            .build();
 
-        registerTool(tool, (exchange, args) -> {
+        registerTool(tool, (exchange, request) -> {
             // Get program and parameters using helper methods
-            Program program = getProgramFromArgs(args);
-            String searchText = getString(args, "searchText");
-            boolean caseSensitive = getOptionalBoolean(args, "caseSensitive", false);
-            List<String> commentTypes = getOptionalStringList(args, "commentTypes", null);
-            int maxResults = getOptionalInt(args, "maxResults", 100);
+            Program program = getProgramFromArgs(request);
+            String searchText = getString(request, "searchText");
+            boolean caseSensitive = getOptionalBoolean(request, "caseSensitive", false);
+            List<String> commentTypes = getOptionalStringList(request.arguments(), "commentTypes", null);
+            int maxResults = getOptionalInt(request, "maxResults", 100);
 
             List<Integer> types = new ArrayList<>();
             if (commentTypes != null && !commentTypes.isEmpty()) {

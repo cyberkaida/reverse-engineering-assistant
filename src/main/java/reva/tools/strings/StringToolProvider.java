@@ -71,16 +71,17 @@ public class StringToolProvider extends AbstractToolProvider {
         List<String> required = List.of("programPath");
 
         // Create the tool
-        McpSchema.Tool tool = new McpSchema.Tool(
-            "get-strings-count",
-            "Get the total count of strings in the program (use this before calling get-strings to plan pagination)",
-            createSchema(properties, required)
-        );
+        McpSchema.Tool tool = McpSchema.Tool.builder()
+            .name("get-strings-count")
+            .title("Get Strings Count")
+            .description("Get the total count of strings in the program (use this before calling get-strings to plan pagination)")
+            .inputSchema(createSchema(properties, required))
+            .build();
 
         // Register the tool with a handler
-        registerTool(tool, (exchange, args) -> {
+        registerTool(tool, (exchange, request) -> {
             // Get program using helper method
-            Program program = getProgramFromArgs(args);
+            Program program = getProgramFromArgs(request);
 
             // Count the strings
             AtomicInteger count = new AtomicInteger(0);
@@ -124,17 +125,18 @@ public class StringToolProvider extends AbstractToolProvider {
         List<String> required = List.of("programPath");
 
         // Create the tool
-        McpSchema.Tool tool = new McpSchema.Tool(
-            "get-strings",
-            "Get strings from the selected program with pagination (use get-strings-count first to determine total count)",
-            createSchema(properties, required)
-        );
+        McpSchema.Tool tool = McpSchema.Tool.builder()
+            .name("get-strings")
+            .title("Get Strings")
+            .description("Get strings from the selected program with pagination (use get-strings-count first to determine total count)")
+            .inputSchema(createSchema(properties, required))
+            .build();
 
         // Register the tool with a handler
-        registerTool(tool, (exchange, args) -> {
+        registerTool(tool, (exchange, request) -> {
             // Get program and pagination parameters using helper methods
-            Program program = getProgramFromArgs(args);
-            PaginationParams pagination = getPaginationParams(args);
+            Program program = getProgramFromArgs(request);
+            PaginationParams pagination = getPaginationParams(request);
 
             // Get strings with pagination
             List<Map<String, Object>> stringData = new ArrayList<>();
@@ -210,18 +212,19 @@ public class StringToolProvider extends AbstractToolProvider {
         List<String> required = List.of("programPath","searchString");
 
         // Create the tool
-        McpSchema.Tool tool = new McpSchema.Tool(
-            "get-strings-by-similarity",
-            "Get strings from the selected program with pagination, sorted by similarity to a given string (use get-strings-count first to determine total count)",
-            createSchema(properties, required)
-        );
+        McpSchema.Tool tool = McpSchema.Tool.builder()
+            .name("get-strings-by-similarity")
+            .title("Get Strings by Similarity")
+            .description("Get strings from the selected program with pagination, sorted by similarity to a given string (use get-strings-count first to determine total count)")
+            .inputSchema(createSchema(properties, required))
+            .build();
 
         // Register the tool with a handler
-        registerTool(tool, (exchange, args) -> {
+        registerTool(tool, (exchange, request) -> {
             // Get program and parameters using helper methods
-            Program program = getProgramFromArgs(args);
-            String searchString = getString(args, "searchString");
-            PaginationParams pagination = getPaginationParams(args);
+            Program program = getProgramFromArgs(request);
+            String searchString = getString(request, "searchString");
+            PaginationParams pagination = getPaginationParams(request);
 
             if (searchString.trim().isEmpty()) {
                 return createErrorResult("Search string cannot be empty");
@@ -297,18 +300,19 @@ public class StringToolProvider extends AbstractToolProvider {
         List<String> required = List.of("programPath", "regexPattern");
 
         // Create the tool
-        McpSchema.Tool tool = new McpSchema.Tool(
-            "search-strings-regex",
-            "Search for strings matching a regex pattern in the program (use this only if you know the string is contained in the program, otherwise use get-strings-by-similarity)",
-            createSchema(properties, required)
-        );
+        McpSchema.Tool tool = McpSchema.Tool.builder()
+            .name("search-strings-regex")
+            .title("Search Strings by Regex")
+            .description("Search for strings matching a regex pattern in the program (use this only if you know the string is contained in the program, otherwise use get-strings-by-similarity)")
+            .inputSchema(createSchema(properties, required))
+            .build();
 
         // Register the tool with a handler
-        registerTool(tool, (exchange, args) -> {
+        registerTool(tool, (exchange, request) -> {
             // Get program and parameters using helper methods
-            Program program = getProgramFromArgs(args);
-            String regexPattern = getString(args, "regexPattern");
-            PaginationParams pagination = getPaginationParams(args);
+            Program program = getProgramFromArgs(request);
+            String regexPattern = getString(request, "regexPattern");
+            PaginationParams pagination = getPaginationParams(request);
 
             if (regexPattern.trim().isEmpty()) {
                 return createErrorResult("Regex pattern cannot be empty");

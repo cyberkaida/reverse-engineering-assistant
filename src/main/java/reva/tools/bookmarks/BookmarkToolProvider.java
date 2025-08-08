@@ -70,19 +70,20 @@ public class BookmarkToolProvider extends AbstractToolProvider {
 
         List<String> required = List.of("programPath", "addressOrSymbol", "type", "comment");
 
-        McpSchema.Tool tool = new McpSchema.Tool(
-            "set-bookmark",
-            "Set or update a bookmark at a specific address. Used to keep track of important locations in the program.",
-            createSchema(properties, required)
-        );
+        McpSchema.Tool tool = McpSchema.Tool.builder()
+            .name("set-bookmark")
+            .title("Set Bookmark")
+            .description("Set or update a bookmark at a specific address. Used to keep track of important locations in the program.")
+            .inputSchema(createSchema(properties, required))
+            .build();
 
-        registerTool(tool, (exchange, args) -> {
+        registerTool(tool, (exchange, request) -> {
             // Get program and parameters using helper methods
-            Program program = getProgramFromArgs(args);
-            Address address = getAddressFromArgs(args, program, "addressOrSymbol");
-            String type = getString(args, "type");
-            String category = getOptionalString(args, "category", "");
-            String comment = getString(args, "comment");
+            Program program = getProgramFromArgs(request);
+            Address address = getAddressFromArgs(request, program, "addressOrSymbol");
+            String type = getString(request, "type");
+            String category = getOptionalString(request, "category", "");
+            String comment = getString(request, "comment");
 
             try {
                 int transactionId = program.startTransaction("Set Bookmark");
@@ -142,19 +143,20 @@ public class BookmarkToolProvider extends AbstractToolProvider {
 
         List<String> required = List.of("programPath");
 
-        McpSchema.Tool tool = new McpSchema.Tool(
-            "get-bookmarks",
-            "Get bookmarks at a specific address or within an address range",
-            createSchema(properties, required)
-        );
+        McpSchema.Tool tool = McpSchema.Tool.builder()
+            .name("get-bookmarks")
+            .title("Get Bookmarks")
+            .description("Get bookmarks at a specific address or within an address range")
+            .inputSchema(createSchema(properties, required))
+            .build();
 
-        registerTool(tool, (exchange, args) -> {
+        registerTool(tool, (exchange, request) -> {
             // Get program and parameters using helper methods
-            Program program = getProgramFromArgs(args);
-            String addressStr = getOptionalString(args, "addressOrSymbol", null);
-            Map<String, Object> addressRange = getOptionalMap(args, "addressRange", null);
-            String typeFilter = getOptionalString(args, "type", null);
-            String categoryFilter = getOptionalString(args, "category", null);
+            Program program = getProgramFromArgs(request);
+            String addressStr = getOptionalString(request, "addressOrSymbol", null);
+            Map<String, Object> addressRange = getOptionalMap(request.arguments(), "addressRange", null);
+            String typeFilter = getOptionalString(request, "type", null);
+            String categoryFilter = getOptionalString(request, "category", null);
 
             BookmarkManager bookmarkMgr = program.getBookmarkManager();
             List<Map<String, Object>> bookmarks = new ArrayList<>();
@@ -231,18 +233,19 @@ public class BookmarkToolProvider extends AbstractToolProvider {
 
         List<String> required = List.of("programPath", "addressOrSymbol", "type");
 
-        McpSchema.Tool tool = new McpSchema.Tool(
-            "remove-bookmark",
-            "Remove a specific bookmark",
-            createSchema(properties, required)
-        );
+        McpSchema.Tool tool = McpSchema.Tool.builder()
+            .name("remove-bookmark")
+            .title("Remove Bookmark")
+            .description("Remove a specific bookmark")
+            .inputSchema(createSchema(properties, required))
+            .build();
 
-        registerTool(tool, (exchange, args) -> {
+        registerTool(tool, (exchange, request) -> {
             // Get program and parameters using helper methods
-            Program program = getProgramFromArgs(args);
-            Address address = getAddressFromArgs(args, program, "addressOrSymbol");
-            String type = getString(args, "type");
-            String category = getOptionalString(args, "category", "");
+            Program program = getProgramFromArgs(request);
+            Address address = getAddressFromArgs(request, program, "addressOrSymbol");
+            String type = getString(request, "type");
+            String category = getOptionalString(request, "category", "");
 
             try {
                 int transactionId = program.startTransaction("Remove Bookmark");
@@ -308,20 +311,21 @@ public class BookmarkToolProvider extends AbstractToolProvider {
 
         List<String> required = List.of("programPath");
 
-        McpSchema.Tool tool = new McpSchema.Tool(
-            "search-bookmarks",
-            "Search for bookmarks by text, type, category, or address range",
-            createSchema(properties, required)
-        );
+        McpSchema.Tool tool = McpSchema.Tool.builder()
+            .name("search-bookmarks")
+            .title("Search Bookmarks")
+            .description("Search for bookmarks by text, type, category, or address range")
+            .inputSchema(createSchema(properties, required))
+            .build();
 
-        registerTool(tool, (exchange, args) -> {
+        registerTool(tool, (exchange, request) -> {
             // Get program and parameters using helper methods
-            Program program = getProgramFromArgs(args);
-            String searchText = getOptionalString(args, "searchText", null);
-            List<String> types = getOptionalStringList(args, "types", null);
-            List<String> categories = getOptionalStringList(args, "categories", null);
-            Map<String, Object> addressRange = getOptionalMap(args, "addressRange", null);
-            int maxResults = getOptionalInt(args, "maxResults", 100);
+            Program program = getProgramFromArgs(request);
+            String searchText = getOptionalString(request, "searchText", null);
+            List<String> types = getOptionalStringList(request.arguments(), "types", null);
+            List<String> categories = getOptionalStringList(request.arguments(), "categories", null);
+            Map<String, Object> addressRange = getOptionalMap(request.arguments(), "addressRange", null);
+            int maxResults = getOptionalInt(request, "maxResults", 100);
 
             AddressSetView searchRange = null;
             if (addressRange != null) {
@@ -392,16 +396,17 @@ public class BookmarkToolProvider extends AbstractToolProvider {
 
         List<String> required = List.of("programPath", "type");
 
-        McpSchema.Tool tool = new McpSchema.Tool(
-            "list-bookmark-categories",
-            "List all categories for a given bookmark type",
-            createSchema(properties, required)
-        );
+        McpSchema.Tool tool = McpSchema.Tool.builder()
+            .name("list-bookmark-categories")
+            .title("List Bookmark Categories")
+            .description("List all categories for a given bookmark type")
+            .inputSchema(createSchema(properties, required))
+            .build();
 
-        registerTool(tool, (exchange, args) -> {
+        registerTool(tool, (exchange, request) -> {
             // Get program and parameters using helper methods
-            Program program = getProgramFromArgs(args);
-            String type = getString(args, "type");
+            Program program = getProgramFromArgs(request);
+            String type = getString(request, "type");
 
             BookmarkManager bookmarkMgr = program.getBookmarkManager();
             Map<String, Integer> categoryCounts = new HashMap<>();

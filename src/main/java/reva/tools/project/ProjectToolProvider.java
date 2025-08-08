@@ -72,14 +72,15 @@ public class ProjectToolProvider extends AbstractToolProvider {
         List<String> required = new ArrayList<>();
 
         // Create the tool
-        McpSchema.Tool tool = new McpSchema.Tool(
-            "get-current-program",
-            "Get the currently active program in Ghidra",
-            createSchema(properties, required)
-        );
+        McpSchema.Tool tool = McpSchema.Tool.builder()
+            .name("get-current-program")
+            .title("Get Current Program")
+            .description("Get the currently active program in Ghidra")
+            .inputSchema(createSchema(properties, required))
+            .build();
 
         // Register the tool with a handler
-        registerTool(tool, (exchange, args) -> {
+        registerTool(tool, (exchange, request) -> {
             // Get all open programs
             List<Program> openPrograms = RevaProgramManager.getOpenPrograms();
 
@@ -126,24 +127,25 @@ public class ProjectToolProvider extends AbstractToolProvider {
         List<String> required = List.of("folderPath");
 
         // Create the tool
-        McpSchema.Tool tool = new McpSchema.Tool(
-            "list-project-files",
-            "List files and folders in the Ghidra project",
-            createSchema(properties, required)
-        );
+        McpSchema.Tool tool = McpSchema.Tool.builder()
+            .name("list-project-files")
+            .title("List Project Files")
+            .description("List files and folders in the Ghidra project")
+            .inputSchema(createSchema(properties, required))
+            .build();
 
         // Register the tool with a handler
-        registerTool(tool, (exchange, args) -> {
+        registerTool(tool, (exchange, request) -> {
             // Get the folder path from the request
             String folderPath;
             try {
-                folderPath = getString(args, "folderPath");
+                folderPath = getString(request, "folderPath");
             } catch (IllegalArgumentException e) {
                 return createErrorResult(e.getMessage());
             }
 
             // Get the recursive flag
-            boolean recursive = getOptionalBoolean(args, "recursive", false);
+            boolean recursive = getOptionalBoolean(request, "recursive", false);
 
             // Get the active project
             Project project = AppInfo.getActiveProject();
@@ -202,14 +204,15 @@ public class ProjectToolProvider extends AbstractToolProvider {
         List<String> required = new ArrayList<>();
 
         // Create the tool
-        McpSchema.Tool tool = new McpSchema.Tool(
-            "list-open-programs",
-            "List all programs currently open in Ghidra across all tools",
-            createSchema(properties, required)
-        );
+        McpSchema.Tool tool = McpSchema.Tool.builder()
+            .name("list-open-programs")
+            .title("List Open Programs")
+            .description("List all programs currently open in Ghidra across all tools")
+            .inputSchema(createSchema(properties, required))
+            .build();
 
         // Register the tool with a handler
-        registerTool(tool, (exchange, args) -> {
+        registerTool(tool, (exchange, request) -> {
             // Get all open programs
             List<Program> openPrograms = RevaProgramManager.getOpenPrograms();
 
@@ -269,28 +272,29 @@ public class ProjectToolProvider extends AbstractToolProvider {
         List<String> required = List.of("programPath", "message");
 
         // Create the tool
-        McpSchema.Tool tool = new McpSchema.Tool(
-            "checkin-program",
-            "Check in (commit) a program to version control with a message",
-            createSchema(properties, required)
-        );
+        McpSchema.Tool tool = McpSchema.Tool.builder()
+            .name("checkin-program")
+            .title("Check In Program")
+            .description("Check in (commit) a program to version control with a message")
+            .inputSchema(createSchema(properties, required))
+            .build();
 
         // Register the tool with a handler
-        registerTool(tool, (exchange, args) -> {
+        registerTool(tool, (exchange, request) -> {
             // Get parameters
             String programPath;
             String message;
             try {
-                programPath = getString(args, "programPath");
-                message = getString(args, "message");
+                programPath = getString(request, "programPath");
+                message = getString(request, "message");
             } catch (IllegalArgumentException e) {
                 return createErrorResult(e.getMessage());
             }
 
-            boolean keepCheckedOut = getOptionalBoolean(args, "keepCheckedOut", true);
+            boolean keepCheckedOut = getOptionalBoolean(request, "keepCheckedOut", true);
 
             // Get the program to obtain its domain file
-            Program program = getProgramFromArgs(args);
+            Program program = getProgramFromArgs(request);
             DomainFile domainFile = program.getDomainFile();
 
             try {

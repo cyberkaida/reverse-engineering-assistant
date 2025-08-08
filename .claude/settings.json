@@ -6,5 +6,20 @@
       "Read(../ghidra/**)"
     ],
     "deny": []
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": {
+          "tools": ["Edit", "MultiEdit", "Write"]
+        },
+        "hooks": [
+          {
+            "type": "command",
+            "command": "gradle compileJava"
+          }
+        ]
+      }
+    ]
   }
 }

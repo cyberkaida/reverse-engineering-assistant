@@ -31,7 +31,6 @@ import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.FunctionManager;
 import ghidra.program.model.listing.GhidraClass;
 import ghidra.program.model.listing.Program;
-import ghidra.program.model.listing.Data;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.symbol.Namespace;
 import ghidra.program.model.symbol.Symbol;
@@ -44,6 +43,7 @@ import io.modelcontextprotocol.server.McpSyncServer;
 import io.modelcontextprotocol.spec.McpError;
 import io.modelcontextprotocol.spec.McpSchema;
 import reva.tools.AbstractToolProvider;
+import reva.util.AddressUtil;
 import reva.util.SchemaUtil;
 
 /**
@@ -84,11 +84,12 @@ public class ClassToolProvider extends AbstractToolProvider {
 
         List<String> required = List.of("programPath");
 
-        McpSchema.Tool tool = new McpSchema.Tool(
-            "list-classes",
-            "List all classes in a program with their basic information",
-            createSchema(properties, required)
-        );
+        McpSchema.Tool tool = McpSchema.Tool.builder()
+            .name("list-classes")
+            .title("List Classes")
+            .description("List all classes in a program with their basic information")
+            .inputSchema(createSchema(properties, required))
+            .build();
 
         registerTool(tool, (exchange, args) -> {
             try {
@@ -169,11 +170,12 @@ public class ClassToolProvider extends AbstractToolProvider {
 
         List<String> required = List.of("programPath", "className");
 
-        McpSchema.Tool tool = new McpSchema.Tool(
-            "get-class-info",
-            "Get detailed information about a specific class or namespace including methods, structure, and inheritance",
-            createSchema(properties, required)
-        );
+        McpSchema.Tool tool = McpSchema.Tool.builder()
+            .name("get-class-info")
+            .title("Get Class Information")
+            .description("Get detailed information about a specific class or namespace including methods, structure, and inheritance")
+            .inputSchema(createSchema(properties, required))
+            .build();
 
         registerTool(tool, (exchange, args) -> {
             try {
@@ -182,7 +184,7 @@ public class ClassToolProvider extends AbstractToolProvider {
 
                 Namespace namespace = getNamespaceFromPath(program, className);
                 if (namespace == null) {
-                    throw new Exception("Namespace not found: " + className + 
+                    throw new Exception("Class namespace not found: " + className + 
                         ". Use 'list-classes' to see available classes or try reconstructing classes from RTTI data if this is a C++ program.");
                 }
 
@@ -208,11 +210,12 @@ public class ClassToolProvider extends AbstractToolProvider {
 
         List<String> required = List.of("programPath", "name");
 
-        McpSchema.Tool tool = new McpSchema.Tool(
-            "list-class-or-namespace-methods",
-            "List all methods in a class or namespace with detailed information including signatures and types",
-            createSchema(properties, required)
-        );
+        McpSchema.Tool tool = McpSchema.Tool.builder()
+            .name("list-class-or-namespace-methods")
+            .title("List Class Methods")
+            .description("List all methods in a class or namespace with detailed information including signatures and types")
+            .inputSchema(createSchema(properties, required))
+            .build();
 
         registerTool(tool, (exchange, args) -> {
             try {
@@ -254,11 +257,12 @@ public class ClassToolProvider extends AbstractToolProvider {
 
         List<String> required = List.of("programPath", "className");
 
-        McpSchema.Tool tool = new McpSchema.Tool(
-            "create-class",
-            "Create a new class to be reconstructed",
-            createSchema(properties, required)
-        );
+        McpSchema.Tool tool = McpSchema.Tool.builder()
+            .name("create-class")
+            .title("Create Class")
+            .description("Create a new class to be reconstructed")
+            .inputSchema(createSchema(properties, required))
+            .build();
 
         registerTool(tool, (exchange, args) -> {
             try {
@@ -319,11 +323,12 @@ public class ClassToolProvider extends AbstractToolProvider {
 
         List<String> required = List.of("programPath", "namespaceName");
 
-        McpSchema.Tool tool = new McpSchema.Tool(
-            "create-namespace",
-            "Create a new namespace to be reconstructed",
-            createSchema(properties, required)
-        );
+        McpSchema.Tool tool = McpSchema.Tool.builder()
+            .name("create-namespace")
+            .title("Create Namespace")
+            .description("Create a new namespace to be reconstructed")
+            .inputSchema(createSchema(properties, required))
+            .build();
 
         registerTool(tool, (exchange, args) -> {
             try {
@@ -385,11 +390,12 @@ public class ClassToolProvider extends AbstractToolProvider {
 
         List<String> required = List.of("programPath", "functionName", "name");
 
-        McpSchema.Tool tool = new McpSchema.Tool(
-            "associate-function-with-class-or-namespace",
-            "Associate a function with a class or namespace as a member of said class or namespace. This is useful for organizing reconstructed methods under their appropriate classes/namespaces.",
-            createSchema(properties, required)
-        );
+        McpSchema.Tool tool = McpSchema.Tool.builder()
+            .name("associate-function-with-class-or-namespace")
+            .title("Associate Function with Class")
+            .description("Associate a function with a class or namespace as a member of said class or namespace. This is useful for organizing reconstructed methods under their appropriate classes/namespaces.")
+            .inputSchema(createSchema(properties, required))
+            .build();
 
         registerTool(tool, (exchange, args) -> {
             try {
@@ -431,7 +437,7 @@ public class ClassToolProvider extends AbstractToolProvider {
                     Map<String, Object> result = new HashMap<>();
                     result.put("success", true);
                     result.put("functionName", function.getName());
-                    result.put("functionAddress", function.getEntryPoint().toString());
+                    result.put("functionAddress", AddressUtil.formatAddress(function.getEntryPoint()));
                     result.put("className", name);
                     result.put("newNamespace", classNamespace.getName(true));
                     result.put("message", "Successfully associated function '" + function.getName() + 
@@ -461,13 +467,14 @@ public class ClassToolProvider extends AbstractToolProvider {
         properties.put("className", SchemaUtil.stringProperty("Name of the class to associate the variable or vtable with (ParentClass"+Namespace.DELIMITER+"Class)"));
         properties.put("variableAddress", SchemaUtil.stringProperty("Address or symbol of the variable or vtable to associate"));
 
-        List<String> required = List.of("programPath", "className", "vtableAddress");
+        List<String> required = List.of("programPath", "className", "variableAddress");
 
-        McpSchema.Tool tool = new McpSchema.Tool(
-            "associate-variable-or-vtable-with-class",
-            "Associate a static variable or vtable with a class.",
-            createSchema(properties, required)
-        );
+        McpSchema.Tool tool = McpSchema.Tool.builder()
+            .name("associate-variable-or-vtable-with-class")
+            .title("Associate Variable with Class")
+            .description("Associate a static variable or vtable with a class.")
+            .inputSchema(createSchema(properties, required))
+            .build();
 
         registerTool(tool, (exchange, args) -> {
             try {
@@ -531,13 +538,14 @@ public class ClassToolProvider extends AbstractToolProvider {
 
         List<String> required = List.of("programPath");
 
-        McpSchema.Tool tool = new McpSchema.Tool(
-            "reconstruct-classes-from-rtti",
-            "Reconstruct classes from Runtime Type Information (RTTI) data using Ghidra's RecoverClassesFromRTTIScript. " +
+        McpSchema.Tool tool = McpSchema.Tool.builder()
+            .name("reconstruct-classes-from-rtti")
+            .title("Reconstruct Classes from RTTI")
+            .description("Reconstruct classes from Runtime Type Information (RTTI) data using Ghidra's RecoverClassesFromRTTIScript. " +
             "This tool works with Windows PE and GCC programs (32/64-bit) that contain RTTI structures. " +
-            "Run this first for best results. (Some binaries may have their RTTI data tampered with, in which case the names recovered will not by accurate, but the types will be correct)",
-            createSchema(properties, required)
-        );
+            "Run this first for best results. (Some binaries may have their RTTI data tampered with, in which case the names recovered will not by accurate, but the types will be correct)")
+            .inputSchema(createSchema(properties, required))
+            .build();
 
         registerTool(tool, (exchange, args) -> {
             try {
@@ -675,7 +683,7 @@ public class ClassToolProvider extends AbstractToolProvider {
         
         Map<String, Object> info = new HashMap<>();
         info.put("name", funcName);
-        info.put("address", function.getEntryPoint().toString());
+        info.put("address", AddressUtil.formatAddress(function.getEntryPoint()));
         info.put("signature", function.getSignature().getPrototypeString());
         info.put("callingConvention", function.getCallingConventionName());
         info.put("parameterCount", function.getParameterCount());

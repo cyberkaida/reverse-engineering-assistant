@@ -19,6 +19,9 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.Collection;
 
 import ghidra.app.plugin.core.progmgr.ProgramLocator;
 import ghidra.app.services.ProgramManager;
@@ -30,6 +33,7 @@ import ghidra.framework.model.ToolManager;
 import ghidra.framework.plugintool.PluginTool;
 import ghidra.program.model.listing.Program;
 import ghidra.util.Msg;
+import ghidra.util.SystemUtilities;
 import ghidra.util.task.TaskMonitor;
 import reva.util.RevaInternalServiceRegistry;
 
@@ -39,10 +43,34 @@ import reva.util.RevaInternalServiceRegistry;
  */
 public class RevaProgramManager {
     // Cache of opened programs by path to avoid repeatedly opening the same program
-    private static final Map<String, Program> programCache = new HashMap<>();
+    private static final Map<String, Program> programCache = new ConcurrentHashMap<>();
 
-    // Registry of directly opened programs (mainly for test environments)
-    private static final Map<String, Program> registeredPrograms = new HashMap<>();
+    // Registry of directly opened programs (mainly for test environments and headless mode)
+    private static final Map<String, Program> registeredPrograms = new ConcurrentHashMap<>();
+
+    // Support multiple active programs simultaneously (for PyGhidra mode)
+    private static final Map<String, Program> activePrograms = new ConcurrentHashMap<>();
+    private static final List<Program> programList = new CopyOnWriteArrayList<>();
+
+    /**
+     * Check if we're running in headless mode
+     * @return true if in headless mode
+     */
+    private static boolean isHeadlessMode() {
+        return Boolean.getBoolean("java.awt.headless") || 
+               Boolean.getBoolean(SystemUtilities.HEADLESS_PROPERTY);
+    }
+
+    /**
+     * Register multiple programs from pyghidra script
+     * @param programs Collection of programs to register
+     */
+    public static void registerPrograms(Collection<Program> programs) {
+        for (Program program : programs) {
+            registerProgram(program);
+        }
+        Msg.info(RevaProgramManager.class, "Registered " + programs.size() + " programs for multi-program access");
+    }
 
     /**
      * Get all currently open programs in any Ghidra tool
@@ -51,10 +79,38 @@ public class RevaProgramManager {
     public static List<Program> getOpenPrograms() {
         List<Program> openPrograms = new ArrayList<>();
 
-        // First try to get programs from the tool manager
+        // In headless mode, return registered programs
+        if (isHeadlessMode()) {
+            openPrograms.addAll(programList);
+            if (!openPrograms.isEmpty()) {
+                Msg.debug(RevaProgramManager.class, "Returning " + openPrograms.size() + " programs from headless registry");
+                return openPrograms;
+            }
+        }
+
+        // GUI mode or fallback: try to get programs from the tool manager
         Project project = AppInfo.getActiveProject();
         if (project == null) {
             Msg.debug(RevaProgramManager.class, "No active project found");
+            return openPrograms;
+        }
+
+        // Fall back to existing tool-based program discovery
+        openPrograms.addAll(getOpenProgramsFromTools());
+        
+        Msg.debug(RevaProgramManager.class, "Total open programs found: " + openPrograms.size());
+        return openPrograms;
+    }
+
+    /**
+     * Get programs from running tools (GUI mode)
+     * @return List of programs from tools
+     */
+    private static List<Program> getOpenProgramsFromTools() {
+        List<Program> openPrograms = new ArrayList<>();
+        
+        Project project = AppInfo.getActiveProject();
+        if (project == null) {
             return openPrograms;
         }
 
@@ -107,7 +163,6 @@ public class RevaProgramManager {
             }
         }
 
-        Msg.debug(RevaProgramManager.class, "Total open programs found: " + openPrograms.size());
         return openPrograms;
     }
 
@@ -119,7 +174,15 @@ public class RevaProgramManager {
     public static void registerProgram(Program program) {
         if (program != null && !program.isClosed()) {
             String programPath = program.getDomainFile().getPathname();
+            
+            // Add to both legacy registry and new multi-program collections
             registeredPrograms.put(programPath, program);
+            activePrograms.put(programPath, program);
+            
+            if (!programList.contains(program)) {
+                programList.add(program);
+            }
+            
             Msg.debug(RevaProgramManager.class, "Registered program: " + programPath);
         }
     }
@@ -131,8 +194,13 @@ public class RevaProgramManager {
     public static void unregisterProgram(Program program) {
         if (program != null) {
             String programPath = program.getDomainFile().getPathname();
+            
+            // Remove from all collections
             registeredPrograms.remove(programPath);
+            activePrograms.remove(programPath);
+            programList.remove(program);
             programCache.remove(programPath);
+            
             Msg.debug(RevaProgramManager.class, "Unregistered program: " + programPath);
         }
     }
@@ -145,8 +213,13 @@ public class RevaProgramManager {
     public static void programClosed(Program program) {
         if (program != null) {
             String programPath = program.getDomainFile().getPathname();
+            
+            // Remove from all collections  
             registeredPrograms.remove(programPath);
+            activePrograms.remove(programPath);
+            programList.remove(program);
             programCache.remove(programPath);
+            
             Msg.debug(RevaProgramManager.class, "Program closed, cleared cache: " + programPath);
         }
     }
@@ -186,7 +259,21 @@ public class RevaProgramManager {
 
         Msg.debug(RevaProgramManager.class, "Looking for program with path: " + programPath);
 
-        // Check registered programs first (for test environments)
+        // Check active programs first (for headless/PyGhidra environments)
+        if (activePrograms.containsKey(programPath)) {
+            Program activeProgram = activePrograms.get(programPath);
+            if (!activeProgram.isClosed()) {
+                Msg.debug(RevaProgramManager.class, "Found program in active registry: " + programPath);
+                return activeProgram;
+            } else {
+                // Remove invalid programs from all registries
+                activePrograms.remove(programPath);
+                programList.remove(activeProgram);
+                registeredPrograms.remove(programPath);
+            }
+        }
+
+        // Check legacy registered programs (for test environments)
         if (registeredPrograms.containsKey(programPath)) {
             Program registeredProgram = registeredPrograms.get(programPath);
             if (!registeredProgram.isClosed()) {
@@ -279,7 +366,11 @@ public class RevaProgramManager {
         }
         programCache.clear();
 
-        // Clear registered programs (but don't release them as we didn't open them)
+        // Clear all program registries (but don't release them as we didn't open them)
         registeredPrograms.clear();
+        activePrograms.clear();
+        programList.clear();
+        
+        Msg.info(RevaProgramManager.class, "Cleaned up all program registries");
     }
 }

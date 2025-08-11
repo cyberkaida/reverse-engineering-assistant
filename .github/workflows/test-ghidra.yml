@@ -3,8 +3,14 @@ name: Test Ghidra 🐉 Extension
 on:
   push:
     branches: [ main, develop ]
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
   pull_request:
     branches: [ main, develop ]
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
 
 permissions:
   contents: write
@@ -13,11 +19,117 @@ permissions:
   security-events: write
 
 jobs:
+  test-python-unit:
+    name: Test Python CLI Unit Tests 🐍
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python 🐍
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install uv
+      run: |
+        curl -LsSf https://astral.sh/uv/install.sh | sh
+        echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+    - name: Install dependencies
+      working-directory: ./cli
+      run: |
+        uv pip install --system -e .
+        uv pip install --system pytest
+
+    - name: Run Python unit tests
+      working-directory: ./cli
+      run: |
+        PYTHONPATH=src pytest tests/ -v
+
+    - name: Test CLI import
+      run: |
+        python -c "from reverse_engineering_assistant import ReVaSession, find_free_port; print('✓ Python API import successful')"
+
+  test-python-integration:
+    name: Test Python CLI Integration 🔗
+    runs-on: ubuntu-latest
+    needs: test-python-unit
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Java 🍵
+      uses: actions/setup-java@v4
+      with:
+        java-version: "21"
+        distribution: "microsoft"
+
+    - name: Install Ghidra 🐉
+      uses: antoniovazquezblanco/setup-ghidra@v2.0.12
+      with:
+        version: "latest"
+
+    - name: Setup Xvfb for headless testing
+      run: |
+        sudo apt-get update && sudo apt-get install -y xvfb
+        Xvfb :99 -nolisten tcp &
+        echo "DISPLAY=:99" >> $GITHUB_ENV
+
+    - name: Setup Gradle 🔧
+      uses: gradle/actions/setup-gradle@v4
+      with:
+        gradle-version: "8.14"
+
+    - name: Build and Install ReVa Extension 🔨
+      run: |
+        gradle buildExtension
+        # Extract the built extension to Ghidra
+        unzip -o dist/ghidra_*_ReVa.zip -d $GHIDRA_INSTALL_DIR/Ghidra/Extensions/
+
+    - name: Set up Python 🐍
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install uv
+      run: |
+        curl -LsSf https://astral.sh/uv/install.sh | sh
+        echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+    - name: Install Python dependencies
+      working-directory: ./cli
+      run: |
+        uv pip install --system -e .
+        uv pip install --system pytest pyghidra
+
+    - name: Test Python CLI with real Ghidra
+      working-directory: ./cli
+      run: |
+        # Basic import test with Ghidra environment
+        export GHIDRA_INSTALL_DIR="${{ env.GHIDRA_INSTALL_DIR }}"
+        echo "Ghidra installed at: $GHIDRA_INSTALL_DIR"
+        echo "ReVa extension files:"
+        find "$GHIDRA_INSTALL_DIR/Ghidra/Extensions" -name "*ReVa*" -type f | head -5
+        
+        # Test ReVaSession constructor (should not require PyGhidra initialization)
+        python -c "
+        import os
+        print('Testing ReVaSession with Ghidra environment...')
+        from reverse_engineering_assistant import ReVaSession, find_free_port
+        # Test constructor only - don't try to start() since that requires PyGhidra
+        session = ReVaSession(['/bin/ls'], quiet=True)
+        print(f'✓ ReVaSession constructor successful')
+        print(f'✓ Ghidra path detected: {session.ghidra_path}')
+        print(f'✓ Port assigned: {session.port}')
+        "
+      env:
+        DISPLAY: :99
+
   test:
     strategy:
       matrix:
         os: [ubuntu-latest]
         ghidra-version: [
+            "11.4.1",
             "11.4",
             "11.3.2",
             "11.3.1",

@@ -4,17 +4,18 @@ build-backend = "hatchling.build"
 
 [project]
 name = "reverse-engineering-assistant"
-version = "0.1.0"
-description = "Command line tool for headless reverse engineering with Ghidra and ReVa MCP server"
+version = "4.4.0"
+description = "Command line interface for ReVa (Reverse Engineering Assistant) - AI-powered Ghidra integration"
 readme = "README.md"
 authors = [
-    {name = "ReVa Contributors", email = "dev@example.com"}
+    {name = "CyberKaida", email = "cyberkaida@proton.me"}
 ]
 license = {text = "Apache-2.0"}
 requires-python = ">=3.9"
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
     "License :: OSI Approved :: Apache Software License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
@@ -24,6 +25,7 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Topic :: Software Development :: Debuggers",
+    "Topic :: Software Development :: Disassemblers",
     "Topic :: Security",
 ]
 dependencies = [

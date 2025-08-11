@@ -1,0 +1,94 @@
+name: Publish Python Package to PyPI
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run (test PyPI only)'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+    
+    - name: Install uv
+      run: |
+        curl -LsSf https://astral.sh/uv/install.sh | sh
+        echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+    
+    - name: Extract version from tag
+      if: github.event_name == 'release'
+      run: |
+        # Extract version from tag (e.g., v4.3.0 -> 4.3.0)
+        VERSION=${GITHUB_REF#refs/tags/v}
+        VERSION=${VERSION#refs/tags/}  # Handle tags without 'v' prefix
+        echo "PACKAGE_VERSION=$VERSION" >> $GITHUB_ENV
+    
+    - name: Update package version
+      if: github.event_name == 'release'
+      working-directory: ./cli
+      run: |
+        # Update version in pyproject.toml to match release tag
+        sed -i "s/^version = .*/version = \"$PACKAGE_VERSION\"/" pyproject.toml
+        echo "Updated package version to $PACKAGE_VERSION"
+        cat pyproject.toml | grep -A2 "^\[project\]"
+    
+    - name: Build package
+      working-directory: ./cli
+      run: |
+        uv pip install --system build
+        python -m build
+    
+    - name: Check package
+      working-directory: ./cli
+      run: |
+        uv pip install --system twine
+        python -m twine check dist/*
+        ls -lah dist/
+    
+    - name: Publish to Test PyPI
+      if: github.event.inputs.dry_run == 'true' || github.event_name == 'workflow_dispatch'
+      working-directory: ./cli
+      env:
+        TWINE_USERNAME: __token__
+        TWINE_PASSWORD: ${{ secrets.TEST_PYPI_TOKEN }}
+      run: |
+        python -m twine upload --repository testpypi dist/*
+        echo "Package published to Test PyPI: https://test.pypi.org/project/reverse-engineering-assistant/"
+    
+    - name: Publish to PyPI
+      if: github.event_name == 'release' && github.event.inputs.dry_run != 'true'
+      working-directory: ./cli
+      env:
+        TWINE_USERNAME: __token__
+        TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
+      run: |
+        python -m twine upload dist/*
+        echo "Package published to PyPI: https://pypi.org/project/reverse-engineering-assistant/"
+    
+    - name: Verify installation
+      if: github.event_name == 'release' && github.event.inputs.dry_run != 'true'
+      run: |
+        # Wait a bit for PyPI to update
+        sleep 30
+        
+        # Try to install the package
+        uv pip install --system reverse-engineering-assistant==$PACKAGE_VERSION
+        
+        # Check that the CLI is available
+        reva --help

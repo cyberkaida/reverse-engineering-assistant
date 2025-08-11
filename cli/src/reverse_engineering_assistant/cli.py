@@ -7,9 +7,14 @@ import os
 import sys
 import time
 import signal
+import socket
+import argparse
 from pathlib import Path
-from typing import List, Optional, Tuple
-import click
+from typing import List, Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ghidra.base.project import GhidraProject
+    from ghidra.program.model.listing import Program
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 from rich.panel import Panel
@@ -19,17 +24,112 @@ import requests
 console = Console()
 
 
-class PyGhidraReVaRunner:
-    """Manages PyGhidra execution with ReVa extension using proper project management."""
+def find_free_port() -> int:
+    """Find a random free port."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(('', 0))
+        port: int = s.getsockname()[1]
+        return port
+
+
+class DummyProgress:
+    """Dummy progress context manager for quiet mode."""
     
-    def __init__(self, ghidra_path: Optional[str] = None, project_dir: Optional[str] = None, project_name: Optional[str] = None):
+    def __enter__(self):
+        return self
+    
+    def __exit__(self, *args):
+        pass
+    
+    def add_task(self, *args, **kwargs):
+        return None
+    
+    def update(self, *args, **kwargs):
+        pass
+    
+    def remove_task(self, *args, **kwargs):
+        pass
+
+
+class ReVaSession:
+    """A session for reverse engineering analysis using PyGhidra and ReVa MCP server.
+    
+    Can be used as a context manager for automatic resource management:
+    
+        with ReVaSession(['binary.exe']) as reva:
+            server_url = reva.server_url
+            programs = reva.programs
+    
+    Or manually managed:
+    
+        reva = ReVaSession(['binary.exe'])
+        reva.start()
+        # ... use reva.server_url, reva.programs
+        reva.shutdown()
+    """
+    
+    def __init__(self, binaries: List[str], *, ghidra_path: Optional[str] = None, project_dir: Optional[str] = None, 
+                 project_name: Optional[str] = None, port: Optional[int] = None, auto_analyze: bool = True, 
+                 quiet: bool = True) -> None:
+        self.binaries = binaries
         self.ghidra_path = ghidra_path or self._find_ghidra()
         self.project_dir = self._determine_project_dir(project_dir)
         self.project_name = project_name or f"reva_session_{os.getpid()}"
-        self.project = None  # GhidraProject instance
-        self.programs = {}  # Map of program name to Program object
+        self.port = port or find_free_port()
+        self.auto_analyze = auto_analyze
+        self.quiet = quiet
+        
+        # State variables
+        self.project: Optional['GhidraProject'] = None  # GhidraProject instance
+        self.programs: dict[str, 'Program'] = {}  # Map of program name to Program object
         self.pyghidra_started = False
         self.cleanup_project = project_dir is None  # Only cleanup if using temp dir
+        self.server_url: Optional[str] = None
+        self._started = False
+    
+    def __enter__(self) -> 'ReVaSession':
+        """Enter the context manager and start the ReVa session."""
+        self.start()
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        """Exit the context manager and cleanup resources."""
+        self.shutdown()
+        return None
+    
+    def start(self) -> None:
+        """Start the ReVa session by initializing PyGhidra, importing binaries, and starting the MCP server."""
+        if self._started:
+            return
+        
+        try:
+            # Initialize PyGhidra
+            self.initialize_pyghidra()
+            
+            # Open or create project
+            self.open_project()
+            
+            # Import programs
+            self.import_programs(self.binaries, run_analysis=self.auto_analyze)
+            
+            if not self.programs:
+                raise RuntimeError("No programs were successfully imported")
+            
+            # Initialize ReVa MCP server
+            self.initialize_reva(self.port)
+            
+            # Wait for MCP server to be ready
+            self.wait_for_mcp_server(self.port)
+            
+            self._started = True
+            
+            if not self.quiet:
+                self.display_ready_message(self.port)
+                
+        except Exception:
+            # Clean up on failure
+            self.shutdown()
+            raise
         
     def _find_ghidra(self) -> str:
         """Auto-detect Ghidra installation path."""
@@ -57,7 +157,7 @@ class PyGhidraReVaRunner:
                 if analyze_script.exists():
                     return path
         
-        raise click.ClickException(
+        raise RuntimeError(
             "Could not find Ghidra installation. Please specify --ghidra-path or set GHIDRA_INSTALL_DIR"
         )
     
@@ -80,7 +180,8 @@ class PyGhidraReVaRunner:
     
     def initialize_pyghidra(self) -> None:
         """Initialize PyGhidra with the Ghidra installation."""
-        console.print(f"[blue]Initializing PyGhidra with Ghidra at: {self.ghidra_path}")
+        if not self.quiet:
+            console.print(f"[blue]Initializing PyGhidra with Ghidra at: {self.ghidra_path}")
         
         # Set GHIDRA_INSTALL_DIR for PyGhidra
         os.environ["GHIDRA_INSTALL_DIR"] = self.ghidra_path
@@ -89,16 +190,18 @@ class PyGhidraReVaRunner:
             import pyghidra
             pyghidra.start()
             self.pyghidra_started = True
-            console.print("[green]✓ PyGhidra initialized successfully")
+            if not self.quiet:
+                console.print("[green]✓ PyGhidra initialized successfully")
         except Exception as e:
-            raise click.ClickException(f"Failed to initialize PyGhidra: {e}")
+            raise RuntimeError(f"Failed to initialize PyGhidra: {e}")
     
     def open_project(self) -> None:
         """Open or create a Ghidra project."""
         if not self.pyghidra_started:
-            raise click.ClickException("PyGhidra must be initialized first")
+            raise RuntimeError("PyGhidra must be initialized first")
         
-        console.print(f"[dim]Opening project: {self.project_dir / self.project_name}")
+        if not self.quiet:
+            console.print(f"[dim]Opening project: {self.project_dir / self.project_name}")
         
         try:
             from ghidra.base.project import GhidraProject
@@ -112,7 +215,8 @@ class PyGhidraReVaRunner:
                     str(self.project_dir),
                     self.project_name
                 )
-                console.print(f"[green]✓ Opened existing project: {self.project_name}")
+                if not self.quiet:
+                    console.print(f"[green]✓ Opened existing project: {self.project_name}")
             else:
                 # Create new project
                 self.project = GhidraProject.createProject(
@@ -120,33 +224,43 @@ class PyGhidraReVaRunner:
                     self.project_name,
                     False  # not temporary
                 )
-                console.print(f"[green]✓ Created new project: {self.project_name}")
+                if not self.quiet:
+                    console.print(f"[green]✓ Created new project: {self.project_name}")
                 
         except Exception as e:
-            raise click.ClickException(f"Failed to open/create project: {e}")
+            raise RuntimeError(f"Failed to open/create project: {e}")
     
     def import_programs(self, binary_paths: List[str], run_analysis: bool = True) -> None:
         """Import programs into the project."""
         if not self.project:
-            raise click.ClickException("Project must be opened first")
+            raise RuntimeError("Project must be opened first")
         
         from java.io import File
         from ghidra.base.project import GhidraProject
         
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            TimeElapsedColumn(),
-            console=console
-        ) as progress:
+        if not self.quiet:
+            progress_ctx = Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                TimeElapsedColumn(),
+                console=console
+            )
+        else:
+            progress_ctx = None
+        
+        with progress_ctx if progress_ctx else DummyProgress() as progress:
             
             for binary_path in binary_paths:
                 binary = Path(binary_path)
                 if not binary.exists():
-                    console.print(f"[red]Warning: Binary not found: {binary_path}")
+                    if not self.quiet:
+                        console.print(f"[red]Warning: Binary not found: {binary_path}")
                     continue
                 
-                task = progress.add_task(f"Importing {binary.name}...", total=None)
+                if not self.quiet:
+                    task = progress.add_task(f"Importing {binary.name}...", total=None)
+                else:
+                    task = None
                 
                 try:
                     # Import the program using GhidraProject
@@ -157,32 +271,41 @@ class PyGhidraReVaRunner:
                         # Store the program
                         self.programs[program.getName()] = program
                         
-                        progress.update(task, description=f"✓ Imported {binary.name}")
+                        if not self.quiet and task is not None:
+                            progress.update(task, description=f"✓ Imported {binary.name}")
                         
                         # Analyze if requested
                         if run_analysis:
-                            progress.update(task, description=f"Analyzing {binary.name}...")
+                            if not self.quiet and task is not None:
+                                progress.update(task, description=f"Analyzing {binary.name}...")
                             GhidraProject.analyze(program)
-                            progress.update(task, description=f"✓ Analyzed {binary.name}")
+                            if not self.quiet and task is not None:
+                                progress.update(task, description=f"✓ Analyzed {binary.name}")
                         
                         # Log successful import (don't use Msg.info due to Java interop issues)
-                        console.print(f"[dim]Imported program: {program.getName()}")
+                        if not self.quiet:
+                            console.print(f"[dim]Imported program: {program.getName()}")
                     else:
-                        console.print(f"[red]Failed to import {binary.name}")
+                        if not self.quiet:
+                            console.print(f"[red]Failed to import {binary.name}")
                         
                 except Exception as e:
-                    console.print(f"[red]Error importing {binary.name}: {e}")
+                    if not self.quiet:
+                        console.print(f"[red]Error importing {binary.name}: {e}")
                 
-                progress.remove_task(task)
+                if not self.quiet and task is not None:
+                    progress.remove_task(task)
         
-        console.print(f"[green]Successfully imported {len(self.programs)} program(s)")
+        if not self.quiet:
+            console.print(f"[green]Successfully imported {len(self.programs)} program(s)")
     
     def initialize_reva(self, port: int = 8080) -> None:
         """Initialize ReVa MCP server with the imported programs."""
         if not self.programs:
-            raise click.ClickException("No programs are imported")
+            raise RuntimeError("No programs are imported")
         
-        console.print(f"[blue]Initializing ReVa MCP server on port {port}...")
+        if not self.quiet:
+            console.print(f"[blue]Initializing ReVa MCP server on port {port}...")
         
         try:
             from reva.plugin import ReVaPyGhidraSupport
@@ -194,39 +317,48 @@ class PyGhidraReVaRunner:
             server_url = ReVaPyGhidraSupport.getMcpServerUrl()
             
             if server_url:
-                console.print(f"[green]✓ ReVa MCP server started at: {server_url}")
-                
-                # Print session information
-                session_info = ReVaPyGhidraSupport.getSessionInfo()
-                console.print("\n[dim]Session Information:[/dim]")
-                for line in session_info.split('\n'):
-                    if line.strip():
-                        console.print(f"  {line}")
+                self.server_url = server_url
+                if not self.quiet:
+                    console.print(f"[green]✓ ReVa MCP server started at: {server_url}")
+                    
+                    # Print session information
+                    session_info = ReVaPyGhidraSupport.getSessionInfo()
+                    console.print("\n[dim]Session Information:[/dim]")
+                    for line in session_info.split('\n'):
+                        if line.strip():
+                            console.print(f"  {line}")
             else:
-                console.print("[yellow]Warning: MCP server URL not available")
+                if not self.quiet:
+                    console.print("[yellow]Warning: MCP server URL not available")
                 
         except ImportError as e:
-            raise click.ClickException(f"ReVa extension not available: {e}")
+            raise RuntimeError(f"ReVa extension not available: {e}")
         except Exception as e:
-            raise click.ClickException(f"Failed to initialize ReVa: {e}")
+            raise RuntimeError(f"Failed to initialize ReVa: {e}")
     
     def wait_for_mcp_server(self, port: int, timeout: int = 30) -> None:
         """Wait for MCP server to become available."""
         start_time = time.time()
         
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("Waiting for MCP server to start..."),
-            TimeElapsedColumn(),
-            console=console
-        ) as progress:
-            task = progress.add_task("Starting...", total=None)
+        if not self.quiet:
+            progress_ctx = Progress(
+                SpinnerColumn(),
+                TextColumn("Waiting for MCP server to start..."),
+                TimeElapsedColumn(),
+                console=console
+            )
+        else:
+            progress_ctx = DummyProgress()
+        
+        with progress_ctx as progress:
+            task = progress.add_task("Starting...", total=None) if not self.quiet else None
             
             while time.time() - start_time < timeout:
                 try:
                     response = requests.get(f"http://localhost:{port}/", timeout=2)
                     # MCP server responds with specific status
-                    progress.update(task, description="✓ MCP server is ready!")
+                    if not self.quiet and task is not None:
+                        progress.update(task, description="✓ MCP server is ready!")
                     time.sleep(0.5)  # Brief pause to show success
                     return
                 except (requests.exceptions.RequestException, requests.exceptions.ConnectionError):
@@ -234,7 +366,8 @@ class PyGhidraReVaRunner:
                 
                 time.sleep(1)
             
-            console.print(f"[yellow]Note: MCP server may still be starting up...")
+            if not self.quiet:
+                console.print(f"[yellow]Note: MCP server may still be starting up...")
     
     def display_ready_message(self, port: int) -> None:
         """Display the server ready message."""
@@ -253,12 +386,14 @@ class PyGhidraReVaRunner:
             title="ReVa PyGhidra Analysis",
             border_style="green"
         )
-        console.print(panel)
+        if not self.quiet:
+            console.print(panel)
     
     def keep_alive(self) -> None:
         """Keep the process alive until interrupted."""
-        def signal_handler(signum, frame):
-            console.print("\n[yellow]Received interrupt signal. Shutting down gracefully...")
+        def signal_handler(signum: int, frame: object) -> None:
+            if not self.quiet:
+                console.print("\n[yellow]Received interrupt signal. Shutting down gracefully...")
             self.shutdown()
             sys.exit(0)
         
@@ -266,7 +401,8 @@ class PyGhidraReVaRunner:
         signal.signal(signal.SIGTERM, signal_handler)
         
         try:
-            console.print("\n[dim]Server is running. Press Ctrl+C to stop...[/dim]")
+            if not self.quiet:
+                console.print("\n[dim]Server is running. Press Ctrl+C to stop...[/dim]")
             while True:
                 time.sleep(1)
                 
@@ -277,40 +413,52 @@ class PyGhidraReVaRunner:
                         invalid_programs.append(name)
                 
                 if invalid_programs:
-                    console.print(f"[yellow]Warning: {len(invalid_programs)} program(s) have been closed")
+                    if not self.quiet:
+                        console.print(f"[yellow]Warning: {len(invalid_programs)} program(s) have been closed")
                     for name in invalid_programs:
                         del self.programs[name]
                 
                 if not self.programs:
-                    console.print("[red]All programs have been closed. Exiting...")
+                    if not self.quiet:
+                        console.print("[red]All programs have been closed. Exiting...")
                     break
                     
         except KeyboardInterrupt:
-            console.print("\n[yellow]Interrupted. Shutting down...")
+            if not self.quiet:
+                console.print("\n[yellow]Interrupted. Shutting down...")
             self.shutdown()
     
     def shutdown(self) -> None:
         """Shutdown PyGhidra and cleanup resources."""
-        console.print("[blue]Shutting down...")
+        if not self._started:
+            return
+        
+        if not self.quiet:
+            console.print("[blue]Shutting down...")
         
         try:
             from reva.plugin import ReVaPyGhidraSupport
             
             # Cleanup ReVa
-            console.print("[blue]Cleaning up ReVa resources...")
+            if not self.quiet:
+                console.print("[blue]Cleaning up ReVa resources...")
             ReVaPyGhidraSupport.cleanup()
             
         except Exception as e:
-            console.print(f"[yellow]Warning during ReVa cleanup: {e}")
+            if not self.quiet:
+                console.print(f"[yellow]Warning during ReVa cleanup: {e}")
         
         # Close the project (this handles closing all programs)
         if self.project:
             try:
-                console.print("[blue]Closing project...")
+                if not self.quiet:
+                    console.print("[blue]Closing project...")
                 self.project.close()
-                console.print("[green]✓ Project closed")
+                if not self.quiet:
+                    console.print("[green]✓ Project closed")
             except Exception as e:
-                console.print(f"[yellow]Warning closing project: {e}")
+                if not self.quiet:
+                    console.print(f"[yellow]Warning closing project: {e}")
         
         # Clear program references
         self.programs.clear()
@@ -319,34 +467,22 @@ class PyGhidraReVaRunner:
         if self.cleanup_project and self.project_dir.exists():
             try:
                 import shutil
-                console.print(f"[blue]Cleaning up temporary project directory: {self.project_dir}")
+                if not self.quiet:
+                    console.print(f"[blue]Cleaning up temporary project directory: {self.project_dir}")
                 shutil.rmtree(self.project_dir)
-                console.print("[green]✓ Temporary project directory removed")
+                if not self.quiet:
+                    console.print("[green]✓ Temporary project directory removed")
             except Exception as e:
-                console.print(f"[yellow]Warning: Could not clean up project directory: {e}")
+                if not self.quiet:
+                    console.print(f"[yellow]Warning: Could not clean up project directory: {e}")
+        
+        # Mark session as no longer started
+        self._started = False
 
 
-@click.command()
-@click.argument('binaries', nargs=-1, required=True, type=click.Path(exists=True))
-@click.option('--ghidra-path', help='Path to Ghidra installation')
-@click.option('--project-dir', help='Directory for Ghidra project files (defaults to temp dir, or REVA_PROJECT_TEMP_DIR env var)')
-@click.option('--project-name', help='Name for the Ghidra project (defaults to reva_session_<pid>)')
-@click.option('--port', default=8080, help='MCP server port (default: 8080)')
-@click.option('--no-analysis', is_flag=True, help='Skip auto-analysis phase')
-@click.option('--verbose', is_flag=True, help='Enable verbose logging')
-def main(
-    binaries: Tuple[str, ...],
-    ghidra_path: Optional[str],
-    project_dir: Optional[str],
-    project_name: Optional[str],
-    port: int,
-    no_analysis: bool,
-    verbose: bool
-) -> None:
+def main() -> None:
     """
     Run PyGhidra analysis with ReVa MCP server.
-    
-    BINARIES: One or more binary files to analyze
     
     Examples:
     
@@ -356,58 +492,59 @@ def main(
       
       reva --ghidra-path /opt/ghidra --port 9090 binary.elf
     """
-    if verbose:
+    parser = argparse.ArgumentParser(
+        description='Run PyGhidra analysis with ReVa MCP server',
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument('binaries', nargs='+', help='One or more binary files to analyze')
+    parser.add_argument('--ghidra-path', help='Path to Ghidra installation')
+    parser.add_argument('--project-dir', help='Directory for Ghidra project files (defaults to temp dir, or REVA_PROJECT_TEMP_DIR env var)')
+    parser.add_argument('--project-name', help='Name for the Ghidra project (defaults to reva_session_<pid>)')
+    parser.add_argument('--port', type=int, default=8080, help='MCP server port (default: 8080)')
+    parser.add_argument('--no-analysis', action='store_true', help='Skip auto-analysis phase')
+    parser.add_argument('--verbose', action='store_true', help='Enable verbose logging')
+    
+    args = parser.parse_args()
+    
+    if args.verbose:
         console.print("[dim]Verbose logging enabled")
         # Enable Ghidra logging
         os.environ["PYGHIDRA_DEBUG"] = "1"
     
     console.print(f"[bold green]ReVa PyGhidra Analysis Tool")
-    console.print(f"[dim]Analyzing {len(binaries)} binary(ies)")
+    console.print(f"[dim]Analyzing {len(args.binaries)} binary(ies)")
     
-    runner = None
+    session = None
     try:
-        # Initialize runner
-        runner = PyGhidraReVaRunner(ghidra_path, project_dir, project_name)
-        console.print(f"[blue]Using Ghidra at: {runner.ghidra_path}")
+        # Initialize session
+        session = ReVaSession(
+            binaries=list(args.binaries),
+            ghidra_path=args.ghidra_path,
+            project_dir=args.project_dir,
+            project_name=args.project_name,
+            port=args.port,
+            auto_analyze=not args.no_analysis,
+            quiet=False  # CLI users expect output
+        )
+        console.print(f"[blue]Using Ghidra at: {session.ghidra_path}")
         
-        # Initialize PyGhidra
-        runner.initialize_pyghidra()
-        
-        # Open or create project
-        runner.open_project()
-        
-        # Import programs
-        runner.import_programs(list(binaries), run_analysis=not no_analysis)
-        
-        if not runner.programs:
-            console.print("[red]No programs were successfully imported. Exiting.")
-            return
-        
-        # Initialize ReVa MCP server
-        runner.initialize_reva(port)
-        
-        # Wait for MCP server to be ready
-        runner.wait_for_mcp_server(port)
-        
-        # Display ready message
-        runner.display_ready_message(port)
+        # Start the session
+        session.start()
         
         # Keep alive until interrupted
-        runner.keep_alive()
+        session.keep_alive()
         
-    except click.ClickException:
-        raise  # Re-raise click exceptions
     except KeyboardInterrupt:
         console.print("\n[yellow]Interrupted by user")
     except Exception as e:
         console.print(f"[red]Error: {e}")
-        if verbose:
+        if args.verbose:
             import traceback
             console.print(traceback.format_exc())
         sys.exit(1)
     finally:
-        if runner:
-            runner.shutdown()
+        if session:
+            session.shutdown()
 
 
 if __name__ == '__main__':

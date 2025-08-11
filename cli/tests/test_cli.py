@@ -1,24 +1,31 @@
-"""Tests for the CLI module."""
+"""Tests for CLI functionality with ReVaSession."""
 
 import os
 import tempfile
 import pytest
 from pathlib import Path
 from unittest.mock import Mock, patch, MagicMock
-from click.testing import CliRunner
+import argparse
 
-from reverse_engineering_assistant.cli import PyGhidraReVaRunner, main
+from reverse_engineering_assistant.cli import ReVaSession, main
 
 
-class TestPyGhidraReVaRunner:
-    """Tests for PyGhidraReVaRunner class."""
+class TestReVaSessionBasicFunctionality:
+    """Tests for ReVaSession basic functionality."""
+    
+    def test_init_with_binaries(self):
+        """Test initialization with binaries."""
+        binaries = ['/bin/ls', '/bin/cat']
+        session = ReVaSession(binaries)
+        assert session.binaries == binaries
+        assert session.programs == {}
+        assert session.pyghidra_started is False
+        assert session._started is False
     
     def test_init_with_custom_ghidra_path(self):
         """Test initialization with custom Ghidra path."""
-        runner = PyGhidraReVaRunner(ghidra_path="/custom/ghidra")
-        assert runner.ghidra_path == "/custom/ghidra"
-        assert runner.programs == []
-        assert runner.pyghidra_started is False
+        session = ReVaSession(['/bin/ls'], ghidra_path="/custom/ghidra")
+        assert session.ghidra_path == "/custom/ghidra"
     
     @patch.dict(os.environ, {"GHIDRA_INSTALL_DIR": "/env/ghidra"})
     @patch("pathlib.Path.exists")
@@ -26,19 +33,8 @@ class TestPyGhidraReVaRunner:
         """Test finding Ghidra from environment variable."""
         mock_exists.return_value = True
         
-        runner = PyGhidraReVaRunner()
-        assert runner.ghidra_path == "/env/ghidra"
-    
-    def test_find_ghidra_from_common_paths(self):
-        """Test finding Ghidra from common installation paths."""
-        def exists_side_effect(self):
-            path_str = str(self)
-            return path_str in ["/opt/ghidra", "/opt/ghidra/support/analyzeHeadless"]
-        
-        with patch.dict(os.environ, {}, clear=True):  # Clear GHIDRA_INSTALL_DIR
-            with patch.object(Path, "exists", exists_side_effect):
-                runner = PyGhidraReVaRunner()
-                assert runner.ghidra_path == "/opt/ghidra"
+        session = ReVaSession(['/bin/ls'])
+        assert session.ghidra_path == "/env/ghidra"
     
     @patch("pathlib.Path.exists")
     def test_find_ghidra_not_found(self, mock_exists):
@@ -46,175 +42,90 @@ class TestPyGhidraReVaRunner:
         mock_exists.return_value = False
         
         with patch.dict(os.environ, {}, clear=True):
-            with pytest.raises(Exception):  # Should raise ClickException
-                PyGhidraReVaRunner()
+            with pytest.raises(RuntimeError):
+                ReVaSession(['/bin/ls'])
     
-    @patch("pyghidra.start")
-    def test_initialize_pyghidra(self, mock_start):
-        """Test PyGhidra initialization."""
-        runner = PyGhidraReVaRunner(ghidra_path="/test/ghidra")
+    def test_shutdown_when_not_started(self):
+        """Test shutdown when session was never started."""
+        session = ReVaSession(['/bin/ls'])
+        # Should not raise any exception
+        session.shutdown()
+        assert session._started is False
+
+
+class TestReVaSessionMockedFunctionality:
+    """Tests for ReVaSession with mocked dependencies."""
+    
+    @patch('reverse_engineering_assistant.cli.ReVaSession.initialize_pyghidra')
+    @patch('reverse_engineering_assistant.cli.ReVaSession.open_project')
+    @patch('reverse_engineering_assistant.cli.ReVaSession.import_programs')
+    @patch('reverse_engineering_assistant.cli.ReVaSession.initialize_reva')
+    @patch('reverse_engineering_assistant.cli.ReVaSession.wait_for_mcp_server')
+    def test_start_method_calls(self, mock_wait, mock_reva, mock_import, mock_project, mock_pyghidra):
+        """Test that start method calls all required methods."""
+        session = ReVaSession(['/bin/ls'])
+        # Mock programs to avoid "no programs imported" error
+        session.programs = {'ls': Mock()}
         
-        # Mock the pyghidra module
-        with patch.dict("sys.modules", {"pyghidra": Mock(start=mock_start)}):
-            runner.initialize_pyghidra()
-            
-            assert runner.pyghidra_started is True
-            assert os.environ["GHIDRA_INSTALL_DIR"] == "/test/ghidra"
+        session.start()
+        
+        mock_pyghidra.assert_called_once()
+        mock_project.assert_called_once()
+        mock_import.assert_called_once_with(['/bin/ls'], run_analysis=True)
+        mock_reva.assert_called_once()
+        mock_wait.assert_called_once()
+        assert session._started is True
+    
+    @patch('reverse_engineering_assistant.cli.ReVaSession.start')
+    @patch('reverse_engineering_assistant.cli.ReVaSession.shutdown')
+    def test_context_manager(self, mock_shutdown, mock_start):
+        """Test context manager functionality."""
+        session = ReVaSession(['/bin/ls'])
+        
+        with session as ctx_session:
+            assert ctx_session is session
             mock_start.assert_called_once()
+        
+        mock_shutdown.assert_called_once()
+
+
+class TestMainCommand:
+    """Tests for main CLI command."""
     
-    def test_open_programs_without_pyghidra_initialized(self):
-        """Test that open_programs requires PyGhidra to be initialized."""
-        runner = PyGhidraReVaRunner(ghidra_path="/test/ghidra")
+    @patch('reverse_engineering_assistant.cli.ReVaSession')
+    def test_main_with_basic_args(self, mock_session_class):
+        """Test main function with basic arguments."""
+        mock_session = Mock()
+        mock_session.ghidra_path = "/test/ghidra"
+        mock_session_class.return_value = mock_session
         
-        with pytest.raises(Exception):  # Should raise ClickException
-            runner.open_programs(["/path/to/binary"])
-    
-    @patch("pyghidra.open_program")
-    @patch("pyghidra.start")
-    def test_open_programs_success(self, mock_start, mock_open_program):
-        """Test successful program opening."""
-        runner = PyGhidraReVaRunner(ghidra_path="/test/ghidra")
+        # Mock sys.argv to simulate command line arguments
+        test_args = ['reva', '/bin/ls']
         
-        # Create a mock program
-        mock_program = Mock()
-        mock_program.isClosed.return_value = False
-        mock_program.getName.return_value = "test.exe"
-        mock_open_program.return_value.__enter__.return_value = mock_program
-        mock_open_program.return_value.__exit__.return_value = None
-        
-        # Initialize PyGhidra first
-        with patch.dict("sys.modules", {"pyghidra": Mock(start=mock_start, open_program=mock_open_program)}):
-            runner.pyghidra_started = True
-            
-            # Create a temporary file to simulate binary
-            with tempfile.NamedTemporaryFile(suffix=".exe") as temp_file:
-                runner.open_programs([temp_file.name], run_analysis=False)
+        with patch('sys.argv', test_args):
+            with patch('argparse.ArgumentParser.parse_args') as mock_parse:
+                mock_args = Mock()
+                mock_args.binaries = ['/bin/ls']
+                mock_args.ghidra_path = None
+                mock_args.project_dir = None
+                mock_args.project_name = None
+                mock_args.port = 8080
+                mock_args.no_analysis = False
+                mock_args.verbose = False
+                mock_parse.return_value = mock_args
                 
-                assert len(runner.programs) == 1
-                mock_program.addConsumer.assert_called_once_with(runner)
-    
-    def test_initialize_reva_no_programs(self):
-        """Test that initialize_reva requires programs to be open."""
-        runner = PyGhidraReVaRunner(ghidra_path="/test/ghidra")
-        
-        with pytest.raises(Exception):  # Should raise ClickException
-            runner.initialize_reva()
-    
-    @patch("reva.plugin.ReVaPyGhidraSupport")
-    def test_initialize_reva_success(self, mock_reva_support):
-        """Test successful ReVa initialization."""
-        runner = PyGhidraReVaRunner(ghidra_path="/test/ghidra")
-        
-        # Add a mock program
-        mock_program = Mock()
-        runner.programs = [mock_program]
-        
-        # Setup mock ReVa support
-        mock_reva_support.getMcpServerUrl.return_value = "http://localhost:8080"
-        mock_reva_support.getSessionInfo.return_value = "Session info"
-        
-        with patch.dict("sys.modules", {"reva.plugin": Mock(ReVaPyGhidraSupport=mock_reva_support)}):
-            runner.initialize_reva(port=8080)
-            
-            mock_reva_support.initializeWithPrograms.assert_called_once_with([mock_program])
-    
-    @patch("pyghidra.shutdown")
-    @patch("reva.plugin.ReVaPyGhidraSupport")
-    def test_shutdown(self, mock_reva_support, mock_shutdown):
-        """Test shutdown method."""
-        runner = PyGhidraReVaRunner(ghidra_path="/test/ghidra")
-        runner.pyghidra_started = True
-        
-        # Add a mock program
-        mock_program = Mock()
-        mock_program.isClosed.return_value = False
-        runner.programs = [mock_program]
-        
-        with patch.dict("sys.modules", {
-            "pyghidra": Mock(shutdown=mock_shutdown),
-            "reva.plugin": Mock(ReVaPyGhidraSupport=mock_reva_support)
-        }):
-            runner.shutdown()
-            
-            mock_reva_support.cleanup.assert_called_once()
-            mock_program.removeConsumer.assert_called_once_with(runner)
-            mock_program.release.assert_called_once_with(runner)
-            mock_shutdown.assert_called_once()
-
-
-class TestCLICommands:
-    """Tests for CLI commands."""
-    
-    def test_main_command_no_binaries(self):
-        """Test main command with no binaries specified."""
-        runner = CliRunner()
-        result = runner.invoke(main, [])
-        
-        assert result.exit_code != 0
-        assert "Missing argument" in result.output or "Usage:" in result.output
-    
-    def test_main_command_help(self):
-        """Test main command help output."""
-        runner = CliRunner()
-        result = runner.invoke(main, ["--help"])
-        
-        assert result.exit_code == 0
-        assert "Run PyGhidra analysis" in result.output
-        assert "--ghidra-path" in result.output
-        assert "--port" in result.output
-        assert "--no-analysis" in result.output
-    
-    def test_main_command_nonexistent_binary(self):
-        """Test main command with nonexistent binary."""
-        runner = CliRunner()
-        result = runner.invoke(main, ["/nonexistent/binary.exe"])
-        
-        assert result.exit_code != 0
-        # Should fail because the binary doesn't exist
-    
-    @patch("reverse_engineering_assistant.cli.PyGhidraReVaRunner")
-    def test_main_command_with_options(self, mock_runner_class):
-        """Test main command with various options."""
-        mock_runner = Mock()
-        mock_runner_class.return_value = mock_runner
-        mock_runner.ghidra_path = "/test/ghidra"
-        mock_runner.programs = [Mock()]  # Simulate successful program opening
-        
-        runner = CliRunner()
-        
-        with tempfile.NamedTemporaryFile(suffix=".exe") as temp_binary:
-            result = runner.invoke(main, [
-                "--ghidra-path", "/custom/ghidra",
-                "--port", "9090", 
-                "--no-analysis",
-                "--verbose",
-                temp_binary.name
-            ])
-            
-            # Should create runner with custom ghidra path
-            mock_runner_class.assert_called_once_with("/custom/ghidra")
-            # Should call initialization methods
-            mock_runner.initialize_pyghidra.assert_called_once()
-            mock_runner.open_programs.assert_called_once()
-
-
-class TestIntegration:
-    """Integration tests (require more setup)."""
-    
-    @pytest.mark.skipif(
-        not os.environ.get("GHIDRA_INSTALL_DIR"), 
-        reason="Requires GHIDRA_INSTALL_DIR environment variable"
-    )
-    def test_with_real_ghidra_path(self):
-        """Test with real Ghidra installation (if available)."""
-        ghidra_path = os.environ.get("GHIDRA_INSTALL_DIR")
-        
-        try:
-            runner = PyGhidraReVaRunner(ghidra_path=ghidra_path)
-            assert Path(runner.ghidra_path).exists()
-            assert (Path(runner.ghidra_path) / "support" / "analyzeHeadless").exists()
-        except Exception as e:
-            pytest.skip(f"Could not initialize with Ghidra: {e}")
+                try:
+                    main()
+                except SystemExit:
+                    pass  # main() calls sys.exit(), which is expected
+                
+                # Verify session was created with correct parameters
+                mock_session_class.assert_called_once()
+                call_args = mock_session_class.call_args
+                assert call_args.kwargs['binaries'] == ['/bin/ls']
+                assert call_args.kwargs['port'] == 8080
+                assert call_args.kwargs['auto_analyze'] is True  # not args.no_analysis
+                assert call_args.kwargs['quiet'] is False  # CLI users expect output
 
 
 if __name__ == "__main__":

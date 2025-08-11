@@ -61,6 +61,143 @@ Once running, the MCP server will be available at `http://localhost:8080` for cl
 
 Press Ctrl+C to exit and clean up resources.
 
+## Programmatic API
+
+ReVa can also be used programmatically in Python scripts for automated analysis:
+
+### Basic Usage
+
+```python
+from reverse_engineering_assistant import ReVaSession
+
+# Analyze a binary with automatic resource cleanup
+with ReVaSession(['malware.exe']) as reva:
+    print(f"Server URL: {reva.server_url}")
+    print(f"Programs loaded: {list(reva.programs.keys())}")
+    
+    # Server is now ready for MCP client connections
+    # Your analysis code here...
+```
+
+### Advanced Configuration
+
+```python
+from reverse_engineering_assistant import ReVaSession, find_free_port
+
+# Custom configuration
+with ReVaSession(
+    binaries=['app.exe', 'lib.dll'],
+    port=find_free_port(),  # Auto-assign random port
+    project_dir='/tmp/my_analysis',  # Custom project directory
+    project_name='custom_analysis',
+    auto_analyze=True,  # Run Ghidra analysis (default)
+    quiet=True,  # Suppress console output (default)
+    ghidra_path='/opt/ghidra'  # Custom Ghidra installation
+) as reva:
+    # Multiple programs loaded
+    for name, program in reva.programs.items():
+        print(f"Loaded: {name} at {program.getImageBase()}")
+    
+    # Use reva.server_url for MCP client connections
+    mcp_client = create_mcp_client(reva.server_url)
+    # ... rest of your analysis
+```
+
+### Manual Session Management
+
+```python
+from reverse_engineering_assistant import ReVaSession
+
+# Manual management (not recommended - use context manager when possible)
+session = ReVaSession(['binary.exe'], quiet=True)
+try:
+    session.start()  # Initialize everything
+    
+    # Use session.server_url and session.programs
+    analyze_with_reva(session.server_url)
+    
+finally:
+    session.shutdown()  # Always cleanup
+```
+
+### API Reference
+
+#### ReVaSession
+
+**Constructor:**
+```python
+ReVaSession(
+    binaries: List[str],          # List of binary paths to analyze
+    *,                            # Keyword-only arguments below
+    ghidra_path: Optional[str] = None,      # Path to Ghidra installation
+    project_dir: Optional[str] = None,       # Project directory (temp if None)
+    project_name: Optional[str] = None,      # Project name (auto-generated if None) 
+    port: Optional[int] = None,              # MCP server port (auto-assigned if None)
+    auto_analyze: bool = True,               # Run Ghidra analysis on import
+    quiet: bool = True                       # Suppress console output
+)
+```
+
+**Properties:**
+- `server_url: Optional[str]` - MCP server URL (available after start())
+- `programs: Dict[str, Program]` - Loaded Ghidra programs by name
+- `port: int` - MCP server port
+- `ghidra_path: str` - Path to Ghidra installation
+
+**Methods:**
+- `start()` - Initialize PyGhidra, load binaries, start MCP server
+- `shutdown()` - Clean up all resources
+- Context manager support (`__enter__`/`__exit__`)
+
+#### Utilities
+
+- `find_free_port() -> int` - Find a random available port
+
+### Error Handling
+
+```python
+from reverse_engineering_assistant import ReVaSession
+
+try:
+    with ReVaSession(['missing.exe']) as reva:
+        # ... analysis code
+        pass
+except RuntimeError as e:
+    print(f"ReVa session failed: {e}")
+except FileNotFoundError as e:
+    print(f"Binary not found: {e}")
+```
+
+### Integration Examples
+
+#### With MCP Client
+```python
+from reverse_engineering_assistant import ReVaSession
+import requests
+
+with ReVaSession(['malware.exe']) as reva:
+    # Use HTTP MCP client
+    response = requests.post(f"{reva.server_url}/mcp/message", json={
+        "method": "tools/list"
+    })
+    tools = response.json()
+    print(f"Available tools: {tools}")
+```
+
+#### Batch Analysis
+```python
+from reverse_engineering_assistant import ReVaSession
+import os
+
+binaries = [f for f in os.listdir('/samples') if f.endswith('.exe')]
+
+for binary in binaries:
+    with ReVaSession([f'/samples/{binary}'], project_name=f'analysis_{binary}') as reva:
+        print(f"Analyzing {binary} on {reva.server_url}")
+        # Your analysis logic here
+        # Project will be automatically cleaned up
+```
+
 ## Requirements
 
 - Python 3.8+

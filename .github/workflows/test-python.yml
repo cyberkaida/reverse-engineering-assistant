@@ -41,7 +41,7 @@ jobs:
     - name: Run tests
       working-directory: ./cli
       run: |
-        pytest tests/ -v
+        PYTHONPATH=src pytest tests/ -v
     
     - name: Test CLI help
       run: |

@@ -73,7 +73,7 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
     private HttpServletStreamableServerTransportProvider currentTransportProvider;
     private Server httpServer;
     private final GThreadPool threadPool;
-    private final ConfigManager configManager;
+    private ConfigManager configManager;
 
     private final List<ResourceProvider> resourceProviders = new ArrayList<>();
     private final List<ToolProvider> toolProviders = new ArrayList<>();
@@ -90,9 +90,12 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
      * @param pluginTool The plugin tool, used for configuration
      */
     public McpServerManager(PluginTool pluginTool) {
-        // Initialize configuration
-        configManager = new ConfigManager(pluginTool);
-        RevaInternalServiceRegistry.registerService(ConfigManager.class, configManager);
+        // Initialize configuration - reuse existing ConfigManager if available
+        configManager = RevaInternalServiceRegistry.getService(ConfigManager.class);
+        if (configManager == null) {
+            configManager = new ConfigManager(pluginTool);
+            RevaInternalServiceRegistry.registerService(ConfigManager.class, configManager);
+        }
 
         // Register as a config change listener
         configManager.addConfigChangeListener(this);

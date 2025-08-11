@@ -3,8 +3,14 @@ name: Test Ghidra 🐉 Extension
 on:
   push:
     branches: [ main, develop ]
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
   pull_request:
     branches: [ main, develop ]
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
 
 permissions:
   contents: write
@@ -13,6 +19,7 @@ permissions:
   security-events: write
 
 jobs:
+
   test:
     strategy:
       matrix:

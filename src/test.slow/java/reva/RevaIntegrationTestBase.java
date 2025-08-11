@@ -318,6 +318,12 @@ public abstract class RevaIntegrationTestBase extends AbstractGhidraHeadedIntegr
 
         // Create a fresh program for each test
         program = createDefaultProgram(getName(), "x86:LE:32:default", this);
+        
+        // Validate program was created successfully
+        if (program == null) {
+            throw new RuntimeException("Failed to create program for test: " + getName());
+        }
+        System.out.println("Created test program: " + program.getName() + " for test: " + getName());
 
         // Add a memory block to the program for tests that expect it
         if (program.getMemory().getBlocks().length == 0) {
@@ -335,6 +341,10 @@ public abstract class RevaIntegrationTestBase extends AbstractGhidraHeadedIntegr
         if (serverManager != null) {
             serverManager.programOpened(program, tool);
         }
+        
+        // Also register with RevaProgramManager for program lookup
+        RevaProgramManager.registerProgram(program);
+        System.out.println("Registered program with RevaProgramManager: " + program.getName());
 
         onGhidraStart();
     }
@@ -346,6 +356,11 @@ public abstract class RevaIntegrationTestBase extends AbstractGhidraHeadedIntegr
         // Unregister the test program from the shared server
         if (serverManager != null && program != null) {
             serverManager.programClosed(program, tool);
+        }
+        
+        // Also unregister from RevaProgramManager
+        if (program != null) {
+            RevaProgramManager.unregisterProgram(program);
         }
 
         // Clean up the program (but keep shared instances)

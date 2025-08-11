@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-ReVa (Reverse Engineering Assistant) is a Ghidra extension that provides a Model Context Protocol (MCP) server for AI-assisted reverse engineering. It uses a streamable transport (SSE) and implements various tools for interacting with Ghidra's capabilities.
+ReVa (Reverse Engineering Assistant) is a Ghidra extension that provides a Model Context Protocol (MCP) server for AI-assisted reverse engineering. It uses a streamable transport (SSE) and implements various tools for interacting with Ghidra's capabilities. The project supports both GUI and headless operation through PyGhidra integration.
+
+The architecture follows a tool-driven approach where each capability (decompiler analysis, function manipulation, string analysis, etc.) is implemented as an MCP tool provider that can be independently called by AI assistants.
 
 ## Build and Test Commands
 
@@ -22,6 +24,13 @@ gradle
 - Single test class: `gradle integrationTest --tests "*DecompilerToolProviderIntegrationTest" --info`
 - Single test method: `gradle test --tests "*AddressUtilTest.testFormatAddress" --info`
 - Debug tests: Increase logging or modify test code directly - cannot use curl to test MCP server
+
+### Python CLI Testing
+```bash
+cd cli/
+uv run pytest tests/ -v
+uv run pytest tests/test_specific.py -v
+```
 
 **Important**: Do not use gradle wrapper (`./gradlew`), use `gradle` directly.
 
@@ -47,10 +56,14 @@ ReVa follows a layered architecture with clear separation of concerns:
   - `resources/` - **MCP resource providers** (read-only data exposure)
   - `services/` - **Service layer integration** (abstraction between plugins and MCP)
   - `ui/` - **User interface components** (optional, minimal implementation)
+- `cli/` - Python CLI for headless operation via PyGhidra
+  - `src/reverse_engineering_assistant/` - Python package source
+  - `tests/` - Python CLI tests
 
 ### Test Organization
 - `src/test/` - Unit tests (no Ghidra environment required)
 - `src/test.slow/` - Integration tests (require Ghidra environment)
+- Uses shared test environment for performance - all integration tests run against same program instance
 
 ### Package-Level Documentation
 Each major package contains its own CLAUDE.md file with detailed implementation guidance:
@@ -65,6 +78,7 @@ Each major package contains its own CLAUDE.md file with detailed implementation 
 - Use `Function.getParameters()` and `Function.getAllVariables()` to validate variable changes
 - Use `DataType.isEquivalent()` to compare datatypes before/after changes
 - Use JUnit 4 (avoid JUnit 5 annotations like `@ParameterizedTest`)
+- Integration tests must use `@Fork` annotation to prevent configuration conflicts
 - **You are not finished until all tests pass!**
 
 ### Address Formatting
@@ -112,12 +126,29 @@ The server uses streamable transport (SSE) on port 8080 by default. Configuratio
 - `McpServerManager` - Manages the MCP server lifecycle
 - Transport: HttpServletStreamableServerTransportProvider (streamable transport)
 
+The server supports multiple concurrent connections and can serve multiple tools simultaneously.
+
+## Python CLI Integration
+
+The Python CLI (`reva` command) provides headless operation through PyGhidra:
+- Uses same Java MCP server but connects via PyGhidra bridge
+- Requires PyGhidra installation and proper environment setup
+- Supports all the same tools as GUI version
+- Configuration through environment variables and command-line options
+
+### Critical Development Workflow
+When changing Java code, you must update the Python CLI:
+1. Build Java extension: `gradle`
+2. Copy to Ghidra: Copy `dist/ghidra_*_ReVa.zip` to `$GHIDRA_INSTALL_DIR/Extensions/Ghidra/`
+3. Update Python CLI: `cd cli && uv sync`
+
 ## External Dependencies
 - Ghidra source code location: `../ghidra`
 - MCP SDK: io.modelcontextprotocol.sdk v0.11.1 (uses MCP BOM)
 - Jackson: 2.17.0 (forced version for compatibility)
 - Jetty: 11.0.25 (embedded servlet support)
 - Target: Java 21, Ghidra 11.3+
+- Python CLI: PyGhidra integration for headless operation
 
 ## Program Identification
 - **ALWAYS use `programPath` for program identifiers** in both tool inputs and outputs
@@ -149,3 +180,4 @@ The server uses streamable transport (SSE) on port 8080 by default. Configuratio
 - **Error Messages**: Provide specific, actionable error messages with suggestions
 - Integration tests run with `java.awt.headless=false`
 - Don't use the old vYYYY-MM-DD tag style, use the new semantic versioning style. Check the github releases for hints.
+- Python and Java versions must be kept in sync for proper operation

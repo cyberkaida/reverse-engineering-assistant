@@ -1,25 +1,19 @@
 {
   "permissions": {
-    "additionalDirectories": ["../ghidra"],
-    "allow": [
-      "Search(path:../ghidra)",
-      "Read(../ghidra/**)"
+    "additionalDirectories": [
+      "../ghidra",
+      "../mcp-java-sdk"
     ],
-    "deny": []
-  },
-  "hooks": {
-    "PostToolUse": [
-      {
-        "matcher": {
-          "tools": ["Edit", "MultiEdit", "Write"]
-        },
-        "hooks": [
-          {
-            "type": "command",
-            "command": "gradle compileJava"
-          }
-        ]
-      }
-    ]
+    "allow": [
+      "Bash(uv:*)",
+      "Bash(gradle:*)",
+      "Bash(grep:*)",
+      "Bash(gradle integrationTest:*)",
+      "Bash(gradle compileJava:*)",
+      "Bash(gradle test:*)",
+      "Bash(find:*)"
+    ],
+    "deny": [],
+    "ask": []
   }
 }

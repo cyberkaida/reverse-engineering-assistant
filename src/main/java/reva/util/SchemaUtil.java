@@ -149,6 +149,22 @@ public class SchemaUtil {
     }
 
     /**
+     * Create an array of strings property schema
+     * @param description Description of the property
+     * @return Map representation of the property schema
+     */
+    public static Map<String, Object> stringArrayProperty(String description) {
+        Map<String, Object> items = new HashMap<>();
+        items.put("type", "string");
+        
+        Map<String, Object> property = new HashMap<>();
+        property.put("type", "array");
+        property.put("description", description);
+        property.put("items", items);
+        return property;
+    }
+
+    /**
      * Create an object property schema
      * @param description Description of the property
      * @param properties Properties of the object

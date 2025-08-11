@@ -46,8 +46,12 @@ public class RevaPluginUnitTest {
 
     @Test
     public void testPluginInheritance() {
-        // Verify the plugin extends the correct base class
-        assertTrue("RevaPlugin should extend ProgramPlugin",
+        // Verify the plugin extends the correct base class (Plugin for headless compatibility)
+        assertTrue("RevaPlugin should extend Plugin",
+            ghidra.framework.plugintool.Plugin.class.isAssignableFrom(RevaPlugin.class));
+        
+        // Should not extend ProgramPlugin (for headless compatibility)
+        assertFalse("RevaPlugin should not extend ProgramPlugin (for headless compatibility)",
             ghidra.app.plugin.ProgramPlugin.class.isAssignableFrom(RevaPlugin.class));
     }
 

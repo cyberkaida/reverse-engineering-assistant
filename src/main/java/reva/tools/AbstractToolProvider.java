@@ -30,6 +30,7 @@ import ghidra.program.model.listing.Program;
 import ghidra.program.model.symbol.Symbol;
 import ghidra.program.model.symbol.SymbolTable;
 import ghidra.util.Msg;
+import ghidra.util.SystemUtilities;
 import reva.util.AddressUtil;
 import io.modelcontextprotocol.server.McpServerFeatures.SyncToolSpecification;
 import io.modelcontextprotocol.spec.McpSchema.CallToolRequest;
@@ -58,6 +59,23 @@ public abstract class AbstractToolProvider implements ToolProvider {
      */
     public AbstractToolProvider(McpSyncServer server) {
         this.server = server;
+    }
+
+    /**
+     * Check if we're running in headless mode
+     * @return true if in headless mode
+     */
+    protected boolean isHeadlessMode() {
+        return Boolean.getBoolean("java.awt.headless") || 
+               Boolean.getBoolean(SystemUtilities.HEADLESS_PROPERTY);
+    }
+
+    /**
+     * Check if we're in PyGhidra mode
+     * @return true if in PyGhidra mode
+     */
+    protected boolean isPyGhidraMode() {
+        return isHeadlessMode() && System.getProperty("pyghidra.mode") != null;
     }
 
     @Override
@@ -510,7 +528,41 @@ public abstract class AbstractToolProvider implements ToolProvider {
      * @throws ProgramValidationException if the program is not found, invalid, or in an invalid state
      */
     protected Program getValidatedProgram(String programPath) throws ProgramValidationException {
-        return ProgramLookupUtil.getValidatedProgram(programPath);
+        return resolveProgram(programPath);
+    }
+
+    /**
+     * Resolve a program from a path, with special handling for PyGhidra multi-program context.
+     * @param programPath The path to the program (can be null/empty in PyGhidra mode)
+     * @return A valid Program object
+     * @throws ProgramValidationException if no program can be resolved
+     */
+    protected Program resolveProgram(String programPath) throws ProgramValidationException {
+        // If no program path specified, try to use first available program in PyGhidra mode
+        if (programPath == null || programPath.trim().isEmpty()) {
+            if (isPyGhidraMode()) {
+                List<Program> openPrograms = RevaProgramManager.getOpenPrograms();
+                if (!openPrograms.isEmpty()) {
+                    Program defaultProgram = openPrograms.get(0);
+                    if (!defaultProgram.isClosed()) {
+                        return defaultProgram;
+                    }
+                }
+                throw new ProgramValidationException("No programs available in PyGhidra mode");
+            } else {
+                throw new ProgramValidationException("Program path cannot be null or empty");
+            }
+        }
+        
+        // Normal path-based resolution
+        Program program = RevaProgramManager.getProgramByPath(programPath);
+        if (program == null) {
+            throw new ProgramValidationException("Program not found: " + programPath);
+        }
+        if (program.isClosed()) {
+            throw new ProgramValidationException("Program is closed: " + programPath);
+        }
+        return program;
     }
 
     /**
@@ -521,7 +573,13 @@ public abstract class AbstractToolProvider implements ToolProvider {
      * @throws ProgramValidationException if the program is not found, invalid, or in an invalid state
      */
     protected Program getProgramFromArgs(CallToolRequest request) throws IllegalArgumentException, ProgramValidationException {
-        String programPath = getString(request, "programPath");
+        // In PyGhidra mode, programPath can be optional
+        String programPath;
+        if (isPyGhidraMode()) {
+            programPath = getOptionalString(request, "programPath", null);
+        } else {
+            programPath = getString(request, "programPath");
+        }
         return getValidatedProgram(programPath);
     }
 
@@ -533,7 +591,13 @@ public abstract class AbstractToolProvider implements ToolProvider {
      * @throws ProgramValidationException if the program is not found, invalid, or in an invalid state
      */
     protected Program getProgramFromArgs(Map<String, Object> args) throws IllegalArgumentException, ProgramValidationException {
-        String programPath = getString(args, "programPath");
+        // In PyGhidra mode, programPath can be optional
+        String programPath;
+        if (isPyGhidraMode()) {
+            programPath = getOptionalString(args, "programPath", null);
+        } else {
+            programPath = getString(args, "programPath");
+        }
         return getValidatedProgram(programPath);
     }
 
@@ -730,4 +794,5 @@ public abstract class AbstractToolProvider implements ToolProvider {
     protected Address getAddressFromSymbolArgs(Map<String, Object> args, Program program) throws IllegalArgumentException {
         return getAddressFromSymbolArgs(args, program, "symbolName");
     }
+
 }

@@ -1,0 +1,79 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "reverse-engineering-assistant"
+version = "4.4.0"
+description = "Command line interface for ReVa (Reverse Engineering Assistant) - AI-powered Ghidra integration"
+readme = "README.md"
+authors = [
+    {name = "CyberKaida", email = "cyberkaida@proton.me"}
+]
+license = {text = "Apache-2.0"}
+requires-python = ">=3.10"
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Debuggers",
+    "Topic :: Software Development :: Disassemblers",
+    "Topic :: Security",
+]
+dependencies = [
+    "requests>=2.28.0",
+    "rich>=12.0.0",
+    "pyghidra>=2.0.0",
+    "claude-code-sdk>=0.0.19",
+    "anyio>=3.0.0",
+    "typing-extensions>=4.14.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "black>=22.0.0",
+    "flake8>=5.0.0",
+    "mypy>=0.991",
+    "mcp>=1.0.0",
+    "httpx>=0.24.0",
+]
+
+[project.scripts]
+reva = "reverse_engineering_assistant.cli:main"
+reva-headless = "reverse_engineering_assistant.cli:main"
+reva-claude = "reverse_engineering_assistant.claude_integration:main"
+
+[project.urls]
+Homepage = "https://github.com/cyberkaida/reverse-engineering-assistant"
+Repository = "https://github.com/cyberkaida/reverse-engineering-assistant"
+Issues = "https://github.com/cyberkaida/reverse-engineering-assistant/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/reverse_engineering_assistant"]
+
+[tool.black]
+line-length = 88
+target-version = ['py310', 'py311', 'py312', 'py313']
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "mcp>=1.13.1",
+    "mypy>=1.17.1",
+    "pytest>=8.4.1",
+    "types-requests>=2.32.4.20250809",
+]

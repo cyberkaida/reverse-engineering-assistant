@@ -58,19 +58,25 @@ public class ConfigManager implements OptionsChangeListener {
 
     /**
      * Constructor
-     * @param tool The plugin tool to get/save options from
+     * @param tool The plugin tool to get/save options from (can be null for headless mode)
      */
     public ConfigManager(PluginTool tool) {
         this.tool = tool;
-        this.toolOptions = tool.getOptions(SERVER_OPTIONS);
         
-        // Register options with Ghidra
-        registerOptionsWithGhidra();
+        if (tool != null) {
+            this.toolOptions = tool.getOptions(SERVER_OPTIONS);
+            
+            // Register options with Ghidra
+            registerOptionsWithGhidra();
+            
+            // Add ourselves as listener to Ghidra's option change system
+            toolOptions.addOptionsChangeListener(this);
+        } else {
+            // Headless/PyGhidra mode - no tool available
+            this.toolOptions = null;
+        }
         
-        // Add ourselves as listener to Ghidra's option change system
-        toolOptions.addOptionsChangeListener(this);
-        
-        // Load initial values
+        // Load initial values (works for both headed and headless modes)
         loadOptions();
     }
 
@@ -96,14 +102,23 @@ public class ConfigManager implements OptionsChangeListener {
      * Load options from the tool options and cache them
      */
     protected void loadOptions() {
-        // Cache the options
-        cachedOptions.put(SERVER_PORT, toolOptions.getInt(SERVER_PORT, DEFAULT_PORT));
-        cachedOptions.put(SERVER_ENABLED, toolOptions.getBoolean(SERVER_ENABLED, DEFAULT_SERVER_ENABLED));
-        cachedOptions.put(DEBUG_MODE, toolOptions.getBoolean(DEBUG_MODE, DEFAULT_DEBUG_MODE));
-        cachedOptions.put(MAX_DECOMPILER_SEARCH_FUNCTIONS,
-            toolOptions.getInt(MAX_DECOMPILER_SEARCH_FUNCTIONS, DEFAULT_MAX_DECOMPILER_SEARCH_FUNCTIONS));
-        cachedOptions.put(DECOMPILER_TIMEOUT_SECONDS,
-            toolOptions.getInt(DECOMPILER_TIMEOUT_SECONDS, DEFAULT_DECOMPILER_TIMEOUT_SECONDS));
+        if (toolOptions != null) {
+            // Cache the options from toolOptions
+            cachedOptions.put(SERVER_PORT, toolOptions.getInt(SERVER_PORT, DEFAULT_PORT));
+            cachedOptions.put(SERVER_ENABLED, toolOptions.getBoolean(SERVER_ENABLED, DEFAULT_SERVER_ENABLED));
+            cachedOptions.put(DEBUG_MODE, toolOptions.getBoolean(DEBUG_MODE, DEFAULT_DEBUG_MODE));
+            cachedOptions.put(MAX_DECOMPILER_SEARCH_FUNCTIONS,
+                toolOptions.getInt(MAX_DECOMPILER_SEARCH_FUNCTIONS, DEFAULT_MAX_DECOMPILER_SEARCH_FUNCTIONS));
+            cachedOptions.put(DECOMPILER_TIMEOUT_SECONDS,
+                toolOptions.getInt(DECOMPILER_TIMEOUT_SECONDS, DEFAULT_DECOMPILER_TIMEOUT_SECONDS));
+        } else {
+            // In headless mode, use defaults
+            cachedOptions.put(SERVER_PORT, DEFAULT_PORT);
+            cachedOptions.put(SERVER_ENABLED, DEFAULT_SERVER_ENABLED);
+            cachedOptions.put(DEBUG_MODE, DEFAULT_DEBUG_MODE);
+            cachedOptions.put(MAX_DECOMPILER_SEARCH_FUNCTIONS, DEFAULT_MAX_DECOMPILER_SEARCH_FUNCTIONS);
+            cachedOptions.put(DECOMPILER_TIMEOUT_SECONDS, DEFAULT_DECOMPILER_TIMEOUT_SECONDS);
+        }
 
         Msg.debug(this, "Loaded ReVa configuration settings");
     }
@@ -175,8 +190,13 @@ public class ConfigManager implements OptionsChangeListener {
      * @param port The port number to use
      */
     public void setServerPort(int port) {
-        toolOptions.setInt(SERVER_PORT, port);
-        // optionsChanged() will be called automatically
+        if (toolOptions != null) {
+            toolOptions.setInt(SERVER_PORT, port);
+            // optionsChanged() will be called automatically
+        } else {
+            // In headless mode, update cache directly
+            cachedOptions.put(SERVER_PORT, port);
+        }
     }
 
     /**
@@ -192,8 +212,13 @@ public class ConfigManager implements OptionsChangeListener {
      * @param enabled True to enable the server
      */
     public void setServerEnabled(boolean enabled) {
-        toolOptions.setBoolean(SERVER_ENABLED, enabled);
-        // optionsChanged() will be called automatically
+        if (toolOptions != null) {
+            toolOptions.setBoolean(SERVER_ENABLED, enabled);
+            // optionsChanged() will be called automatically
+        } else {
+            // In headless mode, update cache directly
+            cachedOptions.put(SERVER_ENABLED, enabled);
+        }
     }
 
     /**
@@ -209,8 +234,13 @@ public class ConfigManager implements OptionsChangeListener {
      * @param enabled True to enable debug mode
      */
     public void setDebugMode(boolean enabled) {
-        toolOptions.setBoolean(DEBUG_MODE, enabled);
-        // optionsChanged() will be called automatically
+        if (toolOptions != null) {
+            toolOptions.setBoolean(DEBUG_MODE, enabled);
+            // optionsChanged() will be called automatically
+        } else {
+            // In headless mode, update cache directly
+            cachedOptions.put(DEBUG_MODE, enabled);
+        }
     }
 
     /**
@@ -226,8 +256,13 @@ public class ConfigManager implements OptionsChangeListener {
      * @param maxFunctions The maximum number of functions
      */
     public void setMaxDecompilerSearchFunctions(int maxFunctions) {
-        toolOptions.setInt(MAX_DECOMPILER_SEARCH_FUNCTIONS, maxFunctions);
-        // optionsChanged() will be called automatically
+        if (toolOptions != null) {
+            toolOptions.setInt(MAX_DECOMPILER_SEARCH_FUNCTIONS, maxFunctions);
+            // optionsChanged() will be called automatically
+        } else {
+            // In headless mode, update cache directly
+            cachedOptions.put(MAX_DECOMPILER_SEARCH_FUNCTIONS, maxFunctions);
+        }
     }
 
     /**
@@ -243,8 +278,13 @@ public class ConfigManager implements OptionsChangeListener {
      * @param timeoutSeconds The timeout in seconds
      */
     public void setDecompilerTimeoutSeconds(int timeoutSeconds) {
-        toolOptions.setInt(DECOMPILER_TIMEOUT_SECONDS, timeoutSeconds);
-        // optionsChanged() will be called automatically
+        if (toolOptions != null) {
+            toolOptions.setInt(DECOMPILER_TIMEOUT_SECONDS, timeoutSeconds);
+            // optionsChanged() will be called automatically
+        } else {
+            // In headless mode, update cache directly
+            cachedOptions.put(DECOMPILER_TIMEOUT_SECONDS, timeoutSeconds);
+        }
     }
     
     /**

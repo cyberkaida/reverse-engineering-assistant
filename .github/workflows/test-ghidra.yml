@@ -105,15 +105,15 @@ jobs:
       working-directory: ./cli
       run: |
         # Basic import test with Ghidra environment
-        export GHIDRA_INSTALL_DIR="${{ env.GHIDRA_INSTALL_DIR }}"
         echo "Ghidra installed at: $GHIDRA_INSTALL_DIR"
         echo "ReVa extension files:"
-        find "$GHIDRA_INSTALL_DIR/Ghidra/Extensions" -name "*ReVa*" -type f | head -5
+        find "$GHIDRA_INSTALL_DIR/Ghidra/Extensions" -name "*ReVa*" -type f | head -5 || echo "No ReVa files found yet"
         
         # Test ReVaSession constructor (should not require PyGhidra initialization)
         python -c "
         import os
         print('Testing ReVaSession with Ghidra environment...')
+        print(f'GHIDRA_INSTALL_DIR from env: {os.environ.get(\"GHIDRA_INSTALL_DIR\", \"Not set\")}')
         from reverse_engineering_assistant import ReVaSession, find_free_port
         # Test constructor only - don't try to start() since that requires PyGhidra
         session = ReVaSession(['/bin/ls'], quiet=True)
@@ -123,6 +123,7 @@ jobs:
         "
       env:
         DISPLAY: :99
+        GHIDRA_INSTALL_DIR: ${{ env.GHIDRA_INSTALL_DIR }}
 
   test:
     strategy:

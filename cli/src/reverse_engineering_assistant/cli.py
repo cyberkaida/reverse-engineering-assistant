@@ -71,6 +71,38 @@ class ReVaSession:
     def __init__(self, binaries: List[str], *, ghidra_path: Optional[str] = None, project_dir: Optional[str] = None, 
                  project_name: Optional[str] = None, port: Optional[int] = None, auto_analyze: bool = True, 
                  quiet: bool = True) -> None:
+        """Initialize a ReVa analysis session.
+        
+        Args:
+            binaries: List of binary paths to analyze
+            ghidra_path: Path to Ghidra installation (auto-detected if None)
+            project_dir: Project directory (temp if None)
+            project_name: Project name (auto-generated if None)
+            port: MCP server port (auto-assigned if None)
+            auto_analyze: Run Ghidra analysis on import
+            quiet: Suppress console output
+            
+        Raises:
+            ValueError: If no binaries specified or path is invalid
+            FileNotFoundError: If any binary file doesn't exist
+            RuntimeError: If Ghidra installation cannot be found
+        """
+        # Validate binaries early to fail fast
+        if not binaries:
+            raise ValueError("At least one binary must be specified")
+        
+        for binary_path in binaries:
+            path = Path(binary_path)
+            if not path.exists():
+                raise FileNotFoundError(f"Binary not found: {binary_path}")
+            if not path.is_file():
+                raise ValueError(f"Path is not a file: {binary_path}")
+            # Basic path traversal protection
+            try:
+                resolved = path.resolve(strict=True)
+            except (OSError, RuntimeError) as e:
+                raise ValueError(f"Invalid path: {binary_path}: {e}")
+        
         self.binaries = binaries
         self.ghidra_path = ghidra_path or self._find_ghidra()
         self.project_dir = self._determine_project_dir(project_dir)
@@ -429,55 +461,89 @@ class ReVaSession:
             self.shutdown()
     
     def shutdown(self) -> None:
-        """Shutdown PyGhidra and cleanup resources."""
+        """Shutdown PyGhidra and cleanup resources.
+        
+        This method is defensive and will attempt to clean up all resources
+        even if some operations fail. Safe to call multiple times.
+        """
+        # Check if we have the _started attribute (defensive against partial initialization)
+        if not hasattr(self, '_started'):
+            return
+        
         if not self._started:
             return
         
-        if not self.quiet:
+        # Use getattr for defensive access to attributes that might not exist
+        quiet = getattr(self, 'quiet', False)
+        
+        if not quiet:
             console.print("[blue]Shutting down...")
         
+        # Track if any cleanup was successful
+        cleanup_performed = False
+        
+        # Cleanup ReVa MCP server
         try:
             from reva.plugin import ReVaPyGhidraSupport
             
-            # Cleanup ReVa
-            if not self.quiet:
+            if not quiet:
                 console.print("[blue]Cleaning up ReVa resources...")
             ReVaPyGhidraSupport.cleanup()
+            cleanup_performed = True
             
+        except ImportError:
+            # ReVa plugin not available (might not be in PyGhidra context)
+            pass
         except Exception as e:
-            if not self.quiet:
+            if not quiet:
                 console.print(f"[yellow]Warning during ReVa cleanup: {e}")
         
         # Close the project (this handles closing all programs)
-        if self.project:
+        project = getattr(self, 'project', None)
+        if project:
             try:
-                if not self.quiet:
+                if not quiet:
                     console.print("[blue]Closing project...")
-                self.project.close()
-                if not self.quiet:
+                project.close()
+                self.project = None  # Clear reference after closing
+                cleanup_performed = True
+                if not quiet:
                     console.print("[green]✓ Project closed")
             except Exception as e:
-                if not self.quiet:
+                if not quiet:
                     console.print(f"[yellow]Warning closing project: {e}")
         
         # Clear program references
-        self.programs.clear()
+        if hasattr(self, 'programs'):
+            try:
+                self.programs.clear()
+                cleanup_performed = True
+            except Exception:
+                pass  # Ignore errors clearing dict
         
         # Clean up project directory if it's a temp directory
-        if self.cleanup_project and self.project_dir.exists():
+        cleanup_project = getattr(self, 'cleanup_project', False)
+        project_dir = getattr(self, 'project_dir', None)
+        
+        if cleanup_project and project_dir and project_dir.exists():
             try:
                 import shutil
-                if not self.quiet:
-                    console.print(f"[blue]Cleaning up temporary project directory: {self.project_dir}")
-                shutil.rmtree(self.project_dir)
-                if not self.quiet:
+                if not quiet:
+                    console.print(f"[blue]Cleaning up temporary project directory: {project_dir}")
+                shutil.rmtree(project_dir)
+                cleanup_performed = True
+                if not quiet:
                     console.print("[green]✓ Temporary project directory removed")
+            except PermissionError as e:
+                if not quiet:
+                    console.print(f"[yellow]Warning: Permission denied cleaning project directory: {e}")
             except Exception as e:
-                if not self.quiet:
+                if not quiet:
                     console.print(f"[yellow]Warning: Could not clean up project directory: {e}")
         
-        # Mark session as no longer started
-        self._started = False
+        # Mark session as no longer started only if we did some cleanup
+        if cleanup_performed:
+            self._started = False
 
 
 def main() -> None:

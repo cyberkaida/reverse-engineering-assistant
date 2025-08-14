@@ -36,14 +36,20 @@ class TestReVaSessionBasicFunctionality:
         session = ReVaSession(['/bin/ls'])
         assert session.ghidra_path == "/env/ghidra"
     
-    @patch("pathlib.Path.exists")
-    def test_find_ghidra_not_found(self, mock_exists):
+    def test_find_ghidra_not_found(self):
         """Test exception when Ghidra is not found."""
-        mock_exists.return_value = False
-        
-        with patch.dict(os.environ, {}, clear=True):
-            with pytest.raises(RuntimeError):
-                ReVaSession(['/bin/ls'])
+        # Need to mock the binary validation first
+        with patch('pathlib.Path.exists') as mock_exists:
+            # First call checks if binary exists (return True)
+            # Subsequent calls check for Ghidra paths (return False)
+            mock_exists.side_effect = [True, True, False, False, False, False, False, False, False, False]
+            
+            with patch('pathlib.Path.is_file') as mock_is_file:
+                mock_is_file.return_value = True
+                
+                with patch.dict(os.environ, {}, clear=True):
+                    with pytest.raises(RuntimeError):
+                        ReVaSession(['/bin/ls'])
     
     def test_shutdown_when_not_started(self):
         """Test shutdown when session was never started."""

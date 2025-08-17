@@ -208,20 +208,28 @@ Add a block to the `mcpServers` section of the configuration file:
 VSCode has a built in MCP client, instructions to configure it can be found
 in the [GitHub Copilot documentation](https://code.visualstudio.com/docs/copilot/chat/mcp-servers#_add-an-mcp-server-to-your-user-settings).
 
-Note that VSCode supports streamable transports natively, so you do not need to use `mcp-remote`.
+VSCode Copilot expects stdio transport, so you'll need to use `mcp-proxy` to bridge ReVa's HTTP server to stdio.
+Create or update your `.vscode/mcp.json` file:
 
 ```json
 {
-  "mcp": {
-    "servers": {
-      "ReVa": {
-        "type": "http",
-        "url": "http://localhost:8080/mcp/message"
-      }
+  "mcpServers": {
+    "ReVa": {
+      "command": "uvx",
+      "args": [
+        "mcp-proxy", 
+        "--transport", 
+        "streamablehttp", 
+        "http://localhost:8080/mcp/message"
+      ],
+      "type": "stdio"
     }
   }
 }
 ```
+
+This configuration uses `uvx` to run `mcp-proxy`, which bridges VSCode's stdio expectations to ReVa's HTTP server.
+Make sure ReVa is running in Ghidra before starting VSCode with this configuration.
 
 ### oterm - Ollama
 

@@ -158,8 +158,10 @@ async def run_claude_analysis(files: List[str], prompt: Optional[str] = None, js
             quiet=True  # Suppress output for Claude integration
         )
         
-        # Configure ReVa port BEFORE starting session - must happen very early
-        # to prevent McpServerManager from creating a new ConfigManager instance
+        # Start the session (initializes PyGhidra, creates project, imports binaries, starts server)
+        session.start()
+        
+        # Configure ReVa port AFTER PyGhidra is initialized - ReVa modules are now available
         try:
             from reva.plugin import ConfigManager
             from reva.util import RevaInternalServiceRegistry
@@ -169,14 +171,11 @@ async def run_claude_analysis(files: List[str], prompt: Optional[str] = None, js
             config_manager = ConfigManager(None)  # None = headless mode
             config_manager.setServerPort(port)
             RevaInternalServiceRegistry.registerService(ConfigManager, config_manager)
-            console.print(f"[dim]Pre-registered ConfigManager with port: {port}")
+            console.print(f"[dim]Configured ReVa port: {port}")
             
         except Exception as e:
             console.print(f"[yellow]Warning: Could not configure ReVa port: {e}")
             console.print("[dim]Using default port configuration")
-        
-        # Start the session (initializes PyGhidra, creates project, imports binaries, starts server)
-        session.start()
         
         console.print("[green]✓ ReVa MCP server is ready")
         

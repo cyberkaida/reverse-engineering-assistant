@@ -1,0 +1,1 @@
+"""Tests for reverse-engineering-assistant CLI."""

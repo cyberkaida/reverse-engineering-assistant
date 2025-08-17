@@ -1,0 +1,60 @@
+name: Test Python Package
+
+on:
+  push:
+    paths:
+      - 'cli/**'
+      - '.github/workflows/test-python.yml'
+  pull_request:
+    paths:
+      - 'cli/**'
+      - '.github/workflows/test-python.yml'
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ['3.10', '3.11', '3.12', '3.13']
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+    
+    - name: Install uv
+      run: |
+        curl -LsSf https://astral.sh/uv/install.sh | sh
+        echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+      shell: bash
+    
+    - name: Install dependencies
+      working-directory: ./cli
+      run: |
+        uv pip install --system -e .
+        uv pip install --system pytest
+    
+    - name: Run tests
+      working-directory: ./cli
+      run: |
+        PYTHONPATH=src pytest tests/ -v
+    
+    - name: Test CLI help
+      run: |
+        reva --help
+    
+    - name: Build package
+      working-directory: ./cli
+      run: |
+        uv pip install --system build
+        python -m build
+    
+    - name: Check package
+      working-directory: ./cli
+      run: |
+        uv pip install --system twine
+        python -m twine check dist/*

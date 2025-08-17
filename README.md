@@ -51,6 +51,8 @@ You can ask questions like:
 
 > NOTE: ReVa only supports Ghidra 11.3 and above!
 
+## Ghidra Extension Installation
+
 ReVa is a Ghidra extension. To install it, you can download the release for your
 version of Ghidra from the releases page and install it using the Ghidra extension manager.
 
@@ -68,6 +70,86 @@ After installing the extension you need to activate it in two places:
 
 1. In the Project view, open the File menu and select "Configure". Click the "Configure all plugins" button on the top right of the menu (it looks like a plug). Check the "ReVa Application Plugin"
 2. In the Code Browser tool (Click the Dragon icon or open a File), open the File menu and select "Configure". Click the "Configure all plugins" button on the top right of the menu (it looks like a plug). Check the "ReVa Plugin". Then Press File and select "Save Tool". This will enable ReVa by default.
+
+## Python CLI Tool (Headless Analysis)
+
+ReVa includes a Python command-line interface for headless analysis using PyGhidra. This allows you to run ReVa without the Ghidra GUI, perfect for automation, CI/CD pipelines, or remote analysis.
+
+### Installation from PyPI
+
+```bash
+pip install reverse-engineering-assistant
+```
+
+Or using uv (recommended):
+
+```bash
+uv pip install reverse-engineering-assistant
+```
+
+### Usage
+
+The `reva` command starts a headless Ghidra session with the MCP server:
+
+```bash
+# Analyze a single binary
+reva /path/to/binary
+
+# Analyze multiple binaries in the same session
+reva malware.exe lib1.dll lib2.dll
+
+# Specify a custom port
+reva --port 9090 /path/to/binary
+
+# Use a specific Ghidra installation
+reva --ghidra-path /opt/ghidra_11.4 /path/to/binary
+
+# Keep analysis database for later use
+reva --project-dir ./my_project --project-name malware_analysis /path/to/binary
+```
+
+### Claude Code Integration
+
+The `reva-claude` command provides seamless AI-assisted analysis integration:
+
+```bash
+# Quick triage with lazy analysis (default)
+reva-claude malware.exe -- "What type of file is this?"
+
+# Progressive analysis - Claude decides when to analyze
+reva-claude app.exe lib1.dll -- "Find the main functionality and any suspicious code"
+
+# Upfront analysis for complex workflows
+reva-claude --auto-analyze complex.exe -- "Comprehensive security analysis"
+
+# Interactive mode - no prompt specified
+reva-claude binary.exe
+```
+
+**Analysis Modes:**
+- **Lazy Analysis (Default)**: Fast startup, analysis on-demand via `analyze-program` tool
+- **Upfront Analysis**: Use `--auto-analyze` flag for immediate full analysis
+- **Interactive Mode**: Launch Claude Code CLI with ReVa tools automatically available
+
+### Features
+
+- **Headless Operation**: No GUI required, runs entirely from the command line
+- **Multi-Binary Support**: Analyze multiple related binaries in a single session
+- **Temporary Projects**: By default creates temporary Ghidra projects that are cleaned up on exit
+- **Persistent Projects**: Optionally save analysis databases for later use
+- **PyGhidra Integration**: Full access to Ghidra's analysis capabilities through PyGhidra
+
+### Environment Variables
+
+- `GHIDRA_INSTALL_DIR`: Path to Ghidra installation (auto-detected if not set)
+- `REVA_PROJECT_TEMP_DIR`: Default directory for temporary projects (defaults to system temp)
+
+### Requirements
+
+- Python 3.9 or higher
+- Ghidra 11.3 or higher installed
+- ReVa extension 4.4.0 or higher installed in Ghidra
+- PyGhidra (automatically installed with the package)
 
 ## MCP configuration
 
@@ -126,20 +208,28 @@ Add a block to the `mcpServers` section of the configuration file:
 VSCode has a built in MCP client, instructions to configure it can be found
 in the [GitHub Copilot documentation](https://code.visualstudio.com/docs/copilot/chat/mcp-servers#_add-an-mcp-server-to-your-user-settings).
 
-Note that VSCode supports streamable transports natively, so you do not need to use `mcp-remote`.
+VSCode Copilot expects stdio transport, so you'll need to use `mcp-proxy` to bridge ReVa's HTTP server to stdio.
+Create or update your `.vscode/mcp.json` file:
 
 ```json
 {
-  "mcp": {
-    "servers": {
-      "ReVa": {
-        "type": "http",
-        "url": "http://localhost:8080/mcp/message"
-      }
+  "mcpServers": {
+    "ReVa": {
+      "command": "uvx",
+      "args": [
+        "mcp-proxy", 
+        "--transport", 
+        "streamablehttp", 
+        "http://localhost:8080/mcp/message"
+      ],
+      "type": "stdio"
     }
   }
 }
 ```
+
+This configuration uses `uvx` to run `mcp-proxy`, which bridges VSCode's stdio expectations to ReVa's HTTP server.
+Make sure ReVa is running in Ghidra before starting VSCode with this configuration.
 
 ### oterm - Ollama
 

@@ -284,9 +284,106 @@ To test your resources and tools:
 2. Check the Ghidra console for log messages.
 3. For MCP server issues, check the server logs.
 
+## Python Package and PyPI Publishing
+
+### Python CLI Tool
+
+ReVa includes a Python command-line interface that enables headless analysis using PyGhidra. The CLI tool is distributed as a separate Python package on PyPI.
+
+#### Package Structure
+
+The Python package is located in the `cli/` directory:
+- `cli/pyproject.toml` - Package configuration and metadata
+- `cli/src/reverse_engineering_assistant/` - Source code
+- `cli/tests/` - Unit tests
+
+#### Version Management
+
+The Python package version should match the ReVa extension version. To update versions:
+
+```bash
+# Update version to match release tag
+python scripts/sync-version.py 4.3.1
+```
+
+This script updates the version in `cli/pyproject.toml`.
+
+#### Local Development
+
+To work on the Python CLI locally:
+
+```bash
+cd cli
+# Install in development mode with uv
+uv pip install -e .
+# Run tests
+uv run pytest tests/
+```
+
+### PyPI Publishing Process
+
+The Python package is automatically published to PyPI when a new release is created on GitHub.
+
+#### Automated Publishing (Recommended)
+
+1. **Create a GitHub Release**:
+   ```bash
+   git tag v4.3.1
+   git push origin v4.3.1
+   ```
+   Then create a release on GitHub using this tag.
+
+2. **Automatic Publishing**:
+   - The `.github/workflows/publish-pypi.yml` workflow triggers on release
+   - It automatically updates the package version to match the git tag
+   - Builds and publishes the package to PyPI
+   - Verifies the installation works
+
+#### Manual Publishing
+
+For testing or manual releases:
+
+1. **Test PyPI** (for testing):
+   ```bash
+   cd cli
+   uv build
+   uv pip install twine
+   twine upload --repository testpypi dist/*
+   ```
+
+2. **Production PyPI**:
+   ```bash
+   cd cli
+   uv build
+   twine upload dist/*
+   ```
+
+#### Required Secrets
+
+The following secrets must be configured in GitHub repository settings:
+- `PYPI_TOKEN` - API token for PyPI.org
+- `TEST_PYPI_TOKEN` - API token for test.pypi.org
+
+To obtain these tokens:
+1. Log in to [PyPI.org](https://pypi.org) or [Test PyPI](https://test.pypi.org)
+2. Go to Account Settings → API Tokens
+3. Create a new token with appropriate scope
+4. Add to GitHub repository secrets
+
+#### Package Testing
+
+The `.github/workflows/test-python.yml` workflow runs on every push that modifies Python code:
+- Tests across multiple Python versions (3.9-3.13)
+- Tests on Ubuntu, macOS, and Windows
+- Runs unit tests
+- Verifies package builds correctly
+- Checks package with twine
+
 ## Additional Resources
 
 - [Model Context Protocol Documentation](https://modelcontextprotocol.io/)
 - [Ghidra API Documentation](https://ghidra.re/ghidra_docs/api/)
 - [Ghidra on GitHub](https://github.com/NationalSecurityAgency/ghidra)
 - [MCP Java SDK](https://modelcontextprotocol.io/sdk/java/mcp-server)
+- [PyGhidra Documentation](https://github.com/NationalSecurityAgency/ghidra/tree/master/Ghidra/Features/PyGhidra)
+- [Python Packaging Guide](https://packaging.python.org/)

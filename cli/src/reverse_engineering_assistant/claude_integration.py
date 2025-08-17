@@ -16,73 +16,12 @@ from pathlib import Path
 from typing import Optional, List
 import anyio
 from rich.console import Console
-from rich.panel import Panel
-from rich.syntax import Syntax
-from rich.tree import Tree
-from rich.table import Table
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from .cli import ReVaSession, find_free_port
+from .ui_manager import ui, format_assistant_message, format_tool_use, format_final_answer
 
 console = Console()
-
-
-def format_assistant_message(message) -> None:
-    """Format and display an AssistantMessage with chain of thought."""
-    for block in message.content:
-        if hasattr(block, 'text'):
-            # Chain of thought text
-            console.print(Panel(
-                block.text,
-                title="🤔 Claude's Analysis",
-                border_style="blue",
-                padding=(1, 2)
-            ))
-        elif hasattr(block, 'name'):  # ToolUseBlock
-            format_tool_use(block)
-
-
-def format_tool_use(tool_block) -> None:
-    """Format and display tool usage."""
-    tool_name = getattr(tool_block, 'name', 'unknown')
-    tool_input = getattr(tool_block, 'input', {})
-    
-    # Create a summary of key parameters
-    key_params = []
-    if isinstance(tool_input, dict):
-        for key, value in tool_input.items():
-            if key in ['programPath', 'address', 'functionName', 'pattern']:
-                key_params.append(f"{key}: {value}")
-    
-    param_str = ", ".join(key_params[:3])  # Show max 3 key params
-    if len(key_params) > 3:
-        param_str += "..."
-    
-    console.print(f"🔧 [bold cyan]{tool_name}[/bold cyan]({param_str})")
-
-
-def format_tool_result(tool_block) -> None:
-    """Format and display tool results in a collapsed format."""
-    if hasattr(tool_block, 'content'):
-        result_text = str(tool_block.content)
-        
-        # Truncate very long results
-        if len(result_text) > 500:
-            preview = result_text[:500] + "..."
-            console.print(f"📋 [dim]Result: {preview}[/dim]")
-        else:
-            console.print(f"📋 [dim]Result: {result_text}[/dim]")
-
-
-def format_final_answer(text: str) -> None:
-    """Format the final answer prominently."""
-    console.print()
-    console.print(Panel(
-        text,
-        title="✅ Final Answer",
-        border_style="green",
-        padding=(1, 2)
-    ))
 
 
 def parse_args() -> tuple[list[str], str | None, str | None, bool]:
@@ -227,14 +166,9 @@ async def run_claude_analysis(files: List[str], prompt: Optional[str] = None, js
                 all_messages = []
                 final_answer_text = ""
                 
-                # Show analysis header
-                console.print()
-                console.print(Panel(
-                    f"Analyzing: {', '.join([Path(f).name for f in files])}\nPrompt: {prompt}",
-                    title="🔍 Starting Analysis",
-                    border_style="yellow"
-                ))
-                console.print()
+                # Show analysis header and start ephemeral display
+                ui.show_progress_header(files, prompt)
+                ui.start_ephemeral_display()
                 
                 async for message in query(prompt=prompt, options=options):
                     # Store for JSON output
@@ -260,7 +194,8 @@ async def run_claude_analysis(files: List[str], prompt: Optional[str] = None, js
                                 final_answer_text += block.text + "\n"
                     
                     elif message_type == 'ToolResultBlock':
-                        format_tool_result(message)
+                        # Don't interrupt thinking display with tool results
+                        pass
                     
                     elif message_type == 'ResultMessage':
                         # This usually contains the final result
@@ -268,6 +203,10 @@ async def run_claude_analysis(files: List[str], prompt: Optional[str] = None, js
                             format_final_answer(message.result)
                         elif hasattr(message, 'content'):
                             format_final_answer(str(message.content))
+                
+                # Ensure ephemeral display is ended if we haven't shown a final result yet
+                if final_answer_text.strip():
+                    ui.end_ephemeral_display()
                 
                 # Save JSON output if requested
                 if json_output:
@@ -322,10 +261,6 @@ async def run_claude_analysis(files: List[str], prompt: Optional[str] = None, js
             signal.signal(signal.SIGTERM, cleanup_handler)
             
             try:
-                # Check if ANTHROPIC_API_KEY is set
-                if not os.environ.get('ANTHROPIC_API_KEY'):
-                    console.print("[yellow]Warning: ANTHROPIC_API_KEY not set. Claude Code may not work.")
-                
                 # Launch interactive Claude Code CLI
                 result = subprocess.run([
                     "claude", 
@@ -368,21 +303,15 @@ async def run_claude_analysis(files: List[str], prompt: Optional[str] = None, js
 
 def main() -> None:
     """Main entry point for reva-claude command."""
-    # Check for authentication
-    if not os.environ.get('ANTHROPIC_API_KEY'):
-        console.print("[yellow]Warning: ANTHROPIC_API_KEY environment variable not set")
-        console.print("[dim]You may need to set this for Claude Code to work properly")
-    
     # Parse arguments
     files, prompt, json_output, auto_analyze = parse_args()
     
     if prompt:
         console.print(f"[bold green]ReVa Claude Analysis (One-shot)")
-        console.print(f"[dim]Files: {', '.join(files)}")
-        console.print(f"[dim]Prompt: {prompt}")
     else:
         console.print(f"[bold green]ReVa Claude Analysis (Interactive)")
-        console.print(f"[dim]Files: {', '.join(files)}")
+    
+    console.print(f"[dim]Files: {', '.join(files)}")
     
     # Show analysis mode
     if auto_analyze:

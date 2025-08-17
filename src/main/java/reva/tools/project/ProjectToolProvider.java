@@ -102,7 +102,7 @@ public class ProjectToolProvider extends AbstractToolProvider {
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("get-current-program")
             .title("Get Current Program")
-            .description("Get the currently active program in Ghidra")
+            .description("Get the currently active program in Ghidra with detailed metadata including analysis status. Returns 'isAnalyzed' flag indicating whether Ghidra's auto-analysis has been run. Unanalyzed programs will have limited function discovery, minimal string detection, and basic symbol information. If you encounter limited results when working with this program's functions, strings, or data structures, use the 'analyze-program' tool to improve the available information.")
             .inputSchema(createSchema(properties, required))
             .build();
 
@@ -232,7 +232,7 @@ public class ProjectToolProvider extends AbstractToolProvider {
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("list-open-programs")
             .title("List Open Programs")
-            .description("List all programs currently open in Ghidra across all tools")
+            .description("List all programs currently open in Ghidra across all tools with detailed metadata including analysis status. Each program includes an 'isAnalyzed' flag indicating whether Ghidra's auto-analysis has been run. Unanalyzed programs will have limited function discovery, minimal string detection, and basic symbol information. If you encounter limited results when working with a specific program's functions, strings, or data structures, use the 'analyze-program' tool on that program to improve the available information.")
             .inputSchema(createSchema(properties, required))
             .build();
 

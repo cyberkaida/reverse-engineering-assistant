@@ -42,7 +42,7 @@ public class ProgramListResource extends AbstractResourceProvider {
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final String RESOURCE_ID = "ghidra://programs";
     private static final String RESOURCE_NAME = "open-programs";
-    private static final String RESOURCE_DESCRIPTION = "Currently open programs with execution context information";
+    private static final String RESOURCE_DESCRIPTION = "Currently open programs with execution context information. Each program includes an 'isAnalyzed' flag indicating whether Ghidra's auto-analysis has been run. Unanalyzed programs (isAnalyzed: false) will have limited function discovery, minimal string detection, and basic symbol information. If you encounter limited results when working with a specific program's functions, strings, or data structures, run the 'analyze-program' tool on that program to improve the available information.";
     private static final String RESOURCE_MIME_TYPE = "application/json";
 
     /**

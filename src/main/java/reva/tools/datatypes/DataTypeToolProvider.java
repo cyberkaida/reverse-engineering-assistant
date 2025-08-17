@@ -78,13 +78,8 @@ public class DataTypeToolProvider extends AbstractToolProvider {
 
         // Register the tool with a handler
         registerTool(tool, (exchange, request) -> {
-            // Get the required program path from the request
-            String programPath;
-            try {
-                programPath = getString(request, "programPath");
-            } catch (IllegalArgumentException e) {
-                return createErrorResult(e.getMessage());
-            }
+            // Get the validated program using the standard helper
+            Program targetProgram = getProgramFromArgs(request);
 
             // Create result data
             List<Map<String, Object>> archivesData = new ArrayList<>();
@@ -100,10 +95,6 @@ public class DataTypeToolProvider extends AbstractToolProvider {
             archivesData.add(builtInInfo);
 
             // Add the specified program first
-            Program targetProgram = RevaProgramManager.getProgramByPath(programPath);
-            if (targetProgram == null) {
-                return createErrorResult("Could not find program: " + programPath);
-            }
             
             DataTypeManager dtm = targetProgram.getDataTypeManager();
             Map<String, Object> archiveInfo = new HashMap<>();
@@ -232,11 +223,12 @@ public class DataTypeToolProvider extends AbstractToolProvider {
 
         // Register the tool with a handler
         registerTool(tool, (exchange, request) -> {
-            // Get the required parameters from the request  
-            String programPath;
+            // Get the validated program using the standard helper
+            Program targetProgram = getProgramFromArgs(request);
+            
+            // Get the required archive name parameter
             String archiveName;
             try {
-                programPath = getString(request, "programPath");
                 archiveName = getString(request, "archiveName");
             } catch (IllegalArgumentException e) {
                 return createErrorResult(e.getMessage());
@@ -248,11 +240,8 @@ public class DataTypeToolProvider extends AbstractToolProvider {
             int startIndex = getOptionalInt(request, "startIndex", 0);
             int maxCount = getOptionalInt(request, "maxCount", 100);
 
-            // Validate that the program exists
-            Program targetProgram = RevaProgramManager.getProgramByPath(programPath);
-            if (targetProgram == null) {
-                return createErrorResult("Could not find program: " + programPath);
-            }
+            // Get the program path for the data type manager lookup
+            String programPath = targetProgram.getDomainFile().getPathname();
             
             // Find the data type manager for the specified program
             DataTypeManager dtm = DataTypeParserUtil.findDataTypeManager(archiveName, programPath);
@@ -347,11 +336,12 @@ public class DataTypeToolProvider extends AbstractToolProvider {
 
         // Register the tool with a handler
         registerTool(tool, (exchange, request) -> {
-            // Get the required parameters from the request
-            String programPath;
+            // Get the validated program using the standard helper
+            Program targetProgram = getProgramFromArgs(request);
+            
+            // Get the required data type string parameter
             String dataTypeString;
             try {
-                programPath = getString(request, "programPath");
                 dataTypeString = getString(request, "dataTypeString");
             } catch (IllegalArgumentException e) {
                 return createErrorResult(e.getMessage());
@@ -360,11 +350,8 @@ public class DataTypeToolProvider extends AbstractToolProvider {
             // Get the optional archive name
             String archiveName = getOptionalString(request, "archiveName", "");
 
-            // Validate that the program exists
-            Program targetProgram = RevaProgramManager.getProgramByPath(programPath);
-            if (targetProgram == null) {
-                return createErrorResult("Could not find program: " + programPath);
-            }
+            // Get the program path for the data type manager lookup
+            String programPath = targetProgram.getDomainFile().getPathname();
 
             try {
                 // Use the utility class to parse the data type with program context

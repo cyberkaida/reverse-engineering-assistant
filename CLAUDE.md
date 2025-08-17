@@ -88,6 +88,14 @@ The server uses streamable transport (SSE) on port 8080 by default. Configuratio
 - Jackson: 2.17.0 (forced version for compatibility)
 - Jetty: 11.0.25 (embedded servlet support)
 
+## Program Identification
+- **ALWAYS use `programPath` for program identifiers** in both tool inputs and outputs
+- The value is the Ghidra project pathname (e.g., "/Hatchery.exe" or "/folder/program.exe")
+- Never use alternative field names like `path`, `name`, or `executable` for program identification
+- Tools that list programs return a `programPath` field that can be directly used as input to other tools
+- All tools use `ProgramLookupUtil.getValidatedProgram()` for consistent program resolution and helpful error messages
+- When a program cannot be found, the error message will include suggestions of available programs
+
 ## Important Notes
 - Don't revert to the SSE transport (already using streamable)
 - The extension requires Ghidra 11.3 or above

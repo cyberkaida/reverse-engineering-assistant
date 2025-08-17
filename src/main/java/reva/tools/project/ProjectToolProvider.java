@@ -93,16 +93,13 @@ public class ProjectToolProvider extends AbstractToolProvider {
 
             // Create result data
             Map<String, Object> programInfo = new HashMap<>();
-            programInfo.put("name", program.getName());
-            programInfo.put("path", program.getDomainFile().getPathname());
+            programInfo.put("programPath", program.getDomainFile().getPathname());
             programInfo.put("language", program.getLanguage().getLanguageID().getIdAsString());
             programInfo.put("compilerSpec", program.getCompilerSpec().getCompilerSpecID().getIdAsString());
-            programInfo.put("executable", program.getExecutablePath());
             programInfo.put("creationDate", program.getCreationDate());
             programInfo.put("sizeBytes", program.getMemory().getSize());
             programInfo.put("symbolCount", program.getSymbolTable().getNumSymbols());
             programInfo.put("functionCount", program.getFunctionManager().getFunctionCount());
-            programInfo.put("programId", program.getDomainFile().getFileID());
             programInfo.put("modificationDate", program.getDomainFile().getLastModifiedTime());
             programInfo.put("isReadOnly", program.getDomainFile().isReadOnly());
 
@@ -225,16 +222,15 @@ public class ProjectToolProvider extends AbstractToolProvider {
 
             for (Program program : openPrograms) {
                 Map<String, Object> programInfo = new HashMap<>();
-                programInfo.put("name", program.getName());
-                programInfo.put("path", program.getDomainFile().getPathname());
+                programInfo.put("programPath", program.getDomainFile().getPathname());
                 programInfo.put("language", program.getLanguage().getLanguageID().getIdAsString());
                 programInfo.put("compilerSpec", program.getCompilerSpec().getCompilerSpecID().getIdAsString());
-                programInfo.put("executable", program.getExecutablePath());
                 programInfo.put("creationDate", program.getCreationDate());
                 programInfo.put("sizeBytes", program.getMemory().getSize());
                 programInfo.put("functionCount", program.getFunctionManager().getFunctionCount());
                 programInfo.put("symbolCount", program.getSymbolTable().getNumSymbols());
-                programInfo.put("programId", program.getDomainFile().getFileID());
+                programInfo.put("modificationDate", program.getDomainFile().getLastModifiedTime());
+                programInfo.put("isReadOnly", program.getDomainFile().isReadOnly());
 
                 programsData.add(programInfo);
             }
@@ -281,20 +277,21 @@ public class ProjectToolProvider extends AbstractToolProvider {
 
         // Register the tool with a handler
         registerTool(tool, (exchange, request) -> {
-            // Get parameters
-            String programPath;
+            // Get the validated program using the standard helper
+            Program program = getProgramFromArgs(request);
+            
+            // Get the message parameter
             String message;
             try {
-                programPath = getString(request, "programPath");
                 message = getString(request, "message");
             } catch (IllegalArgumentException e) {
                 return createErrorResult(e.getMessage());
             }
 
             boolean keepCheckedOut = getOptionalBoolean(request, "keepCheckedOut", true);
-
-            // Get the program to obtain its domain file
-            Program program = getProgramFromArgs(request);
+            
+            // Get the program path for result reporting
+            String programPath = program.getDomainFile().getPathname();
             DomainFile domainFile = program.getDomainFile();
 
             try {
@@ -368,8 +365,7 @@ public class ProjectToolProvider extends AbstractToolProvider {
         // Add subfolders
         for (DomainFolder subfolder : folder.getFolders()) {
             Map<String, Object> folderInfo = new HashMap<>();
-            folderInfo.put("name", subfolder.getName());
-            folderInfo.put("path", pathPrefix + subfolder.getName());
+            folderInfo.put("folderPath", pathPrefix + subfolder.getName());
             folderInfo.put("type", "folder");
             folderInfo.put("childCount", subfolder.getFiles().length + subfolder.getFolders().length);
             filesList.add(folderInfo);
@@ -378,23 +374,27 @@ public class ProjectToolProvider extends AbstractToolProvider {
         // Add files
         for (DomainFile file : folder.getFiles()) {
             Map<String, Object> fileInfo = new HashMap<>();
-            fileInfo.put("name", file.getName());
-            fileInfo.put("path", file.getPathname());
+            fileInfo.put("programPath", file.getPathname());
             fileInfo.put("type", "file");
             fileInfo.put("contentType", file.getContentType());
-            fileInfo.put("fileID", file.getFileID());
             fileInfo.put("lastModified", file.getLastModifiedTime());
             fileInfo.put("readOnly", file.isReadOnly());
             fileInfo.put("versioned", file.isVersioned());
-            fileInfo.put("checked", file.isCheckedOut());
-            fileInfo.put("hasMetadata", file.getMetadata() != null);
+            fileInfo.put("checkedOut", file.isCheckedOut());
 
             // Add program-specific info if it's a program
             if (file.getContentType().equals("Program")) {
                 try {
-                    fileInfo.put("programLanguage", file.getMetadata().get("CREATED_WITH_LANGUAGE"));
-                    fileInfo.put("programSize", file.getMetadata().get("Executable MD5"));
-                    fileInfo.put("programCreator", file.getMetadata().get("Created With"));
+                    if (file.getMetadata() != null) {
+                        Object languageObj = file.getMetadata().get("CREATED_WITH_LANGUAGE");
+                        if (languageObj != null) {
+                            fileInfo.put("programLanguage", languageObj);
+                        }
+                        Object md5Obj = file.getMetadata().get("Executable MD5");
+                        if (md5Obj != null) {
+                            fileInfo.put("executableMD5", md5Obj);
+                        }
+                    }
                 }
                 catch (Exception e) {
                     // Ignore errors when getting metadata

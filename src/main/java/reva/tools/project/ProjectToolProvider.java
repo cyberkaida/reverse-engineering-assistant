@@ -46,6 +46,7 @@ import ghidra.program.model.lang.LanguageNotFoundException;
 import ghidra.program.model.lang.LanguageService;
 import ghidra.program.model.listing.Program;
 import ghidra.program.util.DefaultLanguageService;
+import ghidra.program.util.GhidraProgramUtilities;
 import ghidra.util.exception.CancelledException;
 import ghidra.util.exception.DuplicateNameException;
 import ghidra.util.exception.VersionException;
@@ -57,6 +58,7 @@ import io.modelcontextprotocol.server.McpSyncServer;
 import io.modelcontextprotocol.spec.McpSchema;
 import reva.plugin.RevaProgramManager;
 import reva.tools.AbstractToolProvider;
+import reva.tools.ProgramValidationException;
 import reva.util.SchemaUtil;
 
 /**
@@ -81,6 +83,7 @@ public class ProjectToolProvider extends AbstractToolProvider {
         registerCheckinProgramTool();
         registerLoadBinaryTool();
         registerChangeProcessorTool();
+        registerAnalyzeProgramTool();
     }
 
     /**
@@ -126,6 +129,7 @@ public class ProjectToolProvider extends AbstractToolProvider {
             programInfo.put("functionCount", program.getFunctionManager().getFunctionCount());
             programInfo.put("modificationDate", program.getDomainFile().getLastModifiedTime());
             programInfo.put("isReadOnly", program.getDomainFile().isReadOnly());
+            programInfo.put("isAnalyzed", GhidraProgramUtilities.isAnalyzed(program));
 
             return createJsonResult(programInfo);
         });
@@ -255,6 +259,7 @@ public class ProjectToolProvider extends AbstractToolProvider {
                 programInfo.put("symbolCount", program.getSymbolTable().getNumSymbols());
                 programInfo.put("modificationDate", program.getDomainFile().getLastModifiedTime());
                 programInfo.put("isReadOnly", program.getDomainFile().isReadOnly());
+                programInfo.put("isAnalyzed", GhidraProgramUtilities.isAnalyzed(program));
 
                 programsData.add(programInfo);
             }
@@ -631,6 +636,115 @@ public class ProjectToolProvider extends AbstractToolProvider {
 
             } catch (Exception e) {
                 return createErrorResult("Failed to change processor architecture: " + e.getMessage());
+            }
+        });
+    }
+
+    /**
+     * Register a tool to analyze a program with Ghidra's auto-analysis
+     * @throws McpError if there's an error registering the tool
+     */
+    private void registerAnalyzeProgramTool() throws McpError {
+        // Define schema for the tool
+        Map<String, Object> properties = new HashMap<>();
+        
+        // Required parameter: programPath
+        properties.put("programPath", SchemaUtil.createStringProperty(
+            "Path to the program to analyze"
+        ));
+        
+        // Optional parameter: force (default false)
+        properties.put("force", SchemaUtil.booleanPropertyWithDefault(
+            "Re-analyze even if program has already been analyzed", false
+        ));
+        
+        List<String> required = List.of("programPath");
+
+        // Create the tool
+        McpSchema.Tool tool = McpSchema.Tool.builder()
+            .name("analyze-program")
+            .title("Analyze Program")
+            .description("Run Ghidra auto-analysis on a program. Checks if analysis has already been run and provides hints.")
+            .inputSchema(createSchema(properties, required))
+            .build();
+
+        // Register the tool with the server
+        registerTool(tool, (exchange, request) -> {
+            try {
+                // Extract parameters
+                String programPath = getString(request, "programPath");
+                boolean force = getOptionalBoolean(request, "force", false);
+                
+                // Get the program
+                Program program = getProgramFromArgs(request);
+                
+                // Check current analysis status using Ghidra's standard method
+                boolean isAnalyzed = GhidraProgramUtilities.isAnalyzed(program);
+                
+                // If already analyzed and not forcing, return info with hint
+                if (isAnalyzed && !force) {
+                    Map<String, Object> result = new HashMap<>();
+                    result.put("success", true);
+                    result.put("programPath", programPath);
+                    result.put("wasAlreadyAnalyzed", true);
+                    result.put("analysisTriggered", false);
+                    result.put("message", "Program has already been analyzed");
+                    result.put("hint", "Use 'force: true' parameter to re-analyze if needed");
+                    
+                    // Add current analysis stats
+                    Map<String, Object> currentStats = new HashMap<>();
+                    currentStats.put("functionCount", program.getFunctionManager().getFunctionCount());
+                    currentStats.put("symbolCount", program.getSymbolTable().getNumSymbols());
+                    currentStats.put("memorySize", program.getMemory().getSize());
+                    result.put("currentAnalysisInfo", currentStats);
+                    
+                    return createJsonResult(result);
+                }
+                
+                // Run analysis
+                long startTime = System.currentTimeMillis();
+                
+                AutoAnalysisManager mgr = AutoAnalysisManager.getAnalysisManager(program);
+                mgr.initializeOptions();
+                
+                // If forcing a re-analysis, reset the analysis flags first
+                if (force && isAnalyzed) {
+                    GhidraProgramUtilities.resetAnalysisFlags(program);
+                }
+                
+                mgr.reAnalyzeAll(null);
+                mgr.startAnalysis(TaskMonitor.DUMMY);
+                
+                // Mark program as analyzed using Ghidra's standard method
+                GhidraProgramUtilities.markProgramAnalyzed(program);
+                
+                long endTime = System.currentTimeMillis();
+                long timeElapsed = endTime - startTime;
+                
+                // Create analysis results
+                Map<String, Object> result = new HashMap<>();
+                result.put("success", true);
+                result.put("programPath", programPath);
+                result.put("wasAlreadyAnalyzed", isAnalyzed);
+                result.put("analysisTriggered", true);
+                result.put("forced", force);
+                result.put("message", force && isAnalyzed ? "Re-analysis completed successfully" : "Analysis completed successfully");
+                
+                // Add analysis statistics
+                Map<String, Object> analysisInfo = new HashMap<>();
+                analysisInfo.put("functionsFound", program.getFunctionManager().getFunctionCount());
+                analysisInfo.put("symbolsFound", program.getSymbolTable().getNumSymbols());
+                analysisInfo.put("timeElapsedMs", timeElapsed);
+                analysisInfo.put("timeElapsedSeconds", timeElapsed / 1000.0);
+                analysisInfo.put("memorySize", program.getMemory().getSize());
+                result.put("analysisInfo", analysisInfo);
+                
+                return createJsonResult(result);
+                
+            } catch (IllegalArgumentException | ProgramValidationException e) {
+                return createErrorResult(e.getMessage());
+            } catch (Exception e) {
+                return createErrorResult("Failed to analyze program: " + e.getMessage());
             }
         });
     }

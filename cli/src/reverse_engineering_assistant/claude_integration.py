@@ -85,7 +85,7 @@ def format_final_answer(text: str) -> None:
     ))
 
 
-def parse_args() -> tuple[list[str], str | None, str | None]:
+def parse_args() -> tuple[list[str], str | None, str | None, bool]:
     """Parse command line arguments for reva-claude."""
     parser = argparse.ArgumentParser(
         description="ReVa Claude Analysis - AI-powered binary analysis",
@@ -94,6 +94,7 @@ def parse_args() -> tuple[list[str], str | None, str | None]:
 Examples:
   reva-claude binary.exe -- "What does this program do?"
   reva-claude --json-output analysis.json malware.dll -- "Find suspicious functions"
+  reva-claude --auto-analyze complex.exe -- "Comprehensive analysis"
   reva-claude lib1.so lib2.so -- "Compare these libraries"
         """
     )
@@ -101,6 +102,8 @@ Examples:
     parser.add_argument('files', nargs='+', help='Binary files to analyze')
     parser.add_argument('--json-output', '-j', type=str, 
                        help='Save raw JSON responses to specified file')
+    parser.add_argument('--auto-analyze', action='store_true',
+                       help='Run analysis on all files upfront (default: lazy analysis)')
     parser.add_argument('prompt', nargs='*', 
                        help='Analysis prompt (use after -- separator for compatibility)')
     
@@ -114,12 +117,14 @@ Examples:
         parsed_args = parser.parse_args(args_before)
         files = parsed_args.files
         json_output = parsed_args.json_output
+        auto_analyze = parsed_args.auto_analyze
         prompt = ' '.join(prompt_parts) if prompt_parts else None
     else:
         # Normal argparse behavior
         args = parser.parse_args()
         files = args.files
         json_output = args.json_output
+        auto_analyze = args.auto_analyze
         prompt = ' '.join(args.prompt) if args.prompt else None
     
     # Validate files exist
@@ -128,10 +133,10 @@ Examples:
             console.print(f"[red]Error: File not found: {file_path}")
             sys.exit(1)
     
-    return files, prompt, json_output
+    return files, prompt, json_output, auto_analyze
 
 
-async def run_claude_analysis(files: List[str], prompt: Optional[str] = None, json_output: Optional[str] = None) -> None:
+async def run_claude_analysis(files: List[str], prompt: Optional[str] = None, json_output: Optional[str] = None, auto_analyze: bool = False) -> None:
     """Run Claude analysis with ReVa MCP server."""
     # Use random port for ReVa to avoid conflicts
     port = find_free_port()
@@ -149,7 +154,7 @@ async def run_claude_analysis(files: List[str], prompt: Optional[str] = None, js
         session = ReVaSession(
             binaries=files,
             port=port,
-            auto_analyze=True,
+            auto_analyze=auto_analyze,  # Use the CLI flag value
             quiet=True  # Suppress output for Claude integration
         )
         
@@ -370,7 +375,7 @@ def main() -> None:
         console.print("[dim]You may need to set this for Claude Code to work properly")
     
     # Parse arguments
-    files, prompt, json_output = parse_args()
+    files, prompt, json_output, auto_analyze = parse_args()
     
     if prompt:
         console.print(f"[bold green]ReVa Claude Analysis (One-shot)")
@@ -380,9 +385,15 @@ def main() -> None:
         console.print(f"[bold green]ReVa Claude Analysis (Interactive)")
         console.print(f"[dim]Files: {', '.join(files)}")
     
+    # Show analysis mode
+    if auto_analyze:
+        console.print(f"[dim]Analysis: Upfront analysis enabled")
+    else:
+        console.print(f"[dim]Analysis: Lazy analysis (Claude will analyze as needed)")
+    
     # Run the analysis
     try:
-        anyio.run(run_claude_analysis, files, prompt, json_output)
+        anyio.run(run_claude_analysis, files, prompt, json_output, auto_analyze)
     except KeyboardInterrupt:
         console.print("\n[yellow]Interrupted by user")
     except Exception as e:

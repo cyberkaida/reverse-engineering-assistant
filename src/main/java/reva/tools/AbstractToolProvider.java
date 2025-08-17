@@ -794,4 +794,5 @@ public abstract class AbstractToolProvider implements ToolProvider {
     protected Address getAddressFromSymbolArgs(Map<String, Object> args, Program program) throws IllegalArgumentException {
         return getAddressFromSymbolArgs(args, program, "symbolName");
     }
+
 }

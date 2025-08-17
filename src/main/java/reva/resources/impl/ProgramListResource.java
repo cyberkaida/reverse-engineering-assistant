@@ -24,6 +24,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import ghidra.program.model.listing.Program;
+import ghidra.program.util.GhidraProgramUtilities;
 import ghidra.util.SystemUtilities;
 import io.modelcontextprotocol.server.McpServerFeatures.SyncResourceSpecification;
 import io.modelcontextprotocol.server.McpSyncServer;
@@ -118,7 +119,7 @@ public class ProgramListResource extends AbstractResourceProvider {
                         String programCompilerSpec = program.getCompilerSpec().getCompilerSpecID().getIdAsString();
                         long programSize = program.getMemory().getSize();
                         String executablePath = program.getExecutablePath();
-                        boolean isAnalyzed = program.getOptions("").getBoolean("Program.isAnalyzed", false);
+                        boolean isAnalyzed = GhidraProgramUtilities.isAnalyzed(program);
 
                         String programName = program.getDomainFile().getName();
                         

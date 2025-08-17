@@ -69,7 +69,7 @@ class ReVaSession:
     """
     
     def __init__(self, binaries: List[str], *, ghidra_path: Optional[str] = None, project_dir: Optional[str] = None, 
-                 project_name: Optional[str] = None, port: Optional[int] = None, auto_analyze: bool = True, 
+                 project_name: Optional[str] = None, port: Optional[int] = None, auto_analyze: bool = False, 
                  quiet: bool = True) -> None:
         """Initialize a ReVa analysis session.
         
@@ -79,7 +79,7 @@ class ReVaSession:
             project_dir: Project directory (temp if None)
             project_name: Project name (auto-generated if None)
             port: MCP server port (auto-assigned if None)
-            auto_analyze: Run Ghidra analysis on import
+            auto_analyze: Run Ghidra analysis on import (default: False for lazy analysis)
             quiet: Suppress console output
             
         Raises:
@@ -406,11 +406,13 @@ class ReVaSession:
         panel = Panel(
             Text.assemble(
                 ("MCP Server Ready! 🚀\n\n", "bold green"),
-                (f"Server URL: ", ""),
-                (f"http://localhost:{port}", "bold blue"),
+                ("Transport Type: ", ""),
+                ("HTTP", "bold cyan"),
+                ("\nServer URL: ", ""),
+                (f"http://localhost:{port}/mcp/message", "bold blue"),
                 ("\n\nProject: ", ""),
                 (f"{self.project_dir / self.project_name}", "dim"),
-                ("\n\nPrograms loaded: ", ""),
+                ("\nPrograms loaded: ", ""),
                 (str(len(self.programs)), "bold yellow"),
                 ("\n\nConnect your MCP client to start analysis.\n", ""),
                 ("Press ", ""), ("Ctrl+C", "bold red"), (" to stop the server.", "")
@@ -567,7 +569,7 @@ def main() -> None:
     parser.add_argument('--project-dir', help='Directory for Ghidra project files (defaults to temp dir, or REVA_PROJECT_TEMP_DIR env var)')
     parser.add_argument('--project-name', help='Name for the Ghidra project (defaults to reva_session_<pid>)')
     parser.add_argument('--port', type=int, default=8080, help='MCP server port (default: 8080)')
-    parser.add_argument('--no-analysis', action='store_true', help='Skip auto-analysis phase')
+    parser.add_argument('--auto-analyze', action='store_true', help='Run analysis on all files upfront (default: lazy analysis)')
     parser.add_argument('--verbose', action='store_true', help='Enable verbose logging')
     
     args = parser.parse_args()
@@ -578,7 +580,13 @@ def main() -> None:
         os.environ["PYGHIDRA_DEBUG"] = "1"
     
     console.print(f"[bold green]ReVa PyGhidra Analysis Tool")
-    console.print(f"[dim]Analyzing {len(args.binaries)} binary(ies)")
+    console.print(f"[dim]Importing {len(args.binaries)} binary(ies)")
+    
+    # Show analysis mode
+    if args.auto_analyze:
+        console.print(f"[dim]Analysis: Upfront analysis enabled")
+    else:
+        console.print(f"[dim]Analysis: Lazy analysis (use analyze-program MCP tool when needed)")
     
     session = None
     try:
@@ -589,7 +597,7 @@ def main() -> None:
             project_dir=args.project_dir,
             project_name=args.project_name,
             port=args.port,
-            auto_analyze=not args.no_analysis,
+            auto_analyze=args.auto_analyze,
             quiet=False  # CLI users expect output
         )
         console.print(f"[blue]Using Ghidra at: {session.ghidra_path}")

@@ -28,7 +28,7 @@ reva /path/to/binary1 /path/to/binary2 /path/to/binary3
 - `--project-dir`: Directory for Ghidra project files (default: temp directory, or REVA_PROJECT_TEMP_DIR env var)
 - `--project-name`: Name for the Ghidra project (default: reva_session_<pid>)
 - `--port`: MCP server port (default: 8080)
-- `--no-analysis`: Skip auto-analysis phase
+- `--auto-analyze`: Run analysis on all files upfront (default: lazy analysis)
 - `--verbose`: Enable verbose logging
 
 ### Project Directory Behavior
@@ -46,8 +46,8 @@ By default, ReVa creates a temporary project directory that is automatically cle
 # Analyze a binary with verbose output
 reva --verbose --ghidra-path /opt/ghidra /path/to/malware.exe
 
-# Analyze multiple binaries without auto-analysis
-reva --no-analysis /path/to/lib1.so /path/to/lib2.so
+# Analyze multiple binaries with upfront analysis
+reva --auto-analyze /path/to/lib1.so /path/to/lib2.so
 
 # Use a persistent project directory and custom name
 reva --project-dir ~/ghidra_projects --project-name malware_analysis /path/to/sample.exe
@@ -60,6 +60,56 @@ reva /path/to/binary
 Once running, the MCP server will be available at `http://localhost:8080` for client connections.
 
 Press Ctrl+C to exit and clean up resources.
+
+## Analysis Workflows
+
+### Lazy Analysis (Default)
+
+By default, ReVa uses **lazy analysis** for faster startup and efficient resource usage:
+
+- **Quick startup**: Files are imported without analysis, allowing immediate metadata access
+- **On-demand analysis**: Use the `analyze-program` MCP tool when deeper analysis is needed
+- **Efficient for triage**: Perfect for "What is this file?" questions that don't need full analysis
+
+```bash
+# Quick triage - no upfront analysis time
+reva-claude malware.exe -- "What type of file is this and what architecture?"
+
+# Progressive analysis - start simple, then analyze as needed
+reva-claude suspicious.dll -- "Does this look like malware? Analyze if suspicious."
+```
+
+### Upfront Analysis
+
+For workflows requiring immediate deep analysis, use the `--auto-analyze` flag:
+
+```bash
+# Full analysis upfront
+reva-claude --auto-analyze complex.exe -- "Comprehensive security analysis"
+
+# Regular reva command (always does analysis)
+reva binary.exe  # Analysis happens during startup
+```
+
+### Manual Analysis Control
+
+Use the `analyze-program` MCP tool for fine-grained control:
+
+```json
+{
+  "tool": "analyze-program",
+  "arguments": {
+    "programPath": "/malware.exe",
+    "force": false
+  }
+}
+```
+
+**Tool features:**
+- Checks if analysis was already run
+- Provides hints when re-analysis might be needed
+- Returns analysis statistics (functions found, time taken, etc.)
+- Use `"force": true` to re-analyze if needed
 
 ## Programmatic API
 
@@ -90,7 +140,7 @@ with ReVaSession(
     port=find_free_port(),  # Auto-assign random port
     project_dir='/tmp/my_analysis',  # Custom project directory
     project_name='custom_analysis',
-    auto_analyze=True,  # Run Ghidra analysis (default)
+    auto_analyze=False,  # Lazy analysis (default: False for efficiency)
     quiet=True,  # Suppress console output (default)
     ghidra_path='/opt/ghidra'  # Custom Ghidra installation
 ) as reva:

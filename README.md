@@ -108,6 +108,29 @@ reva --ghidra-path /opt/ghidra_11.4 /path/to/binary
 reva --project-dir ./my_project --project-name malware_analysis /path/to/binary
 ```
 
+### Claude Code Integration
+
+The `reva-claude` command provides seamless AI-assisted analysis integration:
+
+```bash
+# Quick triage with lazy analysis (default)
+reva-claude malware.exe -- "What type of file is this?"
+
+# Progressive analysis - Claude decides when to analyze
+reva-claude app.exe lib1.dll -- "Find the main functionality and any suspicious code"
+
+# Upfront analysis for complex workflows
+reva-claude --auto-analyze complex.exe -- "Comprehensive security analysis"
+
+# Interactive mode - no prompt specified
+reva-claude binary.exe
+```
+
+**Analysis Modes:**
+- **Lazy Analysis (Default)**: Fast startup, analysis on-demand via `analyze-program` tool
+- **Upfront Analysis**: Use `--auto-analyze` flag for immediate full analysis
+- **Interactive Mode**: Launch Claude Code CLI with ReVa tools automatically available
+
 ### Features
 
 - **Headless Operation**: No GUI required, runs entirely from the command line

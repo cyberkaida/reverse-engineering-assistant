@@ -124,7 +124,7 @@ public class DataTypeToolProviderIntegrationTest extends RevaIntegrationTestBase
                     Map.of("programPath", invalidProgramPath)));
                 assertTrue("get-data-type-archives should fail with invalid program path", archivesResult.isError());
                 String archivesError = ((TextContent) archivesResult.content().get(0)).text();
-                assertTrue("Should contain helpful error message", archivesError.contains("Could not find program"));
+                assertTrue("Should contain helpful error message", archivesError.contains("Program not found"));
                 
                 // Test get-data-types with invalid program path
                 CallToolResult typesResult = client.callTool(new CallToolRequest("get-data-types", 

@@ -15,6 +15,8 @@
  */
 package reva.resources.impl;
 
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -71,20 +73,21 @@ public class ProgramListResource extends AbstractResourceProvider {
                     try {
                         // Create program info object
                         String programPath = program.getDomainFile().getPathname();
-                        String programName = program.getName();
                         String programLanguage = program.getLanguage().getLanguageID().getIdAsString();
                         String programCompilerSpec = program.getCompilerSpec().getCompilerSpecID().getIdAsString();
                         long programSize = program.getMemory().getSize();
 
                         // Create a JSON object with program metadata
                         String metaString = JSON.writeValueAsString(
-                            new ProgramInfo(programPath, programName, programLanguage, programCompilerSpec, programSize)
+                            new ProgramInfo(programPath, programLanguage, programCompilerSpec, programSize)
                         );
 
                         // Add to resource contents
+                        // URL encode the program path to ensure URI safety
+                        String encodedProgramPath = URLEncoder.encode(programPath, StandardCharsets.UTF_8);
                         resourceContents.add(
                             new TextResourceContents(
-                                RESOURCE_ID + "/" + programName,
+                                RESOURCE_ID + "/" + encodedProgramPath,
                                 RESOURCE_MIME_TYPE,
                                 metaString
                             )
@@ -107,10 +110,7 @@ public class ProgramListResource extends AbstractResourceProvider {
      */
     private static class ProgramInfo {
         @SuppressWarnings("unused")
-        public String path;
-
-        @SuppressWarnings("unused")
-        public String name;
+        public String programPath;
 
         @SuppressWarnings("unused")
         public String language;
@@ -121,9 +121,8 @@ public class ProgramListResource extends AbstractResourceProvider {
         @SuppressWarnings("unused")
         public long sizeBytes;
 
-        public ProgramInfo(String path, String name, String language, String compilerSpec, long sizeBytes) {
-            this.path = path;
-            this.name = name;
+        public ProgramInfo(String programPath, String language, String compilerSpec, long sizeBytes) {
+            this.programPath = programPath;
             this.language = language;
             this.compilerSpec = compilerSpec;
             this.sizeBytes = sizeBytes;

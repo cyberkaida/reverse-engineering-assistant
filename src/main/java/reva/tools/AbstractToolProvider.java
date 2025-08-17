@@ -34,6 +34,7 @@ import reva.util.AddressUtil;
 import io.modelcontextprotocol.server.McpServerFeatures.SyncToolSpecification;
 import io.modelcontextprotocol.spec.McpSchema.CallToolRequest;
 import reva.plugin.RevaProgramManager;
+import reva.util.ProgramLookupUtil;
 import io.modelcontextprotocol.server.McpSyncServer;
 import io.modelcontextprotocol.spec.McpError;
 import io.modelcontextprotocol.spec.McpSchema;
@@ -503,25 +504,13 @@ public abstract class AbstractToolProvider implements ToolProvider {
 
     /**
      * Get a validated program by path. This method ensures the program exists and is in a valid state.
+     * Uses ProgramLookupUtil for consistent error messages with helpful suggestions.
      * @param programPath The path to the program
      * @return A valid Program object
      * @throws ProgramValidationException if the program is not found, invalid, or in an invalid state
      */
     protected Program getValidatedProgram(String programPath) throws ProgramValidationException {
-        if (programPath == null || programPath.trim().isEmpty()) {
-            throw new ProgramValidationException("Program path cannot be null or empty");
-        }
-
-        Program program = RevaProgramManager.getProgramByPath(programPath);
-        if (program == null) {
-            throw new ProgramValidationException("Program not found: " + programPath);
-        }
-
-        if (program.isClosed()) {
-            throw new ProgramValidationException("Program is closed: " + programPath);
-        }
-
-        return program;
+        return ProgramLookupUtil.getValidatedProgram(programPath);
     }
 
     /**

@@ -94,7 +94,7 @@ repositories {
 dependencies {
 	// Any external dependencies added here will automatically be copied to the lib/ directory when
 	// this extension is built.
-	implementation platform("io.modelcontextprotocol.sdk:mcp-bom:0.11.1")
+	implementation platform("io.modelcontextprotocol.sdk:mcp-bom:0.11.2")
 	implementation "io.modelcontextprotocol.sdk:mcp"
 	implementation "jakarta.servlet:jakarta.servlet-api:6.1.0"
 	// Add Jetty for embedded servlet support

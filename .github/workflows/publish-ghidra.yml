@@ -34,7 +34,7 @@ jobs:
     steps:
     - uses: actions/checkout@v5
     - name: Set up Java 🍵
-      uses: actions/setup-java@v4
+      uses: actions/setup-java@v5
       with:
         java-version: "21"
         distribution: "microsoft"

@@ -98,8 +98,8 @@ dependencies {
 	implementation "io.modelcontextprotocol.sdk:mcp"
 	implementation "jakarta.servlet:jakarta.servlet-api:6.1.0"
 	// Add Jetty for embedded servlet support
-	implementation "org.eclipse.jetty:jetty-server:11.0.25"
-	implementation "org.eclipse.jetty:jetty-servlet:11.0.25"
+	implementation "org.eclipse.jetty:jetty-server:11.0.26"
+	implementation "org.eclipse.jetty:jetty-servlet:11.0.26"
 	
 	// Force Jackson 2.17.0 to be compatible with MCP SDK v0.11.1
 	implementation "com.fasterxml.jackson.core:jackson-core:2.19.2"

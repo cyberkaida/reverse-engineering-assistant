@@ -29,6 +29,7 @@ import java.util.Map;
 import ghidra.app.plugin.core.analysis.AutoAnalysisManager;
 import ghidra.app.services.ProgramManager;
 import ghidra.app.util.importer.AutoImporter;
+import ghidra.app.util.opinion.LoadException;
 import ghidra.app.util.importer.MessageLog;
 import ghidra.app.util.opinion.LoadResults;
 import ghidra.app.util.opinion.Loaded;
@@ -47,6 +48,7 @@ import ghidra.framework.model.ToolManager;
 import ghidra.framework.plugintool.PluginTool;
 import ghidra.program.model.lang.CompilerSpec;
 import ghidra.program.model.lang.CompilerSpecID;
+import ghidra.util.Msg;
 import ghidra.program.model.lang.Language;
 import ghidra.program.model.lang.LanguageCompilerSpecPair;
 import ghidra.program.model.lang.LanguageDescription;
@@ -694,7 +696,10 @@ public class ProjectToolProvider extends AbstractToolProvider {
             "Where to save the programs in the project (default: /)", "/"
         ));
         properties.put("processorSpec", SchemaUtil.stringProperty(
-            "Optional processor/compiler spec (e.g., 'x86:LE:64:default', 'golang:BE:64:default'). If not specified, Ghidra will auto-detect."
+            "Optional processor/compiler spec hint (e.g., 'x86:LE:64:default'). " +
+            "If not specified, Ghidra will automatically detect the best match. " +
+            "Only use if auto-detection chooses incorrectly. " +
+            "The actual loadspec used will be returned in the response."
         ));
         properties.put("runAnalysis", SchemaUtil.booleanPropertyWithDefault(
             "Whether to run auto-analysis after loading", true
@@ -1111,29 +1116,25 @@ public class ProjectToolProvider extends AbstractToolProvider {
         int failureCount = 0;
 
         for (File file : files) {
-            try {
-                Map<String, Object> result = importSingleFile(file, folder, processor, runAnalysis, openProgram);
-                results.add(result);
-                if (result.get("success").equals(true)) {
-                    successCount++;
-                } else {
-                    failureCount++;
-                }
-            } catch (Exception e) {
-                Map<String, Object> errorResult = new HashMap<>();
-                errorResult.put("success", false);
-                errorResult.put("filePath", file.getAbsolutePath());
-                errorResult.put("error", e.getMessage());
-                results.add(errorResult);
+            Map<String, Object> result = importSingleFile(file, folder, processor, runAnalysis, openProgram);
+            results.add(result);
+            
+            if (Boolean.TRUE.equals(result.get("success"))) {
+                successCount++;
+            } else {
                 failureCount++;
+                // Log the failure but continue with other files
+                String error = (String) result.get("error");
+                Msg.warn(this, "Failed to import " + file.getName() + ": " + error);
             }
         }
 
         Map<String, Object> response = new HashMap<>();
-        response.put("success", true);
+        response.put("success", successCount > 0); // Success if at least one file imported
         response.put("sourceType", sourceType);
         response.put("sourcePath", sourcePath);
         response.put("isListing", false);
+        response.put("projectPath", projectPath);
         response.put("totalFiles", files.size());
         response.put("successCount", successCount);
         response.put("failureCount", failureCount);
@@ -1160,29 +1161,25 @@ public class ProjectToolProvider extends AbstractToolProvider {
         int failureCount = 0;
 
         for (FSRL fileFsrl : files) {
-            try {
-                Map<String, Object> result = importSingleFileFromArchive(fileFsrl, folder, processor, runAnalysis, openProgram);
-                results.add(result);
-                if (result.get("success").equals(true)) {
-                    successCount++;
-                } else {
-                    failureCount++;
-                }
-            } catch (Exception e) {
-                Map<String, Object> errorResult = new HashMap<>();
-                errorResult.put("success", false);
-                errorResult.put("filePath", fileFsrl.toString());
-                errorResult.put("error", e.getMessage());
-                results.add(errorResult);
+            Map<String, Object> result = importSingleFileFromArchive(fileFsrl, folder, processor, runAnalysis, openProgram);
+            results.add(result);
+            
+            if (Boolean.TRUE.equals(result.get("success"))) {
+                successCount++;
+            } else {
                 failureCount++;
+                // Log the failure but continue with other files
+                String error = (String) result.get("error");
+                Msg.warn(this, "Failed to import " + fileFsrl.getName() + ": " + error);
             }
         }
 
         Map<String, Object> response = new HashMap<>();
-        response.put("success", true);
+        response.put("success", successCount > 0); // Success if at least one file imported
         response.put("sourceType", "archive");
         response.put("sourcePath", sourcePath);
         response.put("isListing", false);
+        response.put("projectPath", projectPath);
         response.put("totalFiles", files.size());
         response.put("successCount", successCount);
         response.put("failureCount", failureCount);
@@ -1201,16 +1198,35 @@ public class ProjectToolProvider extends AbstractToolProvider {
             String baseName = file.getName();
             String programName = createUniqueFileName(folder, baseName);
             
-            // Use AutoImporter to import the file
             Project project = AppInfo.getActiveProject();
             MessageLog messageLog = new MessageLog();
-            LoadResults<Program> loadResults = AutoImporter.importByUsingBestGuess(
-                file, project, folder.getPathname() + "/" + programName, this, messageLog, TaskMonitor.DUMMY);
+            LoadResults<Program> loadResults;
+            
+            // Use the processor spec if provided, otherwise auto-detect
+            if (processor != null) {
+                try {
+                    Language language = processor.getLanguage();
+                    CompilerSpec compilerSpec = processor.getCompilerSpec();
+                    loadResults = AutoImporter.importByLookingForLcs(
+                        file, project, folder.getPathname() + "/" + programName, 
+                        language, compilerSpec, this, messageLog, TaskMonitor.DUMMY);
+                } catch (Exception e) {
+                    // If specific processor spec fails, fall back to auto-detect
+                    Msg.warn(this, "Processor spec " + processor + " failed for " + file.getName() + 
+                        ", falling back to auto-detection: " + e.getMessage());
+                    loadResults = AutoImporter.importByUsingBestGuess(
+                        file, project, folder.getPathname() + "/" + programName, this, messageLog, TaskMonitor.DUMMY);
+                }
+            } else {
+                loadResults = AutoImporter.importByUsingBestGuess(
+                    file, project, folder.getPathname() + "/" + programName, this, messageLog, TaskMonitor.DUMMY);
+            }
             
             if (loadResults == null || loadResults.size() == 0) {
                 result.put("success", false);
                 result.put("filePath", file.getAbsolutePath());
                 result.put("error", "No programs were imported from file");
+                result.put("errorType", "NO_PROGRAMS_IMPORTED");
                 return result;
             }
             
@@ -1220,6 +1236,11 @@ public class ProjectToolProvider extends AbstractToolProvider {
             // Get the primary imported program
             Program program = loadResults.getPrimaryDomainObject();
             String programPath = program.getDomainFile().getPathname();
+            
+            // Extract the actual loadspec used
+            String languageId = program.getLanguage().getLanguageID().getIdAsString();
+            String compilerSpecId = program.getCompilerSpec().getCompilerSpecID().getIdAsString();
+            String loadSpec = languageId + ":" + compilerSpecId;
             
             // Run analysis on all loaded programs if requested
             if (runAnalysis) {
@@ -1232,6 +1253,7 @@ public class ProjectToolProvider extends AbstractToolProvider {
                     } catch (Exception e) {
                         loadedProgram.endTransaction(analysisTransactionID, false);
                         // Log but don't fail the import due to analysis issues
+                        Msg.warn(this, "Analysis failed for " + loadedProgram.getName() + ": " + e.getMessage());
                     }
                 }
             }
@@ -1247,15 +1269,26 @@ public class ProjectToolProvider extends AbstractToolProvider {
             result.put("filePath", file.getAbsolutePath());
             result.put("programPath", programPath);
             result.put("programName", programName);
+            result.put("languageId", languageId);
+            result.put("compilerSpecId", compilerSpecId);
+            result.put("loadSpec", loadSpec);
             result.put("totalProgramsImported", loadResults.size());
             
-            // Release the LoadResults (this will release all loaded programs)
-            loadResults.release(this);
+            // Don't release the LoadResults immediately - let programs stay open for use
+            // This fixes the "program not found after import" bug
+            // loadResults.release(this); // REMOVED
             
+        } catch (LoadException e) {
+            // Specific handling for files that can't be loaded
+            result.put("success", false);
+            result.put("filePath", file.getAbsolutePath());
+            result.put("error", "Could not find a suitable loader for this file: " + e.getMessage());
+            result.put("errorType", "NO_LOADER");
         } catch (Exception e) {
             result.put("success", false);
             result.put("filePath", file.getAbsolutePath());
             result.put("error", e.getMessage());
+            result.put("errorType", e.getClass().getSimpleName());
         }
         
         return result;
@@ -1271,16 +1304,35 @@ public class ProjectToolProvider extends AbstractToolProvider {
             String fileName = fileFsrl.getName();
             String programName = createUniqueFileName(folder, fileName);
             
-            // Use AutoImporter to import from archive
             Project project = AppInfo.getActiveProject();
             MessageLog messageLog = new MessageLog();
-            LoadResults<Program> loadResults = AutoImporter.importByUsingBestGuess(
-                fileFsrl, project, folder.getPathname() + "/" + programName, this, messageLog, TaskMonitor.DUMMY);
+            LoadResults<Program> loadResults;
+            
+            // Use the processor spec if provided, otherwise auto-detect
+            if (processor != null) {
+                try {
+                    Language language = processor.getLanguage();
+                    CompilerSpec compilerSpec = processor.getCompilerSpec();
+                    loadResults = AutoImporter.importByLookingForLcs(
+                        fileFsrl, project, folder.getPathname() + "/" + programName, 
+                        language, compilerSpec, this, messageLog, TaskMonitor.DUMMY);
+                } catch (Exception e) {
+                    // If specific processor spec fails, fall back to auto-detect
+                    Msg.warn(this, "Processor spec " + processor + " failed for " + fileName + 
+                        ", falling back to auto-detection: " + e.getMessage());
+                    loadResults = AutoImporter.importByUsingBestGuess(
+                        fileFsrl, project, folder.getPathname() + "/" + programName, this, messageLog, TaskMonitor.DUMMY);
+                }
+            } else {
+                loadResults = AutoImporter.importByUsingBestGuess(
+                    fileFsrl, project, folder.getPathname() + "/" + programName, this, messageLog, TaskMonitor.DUMMY);
+            }
             
             if (loadResults == null || loadResults.size() == 0) {
                 result.put("success", false);
                 result.put("filePath", fileFsrl.toString());
                 result.put("error", "No programs were imported from archive file");
+                result.put("errorType", "NO_PROGRAMS_IMPORTED");
                 return result;
             }
             
@@ -1290,6 +1342,11 @@ public class ProjectToolProvider extends AbstractToolProvider {
             // Get the primary imported program
             Program program = loadResults.getPrimaryDomainObject();
             String programPath = program.getDomainFile().getPathname();
+            
+            // Extract the actual loadspec used
+            String languageId = program.getLanguage().getLanguageID().getIdAsString();
+            String compilerSpecId = program.getCompilerSpec().getCompilerSpecID().getIdAsString();
+            String loadSpec = languageId + ":" + compilerSpecId;
             
             // Run analysis on all loaded programs if requested
             if (runAnalysis) {
@@ -1302,6 +1359,7 @@ public class ProjectToolProvider extends AbstractToolProvider {
                     } catch (Exception e) {
                         loadedProgram.endTransaction(analysisTransactionID, false);
                         // Log but don't fail the import due to analysis issues
+                        Msg.warn(this, "Analysis failed for " + loadedProgram.getName() + ": " + e.getMessage());
                     }
                 }
             }
@@ -1317,15 +1375,26 @@ public class ProjectToolProvider extends AbstractToolProvider {
             result.put("filePath", fileFsrl.toString());
             result.put("programPath", programPath);
             result.put("programName", programName);
+            result.put("languageId", languageId);
+            result.put("compilerSpecId", compilerSpecId);
+            result.put("loadSpec", loadSpec);
             result.put("totalProgramsImported", loadResults.size());
             
-            // Release the LoadResults (this will release all loaded programs)
-            loadResults.release(this);
+            // Don't release the LoadResults immediately - let programs stay open for use
+            // This fixes the "program not found after import" bug
+            // loadResults.release(this); // REMOVED
             
+        } catch (LoadException e) {
+            // Specific handling for files that can't be loaded
+            result.put("success", false);
+            result.put("filePath", fileFsrl.toString());
+            result.put("error", "Could not find a suitable loader for this file: " + e.getMessage());
+            result.put("errorType", "NO_LOADER");
         } catch (Exception e) {
             result.put("success", false);
             result.put("filePath", fileFsrl.toString());
             result.put("error", e.getMessage());
+            result.put("errorType", e.getClass().getSimpleName());
         }
         
         return result;

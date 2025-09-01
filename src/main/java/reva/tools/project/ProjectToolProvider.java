@@ -1408,10 +1408,18 @@ public class ProjectToolProvider extends AbstractToolProvider {
     }
 
     private boolean isArchiveFile(File file) {
-        String lowerName = file.getName().toLowerCase();
-        return lowerName.endsWith(".zip") || lowerName.endsWith(".tar") || lowerName.endsWith(".gz") ||
-               lowerName.endsWith(".7z") || lowerName.endsWith(".rar") || lowerName.endsWith(".bz2") ||
-               lowerName.endsWith(".tar.gz") || lowerName.endsWith(".tgz") || lowerName.endsWith(".tar.bz2");
+        try {
+            // Use Ghidra's FileSystemService for content-based archive detection
+            // This properly detects all supported archive formats including CaRT archives
+            FSRL fsrl = FileSystemService.getInstance().getLocalFSRL(file);
+            return FileSystemService.getInstance().isFileFilesystemContainer(fsrl, TaskMonitor.DUMMY);
+        } catch (Exception e) {
+            // Fallback to extension-based detection if FileSystemService fails
+            String lowerName = file.getName().toLowerCase();
+            return lowerName.endsWith(".zip") || lowerName.endsWith(".tar") || lowerName.endsWith(".gz") ||
+                   lowerName.endsWith(".7z") || lowerName.endsWith(".rar") || lowerName.endsWith(".bz2") ||
+                   lowerName.endsWith(".tar.gz") || lowerName.endsWith(".tgz") || lowerName.endsWith(".tar.bz2");
+        }
     }
 
     private Map<String, Object> createFileInfo(File file) {

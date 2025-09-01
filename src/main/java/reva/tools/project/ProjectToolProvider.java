@@ -1204,52 +1204,53 @@ public class ProjectToolProvider extends AbstractToolProvider {
             // Use AutoImporter to import the file
             Project project = AppInfo.getActiveProject();
             MessageLog messageLog = new MessageLog();
-            var importResult = AutoImporter.importByUsingBestGuess(
+            LoadResults<Program> loadResults = AutoImporter.importByUsingBestGuess(
                 file, project, folder.getPathname() + "/" + programName, this, messageLog, TaskMonitor.DUMMY);
-            List<DomainObject> importedObjects = new ArrayList<>();
-            if (importResult != null) {
-                for (var obj : importResult) {
-                    if (obj instanceof DomainObject) {
-                        importedObjects.add((DomainObject) obj);
-                    }
-                }
-            }
             
-            if (importedObjects.isEmpty()) {
+            if (loadResults == null || loadResults.size() == 0) {
                 result.put("success", false);
                 result.put("filePath", file.getAbsolutePath());
                 result.put("error", "No programs were imported from file");
                 return result;
             }
             
-            // Get the first imported program
-            Program program = (Program) importedObjects.get(0);
+            // Save the loaded programs to the project
+            loadResults.save(project, this, messageLog, TaskMonitor.DUMMY);
+            
+            // Get the primary imported program
+            Program program = loadResults.getPrimaryDomainObject();
             String programPath = program.getDomainFile().getPathname();
             
-            // Run analysis if requested
+            // Run analysis on all loaded programs if requested
             if (runAnalysis) {
-                int analysisTransactionID = program.startTransaction("Import program analysis");
-                try {
-                    AutoAnalysisManager.getAnalysisManager(program).startAnalysis(TaskMonitor.DUMMY);
-                    program.endTransaction(analysisTransactionID, true);
-                } catch (Exception e) {
-                    program.endTransaction(analysisTransactionID, false);
-                    // Log but don't fail the import due to analysis issues
+                for (Loaded<Program> loaded : loadResults) {
+                    Program loadedProgram = loaded.getDomainObject();
+                    int analysisTransactionID = loadedProgram.startTransaction("Import program analysis");
+                    try {
+                        AutoAnalysisManager.getAnalysisManager(loadedProgram).startAnalysis(TaskMonitor.DUMMY);
+                        loadedProgram.endTransaction(analysisTransactionID, true);
+                    } catch (Exception e) {
+                        loadedProgram.endTransaction(analysisTransactionID, false);
+                        // Log but don't fail the import due to analysis issues
+                    }
                 }
             }
             
-            // Open program if requested
+            // Open all programs if requested
             if (openProgram) {
-                openProgramInTool(program);
+                for (Loaded<Program> loaded : loadResults) {
+                    openProgramInTool(loaded.getDomainObject());
+                }
             }
             
             result.put("success", true);
             result.put("filePath", file.getAbsolutePath());
             result.put("programPath", programPath);
             result.put("programName", programName);
+            result.put("totalProgramsImported", loadResults.size());
             
-            // Close the program reference
-            program.release(this);
+            // Release the LoadResults (this will release all loaded programs)
+            loadResults.release(this);
             
         } catch (Exception e) {
             result.put("success", false);
@@ -1273,52 +1274,53 @@ public class ProjectToolProvider extends AbstractToolProvider {
             // Use AutoImporter to import from archive
             Project project = AppInfo.getActiveProject();
             MessageLog messageLog = new MessageLog();
-            var importResult = AutoImporter.importByUsingBestGuess(
+            LoadResults<Program> loadResults = AutoImporter.importByUsingBestGuess(
                 fileFsrl, project, folder.getPathname() + "/" + programName, this, messageLog, TaskMonitor.DUMMY);
-            List<DomainObject> importedObjects = new ArrayList<>();
-            if (importResult != null) {
-                for (var obj : importResult) {
-                    if (obj instanceof DomainObject) {
-                        importedObjects.add((DomainObject) obj);
-                    }
-                }
-            }
             
-            if (importedObjects.isEmpty()) {
+            if (loadResults == null || loadResults.size() == 0) {
                 result.put("success", false);
                 result.put("filePath", fileFsrl.toString());
                 result.put("error", "No programs were imported from archive file");
                 return result;
             }
             
-            // Get the first imported program
-            Program program = (Program) importedObjects.get(0);
+            // Save the loaded programs to the project
+            loadResults.save(project, this, messageLog, TaskMonitor.DUMMY);
+            
+            // Get the primary imported program
+            Program program = loadResults.getPrimaryDomainObject();
             String programPath = program.getDomainFile().getPathname();
             
-            // Run analysis if requested
+            // Run analysis on all loaded programs if requested
             if (runAnalysis) {
-                int analysisTransactionID = program.startTransaction("Import program analysis");
-                try {
-                    AutoAnalysisManager.getAnalysisManager(program).startAnalysis(TaskMonitor.DUMMY);
-                    program.endTransaction(analysisTransactionID, true);
-                } catch (Exception e) {
-                    program.endTransaction(analysisTransactionID, false);
-                    // Log but don't fail the import due to analysis issues
+                for (Loaded<Program> loaded : loadResults) {
+                    Program loadedProgram = loaded.getDomainObject();
+                    int analysisTransactionID = loadedProgram.startTransaction("Import program analysis");
+                    try {
+                        AutoAnalysisManager.getAnalysisManager(loadedProgram).startAnalysis(TaskMonitor.DUMMY);
+                        loadedProgram.endTransaction(analysisTransactionID, true);
+                    } catch (Exception e) {
+                        loadedProgram.endTransaction(analysisTransactionID, false);
+                        // Log but don't fail the import due to analysis issues
+                    }
                 }
             }
             
-            // Open program if requested
+            // Open all programs if requested
             if (openProgram) {
-                openProgramInTool(program);
+                for (Loaded<Program> loaded : loadResults) {
+                    openProgramInTool(loaded.getDomainObject());
+                }
             }
             
             result.put("success", true);
             result.put("filePath", fileFsrl.toString());
             result.put("programPath", programPath);
             result.put("programName", programName);
+            result.put("totalProgramsImported", loadResults.size());
             
-            // Close the program reference
-            program.release(this);
+            // Release the LoadResults (this will release all loaded programs)
+            loadResults.release(this);
             
         } catch (Exception e) {
             result.put("success", false);

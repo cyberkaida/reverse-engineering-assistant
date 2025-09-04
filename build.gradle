@@ -50,6 +50,20 @@ task distributeExtension {
 }
 //----------------------END "DO NOT MODIFY" SECTION-------------------------------
 
+task install(type: Exec) {
+    dependsOn buildExtension
+    
+    group = "Installation"
+    description = "Installs the zip package in installed Ghidra's default extension directory"
+
+    workingDir ghidraInstallDir + '/Ghidra/Extensions'
+    commandLine 'unzip', '-o', "${buildExtension.destinationDirectory.getAsFile().get().getAbsolutePath()}/${buildExtension.archiveBaseName.get()}.${buildExtension.archiveExtension.get()}"
+    
+    doLast {
+        logger.quiet("Installed ReVa")
+    }
+}
+
 sourceSets {
 	integrationTest {
 		java {
@@ -72,7 +86,7 @@ configurations {
 			force 'com.fasterxml.jackson.core:jackson-core:2.19.2'
 			force 'com.fasterxml.jackson.core:jackson-databind:2.19.2'
 			force 'com.fasterxml.jackson.core:jackson-annotations:2.19.2'
-			force 'com.fasterxml.jackson.dataformat:jackson-dataformat-yaml:2.17.0'
+			force 'com.fasterxml.jackson.dataformat:jackson-dataformat-yaml:2.19.2'
 		}
 	}
 }
@@ -98,8 +112,8 @@ dependencies {
 	implementation "io.modelcontextprotocol.sdk:mcp"
 	implementation "jakarta.servlet:jakarta.servlet-api:6.1.0"
 	// Add Jetty for embedded servlet support
-	implementation "org.eclipse.jetty:jetty-server:11.0.25"
-	implementation "org.eclipse.jetty:jetty-servlet:11.0.25"
+	implementation "org.eclipse.jetty:jetty-server:11.0.26"
+	implementation "org.eclipse.jetty:jetty-servlet:11.0.26"
 	
 	// Force Jackson 2.17.0 to be compatible with MCP SDK v0.11.1
 	implementation "com.fasterxml.jackson.core:jackson-core:2.19.2"

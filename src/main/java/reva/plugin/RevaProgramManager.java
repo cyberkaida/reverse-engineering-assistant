@@ -25,6 +25,7 @@ import ghidra.app.services.ProgramManager;
 import ghidra.app.util.task.ProgramOpener;
 import ghidra.framework.main.AppInfo;
 import ghidra.framework.model.DomainFile;
+import ghidra.framework.model.DomainFolder;
 import ghidra.framework.model.Project;
 import ghidra.framework.model.ToolManager;
 import ghidra.framework.plugintool.PluginTool;
@@ -247,7 +248,32 @@ public class RevaProgramManager {
             return null;
         }
 
-        DomainFile domainFile = project.getProjectData().getRootFolder().getFile(programPath);
+        // Handle paths that may include folders (e.g., "/imported/program.exe")
+        DomainFile domainFile = null;
+        
+        if (programPath.startsWith("/")) {
+            // Remove leading slash for processing
+            String relativePath = programPath.substring(1);
+            int lastSlash = relativePath.lastIndexOf('/');
+            
+            if (lastSlash > 0) {
+                // Path contains folders - need to get the folder first, then the file
+                String folderPath = "/" + relativePath.substring(0, lastSlash);
+                String fileName = relativePath.substring(lastSlash + 1);
+                
+                DomainFolder folder = project.getProjectData().getFolder(folderPath);
+                if (folder != null) {
+                    domainFile = folder.getFile(fileName);
+                }
+            } else {
+                // No folders, file is directly in root
+                domainFile = project.getProjectData().getRootFolder().getFile(relativePath);
+            }
+        } else {
+            // Handle paths without leading slash
+            domainFile = project.getProjectData().getRootFolder().getFile(programPath);
+        }
+
         if (domainFile == null) {
             Msg.warn(RevaProgramManager.class, "Could not find program: " + programPath);
             return null;

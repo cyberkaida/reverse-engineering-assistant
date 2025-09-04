@@ -1,0 +1,51 @@
+{
+	"name": "ReVa Development Environment",
+	"dockerFile": "Dockerfile",
+	"runArgs": [
+		"--init"
+	],
+	"mounts": [
+		"source=/var/run/docker.sock,target=/var/run/docker.sock,type=bind"
+	],
+	"forwardPorts": [8080],
+	"portsAttributes": {
+		"8080": {
+			"label": "ReVa MCP Server",
+			"onAutoForward": "notify"
+		}
+	},
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"vscjava.vscode-java-pack",
+				"redhat.java",
+				"vscjava.vscode-gradle",
+				"ms-python.python",
+				"ms-python.pylint",
+				"ms-python.black-formatter",
+				"ms-vscode.hexeditor",
+				"charliermarsh.ruff",
+				"github.copilot"
+			],
+			"settings": {
+				"java.jdt.ls.java.home": "/usr/lib/jvm/java-21-openjdk-amd64",
+				"java.configuration.runtimes": [
+					{
+						"name": "JavaSE-21",
+						"path": "/usr/lib/jvm/java-21-openjdk-amd64"
+					}
+				],
+				"java.compile.nullAnalysis.mode": "automatic",
+				"java.gradle.java.home": "/usr/lib/jvm/java-21-openjdk-amd64"
+			}
+		}
+	},
+	"containerEnv": {
+		"GHIDRA_INSTALL_DIR": "/opt/ghidra",
+		"GHIDRA_SRC_DIR": "/opt/ghidra-src",
+		"JAVA_HOME": "/usr/lib/jvm/java-21-openjdk-amd64",
+		"PATH": "${containerEnv:PATH}:/opt/ghidra:/opt/gradle/bin"
+	},
+	"postCreateCommand": ".devcontainer/postCreateCommand.sh",
+	"remoteUser": "vscode"
+}

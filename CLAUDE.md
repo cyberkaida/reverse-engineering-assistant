@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-ReVa (Reverse Engineering Assistant) is a Ghidra extension that provides a Model Context Protocol (MCP) server for AI-assisted reverse engineering. It uses a streamable transport (SSE) and implements various tools for interacting with Ghidra's capabilities.
+ReVa (Reverse Engineering Assistant) is a Ghidra extension that provides a Model Context Protocol (MCP) server for AI-assisted reverse engineering. It uses a streamable transport and implements various tools for interacting with Ghidra's capabilities. ReVa is designed to handle large binaries and entire firmware images efficiently by using smaller, targeted tools that reduce context usage and hallucination.
 
 ## Build and Test Commands
 
@@ -107,16 +107,16 @@ When adding new tools to DecompilerToolProvider:
 
 ## MCP Server Configuration
 
-The server uses streamable transport (SSE) on port 8080 by default. Configuration is managed through:
+The server uses streamable transport on port 8080 by default. Configuration is managed through:
 - `ConfigManager` - Handles server configuration
 - `McpServerManager` - Manages the MCP server lifecycle
-- Transport: HttpServletStreamableServerTransportProvider (streamable transport)
+- Transport: HttpServletStreamableServerTransportProvider (streamable transport, not SSE)
 
 ## External Dependencies
 - Ghidra source code location: `../ghidra`
-- MCP SDK: io.modelcontextprotocol.sdk v0.11.1 (uses MCP BOM)
-- Jackson: 2.17.0 (forced version for compatibility)
-- Jetty: 11.0.25 (embedded servlet support)
+- MCP SDK: io.modelcontextprotocol.sdk v0.11.2 (uses MCP BOM)
+- Jackson: 2.19.2 (forced version for compatibility)
+- Jetty: 11.0.26 (embedded servlet support)
 - Target: Java 21, Ghidra 11.3+
 
 ## Program Identification
@@ -139,7 +139,7 @@ The server uses streamable transport (SSE) on port 8080 by default. Configuratio
 - **Java**: Target Java 21, minimum Ghidra 11.3+
 - **Testing**: Integration tests require `java.awt.headless=false` (GUI environment)
 - **Build**: Use `gradle` directly, not gradle wrapper
-- **MCP SDK**: v0.11.1 with forced Jackson 2.17.0 for compatibility
+- **MCP SDK**: v0.11.2 with forced Jackson 2.19.2 for compatibility
 
 ## Important Notes
 - Don't revert to SSE transport (already using streamable)
@@ -147,3 +147,12 @@ The server uses streamable transport (SSE) on port 8080 by default. Configuratio
 - **Memory Management**: Always dispose DecompInterface instances to prevent leaks
 - **Read-Before-Modify**: Decompiler tools enforce function reading before modification
 - **Error Messages**: Provide specific, actionable error messages with suggestions
+
+## Installation Commands
+After building, install the extension in Ghidra:
+```bash
+# Install directly to Ghidra extensions directory
+gradle install
+```
+
+Or install manually via Ghidra's extension manager using the zip file in `dist/`.

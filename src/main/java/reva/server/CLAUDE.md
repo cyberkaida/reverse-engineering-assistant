@@ -8,8 +8,8 @@ The `reva.server` package contains the core MCP (Model Context Protocol) server 
 
 ### Key Architecture Components
 
-- **MCP Server**: Built on MCP SDK v0.11.0 with streamable transport
-- **HTTP Server**: Jetty 11.0.25 embedded servlet container
+- **MCP Server**: Built on MCP SDK v0.11.2 with streamable transport
+- **HTTP Server**: Jetty 11.0.26 embedded servlet container
 - **Transport Layer**: HttpServletStreamableServerTransportProvider for real-time streaming
 - **Service Registry**: Integration with RevaInternalServiceRegistry for component coordination
 - **Configuration Management**: Dynamic configuration with hot-reload capabilities

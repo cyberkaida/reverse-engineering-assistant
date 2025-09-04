@@ -50,6 +50,20 @@ task distributeExtension {
 }
 //----------------------END "DO NOT MODIFY" SECTION-------------------------------
 
+task install(type: Exec) {
+    dependsOn buildExtension
+    
+    group = "Installation"
+    description = "Installs the zip package in installed Ghidra's default extension directory"
+
+    workingDir ghidraInstallDir + '/Ghidra/Extensions'
+    commandLine 'unzip', '-o', "${buildExtension.destinationDirectory.getAsFile().get().getAbsolutePath()}/${buildExtension.archiveBaseName.get()}.${buildExtension.archiveExtension.get()}"
+    
+    doLast {
+        logger.quiet("Installed ReVa")
+    }
+}
+
 sourceSets {
 	integrationTest {
 		java {

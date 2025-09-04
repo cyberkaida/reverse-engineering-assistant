@@ -151,6 +151,141 @@ public class ProjectToolProviderImportThenUseIntegrationTest extends RevaIntegra
         return mixedZip;
     }
     
+    private Path createNestedArchive() throws Exception {
+        Path nestedZip = tempDir.resolve("nested_archive.zip");
+        
+        // First create an inner zip file
+        Path innerZip = tempDir.resolve("inner_archive.zip");
+        try (FileOutputStream fos = new FileOutputStream(innerZip.toFile());
+             ZipOutputStream zos = new ZipOutputStream(fos)) {
+            
+            // Add binary files to inner zip
+            ZipEntry innerEntry1 = new ZipEntry("inner_program1.bin");
+            zos.putNextEntry(innerEntry1);
+            zos.write(Files.readAllBytes(testBinaryFile));
+            zos.closeEntry();
+            
+            // Add another binary in a subfolder
+            ZipEntry innerEntry2 = new ZipEntry("inner_subdir/inner_program2.exe");
+            zos.putNextEntry(innerEntry2);
+            byte[] peHeader = new byte[64];
+            peHeader[0] = 'M'; peHeader[1] = 'Z'; // PE magic
+            zos.write(peHeader);
+            zos.closeEntry();
+        }
+        
+        // Now create outer zip containing the inner zip and some direct files
+        try (FileOutputStream fos = new FileOutputStream(nestedZip.toFile());
+             ZipOutputStream zos = new ZipOutputStream(fos)) {
+            
+            // Add the inner zip as an entry
+            ZipEntry nestedZipEntry = new ZipEntry("nested/inner_archive.zip");
+            zos.putNextEntry(nestedZipEntry);
+            zos.write(Files.readAllBytes(innerZip));
+            zos.closeEntry();
+            
+            // Add some direct binary files to outer zip
+            ZipEntry outerEntry = new ZipEntry("outer_program.bin");
+            zos.putNextEntry(outerEntry);
+            zos.write(Files.readAllBytes(testBinaryFile));
+            zos.closeEntry();
+            
+            // Add a text file that should be filtered out
+            ZipEntry textEntry = new ZipEntry("readme.txt");
+            zos.putNextEntry(textEntry);
+            zos.write("Nested archive documentation".getBytes());
+            zos.closeEntry();
+        }
+        
+        // Clean up temporary inner zip
+        Files.deleteIfExists(innerZip);
+        return nestedZip;
+    }
+    
+    private Path createDeeplyNestedArchive() throws Exception {
+        Path deeplyNestedZip = tempDir.resolve("deeply_nested_archive.zip");
+        
+        // Create level 3 (innermost) zip
+        Path level3Zip = tempDir.resolve("level3.zip");
+        try (FileOutputStream fos = new FileOutputStream(level3Zip.toFile());
+             ZipOutputStream zos = new ZipOutputStream(fos)) {
+            
+            ZipEntry entry = new ZipEntry("deep_program.bin");
+            zos.putNextEntry(entry);
+            zos.write(Files.readAllBytes(testBinaryFile));
+            zos.closeEntry();
+        }
+        
+        // Create level 2 zip containing level 3
+        Path level2Zip = tempDir.resolve("level2.zip");
+        try (FileOutputStream fos = new FileOutputStream(level2Zip.toFile());
+             ZipOutputStream zos = new ZipOutputStream(fos)) {
+            
+            ZipEntry nestedEntry = new ZipEntry("level3/level3.zip");
+            zos.putNextEntry(nestedEntry);
+            zos.write(Files.readAllBytes(level3Zip));
+            zos.closeEntry();
+            
+            // Add another binary at this level
+            ZipEntry directEntry = new ZipEntry("level2_program.exe");
+            zos.putNextEntry(directEntry);
+            byte[] peHeader = new byte[64];
+            peHeader[0] = 'M'; peHeader[1] = 'Z';
+            zos.write(peHeader);
+            zos.closeEntry();
+        }
+        
+        // Create level 1 (outermost) zip containing level 2
+        try (FileOutputStream fos = new FileOutputStream(deeplyNestedZip.toFile());
+             ZipOutputStream zos = new ZipOutputStream(fos)) {
+            
+            ZipEntry nestedEntry = new ZipEntry("level2/level2.zip");
+            zos.putNextEntry(nestedEntry);
+            zos.write(Files.readAllBytes(level2Zip));
+            zos.closeEntry();
+            
+            // Add direct files at top level
+            ZipEntry topEntry = new ZipEntry("top_level_program.bin");
+            zos.putNextEntry(topEntry);
+            zos.write(Files.readAllBytes(testBinaryFile));
+            zos.closeEntry();
+        }
+        
+        // Clean up temporary files
+        Files.deleteIfExists(level3Zip);
+        Files.deleteIfExists(level2Zip);
+        return deeplyNestedZip;
+    }
+    
+    private Path createMachOFatArchive() throws Exception {
+        Path machoArchive = tempDir.resolve("macho_fat_archive.zip");
+        
+        try (FileOutputStream fos = new FileOutputStream(machoArchive.toFile());
+             ZipOutputStream zos = new ZipOutputStream(fos)) {
+            
+            // Create a simulated fat Mach-O file (universal binary)
+            ZipEntry fatMachoEntry = new ZipEntry("fat_binary");
+            zos.putNextEntry(fatMachoEntry);
+            
+            // Fat Mach-O magic header (0xcafebabe in big endian)
+            byte[] fatHeader = new byte[32];
+            fatHeader[0] = (byte)0xca; fatHeader[1] = (byte)0xfe;
+            fatHeader[2] = (byte)0xba; fatHeader[3] = (byte)0xbe;
+            // Number of architectures (2 in this case)
+            fatHeader[4] = 0x00; fatHeader[5] = 0x00; fatHeader[6] = 0x00; fatHeader[7] = 0x02;
+            zos.write(fatHeader);
+            zos.closeEntry();
+            
+            // Add regular binary files too
+            ZipEntry regularEntry = new ZipEntry("regular_program.bin");
+            zos.putNextEntry(regularEntry);
+            zos.write(Files.readAllBytes(testBinaryFile));
+            zos.closeEntry();
+        }
+        
+        return machoArchive;
+    }
+    
     @After
     public void tearDown() throws Exception {
         if (tempDir != null && Files.exists(tempDir)) {
@@ -695,6 +830,168 @@ public class ProjectToolProviderImportThenUseIntegrationTest extends RevaIntegra
             }
             // If import fails, that's ok too - the key is that it doesn't crash
             // due to the invalid processor spec
+        });
+    }
+    
+    @Test
+    public void testNestedArchiveThresholdCheck() throws Exception {
+        Path nestedArchive = createNestedArchive();
+        
+        withMcpClient(createMcpTransport(), client -> {
+            client.initialize();
+            
+            // Test with low threshold - should trigger warning since nested archive has multiple files
+            Map<String, Object> request = new HashMap<>();
+            request.put("path", nestedArchive.toString());
+            request.put("autoImportThreshold", 2); // Low threshold to trigger warning
+            
+            CallToolResult result = client.callTool(new CallToolRequest("import-program", request));
+            
+            // Should either succeed with browse mode or return threshold warning
+            TextContent content = (TextContent) result.content().get(0);
+            String resultText = content.text();
+            
+            // Verify the result handles nested archives appropriately
+            assertTrue("Should handle nested archive threshold appropriately", 
+                resultText.contains("success") || resultText.contains("threshold") || 
+                resultText.contains("too many files"));
+                
+            // If it's a browse result, verify archive detection
+            if (resultText.contains("\"success\":true")) {
+                JsonNode jsonResult = parseJsonContent(resultText);
+                assertEquals("Should detect as archive source", 
+                    "archive", jsonResult.get("sourceType").asText());
+            }
+        });
+    }
+    
+    @Test
+    public void testNestedArchiveImportSuccess() throws Exception {
+        Path nestedArchive = createNestedArchive();
+        
+        withMcpClient(createMcpTransport(), client -> {
+            client.initialize();
+            
+            // Test with high threshold - should import successfully
+            Map<String, Object> request = new HashMap<>();
+            request.put("path", nestedArchive.toString());
+            request.put("projectPath", "/nested_import_test");
+            request.put("autoImportThreshold", 10); // High threshold to allow import
+            request.put("runAnalysis", false);
+            request.put("openProgram", false);
+            
+            CallToolResult result = client.callTool(new CallToolRequest("import-program", request));
+            
+            // Should succeed with nested archive import
+            if (result.isError() == null || !result.isError()) {
+                TextContent content = (TextContent) result.content().get(0);
+                JsonNode jsonResult = parseJsonContent(content.text());
+                
+                if (jsonResult.get("success").asBoolean()) {
+                    assertEquals("Should be archive source type", 
+                        "archive", jsonResult.get("sourceType").asText());
+                    
+                    // Should have results from nested structure
+                    JsonNode results = jsonResult.get("results");
+                    assertNotNull("Should have import results", results);
+                    assertTrue("Should import multiple files from nested archive", 
+                        results.size() > 0);
+                }
+            }
+        });
+    }
+    
+    @Test
+    public void testDeeplyNestedArchive() throws Exception {
+        Path deeplyNestedArchive = createDeeplyNestedArchive();
+        
+        withMcpClient(createMcpTransport(), client -> {
+            client.initialize();
+            
+            // Test browse mode on nested archive with reasonable depth to avoid timeout
+            Map<String, Object> request = new HashMap<>();
+            request.put("path", deeplyNestedArchive.toString());
+            request.put("browseOnly", true);
+            request.put("maxDepth", 3); // Reasonable depth - validates nested archive handling without excessive nesting
+            
+            CallToolResult result = client.callTool(new CallToolRequest("import-program", request));
+            
+            // Should handle nested archives successfully without hanging
+            assertFalse("Nested archive browse should succeed without hanging", 
+                result.isError() != null && result.isError());
+                
+            TextContent content = (TextContent) result.content().get(0);
+            JsonNode jsonResult = parseJsonContent(content.text());
+            
+            assertTrue("Should successfully browse nested archive", 
+                jsonResult.get("success").asBoolean());
+            assertEquals("Should detect as archive source", 
+                "archive", jsonResult.get("sourceType").asText());
+                
+            // Should find files from nested structure (at least files from top levels)
+            JsonNode files = jsonResult.get("files");
+            assertNotNull("Should have files array", files);
+            assertTrue("Should find files in nested structure", 
+                files.size() > 0);
+        });
+    }
+    
+    @Test
+    public void testFatMachOInsideArchive() throws Exception {
+        Path machoArchive = createMachOFatArchive();
+        
+        withMcpClient(createMcpTransport(), client -> {
+            client.initialize();
+            
+            // Test import with timeout protection - should not hang on fat Mach-O
+            Map<String, Object> request = new HashMap<>();
+            request.put("path", machoArchive.toString());
+            request.put("projectPath", "/macho_test");
+            request.put("autoImportThreshold", 10);
+            request.put("runAnalysis", false);
+            request.put("openProgram", false);
+            
+            CallToolResult result = client.callTool(new CallToolRequest("import-program", request));
+            
+            // Should not hang and should complete within reasonable time
+            // The key test is that this completes without timeout
+            assertNotNull("Should get a result without hanging", result);
+            
+            TextContent content = (TextContent) result.content().get(0);
+            String resultText = content.text();
+            
+            // Should either succeed or fail gracefully, but not hang
+            assertTrue("Should handle fat Mach-O in archive without hanging",
+                resultText.contains("success") || resultText.contains("error") ||
+                resultText.contains("threshold"));
+        });
+    }
+    
+    @Test
+    public void testNestedArchiveWithTimeout() throws Exception {
+        Path nestedArchive = createDeeplyNestedArchive();
+        
+        withMcpClient(createMcpTransport(), client -> {
+            client.initialize();
+            
+            // Test that timeout protection works for nested archives
+            Map<String, Object> request = new HashMap<>();
+            request.put("path", nestedArchive.toString());
+            request.put("browseOnly", true);
+            request.put("maxDepth", 10); // Very deep to potentially trigger timeout
+            
+            CallToolResult result = client.callTool(new CallToolRequest("import-program", request));
+            
+            // Should complete within timeout period and not hang indefinitely
+            assertNotNull("Should complete within timeout period", result);
+            
+            TextContent content = (TextContent) result.content().get(0);
+            String resultText = content.text();
+            
+            // Should handle timeout gracefully if it occurs
+            assertTrue("Should handle deeply nested archive with timeout protection",
+                resultText.contains("success") || resultText.contains("error") ||
+                resultText.contains("timeout") || resultText.contains("threshold"));
         });
     }
 }

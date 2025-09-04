@@ -63,6 +63,7 @@ import ghidra.util.exception.DuplicateNameException;
 import ghidra.util.exception.VersionException;
 import ghidra.util.InvalidNameException;
 import ghidra.util.task.TaskMonitor;
+import ghidra.util.task.CancelledListener;
 import io.modelcontextprotocol.spec.McpError;
 import io.modelcontextprotocol.server.McpSyncServer;
 import io.modelcontextprotocol.spec.McpSchema;
@@ -972,10 +973,42 @@ public class ProjectToolProvider extends AbstractToolProvider {
             boolean runAnalysis, boolean openProgram, List<String> includePatterns, List<String> excludePatterns,
             int maxDepth, int autoImportThreshold) throws Exception {
         
-        // Collect files from archive
-        List<FSRL> filesToImport = collectFilesFromArchive(archiveFsrl, includePatterns, excludePatterns, maxDepth);
+        // First, try to count files without fully collecting them to check threshold
+        // Only check threshold if no include patterns are specified
+        if (includePatterns == null || includePatterns.isEmpty()) {
+            try {
+                int fileCount = countFilesInArchive(archiveFsrl, includePatterns, excludePatterns, maxDepth, autoImportThreshold + 1);
+                if (fileCount > autoImportThreshold) {
+                    Map<String, Object> response = new HashMap<>();
+                    response.put("success", false);
+                    response.put("error", "Too many files found in archive (" + fileCount + 
+                        "). Use includePatterns to filter files or increase autoImportThreshold.");
+                    response.put("foundFiles", fileCount);
+                    response.put("threshold", autoImportThreshold);
+                    return createJsonResult(response);
+                }
+            } catch (IOException e) {
+                // If we can't count files, fall back to attempting full collection
+                // This ensures we still try to import even if the counting fails
+                Msg.warn(this, "Failed to count files in archive " + archiveFsrl + ", attempting full collection: " + e.getMessage());
+            } catch (CancelledException e) {
+                return createErrorResult("Operation was cancelled while counting archive contents.");
+            }
+        }
         
-        // Check auto-import threshold
+        // Collect files from archive with improved error handling
+        List<FSRL> filesToImport;
+        try {
+            filesToImport = collectFilesFromArchive(archiveFsrl, includePatterns, excludePatterns, maxDepth);
+        } catch (IOException e) {
+            return createErrorResult("Failed to access archive contents: " + e.getMessage() + 
+                ". The archive may be corrupted, in an unsupported format, or require special handling. " +
+                "For fat Mach-O files and other container formats, try using includePatterns to select specific architectures.");
+        } catch (CancelledException e) {
+            return createErrorResult("Operation was cancelled while reading archive contents.");
+        }
+        
+        // Double-check threshold with actual collected files (in case counting was inaccurate)
         if (filesToImport.size() > autoImportThreshold && (includePatterns == null || includePatterns.isEmpty())) {
             Map<String, Object> response = new HashMap<>();
             response.put("success", false);
@@ -995,6 +1028,222 @@ public class ProjectToolProvider extends AbstractToolProvider {
         List<File> files = new ArrayList<>();
         collectFilesFromDirectoryRecursive(directory, files, includePatterns, excludePatterns);
         return files;
+    }
+
+    /**
+     * Count files in an archive without fully collecting them.
+     * This method stops counting once the maxCount is reached to avoid unnecessary processing.
+     * @param archiveFsrl The archive FSRL
+     * @param includePatterns Include patterns for filtering
+     * @param excludePatterns Exclude patterns for filtering
+     * @param maxDepth Maximum recursion depth
+     * @param maxCount Stop counting once this number is reached
+     * @return The number of files found (up to maxCount)
+     * @throws IOException if archive cannot be accessed
+     * @throws CancelledException if operation is cancelled
+     */
+    private int countFilesInArchive(FSRL archiveFsrl, List<String> includePatterns, 
+            List<String> excludePatterns, int maxDepth, int maxCount) throws IOException, CancelledException {
+        
+        // Create a TaskMonitor with timeout for counting
+        TaskMonitor countMonitor = createTimeoutTaskMonitor("Counting archive files", 30000); // 30 seconds
+        
+        try (FileSystemRef fsRef = FileSystemService.getInstance().getFilesystem(archiveFsrl.getFS(), countMonitor)) {
+            if (fsRef == null) {
+                throw new IOException("Unable to open archive filesystem: " + archiveFsrl);
+            }
+            
+            GFileSystem fs = fsRef.getFilesystem();
+            return countFilesInArchiveRecursive(fs, fs.getRootDir(), includePatterns, excludePatterns, maxDepth, 0, maxCount, countMonitor);
+        }
+    }
+    
+    /**
+     * Recursively count files in an archive directory, stopping at maxCount.
+     */
+    private int countFilesInArchiveRecursive(GFileSystem fs, GFile directory, 
+            List<String> includePatterns, List<String> excludePatterns, int maxDepth, int currentDepth, 
+            int maxCount, TaskMonitor monitor) {
+        
+        if (currentDepth >= maxDepth || monitor.isCancelled()) {
+            return 0;
+        }
+        
+        int count = 0;
+        try {
+            List<GFile> dirFiles = fs.getListing(directory);
+            if (dirFiles == null) return 0;
+            
+            for (GFile file : dirFiles) {
+                if (count >= maxCount || monitor.isCancelled()) {
+                    return count; // Early termination
+                }
+                
+                if (file.isDirectory()) {
+                    count += countFilesInArchiveRecursive(fs, file, includePatterns, excludePatterns, 
+                        maxDepth, currentDepth + 1, maxCount - count, monitor);
+                } else {
+                    String fileName = file.getName();
+                    FSRL fileFsrl = file.getFSRL();
+                    
+                    // Check if this file is itself an archive (nested archive)
+                    boolean isNestedArchive = false;
+                    try {
+                        isNestedArchive = FileSystemService.getInstance().isFileFilesystemContainer(fileFsrl, monitor);
+                    } catch (Exception e) {
+                        // If we can't determine, assume it's not an archive
+                        isNestedArchive = false;
+                    }
+                    
+                    if (isNestedArchive && currentDepth < maxDepth - 1) {
+                        // Count files in nested archive
+                        try {
+                            count += countFilesInNestedArchive(fileFsrl, includePatterns, excludePatterns, 
+                                maxDepth, currentDepth + 1, maxCount - count, monitor);
+                        } catch (Exception e) {
+                            // If nested archive processing fails, count it as one file
+                            if (shouldIncludeFile(fileName, includePatterns, excludePatterns) && 
+                                isPossibleBinaryFile(fileName)) {
+                                count++;
+                            }
+                        }
+                    } else {
+                        // Regular file or archive at max depth - count as regular file
+                        if (shouldIncludeFile(fileName, includePatterns, excludePatterns) && 
+                            isPossibleBinaryFile(fileName)) {
+                            count++;
+                        }
+                    }
+                }
+            }
+        } catch (IOException e) {
+            // Log error but continue processing - some files may be inaccessible
+        }
+        
+        return count;
+    }
+    
+    private int countFilesInNestedArchive(FSRL nestedArchiveFsrl, List<String> includePatterns, 
+            List<String> excludePatterns, int maxDepth, int currentDepth, int maxCount, TaskMonitor monitor) 
+            throws IOException, CancelledException {
+        
+        if (monitor.isCancelled()) {
+            throw new CancelledException();
+        }
+        
+        // Open the nested archive as a filesystem
+        try (FileSystemRef nestedFsRef = FileSystemService.getInstance().getFilesystem(nestedArchiveFsrl.getFS(), monitor)) {
+            if (nestedFsRef == null) {
+                throw new IOException("Unable to open nested archive filesystem: " + nestedArchiveFsrl);
+            }
+            
+            GFileSystem nestedFs = nestedFsRef.getFilesystem();
+            GFile nestedRootDir = nestedFs.getRootDir();
+            
+            // Recursively count files in the nested archive
+            return countFilesInArchiveRecursive(nestedFs, nestedRootDir, includePatterns, excludePatterns, 
+                maxDepth, currentDepth, maxCount, monitor);
+        }
+    }
+
+    /**
+     * Create a TaskMonitor with timeout capability
+     * @param title The title for the monitor
+     * @param timeoutMs Timeout in milliseconds
+     * @return A TaskMonitor that will cancel after the timeout
+     */
+    private TaskMonitor createTimeoutTaskMonitor(String title, long timeoutMs) {
+        return new TaskMonitor() {
+            private boolean cancelled = false;
+            private long startTime = System.currentTimeMillis();
+            private String message = "";
+            
+            @Override
+            public boolean isCancelled() {
+                if (!cancelled && System.currentTimeMillis() - startTime > timeoutMs) {
+                    cancelled = true;
+                    Msg.warn(ProjectToolProvider.this, "Operation '" + title + "' timed out after " + (timeoutMs / 1000) + " seconds");
+                }
+                return cancelled;
+            }
+            
+            @Override
+            public void cancel() {
+                cancelled = true;
+            }
+            
+            @Override
+            public void setMessage(String message) {
+                this.message = message;
+            }
+            
+            @Override
+            public String getMessage() {
+                return message;
+            }
+            
+            @Override
+            public void setProgress(long value) {}
+            
+            @Override
+            public void initialize(long max) {}
+            
+            @Override
+            public void setMaximum(long max) {}
+            
+            @Override
+            public long getMaximum() {
+                return 0;
+            }
+            
+            public void setProgress(long value, String message) {
+                setMessage(message);
+            }
+            
+            @Override
+            public long getProgress() {
+                return 0;
+            }
+            
+            @Override
+            public void incrementProgress(long incrementAmount) {}
+            
+            @Override
+            public void checkCanceled() throws CancelledException {
+                if (isCancelled()) {
+                    throw new CancelledException();
+                }
+            }
+            
+            @Override
+            public void addCancelledListener(CancelledListener listener) {}
+            
+            @Override
+            public void removeCancelledListener(CancelledListener listener) {}
+            
+            @Override
+            public void setCancelEnabled(boolean enable) {}
+            
+            @Override
+            public boolean isCancelEnabled() {
+                return true;
+            }
+            
+            @Override
+            public void setIndeterminate(boolean indeterminate) {}
+            
+            @Override
+            public boolean isIndeterminate() {
+                return true;
+            }
+            
+            @Override
+            public void setShowProgressValue(boolean showProgressValue) {}
+            
+            @Override
+            public void clearCanceled() {
+                cancelled = false;
+            }        };
     }
 
     private void collectFilesFromDirectoryRecursive(File directory, List<File> files, 
@@ -1019,22 +1268,25 @@ public class ProjectToolProvider extends AbstractToolProvider {
         
         List<FSRL> files = new ArrayList<>();
         
-        try (FileSystemRef fsRef = FileSystemService.getInstance().getFilesystem(archiveFsrl.getFS(), TaskMonitor.DUMMY)) {
+        // Create a TaskMonitor with timeout for collection
+        TaskMonitor collectionMonitor = createTimeoutTaskMonitor("Collecting files from archive", 60000); // 60 seconds
+        
+        try (FileSystemRef fsRef = FileSystemService.getInstance().getFilesystem(archiveFsrl.getFS(), collectionMonitor)) {
             if (fsRef == null) {
                 throw new IOException("Unable to open archive filesystem: " + archiveFsrl);
             }
             
             GFileSystem fs = fsRef.getFilesystem();
-            collectFilesFromArchiveRecursive(fs, fs.getRootDir(), files, includePatterns, excludePatterns, maxDepth, 0);
+            collectFilesFromArchiveRecursive(fs, fs.getRootDir(), files, includePatterns, excludePatterns, maxDepth, 0, collectionMonitor);
         }
         
         return files;
     }
 
     private void collectFilesFromArchiveRecursive(GFileSystem fs, GFile directory, List<FSRL> files,
-            List<String> includePatterns, List<String> excludePatterns, int maxDepth, int currentDepth) {
+            List<String> includePatterns, List<String> excludePatterns, int maxDepth, int currentDepth, TaskMonitor monitor) {
         
-        if (currentDepth >= maxDepth) {
+        if (currentDepth >= maxDepth || monitor.isCancelled()) {
             return;
         }
         
@@ -1043,19 +1295,74 @@ public class ProjectToolProvider extends AbstractToolProvider {
             if (dirFiles == null) return;
             
             for (GFile file : dirFiles) {
+                if (monitor.isCancelled()) {
+                    return; // Early termination on cancellation
+                }
+                
                 if (file.isDirectory()) {
                     collectFilesFromArchiveRecursive(fs, file, files, includePatterns, excludePatterns, 
-                        maxDepth, currentDepth + 1);
+                        maxDepth, currentDepth + 1, monitor);
                 } else {
                     String fileName = file.getName();
-                    if (shouldIncludeFile(fileName, includePatterns, excludePatterns) && 
-                        isPossibleBinaryFile(fileName)) {
-                        files.add(file.getFSRL());
+                    FSRL fileFsrl = file.getFSRL();
+                    
+                    // Check if this file is itself an archive (nested archive)
+                    boolean isNestedArchive = false;
+                    try {
+                        isNestedArchive = FileSystemService.getInstance().isFileFilesystemContainer(fileFsrl, monitor);
+                    } catch (Exception e) {
+                        // If we can't determine, assume it's not an archive
+                        isNestedArchive = false;
+                    }
+                    
+                    if (isNestedArchive && currentDepth < maxDepth - 1) {
+                        // Handle nested archive - recursively extract its contents
+                        try {
+                            collectFilesFromNestedArchive(fileFsrl, files, includePatterns, excludePatterns, 
+                                maxDepth, currentDepth + 1, monitor);
+                        } catch (Exception e) {
+                            // If nested archive processing fails, treat it as a regular file
+                            Msg.warn(this, "Failed to process nested archive " + fileName + ": " + e.getMessage());
+                            if (shouldIncludeFile(fileName, includePatterns, excludePatterns) && 
+                                isPossibleBinaryFile(fileName)) {
+                                files.add(fileFsrl);
+                            }
+                        }
+                    } else {
+                        // Regular file or archive at max depth - treat as regular file
+                        if (shouldIncludeFile(fileName, includePatterns, excludePatterns) && 
+                            isPossibleBinaryFile(fileName)) {
+                            files.add(fileFsrl);
+                        }
                     }
                 }
             }
         } catch (IOException e) {
             // Log error but continue processing other files
+            Msg.warn(this, "Error processing archive directory: " + e.getMessage());
+        }
+    }
+    
+    private void collectFilesFromNestedArchive(FSRL nestedArchiveFsrl, List<FSRL> files,
+            List<String> includePatterns, List<String> excludePatterns, int maxDepth, int currentDepth, TaskMonitor monitor) 
+            throws IOException, CancelledException {
+        
+        if (monitor.isCancelled()) {
+            throw new CancelledException();
+        }
+        
+        // Open the nested archive as a filesystem
+        try (FileSystemRef nestedFsRef = FileSystemService.getInstance().getFilesystem(nestedArchiveFsrl.getFS(), monitor)) {
+            if (nestedFsRef == null) {
+                throw new IOException("Unable to open nested archive filesystem: " + nestedArchiveFsrl);
+            }
+            
+            GFileSystem nestedFs = nestedFsRef.getFilesystem();
+            GFile nestedRootDir = nestedFs.getRootDir();
+            
+            // Recursively collect files from the nested archive
+            collectFilesFromArchiveRecursive(nestedFs, nestedRootDir, files, includePatterns, excludePatterns, 
+                maxDepth, currentDepth, monitor);
         }
     }
 
@@ -1207,19 +1514,22 @@ public class ProjectToolProvider extends AbstractToolProvider {
                 try {
                     Language language = processor.getLanguage();
                     CompilerSpec compilerSpec = processor.getCompilerSpec();
+                    TaskMonitor importMonitor = createTimeoutTaskMonitor("Importing file", 120000); // 2 minutes
                     loadResults = AutoImporter.importByLookingForLcs(
                         file, project, folder.getPathname() + "/" + programName, 
-                        language, compilerSpec, this, messageLog, TaskMonitor.DUMMY);
+                        language, compilerSpec, this, messageLog, importMonitor);
                 } catch (Exception e) {
                     // If specific processor spec fails, fall back to auto-detect
                     Msg.warn(this, "Processor spec " + processor + " failed for " + file.getName() + 
                         ", falling back to auto-detection: " + e.getMessage());
+                    TaskMonitor importMonitor = createTimeoutTaskMonitor("Importing file (fallback)", 120000); // 2 minutes
                     loadResults = AutoImporter.importByUsingBestGuess(
-                        file, project, folder.getPathname() + "/" + programName, this, messageLog, TaskMonitor.DUMMY);
+                        file, project, folder.getPathname() + "/" + programName, this, messageLog, importMonitor);
                 }
             } else {
+                TaskMonitor importMonitor = createTimeoutTaskMonitor("Importing file (auto-detect)", 120000); // 2 minutes
                 loadResults = AutoImporter.importByUsingBestGuess(
-                    file, project, folder.getPathname() + "/" + programName, this, messageLog, TaskMonitor.DUMMY);
+                    file, project, folder.getPathname() + "/" + programName, this, messageLog, importMonitor);
             }
             
             if (loadResults == null || loadResults.size() == 0) {
@@ -1313,19 +1623,22 @@ public class ProjectToolProvider extends AbstractToolProvider {
                 try {
                     Language language = processor.getLanguage();
                     CompilerSpec compilerSpec = processor.getCompilerSpec();
+                    TaskMonitor archiveImportMonitor = createTimeoutTaskMonitor("Importing from archive", 120000); // 2 minutes
                     loadResults = AutoImporter.importByLookingForLcs(
                         fileFsrl, project, folder.getPathname() + "/" + programName, 
-                        language, compilerSpec, this, messageLog, TaskMonitor.DUMMY);
+                        language, compilerSpec, this, messageLog, archiveImportMonitor);
                 } catch (Exception e) {
                     // If specific processor spec fails, fall back to auto-detect
                     Msg.warn(this, "Processor spec " + processor + " failed for " + fileName + 
                         ", falling back to auto-detection: " + e.getMessage());
+                    TaskMonitor archiveImportMonitor = createTimeoutTaskMonitor("Importing from archive (fallback)", 120000); // 2 minutes
                     loadResults = AutoImporter.importByUsingBestGuess(
-                        fileFsrl, project, folder.getPathname() + "/" + programName, this, messageLog, TaskMonitor.DUMMY);
+                        fileFsrl, project, folder.getPathname() + "/" + programName, this, messageLog, archiveImportMonitor);
                 }
             } else {
+                TaskMonitor archiveImportMonitor = createTimeoutTaskMonitor("Importing from archive (auto-detect)", 120000); // 2 minutes
                 loadResults = AutoImporter.importByUsingBestGuess(
-                    fileFsrl, project, folder.getPathname() + "/" + programName, this, messageLog, TaskMonitor.DUMMY);
+                    fileFsrl, project, folder.getPathname() + "/" + programName, this, messageLog, archiveImportMonitor);
             }
             
             if (loadResults == null || loadResults.size() == 0) {

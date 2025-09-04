@@ -61,8 +61,16 @@ export GHIDRA_INSTALL_DIR=/path/to/ghidra
 gradle
 ```
 
-Then install the extension (in `dist/`) using the Ghidra extension manager. You can also extract the release zip to
-the Ghidra extensions directory globally at `${GHIDRA_INSTALL_DIR}/Ghidra/Extensions`.
+### Installation Options
+
+**Option 1: Automatic Installation (Recommended)**
+```bash
+# Build and install directly to Ghidra
+gradle install
+```
+
+**Option 2: Manual Installation**
+Install the extension (in `dist/`) using the Ghidra extension manager, or extract the release zip to the Ghidra extensions directory at `${GHIDRA_INSTALL_DIR}/Ghidra/Extensions`.
 
 After installing the extension you need to activate it in two places:
 

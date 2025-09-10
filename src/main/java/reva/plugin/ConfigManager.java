@@ -39,6 +39,8 @@ public class ConfigManager implements OptionsChangeListener {
 
     // Option names
     public static final String SERVER_PORT = "Server Port";
+    public static final String SERVER_HOST = "Server Host";
+    public static final String SERVER_API_KEY = "Server API Key";
     public static final String SERVER_ENABLED = "Server Enabled";
     public static final String DEBUG_MODE = "Debug Mode";
     public static final String MAX_DECOMPILER_SEARCH_FUNCTIONS = "Max Decompiler Search Functions";
@@ -46,6 +48,8 @@ public class ConfigManager implements OptionsChangeListener {
 
     // Default values
     private static final int DEFAULT_PORT = 8080;
+    private static final String DEFAULT_HOST = "localhost";
+    private static final String DEFAULT_API_KEY = "";
     private static final boolean DEFAULT_SERVER_ENABLED = true;
     private static final boolean DEFAULT_DEBUG_MODE = false;
     private static final int DEFAULT_MAX_DECOMPILER_SEARCH_FUNCTIONS = 1000;
@@ -79,9 +83,13 @@ public class ConfigManager implements OptionsChangeListener {
      */
     private void registerOptionsWithGhidra() {
         HelpLocation help = new HelpLocation("ReVa", "Configuration");
-        
+
         toolOptions.registerOption(SERVER_PORT, DEFAULT_PORT, help,
             "Port number for the ReVa MCP server");
+        toolOptions.registerOption(SERVER_HOST, DEFAULT_HOST, help,
+            "Host or IP address for the ReVa MCP server");
+        toolOptions.registerOption(SERVER_API_KEY, DEFAULT_API_KEY, help,
+            "API key for securing the ReVa MCP server (leave empty to disable)");
         toolOptions.registerOption(SERVER_ENABLED, DEFAULT_SERVER_ENABLED, help,
             "Whether the ReVa MCP server is enabled");
         toolOptions.registerOption(DEBUG_MODE, DEFAULT_DEBUG_MODE, help,
@@ -98,6 +106,8 @@ public class ConfigManager implements OptionsChangeListener {
     protected void loadOptions() {
         // Cache the options
         cachedOptions.put(SERVER_PORT, toolOptions.getInt(SERVER_PORT, DEFAULT_PORT));
+        cachedOptions.put(SERVER_HOST, toolOptions.getString(SERVER_HOST, DEFAULT_HOST));
+        cachedOptions.put(SERVER_API_KEY, toolOptions.getString(SERVER_API_KEY, DEFAULT_API_KEY));
         cachedOptions.put(SERVER_ENABLED, toolOptions.getBoolean(SERVER_ENABLED, DEFAULT_SERVER_ENABLED));
         cachedOptions.put(DEBUG_MODE, toolOptions.getBoolean(DEBUG_MODE, DEFAULT_DEBUG_MODE));
         cachedOptions.put(MAX_DECOMPILER_SEARCH_FUNCTIONS,
@@ -176,6 +186,40 @@ public class ConfigManager implements OptionsChangeListener {
      */
     public void setServerPort(int port) {
         toolOptions.setInt(SERVER_PORT, port);
+        // optionsChanged() will be called automatically
+    }
+
+    /**
+     * Get the server host
+     * @return The configured server host
+     */
+    public String getServerHost() {
+        return (String) cachedOptions.getOrDefault(SERVER_HOST, DEFAULT_HOST);
+    }
+
+    /**
+     * Set the server host
+     * @param host The host or IP address to use
+     */
+    public void setServerHost(String host) {
+        toolOptions.setString(SERVER_HOST, host);
+        // optionsChanged() will be called automatically
+    }
+
+    /**
+     * Get the server API key
+     * @return The configured API key or empty string if disabled
+     */
+    public String getServerApiKey() {
+        return (String) cachedOptions.getOrDefault(SERVER_API_KEY, DEFAULT_API_KEY);
+    }
+
+    /**
+     * Set the server API key
+     * @param apiKey The API key to require, or empty string to disable
+     */
+    public void setServerApiKey(String apiKey) {
+        toolOptions.setString(SERVER_API_KEY, apiKey);
         // optionsChanged() will be called automatically
     }
 

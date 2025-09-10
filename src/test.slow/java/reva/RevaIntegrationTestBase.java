@@ -169,9 +169,15 @@ public abstract class RevaIntegrationTestBase extends AbstractGhidraHeadedIntegr
         String serverUrl = "http://localhost:" + serverPort;
 
         System.out.println("DEBUG: Creating transport to " + serverUrl + "/mcp/message");
-        HttpClientStreamableHttpTransport transport = HttpClientStreamableHttpTransport.builder(serverUrl)
-            .endpoint("/mcp/message")
-            .build();
+        HttpClientStreamableHttpTransport.Builder builder = HttpClientStreamableHttpTransport.builder(serverUrl)
+            .endpoint("/mcp/message");
+
+        String apiKey = sharedConfigManager != null ? sharedConfigManager.getServerApiKey() : "";
+        if (apiKey != null && !apiKey.isEmpty()) {
+            builder.customizeRequest(req -> req.header(reva.server.ApiKeyAuthFilter.API_KEY_HEADER, apiKey));
+        }
+
+        HttpClientStreamableHttpTransport transport = builder.build();
         System.out.println("DEBUG: Transport created successfully");
         return transport;
     }

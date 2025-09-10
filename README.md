@@ -78,6 +78,10 @@ and will listen on port `8080` by default, you can change this in the Ghidra set
 
 You will need to configure your MCP client to connect to ReVa, this depends on the client you are using.
 
+### Authentication
+
+ReVa supports an optional API key. When a key is configured, clients must send it using the `X-API-Key` HTTP header. See [Authentication documentation](docs/configuration/authentication.md) for details.
+
 ### Claude Code
 
 Claude Code is the recommended client for ReVa, performance is excellent and Claude Code

@@ -20,10 +20,14 @@ import java.util.List;
 import java.util.Set;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.net.InetSocketAddress;
 
 import org.eclipse.jetty.server.Server;
 import org.eclipse.jetty.servlet.ServletContextHandler;
 import org.eclipse.jetty.servlet.ServletHolder;
+import org.eclipse.jetty.servlet.FilterHolder;
+import java.util.EnumSet;
+import jakarta.servlet.DispatcherType;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -184,7 +188,8 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
         }
 
         int serverPort = configManager.getServerPort();
-        String baseUrl = "http://localhost:" + serverPort;
+        String serverHost = configManager.getServerHost();
+        String baseUrl = "http://" + serverHost + ":" + serverPort;
         Msg.info(this, "Starting MCP server on " + baseUrl);
 
         ServletContextHandler servletContextHandler = new ServletContextHandler(ServletContextHandler.SESSIONS);
@@ -193,7 +198,11 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
         servletHolder.setAsyncSupported(true);
         servletContextHandler.addServlet(servletHolder, "/*");
 
-        httpServer = new Server(serverPort);
+        // Add API key authentication filter
+        FilterHolder authFilter = new FilterHolder(new ApiKeyAuthFilter(configManager));
+        servletContextHandler.addFilter(authFilter, "/*", EnumSet.of(DispatcherType.REQUEST));
+
+        httpServer = new Server(new InetSocketAddress(serverHost, serverPort));
         httpServer.setHandler(servletContextHandler);
 
         threadPool.submit(() -> {
@@ -380,7 +389,8 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
      */
     private void recreateTransportProvider() {
         int serverPort = configManager.getServerPort();
-        String baseUrl = "http://localhost:" + serverPort;
+        String serverHost = configManager.getServerHost();
+        String baseUrl = "http://" + serverHost + ":" + serverPort;
 
         // Create new transport provider with updated configuration
         currentTransportProvider = HttpServletStreamableServerTransportProvider.builder()
@@ -420,8 +430,14 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
             if (ConfigManager.SERVER_PORT.equals(name)) {
                 Msg.info(this, "Server port changed from " + oldValue + " to " + newValue + ". Restarting server...");
                 restartServer();
+            } else if (ConfigManager.SERVER_HOST.equals(name)) {
+                Msg.info(this, "Server host changed from " + oldValue + " to " + newValue + ". Restarting server...");
+                restartServer();
             } else if (ConfigManager.SERVER_ENABLED.equals(name)) {
                 Msg.info(this, "Server enabled setting changed from " + oldValue + " to " + newValue + ". Restarting server...");
+                restartServer();
+            } else if (ConfigManager.SERVER_API_KEY.equals(name)) {
+                Msg.info(this, "Server API key changed. Restarting server...");
                 restartServer();
             }
         }

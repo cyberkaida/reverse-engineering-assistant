@@ -77,6 +77,8 @@ public class ConfigChangeTest {
         
         // Setup default return values for option getters
         when(mockToolOptions.getInt(eq(ConfigManager.SERVER_PORT), anyInt())).thenReturn(8080);
+        when(mockToolOptions.getString(eq(ConfigManager.SERVER_HOST), anyString())).thenReturn("localhost");
+        when(mockToolOptions.getString(eq(ConfigManager.SERVER_API_KEY), anyString())).thenReturn("");
         when(mockToolOptions.getBoolean(eq(ConfigManager.SERVER_ENABLED), anyBoolean())).thenReturn(true);
         when(mockToolOptions.getBoolean(eq(ConfigManager.DEBUG_MODE), anyBoolean())).thenReturn(false);
         when(mockToolOptions.getInt(eq(ConfigManager.MAX_DECOMPILER_SEARCH_FUNCTIONS), anyInt())).thenReturn(1000);
@@ -137,6 +139,44 @@ public class ConfigChangeTest {
         assertEquals("Changed option should be server enabled", ConfigManager.SERVER_ENABLED, lastChangedName);
         assertEquals("Old value should be true", true, lastOldValue);
         assertEquals("New value should be false", false, lastNewValue);
+    }
+
+    @Test
+    public void testServerHostConfigChange() throws Exception {
+        // Reset the notification flag
+        changeNotified.set(false);
+
+        // Change the server host
+        configManager.setServerHost("0.0.0.0");
+
+        // Manually trigger the optionsChanged callback
+        configManager.optionsChanged(mockToolOptions, ConfigManager.SERVER_HOST, "localhost", "0.0.0.0");
+
+        // Verify the listener was notified
+        assertTrue("Config change listener should be notified", changeNotified.get());
+        assertEquals("Category should be server options", ConfigManager.SERVER_OPTIONS, lastChangedCategory);
+        assertEquals("Changed option should be server host", ConfigManager.SERVER_HOST, lastChangedName);
+        assertEquals("Old value should be localhost", "localhost", lastOldValue);
+        assertEquals("New value should be 0.0.0.0", "0.0.0.0", lastNewValue);
+    }
+
+    @Test
+    public void testServerApiKeyConfigChange() throws Exception {
+        // Reset the notification flag
+        changeNotified.set(false);
+
+        // Change the server API key
+        configManager.setServerApiKey("secret");
+
+        // Manually trigger the optionsChanged callback
+        configManager.optionsChanged(mockToolOptions, ConfigManager.SERVER_API_KEY, "", "secret");
+
+        // Verify the listener was notified
+        assertTrue("Config change listener should be notified", changeNotified.get());
+        assertEquals("Category should be server options", ConfigManager.SERVER_OPTIONS, lastChangedCategory);
+        assertEquals("Changed option should be server API key", ConfigManager.SERVER_API_KEY, lastChangedName);
+        assertEquals("Old value should be empty", "", lastOldValue);
+        assertEquals("New value should be secret", "secret", lastNewValue);
     }
     
     @Test

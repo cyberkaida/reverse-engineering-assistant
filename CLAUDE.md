@@ -148,3 +148,4 @@ The server uses streamable transport (SSE) on port 8080 by default. Configuratio
 - **Read-Before-Modify**: Decompiler tools enforce function reading before modification
 - **Error Messages**: Provide specific, actionable error messages with suggestions
 - When reading the test report, use the read tool or grep, do not use `open`.
+- If you have compatibility problems and things do not compile because of jackson or the MCP SDK. `rm lib/*.jar` can help clean and fix these.

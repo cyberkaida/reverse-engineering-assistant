@@ -25,6 +25,7 @@ import ghidra.program.model.address.AddressSet;
 import ghidra.program.model.address.AddressSetView;
 import ghidra.program.model.address.AddressIterator;
 import ghidra.program.model.listing.CodeUnit;
+import ghidra.program.model.listing.CommentType;
 import ghidra.program.model.listing.Program;
 import ghidra.program.model.listing.Listing;
 import ghidra.program.model.listing.CodeUnitIterator;
@@ -41,12 +42,12 @@ import reva.util.SchemaUtil;
  */
 public class CommentToolProvider extends AbstractToolProvider {
 
-    private static final Map<String, Integer> COMMENT_TYPES = Map.of(
-        "pre", CodeUnit.PRE_COMMENT,
-        "eol", CodeUnit.EOL_COMMENT,
-        "post", CodeUnit.POST_COMMENT,
-        "plate", CodeUnit.PLATE_COMMENT,
-        "repeatable", CodeUnit.REPEATABLE_COMMENT
+    private static final Map<String, CommentType> COMMENT_TYPES = Map.of(
+        "pre", CommentType.PRE,
+        "eol", CommentType.EOL,
+        "post", CommentType.POST,
+        "plate", CommentType.PLATE,
+        "repeatable", CommentType.REPEATABLE
     );
 
     /**
@@ -93,7 +94,7 @@ public class CommentToolProvider extends AbstractToolProvider {
             String commentTypeStr = getOptionalString(request, "commentType", "eol");
             String comment = getString(request, "comment");
 
-            Integer commentType = COMMENT_TYPES.get(commentTypeStr.toLowerCase());
+            CommentType commentType = COMMENT_TYPES.get(commentTypeStr.toLowerCase());
             if (commentType == null) {
                 return createErrorResult("Invalid comment type: " + commentTypeStr +
                     ". Must be one of: pre, eol, post, plate, repeatable");
@@ -187,10 +188,10 @@ public class CommentToolProvider extends AbstractToolProvider {
                 return createErrorResult("Either 'address' or 'addressRange' must be provided");
             }
 
-            List<Integer> types = new ArrayList<>();
+            List<CommentType> types = new ArrayList<>();
             if (commentTypes != null && !commentTypes.isEmpty()) {
                 for (String typeStr : commentTypes) {
-                    Integer type = COMMENT_TYPES.get(typeStr.toLowerCase());
+                    CommentType type = COMMENT_TYPES.get(typeStr.toLowerCase());
                     if (type == null) {
                         return createErrorResult("Invalid comment type: " + typeStr);
                     }
@@ -208,7 +209,7 @@ public class CommentToolProvider extends AbstractToolProvider {
                 CodeUnit codeUnit = codeUnits.next();
                 Address addr = codeUnit.getAddress();
 
-                for (int type : types) {
+                for (CommentType type : types) {
                     String comment = codeUnit.getComment(type);
                     if (comment != null && !comment.isEmpty()) {
                         Map<String, Object> commentInfo = new HashMap<>();
@@ -254,7 +255,7 @@ public class CommentToolProvider extends AbstractToolProvider {
             Address address = getAddressFromArgs(request, program, "addressOrSymbol");
             String commentTypeStr = getString(request, "commentType");
 
-            Integer commentType = COMMENT_TYPES.get(commentTypeStr.toLowerCase());
+            CommentType commentType = COMMENT_TYPES.get(commentTypeStr.toLowerCase());
             if (commentType == null) {
                 return createErrorResult("Invalid comment type: " + commentTypeStr +
                     ". Must be one of: pre, eol, post, plate, repeatable");
@@ -317,10 +318,10 @@ public class CommentToolProvider extends AbstractToolProvider {
             List<String> commentTypes = getOptionalStringList(request.arguments(), "commentTypes", null);
             int maxResults = getOptionalInt(request, "maxResults", 100);
 
-            List<Integer> types = new ArrayList<>();
+            List<CommentType> types = new ArrayList<>();
             if (commentTypes != null && !commentTypes.isEmpty()) {
                 for (String typeStr : commentTypes) {
-                    Integer type = COMMENT_TYPES.get(typeStr.toLowerCase());
+                    CommentType type = COMMENT_TYPES.get(typeStr.toLowerCase());
                     if (type == null) {
                         return createErrorResult("Invalid comment type: " + typeStr);
                     }
@@ -334,7 +335,7 @@ public class CommentToolProvider extends AbstractToolProvider {
             List<Map<String, Object>> results = new ArrayList<>();
             Listing listing = program.getListing();
 
-            for (int type : types) {
+            for (CommentType type : types) {
                 if (results.size() >= maxResults) break;
 
                 AddressIterator commentAddrs = listing.getCommentAddressIterator(
@@ -376,11 +377,11 @@ public class CommentToolProvider extends AbstractToolProvider {
 
     /**
      * Get the string name for a comment type constant
-     * @param commentType The comment type constant
+     * @param commentType The comment type enum
      * @return The string name
      */
-    private String getCommentTypeName(int commentType) {
-        for (Map.Entry<String, Integer> entry : COMMENT_TYPES.entrySet()) {
+    private String getCommentTypeName(CommentType commentType) {
+        for (Map.Entry<String, CommentType> entry : COMMENT_TYPES.entrySet()) {
             if (entry.getValue() == commentType) {
                 return entry.getKey();
             }

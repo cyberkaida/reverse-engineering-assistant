@@ -98,12 +98,13 @@ public class ConfigManager implements OptionsChangeListener {
 
         // Only generate a new API key if one does not already exist
         String existingApiKey = toolOptions.getString(API_KEY, null);
-        String apiKeyToRegister = (existingApiKey != null && !existingApiKey.isEmpty()) ? existingApiKey : generateDefaultApiKey();
+        boolean isApiKeyMissing = (existingApiKey == null || existingApiKey.isEmpty());
+        String apiKeyToRegister = isApiKeyMissing ? generateDefaultApiKey() : existingApiKey;
         toolOptions.registerOption(API_KEY, apiKeyToRegister, help,
             "API key required for MCP server access when authentication is enabled");
 
         // Ensure the generated key is actually set in the options
-        if (existingApiKey == null || existingApiKey.isEmpty()) {
+        if (isApiKeyMissing) {
             toolOptions.setString(API_KEY, apiKeyToRegister);
         }
         toolOptions.registerOption(DEBUG_MODE, DEFAULT_DEBUG_MODE, help,

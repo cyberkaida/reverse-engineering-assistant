@@ -22,8 +22,13 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 import org.eclipse.jetty.server.Server;
+import org.eclipse.jetty.server.ServerConnector;
+import org.eclipse.jetty.servlet.FilterHolder;
 import org.eclipse.jetty.servlet.ServletContextHandler;
 import org.eclipse.jetty.servlet.ServletHolder;
+
+import java.util.EnumSet;
+import jakarta.servlet.DispatcherType;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -184,16 +189,30 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
         }
 
         int serverPort = configManager.getServerPort();
-        String baseUrl = "http://localhost:" + serverPort;
+        String serverHost = configManager.getServerHost();
+        String baseUrl = "http://" + serverHost + ":" + serverPort;
         Msg.info(this, "Starting MCP server on " + baseUrl);
 
         ServletContextHandler servletContextHandler = new ServletContextHandler(ServletContextHandler.SESSIONS);
         servletContextHandler.setContextPath("/");
+
+        // Add API key authentication filter if enabled
+        if (configManager.isApiKeyEnabled()) {
+            FilterHolder filterHolder = new FilterHolder(new ApiKeyAuthFilter(configManager));
+            servletContextHandler.addFilter(filterHolder, "/*", EnumSet.of(DispatcherType.REQUEST));
+            Msg.info(this, "API key authentication enabled for MCP server");
+        }
+
         ServletHolder servletHolder = new ServletHolder(currentTransportProvider);
         servletHolder.setAsyncSupported(true);
         servletContextHandler.addServlet(servletHolder, "/*");
 
-        httpServer = new Server(serverPort);
+        // Create server with specific host binding for security
+        httpServer = new Server();
+        ServerConnector connector = new ServerConnector(httpServer);
+        connector.setHost(serverHost);
+        connector.setPort(serverPort);
+        httpServer.addConnector(connector);
         httpServer.setHandler(servletContextHandler);
 
         threadPool.submit(() -> {
@@ -375,12 +394,13 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
     }
 
     /**
-     * Recreate the transport provider with updated port configuration.
-     * This is necessary when the port changes during server restart.
+     * Recreate the transport provider with updated configuration.
+     * This is necessary when configuration changes during server restart.
      */
     private void recreateTransportProvider() {
         int serverPort = configManager.getServerPort();
-        String baseUrl = "http://localhost:" + serverPort;
+        String serverHost = configManager.getServerHost();
+        String baseUrl = "http://" + serverHost + ":" + serverPort;
 
         // Create new transport provider with updated configuration
         currentTransportProvider = HttpServletStreamableServerTransportProvider.builder()
@@ -420,8 +440,17 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
             if (ConfigManager.SERVER_PORT.equals(name)) {
                 Msg.info(this, "Server port changed from " + oldValue + " to " + newValue + ". Restarting server...");
                 restartServer();
+            } else if (ConfigManager.SERVER_HOST.equals(name)) {
+                Msg.info(this, "Server host changed from " + oldValue + " to " + newValue + ". Restarting server...");
+                restartServer();
             } else if (ConfigManager.SERVER_ENABLED.equals(name)) {
                 Msg.info(this, "Server enabled setting changed from " + oldValue + " to " + newValue + ". Restarting server...");
+                restartServer();
+            } else if (ConfigManager.API_KEY_ENABLED.equals(name)) {
+                Msg.info(this, "API key authentication setting changed from " + oldValue + " to " + newValue + ". Restarting server...");
+                restartServer();
+            } else if (ConfigManager.API_KEY.equals(name)) {
+                Msg.info(this, "API key changed. Restarting server...");
                 restartServer();
             }
         }

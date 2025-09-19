@@ -18,6 +18,7 @@ package reva.plugin;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 import ghidra.framework.options.Options;
@@ -39,14 +40,20 @@ public class ConfigManager implements OptionsChangeListener {
 
     // Option names
     public static final String SERVER_PORT = "Server Port";
+    public static final String SERVER_HOST = "Server Host";
     public static final String SERVER_ENABLED = "Server Enabled";
+    public static final String API_KEY_ENABLED = "API Key Authentication Enabled";
+    public static final String API_KEY = "API Key";
     public static final String DEBUG_MODE = "Debug Mode";
     public static final String MAX_DECOMPILER_SEARCH_FUNCTIONS = "Max Decompiler Search Functions";
     public static final String DECOMPILER_TIMEOUT_SECONDS = "Decompiler Timeout Seconds";
 
     // Default values
     private static final int DEFAULT_PORT = 8080;
+    private static final String DEFAULT_HOST = "127.0.0.1";
     private static final boolean DEFAULT_SERVER_ENABLED = true;
+    private static final boolean DEFAULT_API_KEY_ENABLED = false;
+    private static final String DEFAULT_API_KEY = "";
     private static final boolean DEFAULT_DEBUG_MODE = false;
     private static final int DEFAULT_MAX_DECOMPILER_SEARCH_FUNCTIONS = 1000;
     private static final int DEFAULT_DECOMPILER_TIMEOUT_SECONDS = 10;
@@ -79,11 +86,26 @@ public class ConfigManager implements OptionsChangeListener {
      */
     private void registerOptionsWithGhidra() {
         HelpLocation help = new HelpLocation("ReVa", "Configuration");
-        
+
         toolOptions.registerOption(SERVER_PORT, DEFAULT_PORT, help,
             "Port number for the ReVa MCP server");
+        toolOptions.registerOption(SERVER_HOST, DEFAULT_HOST, help,
+            "Host interface for the ReVa MCP server (127.0.0.1 for localhost only, 0.0.0.0 for all interfaces)");
         toolOptions.registerOption(SERVER_ENABLED, DEFAULT_SERVER_ENABLED, help,
             "Whether the ReVa MCP server is enabled");
+        toolOptions.registerOption(API_KEY_ENABLED, DEFAULT_API_KEY_ENABLED, help,
+            "Whether API key authentication is required for MCP server access");
+
+        // Only generate a new API key if one does not already exist
+        String existingApiKey = toolOptions.getString(API_KEY, null);
+        String apiKeyToRegister = (existingApiKey != null && !existingApiKey.isEmpty()) ? existingApiKey : generateDefaultApiKey();
+        toolOptions.registerOption(API_KEY, apiKeyToRegister, help,
+            "API key required for MCP server access when authentication is enabled");
+
+        // Ensure the generated key is actually set in the options
+        if (existingApiKey == null || existingApiKey.isEmpty()) {
+            toolOptions.setString(API_KEY, apiKeyToRegister);
+        }
         toolOptions.registerOption(DEBUG_MODE, DEFAULT_DEBUG_MODE, help,
             "Whether debug mode is enabled");
         toolOptions.registerOption(MAX_DECOMPILER_SEARCH_FUNCTIONS, DEFAULT_MAX_DECOMPILER_SEARCH_FUNCTIONS, help,
@@ -98,7 +120,14 @@ public class ConfigManager implements OptionsChangeListener {
     protected void loadOptions() {
         // Cache the options
         cachedOptions.put(SERVER_PORT, toolOptions.getInt(SERVER_PORT, DEFAULT_PORT));
+        cachedOptions.put(SERVER_HOST, toolOptions.getString(SERVER_HOST, DEFAULT_HOST));
         cachedOptions.put(SERVER_ENABLED, toolOptions.getBoolean(SERVER_ENABLED, DEFAULT_SERVER_ENABLED));
+        cachedOptions.put(API_KEY_ENABLED, toolOptions.getBoolean(API_KEY_ENABLED, DEFAULT_API_KEY_ENABLED));
+
+        // Get the actual API key that was registered (could be generated or existing)
+        String apiKey = toolOptions.getString(API_KEY, DEFAULT_API_KEY);
+        cachedOptions.put(API_KEY, apiKey);
+
         cachedOptions.put(DEBUG_MODE, toolOptions.getBoolean(DEBUG_MODE, DEFAULT_DEBUG_MODE));
         cachedOptions.put(MAX_DECOMPILER_SEARCH_FUNCTIONS,
             toolOptions.getInt(MAX_DECOMPILER_SEARCH_FUNCTIONS, DEFAULT_MAX_DECOMPILER_SEARCH_FUNCTIONS));
@@ -180,6 +209,23 @@ public class ConfigManager implements OptionsChangeListener {
     }
 
     /**
+     * Get the server host
+     * @return The configured server host
+     */
+    public String getServerHost() {
+        return (String) cachedOptions.getOrDefault(SERVER_HOST, DEFAULT_HOST);
+    }
+
+    /**
+     * Set the server host
+     * @param host The host interface to bind to
+     */
+    public void setServerHost(String host) {
+        toolOptions.setString(SERVER_HOST, host);
+        // optionsChanged() will be called automatically
+    }
+
+    /**
      * Check if the server is enabled
      * @return True if the server is enabled
      */
@@ -193,6 +239,40 @@ public class ConfigManager implements OptionsChangeListener {
      */
     public void setServerEnabled(boolean enabled) {
         toolOptions.setBoolean(SERVER_ENABLED, enabled);
+        // optionsChanged() will be called automatically
+    }
+
+    /**
+     * Check if API key authentication is enabled
+     * @return True if API key authentication is enabled
+     */
+    public boolean isApiKeyEnabled() {
+        return (Boolean) cachedOptions.getOrDefault(API_KEY_ENABLED, DEFAULT_API_KEY_ENABLED);
+    }
+
+    /**
+     * Set whether API key authentication is enabled
+     * @param enabled True to enable API key authentication
+     */
+    public void setApiKeyEnabled(boolean enabled) {
+        toolOptions.setBoolean(API_KEY_ENABLED, enabled);
+        // optionsChanged() will be called automatically
+    }
+
+    /**
+     * Get the API key
+     * @return The configured API key
+     */
+    public String getApiKey() {
+        return (String) cachedOptions.getOrDefault(API_KEY, DEFAULT_API_KEY);
+    }
+
+    /**
+     * Set the API key
+     * @param apiKey The API key to use
+     */
+    public void setApiKey(String apiKey) {
+        toolOptions.setString(API_KEY, apiKey);
         // optionsChanged() will be called automatically
     }
 
@@ -247,6 +327,14 @@ public class ConfigManager implements OptionsChangeListener {
         // optionsChanged() will be called automatically
     }
     
+    /**
+     * Generate a default API key with ReVa-UUID format
+     * @return A new API key in the format "ReVa-{uuid}"
+     */
+    private String generateDefaultApiKey() {
+        return "ReVa-" + UUID.randomUUID().toString();
+    }
+
     /**
      * Clean up when the plugin is disposed
      */

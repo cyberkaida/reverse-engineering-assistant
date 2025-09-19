@@ -92,7 +92,7 @@ public class ConfigManagerSecurityTest extends RevaIntegrationTestBase {
         String[] parts = apiKey.split("-", 2);
 
         assertEquals("API key should start with 'ReVa'", "ReVa", parts[0]);
-        assertTrue("API key should have UUID part", parts.length == 2);
+        assertEquals("API key should have UUID part", 2, parts.length);
         assertTrue("UUID part should be non-empty", parts[1].length() > 0);
         // UUID with dashes is typically 36 characters, but let's be more lenient
         assertTrue("UUID part should be reasonable length", parts[1].length() >= 10);

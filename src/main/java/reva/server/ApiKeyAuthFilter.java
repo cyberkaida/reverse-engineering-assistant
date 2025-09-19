@@ -136,7 +136,19 @@ public class ApiKeyAuthFilter implements Filter {
      * @return A string with client IP and user agent
      */
     private String getClientInfo(HttpServletRequest request) {
-        String clientIP = request.getRemoteAddr();
+        String clientIP = null;
+        String xForwardedFor = request.getHeader("X-Forwarded-For");
+        if (xForwardedFor != null && !xForwardedFor.isEmpty()) {
+            // X-Forwarded-For can contain multiple IPs, the first is the original client
+            clientIP = xForwardedFor.split(",")[0].trim();
+        } else {
+            String xRealIp = request.getHeader("X-Real-IP");
+            if (xRealIp != null && !xRealIp.isEmpty()) {
+                clientIP = xRealIp;
+            } else {
+                clientIP = request.getRemoteAddr();
+            }
+        }
         String userAgent = request.getHeader("User-Agent");
         return clientIP + (userAgent != null ? " (" + userAgent + ")" : "");
     }

@@ -49,7 +49,7 @@ You can ask questions like:
 
 # Installation
 
-> NOTE: ReVa only supports Ghidra 11.3 and above!
+> NOTE: ReVa only supports Ghidra 11.4 and above!
 
 ReVa is a Ghidra extension. To install it, you can download the release for your
 version of Ghidra from the releases page and install it using the Ghidra extension manager.

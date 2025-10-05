@@ -117,7 +117,7 @@ The server uses streamable transport (SSE) on port 8080 by default. Configuratio
 - MCP SDK: io.modelcontextprotocol.sdk v0.11.1 (uses MCP BOM)
 - Jackson: 2.17.0 (forced version for compatibility)
 - Jetty: 11.0.25 (embedded servlet support)
-- Target: Java 21, Ghidra 11.3+
+- Target: Java 21, Ghidra 11.4+
 
 ## Program Identification
 - **ALWAYS use `programPath` for program identifiers** in both tool inputs and outputs
@@ -136,7 +136,7 @@ The server uses streamable transport (SSE) on port 8080 by default. Configuratio
 - **Tool Pattern**: AbstractToolProvider base class with consistent parameter extraction and error handling
 
 ### Development Constraints
-- **Java**: Target Java 21, minimum Ghidra 11.3+
+- **Java**: Target Java 21, minimum Ghidra 11.4+
 - **Testing**: Integration tests require `java.awt.headless=false` (GUI environment)
 - **Build**: Use `gradle` directly, not gradle wrapper
 - **MCP SDK**: v0.11.1 with forced Jackson 2.17.0 for compatibility

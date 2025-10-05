@@ -18,10 +18,8 @@ jobs:
       matrix:
         os: [ubuntu-latest]
         ghidra-version: [
+            "11.4.2",
             "11.4",
-            "11.3.2",
-            "11.3.1",
-            "11.3",
             "latest",
         ]
     name: Test on Ghidra ${{ matrix.ghidra-version }}

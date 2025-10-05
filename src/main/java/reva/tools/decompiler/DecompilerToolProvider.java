@@ -37,6 +37,7 @@ import ghidra.app.decompiler.component.DecompilerUtils;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.address.AddressSetView;
 import ghidra.program.model.listing.CodeUnit;
+import ghidra.program.model.listing.CommentType;
 import ghidra.program.model.listing.CodeUnitIterator;
 import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.FunctionIterator;
@@ -1206,17 +1207,17 @@ public class DecompilerToolProvider extends AbstractToolProvider {
 
                 // Get comments at these addresses
                 Listing listing = program.getListing();
-                Map<Integer, String> commentTypes = Map.of(
-                    CodeUnit.PRE_COMMENT, "pre",
-                    CodeUnit.EOL_COMMENT, "eol",
-                    CodeUnit.POST_COMMENT, "post",
-                    CodeUnit.PLATE_COMMENT, "plate",
-                    CodeUnit.REPEATABLE_COMMENT, "repeatable"
+                Map<CommentType, String> commentTypes = Map.of(
+                    CommentType.PRE, "pre",
+                    CommentType.EOL, "eol",
+                    CommentType.POST, "post",
+                    CommentType.PLATE, "plate",
+                    CommentType.REPEATABLE, "repeatable"
                 );
                 for (Address addr : lineAddresses) {
                     CodeUnit cu = listing.getCodeUnitAt(addr);
                     if (cu != null) {
-                        for (Map.Entry<Integer, String> entry : commentTypes.entrySet()) {
+                        for (Map.Entry<CommentType, String> entry : commentTypes.entrySet()) {
                             addCommentIfExists(comments, cu, entry.getKey(), entry.getValue(), addr);
                         }
                     }
@@ -1243,19 +1244,19 @@ public class DecompilerToolProvider extends AbstractToolProvider {
             AddressSetView body = function.getBody();
 
             CodeUnitIterator codeUnits = listing.getCodeUnits(body, true);
-            Map<Integer, String> commentTypes = Map.of(
-                CodeUnit.PRE_COMMENT, "pre",
-                CodeUnit.EOL_COMMENT, "eol",
-                CodeUnit.POST_COMMENT, "post",
-                CodeUnit.PLATE_COMMENT, "plate",
-                CodeUnit.REPEATABLE_COMMENT, "repeatable"
+            Map<CommentType, String> commentTypes = Map.of(
+                CommentType.PRE, "pre",
+                CommentType.EOL, "eol",
+                CommentType.POST, "post",
+                CommentType.PLATE, "plate",
+                CommentType.REPEATABLE, "repeatable"
             );
             while (codeUnits.hasNext()) {
                 CodeUnit cu = codeUnits.next();
                 Address addr = cu.getAddress();
 
                 // Check all comment types
-                for (Map.Entry<Integer, String> entry : commentTypes.entrySet()) {
+                for (Map.Entry<CommentType, String> entry : commentTypes.entrySet()) {
                     addCommentIfExists(comments, cu, entry.getKey(), entry.getValue(), addr);
                 }
             }
@@ -1275,7 +1276,7 @@ public class DecompilerToolProvider extends AbstractToolProvider {
      * @param address The address
      */
     private void addCommentIfExists(List<Map<String, Object>> comments, CodeUnit cu,
-            int commentType, String typeString, Address address) {
+            CommentType commentType, String typeString, Address address) {
         String comment = cu.getComment(commentType);
         if (comment != null && !comment.isEmpty()) {
             Map<String, Object> commentInfo = new HashMap<>();
@@ -1334,11 +1335,11 @@ public class DecompilerToolProvider extends AbstractToolProvider {
             String comment = getString(request, "comment");
 
             // Validate comment type
-            int commentType;
+            CommentType commentType;
             if ("pre".equals(commentTypeStr)) {
-                commentType = CodeUnit.PRE_COMMENT;
+                commentType = CommentType.PRE;
             } else if ("eol".equals(commentTypeStr)) {
-                commentType = CodeUnit.EOL_COMMENT;
+                commentType = CommentType.EOL;
             } else {
                 return createErrorResult("Invalid comment type: " + commentTypeStr +
                     ". Must be 'pre' or 'eol' for decompilation comments.");

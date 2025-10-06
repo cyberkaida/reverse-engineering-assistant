@@ -42,7 +42,6 @@ import ghidra.formats.gfilesystem.FileSystemService;
 import ghidra.plugins.importer.batch.BatchInfo;
 import ghidra.plugins.importer.tasks.ImportBatchTask;
 import ghidra.util.task.TaskLauncher;
-import io.modelcontextprotocol.spec.McpError;
 import io.modelcontextprotocol.server.McpSyncServer;
 import io.modelcontextprotocol.spec.McpSchema;
 import reva.plugin.RevaProgramManager;
@@ -64,7 +63,7 @@ public class ProjectToolProvider extends AbstractToolProvider {
     }
 
     @Override
-    public void registerTools() throws McpError {
+    public void registerTools() {
         registerGetCurrentProgramTool();
         registerListProjectFilesTool();
         registerListOpenProgramsTool();
@@ -76,9 +75,8 @@ public class ProjectToolProvider extends AbstractToolProvider {
 
     /**
      * Register a tool to get the currently active program
-     * @throws McpError if there's an error registering the tool
      */
-    private void registerGetCurrentProgramTool() throws McpError {
+    private void registerGetCurrentProgramTool() {
         // Define schema for the tool
         Map<String, Object> properties = new HashMap<>();
         // This tool doesn't require any parameters
@@ -121,9 +119,8 @@ public class ProjectToolProvider extends AbstractToolProvider {
 
     /**
      * Register a tool to list files and folders in the Ghidra project
-     * @throws McpError if there's an error registering the tool
      */
-    private void registerListProjectFilesTool() throws McpError {
+    private void registerListProjectFilesTool() {
         // Define schema for the tool
         Map<String, Object> properties = new HashMap<>();
         properties.put("folderPath", SchemaUtil.stringProperty(
@@ -203,9 +200,8 @@ public class ProjectToolProvider extends AbstractToolProvider {
 
     /**
      * Register a tool to list all open programs across all Ghidra tools
-     * @throws McpError if there's an error registering the tool
      */
-    private void registerListOpenProgramsTool() throws McpError {
+    private void registerListOpenProgramsTool() {
         // Define schema for the tool
         Map<String, Object> properties = new HashMap<>();
         // This tool doesn't require any parameters
@@ -259,9 +255,8 @@ public class ProjectToolProvider extends AbstractToolProvider {
 
     /**
      * Register a tool to checkin (commit) a program to version control
-     * @throws McpError if there's an error registering the tool
      */
-    private void registerCheckinProgramTool() throws McpError {
+    private void registerCheckinProgramTool() {
         // Define schema for the tool
         Map<String, Object> properties = new HashMap<>();
         properties.put("programPath", SchemaUtil.stringProperty(
@@ -431,9 +426,8 @@ public class ProjectToolProvider extends AbstractToolProvider {
 
     /**
      * Register a tool to analyze a program with Ghidra's auto-analysis
-     * @throws McpError if there's an error registering the tool
      */
-    private void registerAnalyzeProgramTool() throws McpError {
+    private void registerAnalyzeProgramTool() {
         // Define schema for the tool
         Map<String, Object> properties = new HashMap<>();
         properties.put("programPath", SchemaUtil.stringProperty(
@@ -488,9 +482,8 @@ public class ProjectToolProvider extends AbstractToolProvider {
 
     /**
      * Register a tool to change the processor architecture of an existing program
-     * @throws McpError if there's an error registering the tool
      */
-    private void registerChangeProcessorTool() throws McpError {
+    private void registerChangeProcessorTool() {
         // Define schema for the tool
         Map<String, Object> properties = new HashMap<>();
         properties.put("programPath", SchemaUtil.stringProperty(
@@ -585,9 +578,8 @@ public class ProjectToolProvider extends AbstractToolProvider {
 
     /**
      * Register a tool to import files into the Ghidra project
-     * @throws McpError if there's an error registering the tool
      */
-    private void registerImportFileTool() throws McpError {
+    private void registerImportFileTool() {
         // Define schema for the tool
         Map<String, Object> properties = new HashMap<>();
 

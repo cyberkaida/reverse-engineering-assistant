@@ -28,7 +28,6 @@ import ghidra.program.model.listing.Data;
 import ghidra.program.model.listing.DataIterator;
 import ghidra.program.model.listing.Program;
 import ghidra.program.model.mem.MemoryAccessException;
-import io.modelcontextprotocol.spec.McpError;
 import io.modelcontextprotocol.server.McpSyncServer;
 import io.modelcontextprotocol.spec.McpSchema;
 import reva.tools.AbstractToolProvider;
@@ -49,7 +48,7 @@ public class StringToolProvider extends AbstractToolProvider {
     }
 
     @Override
-    public void registerTools() throws McpError {
+    public void registerTools() {
         registerStringsCountTool();
         registerStringsTool();
         registerStringsBySimilarityTool();
@@ -58,9 +57,8 @@ public class StringToolProvider extends AbstractToolProvider {
 
     /**
      * Register a tool to get the count of strings in a program
-     * @throws McpError if there's an error registering the tool
      */
-    private void registerStringsCountTool() throws McpError {
+    private void registerStringsCountTool() {
         // Define schema for the tool
         Map<String, Object> properties = new HashMap<>();
         properties.put("programPath", Map.of(
@@ -102,9 +100,8 @@ public class StringToolProvider extends AbstractToolProvider {
 
     /**
      * Register a tool to get strings from a program with pagination
-     * @throws McpError if there's an error registering the tool
      */
-    private void registerStringsTool() throws McpError {
+    private void registerStringsTool() {
         // Define schema for the tool
         Map<String, Object> properties = new HashMap<>();
         properties.put("programPath", Map.of(
@@ -183,9 +180,8 @@ public class StringToolProvider extends AbstractToolProvider {
 
     /**
      * Register a tool to get strings from a program with pagination, sorted by similarity.
-     * @throws McpError if there's an error registering the tool
      */
-    private void registerStringsBySimilarityTool() throws McpError {
+    private void registerStringsBySimilarityTool() {
         // Define schema for the tool
         Map<String, Object> properties = new HashMap<>();
         properties.put("programPath", Map.of(
@@ -273,9 +269,8 @@ public class StringToolProvider extends AbstractToolProvider {
 
     /**
      * Register a tool to search strings using regex pattern
-     * @throws McpError if there's an error registering the tool
      */
-    private void registerStringsRegexSearchTool() throws McpError {
+    private void registerStringsRegexSearchTool() {
         // Define schema for the tool
         Map<String, Object> properties = new HashMap<>();
         properties.put("programPath", Map.of(

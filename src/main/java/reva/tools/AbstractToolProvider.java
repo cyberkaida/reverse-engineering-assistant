@@ -36,7 +36,6 @@ import io.modelcontextprotocol.spec.McpSchema.CallToolRequest;
 import reva.plugin.RevaProgramManager;
 import reva.util.ProgramLookupUtil;
 import io.modelcontextprotocol.server.McpSyncServer;
-import io.modelcontextprotocol.spec.McpError;
 import io.modelcontextprotocol.spec.McpSchema;
 import io.modelcontextprotocol.spec.McpSchema.Content;
 import io.modelcontextprotocol.spec.McpSchema.TextContent;
@@ -134,9 +133,8 @@ public abstract class AbstractToolProvider implements ToolProvider {
      * Register a tool with the MCP server
      * @param tool The tool to register
      * @param handler The handler function for the tool
-     * @throws McpError if there's an error registering the tool
      */
-    protected void registerTool(Tool tool, java.util.function.BiFunction<io.modelcontextprotocol.server.McpSyncServerExchange, CallToolRequest, McpSchema.CallToolResult> handler) throws McpError {
+    protected void registerTool(Tool tool, java.util.function.BiFunction<io.modelcontextprotocol.server.McpSyncServerExchange, CallToolRequest, McpSchema.CallToolResult> handler) {
         // Wrap the handler with safe execution
         java.util.function.BiFunction<io.modelcontextprotocol.server.McpSyncServerExchange, CallToolRequest, McpSchema.CallToolResult> safeHandler = 
             (exchange, request) -> {

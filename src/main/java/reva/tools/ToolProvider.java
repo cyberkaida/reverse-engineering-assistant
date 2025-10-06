@@ -16,7 +16,6 @@
 package reva.tools;
 
 import ghidra.program.model.listing.Program;
-import io.modelcontextprotocol.spec.McpError;
 
 /**
  * Interface for MCP tool providers.
@@ -26,9 +25,8 @@ import io.modelcontextprotocol.spec.McpError;
 public interface ToolProvider {
     /**
      * Register all tools with the MCP server
-     * @throws McpError if there's an error registering the tools
      */
-    void registerTools() throws McpError;
+    void registerTools();
 
     /**
      * Notify the provider that a program has been opened

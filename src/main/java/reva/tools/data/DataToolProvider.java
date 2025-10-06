@@ -30,7 +30,6 @@ import ghidra.program.model.listing.Program;
 import ghidra.program.model.mem.MemoryAccessException;
 import ghidra.program.model.symbol.Symbol;
 import ghidra.program.model.symbol.SymbolTable;
-import io.modelcontextprotocol.spec.McpError;
 import io.modelcontextprotocol.server.McpSyncServer;
 import io.modelcontextprotocol.spec.McpSchema;
 import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
@@ -54,7 +53,7 @@ public class DataToolProvider extends AbstractToolProvider {
     }
 
     @Override
-    public void registerTools() throws McpError {
+    public void registerTools() {
         registerGetDataTool();
         registerApplyDataTypeTool();
         registerCreateLabelTool();
@@ -62,9 +61,8 @@ public class DataToolProvider extends AbstractToolProvider {
 
     /**
      * Register a unified tool to get data by address or symbol name
-     * @throws McpError if there's an error registering the tool
      */
-    private void registerGetDataTool() throws McpError {
+    private void registerGetDataTool() {
         // Define schema for the tool
         Map<String, Object> properties = new HashMap<>();
         properties.put("programPath", Map.of(
@@ -98,9 +96,8 @@ public class DataToolProvider extends AbstractToolProvider {
 
     /**
      * Register a tool to apply a data type to an address or symbol
-     * @throws McpError if there's an error registering the tool
      */
-    private void registerApplyDataTypeTool() throws McpError {
+    private void registerApplyDataTypeTool() {
         // Define schema for the tool
         Map<String, Object> properties = new HashMap<>();
         properties.put("programPath", Map.of(
@@ -201,9 +198,8 @@ public class DataToolProvider extends AbstractToolProvider {
 
     /**
      * Register a tool to create a label at a specific address in a program
-     * @throws McpError if there's an error registering the tool
      */
-    private void registerCreateLabelTool() throws McpError {
+    private void registerCreateLabelTool() {
         // Define schema for the tool
         Map<String, Object> properties = new HashMap<>();
         properties.put("programPath", Map.of(

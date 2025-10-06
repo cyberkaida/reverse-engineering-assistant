@@ -41,7 +41,6 @@ import ghidra.program.model.symbol.SourceType;
 import ghidra.util.exception.CancelledException;
 import ghidra.util.exception.DuplicateNameException;
 import ghidra.util.exception.InvalidInputException;
-import io.modelcontextprotocol.spec.McpError;
 import io.modelcontextprotocol.server.McpSyncServer;
 import io.modelcontextprotocol.spec.McpSchema;
 import reva.tools.AbstractToolProvider;
@@ -62,7 +61,7 @@ public class FunctionToolProvider extends AbstractToolProvider {
     }
 
     @Override
-    public void registerTools() throws McpError {
+    public void registerTools() {
         registerFunctionCountTool();
         registerFunctionsTool();
         registerFunctionsBySimilarityTool();
@@ -71,9 +70,8 @@ public class FunctionToolProvider extends AbstractToolProvider {
 
     /**
      * Register a tool to count the functions in a program
-     * @throws McpError if there's an error registering the tool
      */
-    private void registerFunctionCountTool() throws McpError {
+    private void registerFunctionCountTool() {
         // Define schema for the tool
         Map<String, Object> properties = new HashMap<>();
         properties.put("programPath", Map.of(
@@ -125,9 +123,8 @@ public class FunctionToolProvider extends AbstractToolProvider {
 
     /**
      * Register a tool to list functions from a program
-     * @throws McpError if there's an error registering the tool
      */
-    private void registerFunctionsTool() throws McpError {
+    private void registerFunctionsTool() {
         // Define schema for the tool
         Map<String, Object> properties = new HashMap<>();
         properties.put("programPath", Map.of(
@@ -214,9 +211,8 @@ public class FunctionToolProvider extends AbstractToolProvider {
 
     /**
      * Register a tool to get functions from a program with pagination, sorted by similarity to a given function name.
-     * @throws McpError if there's an error registering the tool
      */
-    private void registerFunctionsBySimilarityTool() throws McpError {
+    private void registerFunctionsBySimilarityTool() {
         // Define schema for the tool
         Map<String, Object> properties = new HashMap<>();
         properties.put("programPath", Map.of(
@@ -361,9 +357,8 @@ public class FunctionToolProvider extends AbstractToolProvider {
 
     /**
      * Register a tool to set or update a function prototype using C-style signatures
-     * @throws McpError if there's an error registering the tool
      */
-    private void registerSetFunctionPrototypeTool() throws McpError {
+    private void registerSetFunctionPrototypeTool() {
         // Define schema for the tool
         Map<String, Object> properties = new HashMap<>();
         properties.put("programPath", Map.of(

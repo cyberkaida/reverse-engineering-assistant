@@ -32,7 +32,6 @@ import ghidra.util.Msg;
 import ghidra.util.data.DataTypeParser;
 import ghidra.util.data.DataTypeParser.AllowedDataTypes;
 import io.modelcontextprotocol.server.McpSyncServer;
-import io.modelcontextprotocol.spec.McpError;
 import io.modelcontextprotocol.spec.McpSchema;
 import reva.tools.AbstractToolProvider;
 import reva.util.AddressUtil;
@@ -53,7 +52,7 @@ public class StructureToolProvider extends AbstractToolProvider {
     }
 
     @Override
-    public void registerTools() throws McpError {
+    public void registerTools() {
         registerParseCStructureTool();
         registerValidateCStructureTool();
         registerCreateStructureTool();
@@ -68,7 +67,7 @@ public class StructureToolProvider extends AbstractToolProvider {
     /**
      * Register tool to parse C-style structure definitions
      */
-    private void registerParseCStructureTool() throws McpError {
+    private void registerParseCStructureTool() {
         Map<String, Object> properties = new HashMap<>();
         properties.put("programPath", SchemaUtil.createStringProperty("Path of the program"));
         properties.put("cDefinition", SchemaUtil.createStringProperty("C-style structure definition"));
@@ -134,7 +133,7 @@ public class StructureToolProvider extends AbstractToolProvider {
     /**
      * Register tool to validate C-style structure definitions without creating them
      */
-    private void registerValidateCStructureTool() throws McpError {
+    private void registerValidateCStructureTool() {
         Map<String, Object> properties = new HashMap<>();
         properties.put("cDefinition", SchemaUtil.createStringProperty("C-style structure definition to validate"));
         
@@ -197,7 +196,7 @@ public class StructureToolProvider extends AbstractToolProvider {
     /**
      * Register tool to create an empty structure
      */
-    private void registerCreateStructureTool() throws McpError {
+    private void registerCreateStructureTool() {
         Map<String, Object> properties = new HashMap<>();
         properties.put("programPath", SchemaUtil.createStringProperty("Path of the program"));
         properties.put("name", SchemaUtil.createStringProperty("Name of the structure"));
@@ -275,7 +274,7 @@ public class StructureToolProvider extends AbstractToolProvider {
     /**
      * Register tool to add fields to structures
      */
-    private void registerAddStructureFieldTool() throws McpError {
+    private void registerAddStructureFieldTool() {
         Map<String, Object> properties = new HashMap<>();
         properties.put("programPath", SchemaUtil.createStringProperty("Path of the program"));
         properties.put("structureName", SchemaUtil.createStringProperty("Name of the structure"));
@@ -405,7 +404,7 @@ public class StructureToolProvider extends AbstractToolProvider {
     /**
      * Register tool to get structure information
      */
-    private void registerGetStructureInfoTool() throws McpError {
+    private void registerGetStructureInfoTool() {
         Map<String, Object> properties = new HashMap<>();
         properties.put("programPath", SchemaUtil.createStringProperty("Path of the program"));
         properties.put("structureName", SchemaUtil.createStringProperty("Name of the structure"));
@@ -449,7 +448,7 @@ public class StructureToolProvider extends AbstractToolProvider {
     /**
      * Register tool to list structures
      */
-    private void registerListStructuresTool() throws McpError {
+    private void registerListStructuresTool() {
         Map<String, Object> properties = new HashMap<>();
         properties.put("programPath", SchemaUtil.createStringProperty("Path of the program"));
         properties.put("category", SchemaUtil.createOptionalStringProperty("Filter by category path"));
@@ -518,7 +517,7 @@ public class StructureToolProvider extends AbstractToolProvider {
     /**
      * Register tool to apply structure at address
      */
-    private void registerApplyStructureTool() throws McpError {
+    private void registerApplyStructureTool() {
         Map<String, Object> properties = new HashMap<>();
         properties.put("programPath", SchemaUtil.createStringProperty("Path of the program"));
         properties.put("structureName", SchemaUtil.createStringProperty("Name of the structure"));
@@ -601,7 +600,7 @@ public class StructureToolProvider extends AbstractToolProvider {
     /**
      * Register tool to delete a structure
      */
-    private void registerDeleteStructureTool() throws McpError {
+    private void registerDeleteStructureTool() {
         Map<String, Object> properties = new HashMap<>();
         properties.put("programPath", SchemaUtil.createStringProperty("Path of the program"));
         properties.put("structureName", SchemaUtil.createStringProperty("Name of the structure to delete"));
@@ -659,7 +658,7 @@ public class StructureToolProvider extends AbstractToolProvider {
     /**
      * Register tool to parse C header files
      */
-    private void registerParseCHeaderTool() throws McpError {
+    private void registerParseCHeaderTool() {
         Map<String, Object> properties = new HashMap<>();
         properties.put("programPath", SchemaUtil.createStringProperty("Path of the program"));
         properties.put("headerContent", SchemaUtil.createStringProperty("C header file content"));

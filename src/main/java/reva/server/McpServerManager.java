@@ -30,8 +30,6 @@ import org.eclipse.jetty.servlet.ServletHolder;
 import java.util.EnumSet;
 import jakarta.servlet.DispatcherType;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-
 import generic.concurrent.GThreadPool;
 import ghidra.framework.plugintool.PluginTool;
 import ghidra.program.model.listing.Program;
@@ -40,7 +38,6 @@ import ghidra.util.Msg;
 import io.modelcontextprotocol.server.McpServer;
 import io.modelcontextprotocol.server.McpSyncServer;
 import io.modelcontextprotocol.server.transport.HttpServletStreamableServerTransportProvider;
-import io.modelcontextprotocol.spec.McpError;
 import io.modelcontextprotocol.spec.McpSchema;
 import reva.plugin.ConfigManager;
 import reva.plugin.ConfigChangeListener;
@@ -69,7 +66,6 @@ import reva.util.RevaInternalServiceRegistry;
  * the same server instance and coordinates program lifecycle events across tools.
  */
 public class McpServerManager implements RevaMcpService, ConfigChangeListener {
-    private static final ObjectMapper JSON = new ObjectMapper();
     private static final String MCP_MSG_ENDPOINT = "/mcp/message";
     private static final String MCP_SERVER_NAME = "ReVa";
     private static final String MCP_SERVER_VERSION = "1.0.0";
@@ -163,12 +159,9 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
         toolProviders.add(new BookmarkToolProvider(server));
 
         // Register all tools with the server
+        // Note: As of MCP SDK v0.14.0, tool registration is idempotent and replaces duplicates
         for (ToolProvider provider : toolProviders) {
-            try {
-                provider.registerTools();
-            } catch (McpError e) {
-                Msg.error(this, "Failed to register tools for provider: " + provider.getClass().getSimpleName(), e);
-            }
+            provider.registerTools();
         }
     }
 
@@ -403,8 +396,8 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
         String baseUrl = "http://" + serverHost + ":" + serverPort;
 
         // Create new transport provider with updated configuration
+        // Note: As of MCP SDK v0.14.0, the builder uses McpJsonMapper.getDefault() automatically
         currentTransportProvider = HttpServletStreamableServerTransportProvider.builder()
-            .objectMapper(JSON)
             .mcpEndpoint(MCP_MSG_ENDPOINT)
             .keepAliveInterval(java.time.Duration.ofSeconds(30))
             .build();

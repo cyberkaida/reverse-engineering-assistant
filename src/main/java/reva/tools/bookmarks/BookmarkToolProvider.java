@@ -28,7 +28,6 @@ import ghidra.program.model.listing.Bookmark;
 import ghidra.program.model.listing.BookmarkManager;
 import ghidra.program.model.listing.Program;
 import io.modelcontextprotocol.server.McpSyncServer;
-import io.modelcontextprotocol.spec.McpError;
 import io.modelcontextprotocol.spec.McpSchema;
 import reva.tools.AbstractToolProvider;
 import reva.util.SchemaUtil;
@@ -48,7 +47,7 @@ public class BookmarkToolProvider extends AbstractToolProvider {
     }
 
     @Override
-    public void registerTools() throws McpError {
+    public void registerTools() {
         registerSetBookmarkTool();
         registerGetBookmarksTool();
         registerRemoveBookmarkTool();
@@ -58,9 +57,8 @@ public class BookmarkToolProvider extends AbstractToolProvider {
 
     /**
      * Register a tool to set or update a bookmark at an address
-     * @throws McpError if there's an error registering the tool
      */
-    private void registerSetBookmarkTool() throws McpError {
+    private void registerSetBookmarkTool() {
         Map<String, Object> properties = new HashMap<>();
         properties.put("programPath", SchemaUtil.stringProperty("Path to the program in the Ghidra Project"));
         properties.put("addressOrSymbol", SchemaUtil.stringProperty("Address or symbol name where to set the bookmark"));
@@ -122,9 +120,8 @@ public class BookmarkToolProvider extends AbstractToolProvider {
 
     /**
      * Register a tool to get bookmarks at an address or range
-     * @throws McpError if there's an error registering the tool
      */
-    private void registerGetBookmarksTool() throws McpError {
+    private void registerGetBookmarksTool() {
         Map<String, Object> properties = new HashMap<>();
         properties.put("programPath", SchemaUtil.stringProperty("Path to the program in the Ghidra Project"));
         properties.put("addressOrSymbol", SchemaUtil.stringProperty("Address or symbol name to get bookmarks from (optional if using addressRange)"));
@@ -222,9 +219,8 @@ public class BookmarkToolProvider extends AbstractToolProvider {
 
     /**
      * Register a tool to remove a bookmark
-     * @throws McpError if there's an error registering the tool
      */
-    private void registerRemoveBookmarkTool() throws McpError {
+    private void registerRemoveBookmarkTool() {
         Map<String, Object> properties = new HashMap<>();
         properties.put("programPath", SchemaUtil.stringProperty("Path to the program in the Ghidra Project"));
         properties.put("addressOrSymbol", SchemaUtil.stringProperty("Address or symbol name of the bookmark"));
@@ -281,9 +277,8 @@ public class BookmarkToolProvider extends AbstractToolProvider {
 
     /**
      * Register a tool to search bookmarks
-     * @throws McpError if there's an error registering the tool
      */
-    private void registerSearchBookmarksTool() throws McpError {
+    private void registerSearchBookmarksTool() {
         Map<String, Object> properties = new HashMap<>();
         properties.put("programPath", SchemaUtil.stringProperty("Path to the program in the Ghidra Project"));
         properties.put("searchText", SchemaUtil.stringProperty("Text to search for in bookmark comments (optional)"));
@@ -387,9 +382,8 @@ public class BookmarkToolProvider extends AbstractToolProvider {
 
     /**
      * Register a tool to list bookmark categories for a type
-     * @throws McpError if there's an error registering the tool
      */
-    private void registerListBookmarkCategoriesTool() throws McpError {
+    private void registerListBookmarkCategoriesTool() {
         Map<String, Object> properties = new HashMap<>();
         properties.put("programPath", SchemaUtil.stringProperty("Path to the program in the Ghidra Project"));
         properties.put("type", SchemaUtil.stringProperty("Bookmark type to get categories for"));

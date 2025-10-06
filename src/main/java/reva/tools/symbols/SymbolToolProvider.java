@@ -26,7 +26,6 @@ import ghidra.program.model.symbol.Symbol;
 import ghidra.program.model.symbol.SymbolIterator;
 import ghidra.program.model.symbol.SymbolTable;
 import ghidra.program.model.symbol.SymbolType;
-import io.modelcontextprotocol.spec.McpError;
 import io.modelcontextprotocol.server.McpSyncServer;
 import io.modelcontextprotocol.spec.McpSchema;
 import reva.tools.AbstractToolProvider;
@@ -45,16 +44,15 @@ public class SymbolToolProvider extends AbstractToolProvider {
     }
 
     @Override
-    public void registerTools() throws McpError {
+    public void registerTools() {
         registerSymbolsCountTool();
         registerSymbolsTool();
     }
 
     /**
      * Register a tool to get the count of symbols in a program
-     * @throws McpError if there's an error registering the tool
      */
-    private void registerSymbolsCountTool() throws McpError {
+    private void registerSymbolsCountTool() {
         // Define schema for the tool
         Map<String, Object> properties = new HashMap<>();
         properties.put("programPath", Map.of(
@@ -117,9 +115,8 @@ public class SymbolToolProvider extends AbstractToolProvider {
 
     /**
      * Register a tool to get symbols from a program with pagination
-     * @throws McpError if there's an error registering the tool
      */
-    private void registerSymbolsTool() throws McpError {
+    private void registerSymbolsTool() {
         // Define schema for the tool
         Map<String, Object> properties = new HashMap<>();
         properties.put("programPath", Map.of(

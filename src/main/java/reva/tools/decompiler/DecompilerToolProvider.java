@@ -58,7 +58,6 @@ import ghidra.util.exception.CancelledException;
 import ghidra.util.exception.DuplicateNameException;
 import ghidra.util.exception.InvalidInputException;
 import ghidra.util.Msg;
-import io.modelcontextprotocol.spec.McpError;
 import io.modelcontextprotocol.server.McpSyncServer;
 import io.modelcontextprotocol.spec.McpSchema;
 import reva.plugin.ConfigManager;
@@ -86,7 +85,7 @@ public class DecompilerToolProvider extends AbstractToolProvider {
     }
 
     @Override
-    public void registerTools() throws McpError {
+    public void registerTools() {
         registerGetDecompilationTool();
         registerSearchDecompilationTool();
         registerRenameVariablesTool();
@@ -114,9 +113,8 @@ public class DecompilerToolProvider extends AbstractToolProvider {
 
     /**
      * Register a tool to get decompiled code for a function with line range support (Claude Code style)
-     * @throws McpError if there's an error registering the tool
      */
-    private void registerGetDecompilationTool() throws McpError {
+    private void registerGetDecompilationTool() {
         // Define schema for the tool
         Map<String, Object> properties = new HashMap<>();
         properties.put("programPath", Map.of(
@@ -325,9 +323,8 @@ public class DecompilerToolProvider extends AbstractToolProvider {
 
     /**
      * Register a tool to search decompilation across all functions
-     * @throws McpError if there's an error registering the tool
      */
-    private void registerSearchDecompilationTool() throws McpError {
+    private void registerSearchDecompilationTool() {
         // Define schema for the tool
         Map<String, Object> properties = new HashMap<>();
         properties.put("programPath", Map.of(
@@ -405,9 +402,8 @@ public class DecompilerToolProvider extends AbstractToolProvider {
 
     /**
      * Register a tool to rename variables in a decompiled function
-     * @throws McpError if there's an error registering the tool
      */
-    private void registerRenameVariablesTool() throws McpError {
+    private void registerRenameVariablesTool() {
         // Define schema for the tool
         Map<String, Object> properties = new HashMap<>();
         properties.put("programPath", Map.of(
@@ -603,9 +599,8 @@ public class DecompilerToolProvider extends AbstractToolProvider {
 
     /**
      * Register a tool to change variable data types in a decompiled function
-     * @throws McpError if there's an error registering the tool
      */
-    private void registerChangeVariableDataTypesTool() throws McpError {
+    private void registerChangeVariableDataTypesTool() {
         // Define schema for the tool
         Map<String, Object> properties = new HashMap<>();
         properties.put("programPath", Map.of(
@@ -1289,9 +1284,8 @@ public class DecompilerToolProvider extends AbstractToolProvider {
 
     /**
      * Register a tool to set a comment from decompilation context
-     * @throws McpError if there's an error registering the tool
      */
-    private void registerSetDecompilationCommentTool() throws McpError {
+    private void registerSetDecompilationCommentTool() {
         // Define schema for the tool
         Map<String, Object> properties = new HashMap<>();
         properties.put("programPath", Map.of(

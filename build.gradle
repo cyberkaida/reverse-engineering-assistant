@@ -79,8 +79,8 @@ sourceSets {
 
 configurations {
 	integrationTestImplementation.extendsFrom testImplementation
-	
-	// Force Jackson 2.17.0 to be compatible with MCP SDK v0.11.1
+
+	// Force Jackson 2.19.2 to be compatible with MCP SDK v0.14.0
 	all {
 		resolutionStrategy {
 			force 'com.fasterxml.jackson.core:jackson-core:2.19.2'
@@ -108,16 +108,17 @@ repositories {
 dependencies {
 	// Any external dependencies added here will automatically be copied to the lib/ directory when
 	// this extension is built.
-	implementation platform("io.modelcontextprotocol.sdk:mcp-bom:0.12.1")
+	implementation platform("io.modelcontextprotocol.sdk:mcp-bom:0.14.0")
 	implementation "io.modelcontextprotocol.sdk:mcp"
+	implementation "io.modelcontextprotocol.sdk:mcp-json-jackson2"
 	implementation "jakarta.servlet:jakarta.servlet-api:6.1.0"
 	// Add Jetty for embedded servlet support
 	implementation "org.eclipse.jetty:jetty-server:11.0.26"
 	implementation "org.eclipse.jetty:jetty-servlet:11.0.26"
-	
-	// Force Jackson 2.17.0 to be compatible with MCP SDK v0.11.1
+
+	// Force Jackson 2.19.2 to be compatible with MCP SDK v0.14.0
 	implementation "com.fasterxml.jackson.core:jackson-core:2.19.2"
-	implementation "com.fasterxml.jackson.core:jackson-databind:2.19.2" 
+	implementation "com.fasterxml.jackson.core:jackson-databind:2.19.2"
 	implementation "com.fasterxml.jackson.core:jackson-annotations:2.19.2"
 
 	// Testing dependencies

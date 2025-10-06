@@ -25,7 +25,6 @@ import ghidra.program.model.listing.Program;
 import ghidra.program.model.mem.Memory;
 import ghidra.program.model.mem.MemoryBlock;
 import io.modelcontextprotocol.server.McpSyncServer;
-import io.modelcontextprotocol.spec.McpError;
 import io.modelcontextprotocol.spec.McpSchema;
 import reva.tools.AbstractToolProvider;
 import reva.util.MemoryUtil;
@@ -46,16 +45,15 @@ public class MemoryToolProvider extends AbstractToolProvider {
     }
 
     @Override
-    public void registerTools() throws McpError {
+    public void registerTools() {
         registerMemoryBlocksTool();
         registerReadMemoryTool();
     }
 
     /**
      * Register a tool to list memory blocks from a program
-     * @throws McpError if there's an error registering the tool
      */
-    private void registerMemoryBlocksTool() throws McpError {
+    private void registerMemoryBlocksTool() {
         // Define schema for the tool
         Map<String, Object> properties = new HashMap<>();
         properties.put("programPath", SchemaUtil.stringProperty("Path to the program in the Ghidra Project"));
@@ -103,9 +101,8 @@ public class MemoryToolProvider extends AbstractToolProvider {
 
     /**
      * Register a tool to read memory content from a program
-     * @throws McpError if there's an error registering the tool
      */
-    private void registerReadMemoryTool() throws McpError {
+    private void registerReadMemoryTool() {
         // Define schema for the tool
         Map<String, Object> properties = new HashMap<>();
         properties.put("programPath", SchemaUtil.stringProperty("Path to the program in the Ghidra Project"));

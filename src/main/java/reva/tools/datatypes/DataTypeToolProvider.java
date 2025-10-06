@@ -28,7 +28,6 @@ import ghidra.program.model.data.DataTypeManager;
 import ghidra.program.model.listing.Program;
 import ghidra.util.Msg;
 import io.modelcontextprotocol.server.McpSyncServer;
-import io.modelcontextprotocol.spec.McpError;
 import io.modelcontextprotocol.spec.McpSchema;
 import reva.plugin.RevaProgramManager;
 import reva.tools.AbstractToolProvider;
@@ -49,7 +48,7 @@ public class DataTypeToolProvider extends AbstractToolProvider {
     }
 
     @Override
-    public void registerTools() throws McpError {
+    public void registerTools() {
         registerGetDataTypeArchivesTool();
         registerGetDataTypesTool();
         registerGetDataTypeByStringTool();
@@ -57,9 +56,8 @@ public class DataTypeToolProvider extends AbstractToolProvider {
 
     /**
      * Register a tool to get data type archives for a specific program
-     * @throws McpError if there's an error registering the tool
      */
-    private void registerGetDataTypeArchivesTool() throws McpError {
+    private void registerGetDataTypeArchivesTool() {
         // Define schema for the tool
         Map<String, Object> properties = new HashMap<>();
         properties.put("programPath", Map.of(
@@ -177,9 +175,8 @@ public class DataTypeToolProvider extends AbstractToolProvider {
 
     /**
      * Register a tool to get data types from an archive
-     * @throws McpError if there's an error registering the tool
      */
-    private void registerGetDataTypesTool() throws McpError {
+    private void registerGetDataTypesTool() {
         // Define schema for the tool
         Map<String, Object> properties = new HashMap<>();
         properties.put("programPath", Map.of(
@@ -305,9 +302,8 @@ public class DataTypeToolProvider extends AbstractToolProvider {
 
     /**
      * Register a tool to get a data type by string representation (e.g., "char**")
-     * @throws McpError if there's an error registering the tool
      */
-    private void registerGetDataTypeByStringTool() throws McpError {
+    private void registerGetDataTypeByStringTool() {
         // Define schema for the tool
         Map<String, Object> properties = new HashMap<>();
         properties.put("programPath", Map.of(

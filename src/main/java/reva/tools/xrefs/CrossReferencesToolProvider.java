@@ -30,7 +30,6 @@ import ghidra.program.model.symbol.ReferenceManager;
 import ghidra.program.model.symbol.Symbol;
 import ghidra.program.model.symbol.SymbolTable;
 import io.modelcontextprotocol.server.McpSyncServer;
-import io.modelcontextprotocol.spec.McpError;
 import io.modelcontextprotocol.spec.McpSchema;
 import reva.tools.AbstractToolProvider;
 import reva.util.AddressUtil;
@@ -52,15 +51,14 @@ public class CrossReferencesToolProvider extends AbstractToolProvider {
     }
 
     @Override
-    public void registerTools() throws McpError {
+    public void registerTools() {
         registerCrossReferencesTool();
     }
 
     /**
      * Register the unified cross references tool
-     * @throws McpError if there's an error registering the tool
      */
-    private void registerCrossReferencesTool() throws McpError {
+    private void registerCrossReferencesTool() {
         // Define schema for the tool
         Map<String, Object> properties = new HashMap<>();
         properties.put("programPath", Map.of(

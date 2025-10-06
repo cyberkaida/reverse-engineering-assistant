@@ -30,7 +30,6 @@ import ghidra.program.model.listing.Program;
 import ghidra.program.model.listing.Listing;
 import ghidra.program.model.listing.CodeUnitIterator;
 import io.modelcontextprotocol.server.McpSyncServer;
-import io.modelcontextprotocol.spec.McpError;
 import io.modelcontextprotocol.spec.McpSchema;
 import reva.tools.AbstractToolProvider;
 import reva.util.AddressUtil;
@@ -59,7 +58,7 @@ public class CommentToolProvider extends AbstractToolProvider {
     }
 
     @Override
-    public void registerTools() throws McpError {
+    public void registerTools() {
         registerSetCommentTool();
         registerGetCommentsTool();
         registerRemoveCommentTool();
@@ -68,9 +67,8 @@ public class CommentToolProvider extends AbstractToolProvider {
 
     /**
      * Register a tool to set or update a comment at an address
-     * @throws McpError if there's an error registering the tool
      */
-    private void registerSetCommentTool() throws McpError {
+    private void registerSetCommentTool() {
         Map<String, Object> properties = new HashMap<>();
         properties.put("programPath", SchemaUtil.stringProperty("Path to the program in the Ghidra Project"));
         properties.put("addressOrSymbol", SchemaUtil.stringProperty("Address or symbol name where to set the comment"));
@@ -127,9 +125,8 @@ public class CommentToolProvider extends AbstractToolProvider {
 
     /**
      * Register a tool to get comments at an address or range
-     * @throws McpError if there's an error registering the tool
      */
-    private void registerGetCommentsTool() throws McpError {
+    private void registerGetCommentsTool() {
         Map<String, Object> properties = new HashMap<>();
         properties.put("programPath", SchemaUtil.stringProperty("Path to the program in the Ghidra Project"));
         properties.put("addressOrSymbol", SchemaUtil.stringProperty("Address or symbol name to get comments from (optional if using addressRange)"));
@@ -231,9 +228,8 @@ public class CommentToolProvider extends AbstractToolProvider {
 
     /**
      * Register a tool to remove a comment at an address
-     * @throws McpError if there's an error registering the tool
      */
-    private void registerRemoveCommentTool() throws McpError {
+    private void registerRemoveCommentTool() {
         Map<String, Object> properties = new HashMap<>();
         properties.put("programPath", SchemaUtil.stringProperty("Path to the program in the Ghidra Project"));
         properties.put("addressOrSymbol", SchemaUtil.stringProperty("Address or symbol name where to remove the comment"));
@@ -287,9 +283,8 @@ public class CommentToolProvider extends AbstractToolProvider {
 
     /**
      * Register a tool to search for comments containing text
-     * @throws McpError if there's an error registering the tool
      */
-    private void registerSearchCommentsTool() throws McpError {
+    private void registerSearchCommentsTool() {
         Map<String, Object> properties = new HashMap<>();
         properties.put("programPath", SchemaUtil.stringProperty("Path to the program in the Ghidra Project"));
         properties.put("searchText", SchemaUtil.stringProperty("Text to search for in comments"));

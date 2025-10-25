@@ -10,10 +10,11 @@
   "hooks": {
     "SessionStart": [
       {
+        "matcher": "",
         "hooks": [
           {
             "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/setup-environment.sh"
+            "command": ".claude/setup-environment.sh"
           }
         ]
       }

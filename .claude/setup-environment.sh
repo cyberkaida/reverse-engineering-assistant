@@ -21,7 +21,7 @@ fi
 
 echo "Installing required packages..."
 apt-get update -qq
-apt-get install -y -qq wget unzip openjdk-21-jdk curl > /dev/null 2>&1
+apt-get install -y -qq wget unzip openjdk-21-jdk curl jq > /dev/null 2>&1
 
 # Install Gradle 8.14
 if [ ! -d "/opt/gradle" ]; then
@@ -37,26 +37,33 @@ export PATH="/opt/gradle/bin:$PATH"
 if [ ! -d "/opt/ghidra" ]; then
     echo "Installing Ghidra (latest)..."
 
-    # Get latest Ghidra release info
-    GHIDRA_VERSION=$(curl -s https://api.github.com/repos/NationalSecurityAgency/ghidra/releases/latest | grep '"tag_name":' | sed -E 's/.*"Ghidra_([^"]+)_build".*/\1/')
+    # Get latest Ghidra release info using jq
+    RELEASE_JSON=$(curl -s https://api.github.com/repos/NationalSecurityAgency/ghidra/releases/latest)
+    GHIDRA_VERSION=$(echo "$RELEASE_JSON" | jq -r '.tag_name' | sed -E 's/Ghidra_([^_]+)_build/\1/')
 
-    if [ -z "$GHIDRA_VERSION" ]; then
+    # Get the actual download URL from the assets
+    GHIDRA_URL=$(echo "$RELEASE_JSON" | jq -r '.assets[] | select(.name | endswith(".zip") and contains("PUBLIC")) | .browser_download_url' | head -n 1)
+
+    if [ -z "$GHIDRA_VERSION" ] || [ -z "$GHIDRA_URL" ]; then
         echo "Failed to detect latest Ghidra version, using 11.4 as fallback"
         GHIDRA_VERSION="11.4"
+        GHIDRA_URL="https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_11.4_build/ghidra_11.4_PUBLIC_20241105.zip"
     fi
 
-    echo "Downloading Ghidra ${GHIDRA_VERSION}..."
-    GHIDRA_URL="https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_${GHIDRA_VERSION}_build/ghidra_${GHIDRA_VERSION}_PUBLIC_$(date +%Y%m%d).zip"
+    echo "Downloading Ghidra ${GHIDRA_VERSION} from ${GHIDRA_URL}..."
 
-    # Try to download, if fails use a known good version
+    # Download Ghidra
     if ! wget -q "$GHIDRA_URL" -O /tmp/ghidra.zip 2>/dev/null; then
-        echo "Download failed, trying Ghidra 11.4..."
-        wget -q "https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_11.4_build/ghidra_11.4_PUBLIC_20241105.zip" -O /tmp/ghidra.zip
+        echo "Download failed, trying Ghidra 11.4 fallback..."
         GHIDRA_VERSION="11.4"
+        wget -q "https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_11.4_build/ghidra_11.4_PUBLIC_20241105.zip" -O /tmp/ghidra.zip
     fi
 
+    # Extract and move to /opt/ghidra
     unzip -q /tmp/ghidra.zip -d /opt/
-    mv /opt/ghidra_${GHIDRA_VERSION}_PUBLIC /opt/ghidra
+    # Find the extracted directory (it will be something like ghidra_11.4_PUBLIC)
+    GHIDRA_DIR=$(find /opt -maxdepth 1 -type d -name "ghidra_*_PUBLIC" | head -n 1)
+    mv "$GHIDRA_DIR" /opt/ghidra
     rm /tmp/ghidra.zip
 fi
 

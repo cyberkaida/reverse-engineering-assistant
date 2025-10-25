@@ -13,3 +13,6 @@ __pycache__
 
 # Java heap dump files
 *.hprof
+# GitHub Actions workflow that requires manual setup by maintainer
+# See WORKFLOW_NOTE.md and WORKFLOW_SETUP.md for details
+.github/workflows/headless-tests.yml

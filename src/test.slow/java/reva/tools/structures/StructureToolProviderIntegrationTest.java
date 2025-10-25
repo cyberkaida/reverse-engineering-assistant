@@ -433,6 +433,75 @@ public class StructureToolProviderIntegrationTest extends RevaIntegrationTestBas
         });
     }
 
+    @Test
+    public void testGetStructureInfoCondendesUndefinedBytes() throws Exception {
+        withMcpClient(createMcpTransport(), client -> {
+            client.initialize();
+
+            // Create a structure with a specific size that will have many undefined bytes
+            Map<String, Object> createArgs = new HashMap<>();
+            createArgs.put("programPath", programPath);
+            createArgs.put("name", "LargeStruct");
+            createArgs.put("size", 100); // 100 bytes
+
+            CallToolResult createResult = client.callTool(new CallToolRequest("create-structure", createArgs));
+            assertMcpResultNotError(createResult, "Create structure should not error");
+
+            // Add just a few defined fields, leaving many undefined bytes
+            Map<String, Object> addArgs1 = new HashMap<>();
+            addArgs1.put("programPath", programPath);
+            addArgs1.put("structureName", "LargeStruct");
+            addArgs1.put("fieldName", "firstField");
+            addArgs1.put("dataType", "int");
+            addArgs1.put("offset", 0);
+
+            client.callTool(new CallToolRequest("add-structure-field", addArgs1));
+
+            Map<String, Object> addArgs2 = new HashMap<>();
+            addArgs2.put("programPath", programPath);
+            addArgs2.put("structureName", "LargeStruct");
+            addArgs2.put("fieldName", "lastField");
+            addArgs2.put("dataType", "int");
+            addArgs2.put("offset", 96); // Near the end
+
+            client.callTool(new CallToolRequest("add-structure-field", addArgs2));
+
+            // Get structure info
+            Map<String, Object> infoArgs = new HashMap<>();
+            infoArgs.put("programPath", programPath);
+            infoArgs.put("structureName", "LargeStruct");
+
+            CallToolResult result = client.callTool(new CallToolRequest("get-structure-info", infoArgs));
+
+            assertNotNull("Result should not be null", result);
+            assertMcpResultNotError(result, "Result should not be an error");
+
+            TextContent content = (TextContent) result.content().get(0);
+            JsonNode json = parseJsonContent(content.text());
+
+            JsonNode fields = json.get("fields");
+            assertNotNull("Should have fields", fields);
+
+            // Verify that undefined bytes were condensed
+            // Should have: firstField, condensed undefined range, lastField
+            // Instead of 100+ individual undefined byte fields
+            assertTrue("Should have fewer than 10 fields due to condensing", fields.size() < 10);
+
+            // Check for condensed field
+            boolean foundCondensed = false;
+            for (JsonNode field : fields) {
+                if (field.has("isCondensed") && field.get("isCondensed").asBoolean()) {
+                    foundCondensed = true;
+                    assertEquals("<undefined>", field.get("fieldName").asText());
+                    assertTrue("Condensed range should have componentCount > 1",
+                        field.get("componentCount").asInt() > 1);
+                }
+            }
+
+            assertTrue("Should have at least one condensed undefined range", foundCondensed);
+        });
+    }
+
     /**
      * Helper method to find a data type by name in all categories
      */

@@ -803,45 +803,111 @@ public class StructureToolProvider extends AbstractToolProvider {
      */
     private Map<String, Object> createDetailedStructureInfo(Composite composite) {
         Map<String, Object> info = createStructureInfo(composite);
-        
-        // Add field information
+
+        // Add field information with undefined byte condensing
         List<Map<String, Object>> fields = new ArrayList<>();
-        for (int i = 0; i < composite.getNumComponents(); i++) {
+
+        int i = 0;
+        while (i < composite.getNumComponents()) {
             DataTypeComponent comp = composite.getComponent(i);
-            Map<String, Object> fieldInfo = new HashMap<>();
-            
-            fieldInfo.put("ordinal", comp.getOrdinal());
-            fieldInfo.put("offset", comp.getOffset());
-            fieldInfo.put("length", comp.getLength());
-            fieldInfo.put("fieldName", comp.getFieldName());
-            fieldInfo.put("comment", comp.getComment());
-            
-            DataType fieldType = comp.getDataType();
-            fieldInfo.put("dataType", fieldType.getDisplayName());
-            fieldInfo.put("dataTypeSize", fieldType.getLength());
-            
-            // Check if it's a bitfield
-            if (comp.isBitFieldComponent()) {
-                BitFieldDataType bitfield = (BitFieldDataType) fieldType;
-                fieldInfo.put("isBitfield", true);
-                fieldInfo.put("bitSize", bitfield.getBitSize());
-                fieldInfo.put("bitOffset", bitfield.getBitOffset());
-                fieldInfo.put("baseDataType", bitfield.getBaseDataType().getDisplayName());
-            } else {
+
+            // Check if this is an undefined byte that should be condensed
+            if (isUndefinedField(comp)) {
+                // Count consecutive undefined bytes
+                int startOffset = comp.getOffset();
+                int startOrdinal = comp.getOrdinal();
+                int totalLength = 0;
+                int count = 0;
+
+                while (i < composite.getNumComponents()) {
+                    DataTypeComponent nextComp = composite.getComponent(i);
+                    if (!isUndefinedField(nextComp)) {
+                        break;
+                    }
+                    totalLength += nextComp.getLength();
+                    count++;
+                    i++;
+                }
+
+                // Create a condensed entry for the undefined range
+                Map<String, Object> fieldInfo = new HashMap<>();
+                fieldInfo.put("ordinal", startOrdinal);
+                fieldInfo.put("offset", startOffset);
+                fieldInfo.put("length", totalLength);
+                fieldInfo.put("fieldName", "<undefined>");
+                fieldInfo.put("dataType", "undefined");
+                fieldInfo.put("dataTypeSize", totalLength);
                 fieldInfo.put("isBitfield", false);
+                fieldInfo.put("isCondensed", true);
+                fieldInfo.put("componentCount", count);
+
+                fields.add(fieldInfo);
+            } else {
+                // Regular field - add as-is
+                Map<String, Object> fieldInfo = new HashMap<>();
+
+                fieldInfo.put("ordinal", comp.getOrdinal());
+                fieldInfo.put("offset", comp.getOffset());
+                fieldInfo.put("length", comp.getLength());
+                fieldInfo.put("fieldName", comp.getFieldName());
+                fieldInfo.put("comment", comp.getComment());
+
+                DataType fieldType = comp.getDataType();
+                fieldInfo.put("dataType", fieldType.getDisplayName());
+                fieldInfo.put("dataTypeSize", fieldType.getLength());
+
+                // Check if it's a bitfield
+                if (comp.isBitFieldComponent()) {
+                    BitFieldDataType bitfield = (BitFieldDataType) fieldType;
+                    fieldInfo.put("isBitfield", true);
+                    fieldInfo.put("bitSize", bitfield.getBitSize());
+                    fieldInfo.put("bitOffset", bitfield.getBitOffset());
+                    fieldInfo.put("baseDataType", bitfield.getBaseDataType().getDisplayName());
+                } else {
+                    fieldInfo.put("isBitfield", false);
+                }
+
+                fieldInfo.put("isCondensed", false);
+
+                fields.add(fieldInfo);
+                i++;
             }
-            
-            fields.add(fieldInfo);
         }
-        
+
         info.put("fields", fields);
-        
+
         // Add C representation
         if (composite instanceof Structure) {
             info.put("cRepresentation", generateCRepresentation((Structure) composite));
         }
-        
+
         return info;
+    }
+
+    /**
+     * Check if a field is an undefined/default field that should be condensed
+     */
+    private boolean isUndefinedField(DataTypeComponent comp) {
+        // Check if the field name is null or empty (undefined)
+        String fieldName = comp.getFieldName();
+        if (fieldName == null || fieldName.isEmpty()) {
+            return true;
+        }
+
+        // Check if it's a Ghidra default field name like "field_0x0", "field_0x1", etc.
+        // These are generated for undefined structure areas
+        if (fieldName.startsWith("field_0x") || fieldName.startsWith("field0x")) {
+            return true;
+        }
+
+        // Check if the datatype is "undefined" or "undefined1"
+        DataType fieldType = comp.getDataType();
+        String typeName = fieldType.getName();
+        if (typeName != null && (typeName.equals("undefined") || typeName.startsWith("undefined"))) {
+            return true;
+        }
+
+        return false;
     }
 
     /**

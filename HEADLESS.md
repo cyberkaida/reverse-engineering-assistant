@@ -482,13 +482,117 @@ services:
       --project-name MyProject
 ```
 
+## Testing
+
+ReVa includes comprehensive tests for headless mode to ensure reliability and correctness.
+
+### Running Tests
+
+#### Quick Smoke Test
+
+Verify basic functionality in ~30 seconds:
+
+```bash
+python3 tests/smoke_test.py
+```
+
+This tests:
+- Server startup
+- MCP endpoint accessibility
+- Tool listing
+- Basic tool invocation
+- Graceful shutdown
+
+#### Java Integration Tests
+
+Test Java components:
+
+```bash
+# Test headless launcher
+gradle test --tests "*HeadlessRevaLauncherIntegrationTest"
+
+# Test all headless components
+gradle test --tests "*Headless*"
+```
+
+#### Python End-to-End Tests
+
+Test the complete stack including MCP protocol:
+
+```bash
+# Using pytest
+pytest tests/test_headless_e2e.py -v
+
+# Using unittest
+python3 tests/test_headless_e2e.py
+```
+
+#### All Tests
+
+Run the complete test suite:
+
+```bash
+# Install test dependencies
+pip install -r requirements-test.txt
+
+# Run all tests
+pytest tests/ -v
+
+# Run Java tests
+gradle test --tests "*Headless*"
+```
+
+### Test Coverage
+
+The test suite covers:
+
+1. **Server Lifecycle**
+   - Startup and initialization
+   - Graceful shutdown
+   - Restart capability
+   - Error handling
+
+2. **MCP Protocol**
+   - Tool listing
+   - Resource listing
+   - Tool invocation
+   - Error responses
+
+3. **Program Management**
+   - Program registration
+   - Multiple programs
+   - Program unregistration
+
+4. **Performance**
+   - Startup time
+   - Response time
+   - Resource usage
+
+5. **Error Handling**
+   - Invalid requests
+   - Port conflicts
+   - Malformed data
+
+### Continuous Integration
+
+Tests run automatically on GitHub Actions for every push and pull request. See `.github/workflows/headless-tests.yml` for configuration.
+
+View test results: https://github.com/cyberkaida/reverse-engineering-assistant/actions
+
 ## References
 
 - [PyGhidra Documentation](https://github.com/NationalSecurityAgency/ghidra/tree/master/Ghidra/Features/PyGhidra)
 - [Ghidra Headless Mode](https://ghidra-sre.org/GhidraHeadless.html)
 - [MCP Protocol Specification](https://modelcontextprotocol.io/)
+- [Test Documentation](tests/README.md)
 
 ## Contributing
 
 If you encounter issues with headless mode, please report them at:
 https://github.com/cyberkaida/reverse-engineering-assistant/issues
+
+When contributing:
+1. Add tests for new features
+2. Ensure smoke test passes
+3. Update documentation
+4. Follow existing code patterns

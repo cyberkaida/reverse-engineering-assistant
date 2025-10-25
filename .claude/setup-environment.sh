@@ -21,7 +21,7 @@ fi
 
 echo "Installing required packages..."
 apt-get update -qq
-apt-get install -y -qq wget unzip openjdk-21-jdk curl jq > /dev/null 2>&1
+apt-get install -y -qq wget unzip openjdk-21-jdk curl jq python3 python3-pip python3-venv > /dev/null 2>&1
 
 # Install Gradle 8.14
 if [ ! -d "/opt/gradle" ]; then
@@ -69,10 +69,15 @@ fi
 
 export GHIDRA_INSTALL_DIR="/opt/ghidra"
 
+# Install Python dependencies for headless mode
+echo "Installing Python dependencies..."
+pip3 install --quiet pyghidra 2>/dev/null || echo "Note: pyghidra installation may require additional setup"
+
 # Verify installations
 echo "Verifying installations..."
 java -version
 gradle --version
+python3 --version
 echo "GHIDRA_INSTALL_DIR=$GHIDRA_INSTALL_DIR"
 ls -la "$GHIDRA_INSTALL_DIR" | head -n 5
 
@@ -92,3 +97,7 @@ echo "  GHIDRA_INSTALL_DIR=/opt/ghidra"
 echo "  PATH includes /opt/gradle/bin"
 echo ""
 echo "Ready to build with: gradle buildExtension"
+echo ""
+echo "For headless mode:"
+echo "  1. Build the extension: gradle buildExtension"
+echo "  2. Run headless: python3 reva_headless.py"

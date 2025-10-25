@@ -1,0 +1,5 @@
+# Python dependencies for ReVa headless mode
+# Install with: pip install -r requirements-headless.txt
+
+# PyGhidra - Python bindings for Ghidra in headless mode
+pyghidra>=1.0.0

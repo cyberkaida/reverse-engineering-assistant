@@ -69,6 +69,31 @@ After installing the extension you need to activate it in two places:
 1. In the Project view, open the File menu and select "Configure". Click the "Configure all plugins" button on the top right of the menu (it looks like a plug). Check the "ReVa Application Plugin"
 2. In the Code Browser tool (Click the Dragon icon or open a File), open the File menu and select "Configure". Click the "Configure all plugins" button on the top right of the menu (it looks like a plug). Check the "ReVa Plugin". Then Press File and select "Save Tool". This will enable ReVa by default.
 
+## Headless Mode
+
+ReVa can also run in **headless mode** without Ghidra's GUI using [pyghidra](https://github.com/NationalSecurityAgency/ghidra/tree/master/Ghidra/Features/PyGhidra). This is ideal for:
+
+- Automated reverse engineering workflows
+- CI/CD pipelines
+- Docker containers
+- Remote server deployments
+
+### Quick Start (Headless)
+
+```bash
+# Install Python dependencies
+pip install pyghidra
+
+# Build the extension
+export GHIDRA_INSTALL_DIR=/path/to/ghidra
+gradle buildExtension
+
+# Run in headless mode
+python3 reva_headless.py
+```
+
+For complete headless mode documentation, see [HEADLESS.md](HEADLESS.md).
+
 ## MCP configuration
 
 ReVa uses the [Model Context Protocol (MCP)](https://modelcontextprotocol.io/faqs) to communicate with the LLM.

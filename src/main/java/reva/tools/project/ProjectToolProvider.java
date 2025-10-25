@@ -577,6 +577,50 @@ public class ProjectToolProvider extends AbstractToolProvider {
     }
 
     /**
+     * Creates a folder path recursively in the project, similar to 'mkdir -p'.
+     * If intermediate folders don't exist, they will be created.
+     *
+     * @param project The active Ghidra project
+     * @param folderPath The folder path to create (e.g., "/folder/subfolder")
+     * @return The created or existing DomainFolder, or null if creation fails
+     * @throws Exception if folder creation fails
+     */
+    private DomainFolder createFolderPath(Project project, String folderPath) throws Exception {
+        // Root folder special case
+        if (folderPath.equals("/")) {
+            return project.getProjectData().getRootFolder();
+        }
+
+        // Remove leading slash if present
+        String path = folderPath.startsWith("/") ? folderPath.substring(1) : folderPath;
+
+        // Split the path into components
+        String[] components = path.split("/");
+
+        // Start at root folder
+        DomainFolder currentFolder = project.getProjectData().getRootFolder();
+
+        // Create each folder component if it doesn't exist
+        for (String component : components) {
+            if (component.isEmpty()) {
+                continue; // Skip empty components from consecutive slashes
+            }
+
+            // Check if subfolder already exists
+            DomainFolder subfolder = currentFolder.getFolder(component);
+
+            if (subfolder == null) {
+                // Folder doesn't exist, create it
+                subfolder = currentFolder.createFolder(component);
+            }
+
+            currentFolder = subfolder;
+        }
+
+        return currentFolder;
+    }
+
+    /**
      * Register a tool to import files into the Ghidra project
      */
     private void registerImportFileTool() {
@@ -649,15 +693,12 @@ public class ProjectToolProvider extends AbstractToolProvider {
                     return createErrorResult("No active project found");
                 }
 
-                // Get destination folder
+                // Get or create destination folder (mkdir -p behavior)
                 DomainFolder destFolder;
-                if (destinationFolder.equals("/")) {
-                    destFolder = project.getProjectData().getRootFolder();
-                } else {
-                    destFolder = project.getProjectData().getFolder(destinationFolder);
-                    if (destFolder == null) {
-                        return createErrorResult("Destination folder not found: " + destinationFolder);
-                    }
+                try {
+                    destFolder = createFolderPath(project, destinationFolder);
+                } catch (Exception e) {
+                    return createErrorResult("Failed to create destination folder '" + destinationFolder + "': " + e.getMessage());
                 }
 
                 // Create BatchInfo with specified max depth

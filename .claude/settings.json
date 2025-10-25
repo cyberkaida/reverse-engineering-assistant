@@ -8,6 +8,16 @@
     "deny": []
   },
   "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/setup-environment.sh"
+          }
+        ]
+      }
+    ],
     "PostToolUse": [
       {
         "matcher": {

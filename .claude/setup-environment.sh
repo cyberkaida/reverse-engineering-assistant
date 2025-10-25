@@ -69,6 +69,30 @@ fi
 
 export GHIDRA_INSTALL_DIR="/opt/ghidra"
 
+# Clone Ghidra source code into sibling directory if needed
+if [ ! -d "../ghidra" ]; then
+    echo "Cloning Ghidra source code..."
+    cd /workspace/.. || cd ..
+    if git clone --depth 1 https://github.com/NationalSecurityAgency/ghidra.git 2>/dev/null; then
+        echo "✓ Ghidra source code cloned to ../ghidra"
+    else
+        echo "⚠ Warning: Could not clone Ghidra source (network issue?)"
+    fi
+    cd - > /dev/null
+else
+    echo "✓ Ghidra source code already present at ../ghidra"
+fi
+
+# Fetch Gradle dependencies (including MCP SDK)
+echo "Fetching Gradle dependencies..."
+cd /workspace || cd "$(pwd)"
+if gradle dependencies --configuration runtimeClasspath > /dev/null 2>&1; then
+    echo "✓ Dependencies fetched successfully"
+else
+    echo "⚠ Warning: Dependency fetch failed (network issue?)"
+    echo "  Will attempt to use local JARs from lib/ directory"
+fi
+
 # Install Python dependencies for headless mode
 echo "Installing Python dependencies..."
 pip3 install --quiet pyghidra 2>/dev/null || echo "Note: pyghidra installation may require additional setup"

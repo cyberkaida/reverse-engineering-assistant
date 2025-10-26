@@ -14,7 +14,15 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PROJECT_DIR}/.claude/setup-environment.sh"
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/clone-ghidra-source.sh"
+          },
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/install-ghidra-binary.sh"
+          },
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/setup-gradle.sh"
           }
         ]
       }

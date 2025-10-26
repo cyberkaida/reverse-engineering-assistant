@@ -2,29 +2,20 @@
 set -ex
 
 # Log to both stderr and log file
-LOG_FILE="/tmp/reva-claude-startup-hook.log"
+LOG_FILE="/tmp/reva-install-ghidra.log"
 exec > >(tee -a "${LOG_FILE}") 2>&1
 
 # Only run in remote (web) environments
 if [ "${CLAUDE_CODE_REMOTE}" != "true" ]; then
-    echo "[SessionStart Hook] Local environment detected. Skipping remote setup."
+    echo "[Install Ghidra Hook] Local environment detected. Skipping."
     exit 0
 fi
 
-echo "[SessionStart Hook] Remote environment detected. Starting setup..."
-
-echo "=== Setting up Claude Code Web Environment for ReVa ==="
-
-GHIDRA_GIT=$(readlink -f "${CLAUDE_PROJECT_DIR}/../ghidra")
-
-if [ ! -d "${GHIDRA_GIT}" ]; then
-    git clone --depth 1 "https://github.com/NationalSecurityAgency/ghidra.git" "${GHIDRA_GIT}"
-    echo "Cloned Ghidra to ${GHIDRA_GIT}"
-fi
+echo "[Install Ghidra Hook] Installing Ghidra binary..."
 
 # Install Ghidra latest
 if [ ! -d "/opt/ghidra" ]; then
-    echo "Installing Ghidra (latest)..."
+    echo "Downloading Ghidra (latest)..."
 
     # Get latest Ghidra release info using jq
     RELEASE_JSON=$(curl -s https://api.github.com/repos/NationalSecurityAgency/ghidra/releases/latest)
@@ -47,33 +38,22 @@ if [ ! -d "/opt/ghidra" ]; then
     GHIDRA_DIR=$(find /opt -maxdepth 1 -type d -name "ghidra_*_PUBLIC" | head -n 1)
     mv "$GHIDRA_DIR" /opt/ghidra
     rm /tmp/ghidra.zip
+
+    echo "Ghidra installed to /opt/ghidra"
+else
+    echo "Ghidra binary already exists at /opt/ghidra"
 fi
 
 export GHIDRA_INSTALL_DIR="/opt/ghidra"
 
-# Verify installations
-echo "Verifying installations..."
-java -version
-gradle --version
-echo "GHIDRA_INSTALL_DIR=$GHIDRA_INSTALL_DIR"
-ls -la "$GHIDRA_INSTALL_DIR" | head -n 5
-
 # Persist environment variables for all subsequent bash commands
 if [ -n "$CLAUDE_ENV_FILE" ]; then
     echo 'export GHIDRA_INSTALL_DIR="/opt/ghidra"' >> "$CLAUDE_ENV_FILE"
-    echo 'export PATH="/opt/gradle/bin:$PATH"' >> "$CLAUDE_ENV_FILE"
 fi
 
-# Pre-fetch Gradle dependencies
-pushd ${CLAUDE_PROJECT_DIR} > /dev/null
-    echo "Pre-fetching Gradle dependencies..."
-    gradle copyDependencies
-popd > /dev/null
+# Verify installation
+echo "Verifying Ghidra installation..."
+echo "GHIDRA_INSTALL_DIR=$GHIDRA_INSTALL_DIR"
+ls -la "$GHIDRA_INSTALL_DIR" | head -n 5
 
-echo "=== Environment setup complete! ==="
-echo ""
-echo "Environment variables set:"
-echo "  GHIDRA_INSTALL_DIR=/opt/ghidra"
-echo "  ghidra cloned to ../ghidra"
-echo ""
-echo "Ready to build with: gradle buildExtension"
+echo "[Install Ghidra Hook] Complete!"

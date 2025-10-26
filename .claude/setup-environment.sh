@@ -54,9 +54,8 @@ if [ ! -d "/opt/ghidra" ]; then
 
     # Download Ghidra
     if ! wget -q "$GHIDRA_URL" -O /tmp/ghidra.zip 2>/dev/null; then
-        echo "Download failed, trying Ghidra 11.4 fallback..."
-        GHIDRA_VERSION="11.4"
-        wget -q "https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_11.4_build/ghidra_11.4_PUBLIC_20241105.zip" -O /tmp/ghidra.zip
+        echo "Download of ${GHIDRA_URL} failed"
+	exit 2
     fi
 
     # Extract and move to /opt/ghidra
@@ -84,6 +83,12 @@ if [ -n "$CLAUDE_ENV_FILE" ]; then
     echo 'export GHIDRA_INSTALL_DIR="/opt/ghidra"' >> "$CLAUDE_ENV_FILE"
     echo 'export PATH="/opt/gradle/bin:$PATH"' >> "$CLAUDE_ENV_FILE"
 fi
+
+# Pre-fetch Gradle dependencies
+pushd ${CLAUDE_PROJECT_DIR} > /dev/null
+    echo "Pre-fetching Gradle dependencies..."
+    gradle copyDependencies
+popd > /dev/null
 
 echo "=== Environment setup complete! ==="
 echo ""

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -e
+set -ex
 
 # Log to both stderr and log file
 LOG_FILE="/tmp/reva-claude-startup-hook.log"
@@ -15,10 +15,10 @@ echo "[SessionStart Hook] Remote environment detected. Starting setup..."
 
 echo "=== Setting up Claude Code Web Environment for ReVa ==="
 
-GHIDRA_GIT="${CLAUDE_PROJECT_DIR}/../ghidra"
+GHIDRA_GIT=$(readlink -f "${CLAUDE_PROJECT_DIR}/../ghidra")
 
 if [ ! -d "${GHIDRA_GIT}" ]; then
-    git clone "https://github.com/NationalSecurityAgency/ghidra.git" "${GHIDRA_GIT}"
+    git clone --depth 1 "https://github.com/NationalSecurityAgency/ghidra.git" "${GHIDRA_GIT}"
     echo "Cloned Ghidra to ${GHIDRA_GIT}"
     pushd "${GHIDRA_GIT}" > /dev/null
         echo "Fetching Ghidra Dependencies"

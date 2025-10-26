@@ -20,16 +20,6 @@ GHIDRA_GIT=$(readlink -f "${CLAUDE_PROJECT_DIR}/../ghidra")
 if [ ! -d "${GHIDRA_GIT}" ]; then
     git clone --depth 1 "https://github.com/NationalSecurityAgency/ghidra.git" "${GHIDRA_GIT}"
     echo "Cloned Ghidra to ${GHIDRA_GIT}"
-    pushd "${GHIDRA_GIT}" > /dev/null
-        echo "Fetching Ghidra Dependencies"
-        gradle -I gradle/support/fetchDependencies.gradle
-        gradle buildGhidra
-        pushd "/opt" > /dev/null
-            unzip "${GHIDRA_GIT}/build/dist/*.zip"
-            mv ghidra_*_DEV /opt/ghidra
-            echo "Built development Ghidra. Installed in /opt/ghidra"
-        popd
-    popd > /dev/null
 fi
 
 # Install Ghidra latest
@@ -46,7 +36,7 @@ if [ ! -d "/opt/ghidra" ]; then
     echo "Downloading Ghidra ${GHIDRA_VERSION} from ${GHIDRA_URL}..."
 
     # Download Ghidra
-    if ! wget -q "$GHIDRA_URL" -O /tmp/ghidra.zip 2>/dev/null; then
+    if ! curl -fsSL "$GHIDRA_URL" -o /tmp/ghidra.zip 2>/dev/null; then
         echo "Download of ${GHIDRA_URL} failed"
         exit 2
     fi

@@ -11,30 +11,10 @@ echo "[SessionStart Hook] Remote environment detected. Starting setup..." >&2
 
 echo "=== Setting up Claude Code Web Environment for ReVa ===" >&2
 
-# Check if already set up
-if [ -f "/tmp/.reva-env-setup-complete" ]; then
-    echo "Environment already configured. Skipping setup." >&2
-    # Persist environment variables
-    if [ -n "$CLAUDE_ENV_FILE" ]; then
-        echo 'export GHIDRA_INSTALL_DIR="/opt/ghidra"' >> "$CLAUDE_ENV_FILE"
-        echo 'export PATH="/opt/gradle/bin:$PATH"' >> "$CLAUDE_ENV_FILE"
-    fi
-    exit 0
+if [ ! -d "${CLAUDE_PROJECT_DIR}/../ghidra" ]; then
+    git clone "https://github.com/NationalSecurityAgency/ghidra.git" "${CLAUDE_PROJECT_DIR}/../ghidra"
+    echo "Cloned Ghidra to ${CLAUDE_PROJECT_DIR}/../ghidra"
 fi
-
-echo "Installing required packages..." >&2
-apt-get update -qq
-apt-get install -y -qq wget unzip openjdk-21-jdk curl jq > /dev/null 2>&1
-
-# Install Gradle 8.14
-if [ ! -d "/opt/gradle" ]; then
-    echo "Installing Gradle 8.14..." >&2
-    wget -q https://services.gradle.org/distributions/gradle-8.14-bin.zip -O /tmp/gradle.zip
-    unzip -q /tmp/gradle.zip -d /opt/
-    mv /opt/gradle-8.14 /opt/gradle
-    rm /tmp/gradle.zip
-fi
-export PATH="/opt/gradle/bin:$PATH"
 
 # Install Ghidra latest
 if [ ! -d "/opt/ghidra" ]; then
@@ -78,9 +58,6 @@ gradle --version
 echo "GHIDRA_INSTALL_DIR=$GHIDRA_INSTALL_DIR"
 ls -la "$GHIDRA_INSTALL_DIR" | head -n 5
 
-# Mark setup as complete
-touch /tmp/.reva-env-setup-complete
-
 # Persist environment variables for all subsequent bash commands
 if [ -n "$CLAUDE_ENV_FILE" ]; then
     echo 'export GHIDRA_INSTALL_DIR="/opt/ghidra"' >> "$CLAUDE_ENV_FILE"
@@ -97,6 +74,6 @@ echo "=== Environment setup complete! ===" >&2
 echo "" >&2
 echo "Environment variables set:" >&2
 echo "  GHIDRA_INSTALL_DIR=/opt/ghidra" >&2
-echo "  PATH includes /opt/gradle/bin" >&2
+echo "  ghidra cloned to ../ghidra" >&2
 echo "" >&2
 echo "Ready to build with: gradle buildExtension" >&2

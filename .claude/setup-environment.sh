@@ -11,9 +11,21 @@ echo "[SessionStart Hook] Remote environment detected. Starting setup..." >&2
 
 echo "=== Setting up Claude Code Web Environment for ReVa ===" >&2
 
-if [ ! -d "${CLAUDE_PROJECT_DIR}/../ghidra" ]; then
-    git clone "https://github.com/NationalSecurityAgency/ghidra.git" "${CLAUDE_PROJECT_DIR}/../ghidra"
-    echo "Cloned Ghidra to ${CLAUDE_PROJECT_DIR}/../ghidra"
+GHIDRA_GIT="${CLAUDE_PROJECT_DIR}/../ghidra"
+
+if [ ! -d "${GHIDRA_GIT}" ]; then
+    git clone "https://github.com/NationalSecurityAgency/ghidra.git" "${GHIDRA_GIT}"
+    echo "Cloned Ghidra to ${GHIDRA_GIT}"
+    pushd "${GHIDRA_GIT}" > /dev/null
+        echo "Fetching Ghidra Dependencies"
+        gradle -I gradle/support/fetchDependencies.gradle
+        gradle buildGhidra
+        pushd "/opt" > /dev/null
+            unzip "${GHIDRA_GIT}/build/dist/*.zip"
+            mv ghidra_*_DEV /opt/ghidra
+            echo "Built development Ghidra. Installed in /opt/ghidra"
+        popd
+    popd > /dev/null
 fi
 
 # Install Ghidra latest
@@ -27,18 +39,12 @@ if [ ! -d "/opt/ghidra" ]; then
     # Get the actual download URL from the assets
     GHIDRA_URL=$(echo "$RELEASE_JSON" | jq -r '.assets[] | select(.name | endswith(".zip") and contains("PUBLIC")) | .browser_download_url' | head -n 1)
 
-    if [ -z "$GHIDRA_VERSION" ] || [ -z "$GHIDRA_URL" ]; then
-        echo "Failed to detect latest Ghidra version, using 11.4 as fallback" >&2
-        GHIDRA_VERSION="11.4"
-        GHIDRA_URL="https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_11.4_build/ghidra_11.4_PUBLIC_20241105.zip"
-    fi
-
     echo "Downloading Ghidra ${GHIDRA_VERSION} from ${GHIDRA_URL}..." >&2
 
     # Download Ghidra
     if ! wget -q "$GHIDRA_URL" -O /tmp/ghidra.zip 2>/dev/null; then
         echo "Download of ${GHIDRA_URL} failed" >&2
-	exit 2
+        exit 2
     fi
 
     # Extract and move to /opt/ghidra

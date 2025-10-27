@@ -20,10 +20,12 @@ import java.io.IOException;
 
 import ghidra.framework.Application;
 import ghidra.framework.ApplicationConfiguration;
+import ghidra.framework.ApplicationLayout;
 import ghidra.framework.HeadlessGhidraApplicationConfiguration;
 import ghidra.framework.model.Project;
 import ghidra.framework.project.DefaultProjectManager;
 import ghidra.util.Msg;
+import ghidra.GhidraApplicationLayout;
 
 import reva.plugin.ConfigManager;
 import reva.server.McpServerManager;
@@ -94,9 +96,14 @@ public class RevaHeadlessLauncher {
         if (!Application.isInitialized()) {
             if (autoInitializeGhidra) {
                 Msg.info(this, "Initializing Ghidra application in headless mode...");
-                ApplicationConfiguration config = new HeadlessGhidraApplicationConfiguration();
-                Application.initializeApplication(config);
-                Msg.info(this, "Ghidra application initialized");
+                try {
+                    ApplicationLayout layout = new GhidraApplicationLayout();
+                    ApplicationConfiguration config = new HeadlessGhidraApplicationConfiguration();
+                    Application.initializeApplication(layout, config);
+                    Msg.info(this, "Ghidra application initialized");
+                } catch (IOException e) {
+                    throw new IOException("Failed to initialize Ghidra application layout", e);
+                }
             } else {
                 throw new IllegalStateException(
                     "Ghidra application is not initialized. " +

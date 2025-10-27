@@ -29,7 +29,7 @@ import ghidra.util.Msg;
  */
 public class InMemoryBackend implements ConfigurationBackend {
 
-    private final Map<String, Object> storage = new HashMap<>();
+    private final Map<String, Object> storage = new ConcurrentHashMap<>();
     private final Set<ConfigurationBackendListener> listeners = ConcurrentHashMap.newKeySet();
 
     @Override

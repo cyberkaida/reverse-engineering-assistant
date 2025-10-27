@@ -14,14 +14,14 @@ Usage:
     # Start with defaults (port 8080, localhost)
     python reva_headless_server.py
 
-    # Start with custom port
-    python reva_headless_server.py --port 9090
-
     # Start with configuration file
     python reva_headless_server.py --config /path/to/reva.properties
 
     # Start and keep running
     python reva_headless_server.py --wait
+
+    # Customize settings via config file
+    python reva_headless_server.py --config config/reva.properties --wait
 
 Example:
     # Quick test
@@ -54,15 +54,7 @@ def signal_handler(sig, frame):
 def main():
     parser = argparse.ArgumentParser(
         description="Start ReVa MCP server in headless Ghidra mode",
-        epilog="Example: python reva_headless_server.py --port 9090 --wait"
-    )
-    parser.add_argument(
-        "--port", type=int, default=None,
-        help="Server port (default: 8080, overrides config file)"
-    )
-    parser.add_argument(
-        "--host", default=None,
-        help="Server host (default: 127.0.0.1, overrides config file)"
+        epilog="Example: python reva_headless_server.py --config config/reva.properties --wait"
     )
     parser.add_argument(
         "--config", type=Path,
@@ -109,22 +101,6 @@ def main():
         else:
             print("📋 Using default configuration")
             launcher = RevaHeadlessLauncher()
-
-        # Override port/host if specified on command line
-        if args.port or args.host:
-            print("🔧 Applying command-line overrides...")
-            config = launcher.getConfigManager()
-            if config:
-                if args.port:
-                    from reva.plugin.config import InMemoryBackend
-                    from reva.plugin import ConfigManager
-
-                    # Need to create custom config with overrides
-                    print(f"   Port: {args.port}")
-                if args.host:
-                    print(f"   Host: {args.host}")
-            # Note: For full override support, we'd need to enhance the launcher
-            # For now, this demonstrates the pattern
 
         # Start the server
         print("🔄 Starting MCP server...")

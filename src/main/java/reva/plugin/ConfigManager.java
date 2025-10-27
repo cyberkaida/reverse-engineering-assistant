@@ -63,7 +63,7 @@ public class ConfigManager implements ConfigurationBackendListener {
     private static final int DEFAULT_DECOMPILER_TIMEOUT_SECONDS = 10;
 
     private final ConfigurationBackend backend;
-    private final Map<String, Object> cachedOptions = new HashMap<>();
+    private final Map<String, Object> cachedOptions = new ConcurrentHashMap<>();
     private final Set<ConfigChangeListener> configChangeListeners = ConcurrentHashMap.newKeySet();
 
     /**

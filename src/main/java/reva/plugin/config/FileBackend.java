@@ -166,6 +166,7 @@ public class FileBackend implements ConfigurationBackend {
             save();
         }
         listeners.clear();
+        properties.clear();
     }
 
     /**

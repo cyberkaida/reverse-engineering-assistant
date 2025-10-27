@@ -16,6 +16,7 @@
 package reva.plugin;
 
 import static org.junit.Assert.*;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -29,6 +30,8 @@ import ghidra.framework.plugintool.PluginTool;
 import ghidra.framework.options.ToolOptions;
 import ghidra.framework.options.OptionsChangeListener;
 import ghidra.util.HelpLocation;
+import ghidra.util.bean.opteditor.OptionsVetoException;
+import reva.plugin.config.ToolOptionsBackend;
 
 /**
  * Test class for ConfigManager configuration change notifications
@@ -74,10 +77,13 @@ public class ConfigChangeTest {
     private void setupMockTool() {
         // Mock the tool to return our mock ToolOptions
         when(mockTool.getOptions(eq(ConfigManager.SERVER_OPTIONS))).thenReturn(mockToolOptions);
-        
-        // Setup default return values for option getters
+
+        // Setup default return values for ALL option getters (to avoid null values)
         when(mockToolOptions.getInt(eq(ConfigManager.SERVER_PORT), anyInt())).thenReturn(8080);
+        when(mockToolOptions.getString(eq(ConfigManager.SERVER_HOST), anyString())).thenReturn("127.0.0.1");
         when(mockToolOptions.getBoolean(eq(ConfigManager.SERVER_ENABLED), anyBoolean())).thenReturn(true);
+        when(mockToolOptions.getBoolean(eq(ConfigManager.API_KEY_ENABLED), anyBoolean())).thenReturn(false);
+        when(mockToolOptions.getString(eq(ConfigManager.API_KEY), anyString())).thenReturn("");
         when(mockToolOptions.getBoolean(eq(ConfigManager.DEBUG_MODE), anyBoolean())).thenReturn(false);
         when(mockToolOptions.getInt(eq(ConfigManager.MAX_DECOMPILER_SEARCH_FUNCTIONS), anyInt())).thenReturn(1000);
         when(mockToolOptions.getInt(eq(ConfigManager.DECOMPILER_TIMEOUT_SECONDS), anyInt())).thenReturn(10);
@@ -87,13 +93,15 @@ public class ConfigChangeTest {
     public void testConfigChangeListenerNotification() throws Exception {
         // Reset the notification flag
         changeNotified.set(false);
-        
+
         // Change the server port - this should call toolOptions.setInt()
         configManager.setServerPort(8955);
-        
+
         // Manually trigger the optionsChanged callback since we're using mocks
-        configManager.optionsChanged(mockToolOptions, ConfigManager.SERVER_PORT, 8080, 8955);
-        
+        // Get the backend and trigger the Ghidra callback
+        ToolOptionsBackend backend = (ToolOptionsBackend) configManager.getBackend();
+        backend.optionsChanged(mockToolOptions, ConfigManager.SERVER_PORT, 8080, 8955);
+
         // Verify the listener was notified
         assertTrue("Config change listener should be notified", changeNotified.get());
         assertEquals("Category should be server options", ConfigManager.SERVER_OPTIONS, lastChangedCategory);
@@ -106,14 +114,15 @@ public class ConfigChangeTest {
     public void testConfigChangeListenerNotNotifiedForSameValue() throws Exception {
         // Reset the notification flag
         changeNotified.set(false);
-        
+
         // Set the port to the same value it already has
         configManager.setServerPort(8080);
-        
+
         // Manually trigger optionsChanged with same values (simulating Ghidra's behavior)
         // Note: Ghidra might still call optionsChanged even if values are the same
-        configManager.optionsChanged(mockToolOptions, ConfigManager.SERVER_PORT, 8080, 8080);
-        
+        ToolOptionsBackend backend = (ToolOptionsBackend) configManager.getBackend();
+        backend.optionsChanged(mockToolOptions, ConfigManager.SERVER_PORT, 8080, 8080);
+
         // In this case, our listener should still be notified since Ghidra called optionsChanged
         // The "same value" optimization would happen at Ghidra's level, not ours
         assertTrue("Config change listener should be notified when Ghidra calls optionsChanged", changeNotified.get());
@@ -124,13 +133,14 @@ public class ConfigChangeTest {
     public void testServerEnabledConfigChange() throws Exception {
         // Reset the notification flag
         changeNotified.set(false);
-        
+
         // Change the server enabled setting
         configManager.setServerEnabled(false);
-        
+
         // Manually trigger the optionsChanged callback
-        configManager.optionsChanged(mockToolOptions, ConfigManager.SERVER_ENABLED, true, false);
-        
+        ToolOptionsBackend backend = (ToolOptionsBackend) configManager.getBackend();
+        backend.optionsChanged(mockToolOptions, ConfigManager.SERVER_ENABLED, true, false);
+
         // Verify the listener was notified
         assertTrue("Config change listener should be notified", changeNotified.get());
         assertEquals("Category should be server options", ConfigManager.SERVER_OPTIONS, lastChangedCategory);
@@ -143,15 +153,16 @@ public class ConfigChangeTest {
     public void testRemoveConfigChangeListener() throws Exception {
         // Create a test listener
         ConfigChangeListener testListener = mock(ConfigChangeListener.class);
-        
+
         // Add and then remove the listener
         configManager.addConfigChangeListener(testListener);
         configManager.removeConfigChangeListener(testListener);
-        
+
         // Make a config change and trigger the callback
         configManager.setServerPort(9000);
-        configManager.optionsChanged(mockToolOptions, ConfigManager.SERVER_PORT, 8080, 9000);
-        
+        ToolOptionsBackend backend = (ToolOptionsBackend) configManager.getBackend();
+        backend.optionsChanged(mockToolOptions, ConfigManager.SERVER_PORT, 8080, 9000);
+
         // Verify the removed listener was not called
         verify(testListener, never()).onConfigChanged(anyString(), anyString(), any(), any());
     }

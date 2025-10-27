@@ -1,0 +1,107 @@
+[project]
+name = "reverse-engineering-assistant"
+version = "3.0.0"
+description = "ReVa - AI-powered Reverse Engineering Assistant for Ghidra with MCP server and Claude CLI integration"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "Apache-2.0"}
+authors = [
+    {name = "cyberkaida", email = "cyberkaida@users.noreply.github.com"}
+]
+maintainers = [
+    {name = "cyberkaida"}
+]
+keywords = [
+    "reverse-engineering",
+    "ghidra",
+    "mcp",
+    "ai",
+    "disassembly",
+    "decompiler",
+    "binary-analysis",
+    "claude",
+    "security-research"
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Natural Language :: English",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Java",
+    "Topic :: Security",
+    "Topic :: Software Development :: Disassemblers",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+]
+
+# NOTE: pyghidra is NOT listed here because it must be installed from the local
+# Ghidra distribution to ensure compatibility. Install it manually using:
+#   uv pip install "${GHIDRA_INSTALL_DIR}/Ghidra/Features/PyGhidra/pypkg"
+# Environment variables are not supported in pyproject.toml (PEP 621/508).
+dependencies = [
+    "pyghidra>=2.2.0",
+    "mcp",
+    "httpx>=0.27.0,<1.0",
+    "httpx-sse>=0.4.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/cyberkaida/reverse-engineering-assistant"
+Documentation = "https://github.com/cyberkaida/reverse-engineering-assistant/tree/main/docs"
+Repository = "https://github.com/cyberkaida/reverse-engineering-assistant"
+Issues = "https://github.com/cyberkaida/reverse-engineering-assistant/issues"
+Changelog = "https://github.com/cyberkaida/reverse-engineering-assistant/releases"
+
+[project.scripts]
+mcp-reva = "reva_cli.__main__:main"
+
+[project.optional-dependencies]
+test = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-timeout>=2.0.0",
+    "pytest-sugar>=0.9.0",
+    "mcp",
+    "httpx>=0.27.0,<1.0",
+    "httpx-sse>=0.4.0",
+]
+
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["reva_cli"]
+package-dir = {"" = "src"}
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+timeout = 60
+addopts = "-v --tb=short"
+markers = [
+    "unit: Fast unit tests with mocked dependencies",
+    "integration: Integration tests with real PyGhidra",
+    "e2e: End-to-end tests via subprocess",
+    "cli: All CLI-specific tests",
+    "slow: Tests that take more than 5 seconds"
+]
+
+[dependency-groups]
+dev = [
+    # pyghidra must be installed manually from local Ghidra - see installation instructions
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-timeout>=2.0.0",
+    "pytest-sugar>=0.9.0",
+    "mcp",
+    "httpx>=0.27.0,<1.0",
+    "httpx-sse>=0.4.0",
+]

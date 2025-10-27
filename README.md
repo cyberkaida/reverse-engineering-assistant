@@ -69,6 +69,107 @@ After installing the extension you need to activate it in two places:
 1. In the Project view, open the File menu and select "Configure". Click the "Configure all plugins" button on the top right of the menu (it looks like a plug). Check the "ReVa Application Plugin"
 2. In the Code Browser tool (Click the Dragon icon or open a File), open the File menu and select "Configure". Click the "Configure all plugins" button on the top right of the menu (it looks like a plug). Check the "ReVa Plugin". Then Press File and select "Save Tool". This will enable ReVa by default.
 
+## Headless Mode
+
+ReVa can run in headless Ghidra mode without the GUI, making it ideal for:
+- **Automation** - CI/CD pipelines and automated analysis
+- **Testing** - Automated testing and verification
+- **Docker** - Containerized reverse engineering workflows
+- **Servers** - Long-running analysis servers
+- **PyGhidra** - Python-based automation
+
+### Quick Start (Headless)
+
+```bash
+# Set Ghidra installation directory
+export GHIDRA_INSTALL_DIR=/path/to/ghidra
+
+# Install pyghidra from your local Ghidra distribution
+# (This ensures compatibility with your Ghidra version)
+uv pip install "${GHIDRA_INSTALL_DIR}/Ghidra/Features/PyGhidra/pypkg"
+
+# Install ReVa dependencies
+uv sync
+
+# Run headless server
+python scripts/reva_headless_server.py --wait
+```
+
+The server will start on `http://localhost:8080/mcp/message` just like GUI mode.
+
+### Headless Usage Patterns
+
+**Quick Test:**
+```bash
+# Start server for quick testing
+python scripts/reva_headless_server.py
+
+# Test functionality
+python scripts/test_headless_quick.py
+```
+
+**With Configuration:**
+```bash
+# Use custom configuration file
+python scripts/reva_headless_server.py \
+  --config config/reva-headless.properties \
+  --wait
+```
+
+**Custom Port:**
+```bash
+# Run on different port
+python scripts/reva_headless_server.py --port 9090 --wait
+```
+
+### PyGhidra Integration
+
+You can also use ReVa directly from PyGhidra scripts:
+
+```python
+import pyghidra
+pyghidra.start()
+
+from reva.headless import RevaHeadlessLauncher
+
+# Start server
+launcher = RevaHeadlessLauncher()
+launcher.start()
+
+if launcher.waitForServer(30000):
+    print(f"Server ready on port {launcher.getPort()}")
+    # ... your analysis code ...
+
+launcher.stop()
+```
+
+### Docker Example
+
+```dockerfile
+FROM ghidra:latest
+
+# Set Ghidra installation directory (adjust path based on your Docker image)
+ENV GHIDRA_INSTALL_DIR=/opt/ghidra
+
+# Install pyghidra from local Ghidra distribution
+RUN pip install "${GHIDRA_INSTALL_DIR}/Ghidra/Features/PyGhidra/pypkg"
+
+COPY . /reva
+WORKDIR /reva
+
+# Install ReVa dependencies
+RUN pip install -r requirements.txt
+
+CMD ["python", "scripts/reva_headless_server.py", "--wait"]
+```
+
+### Documentation
+
+- **Architecture**: [`HEADLESS_ARCHITECTURE.md`](HEADLESS_ARCHITECTURE.md) - Complete architecture design
+- **Scripts**: [`scripts/README.md`](scripts/README.md) - Detailed usage guide
+- **Java API**: [`src/main/java/reva/headless/CLAUDE.md`](src/main/java/reva/headless/CLAUDE.md) - API documentation
+- **Configuration**: [`config/reva-headless-example.properties`](config/reva-headless-example.properties) - Config template
+
 ## MCP configuration
 
 ReVa uses the [Model Context Protocol (MCP)](https://modelcontextprotocol.io/faqs) to communicate with the LLM.

@@ -7,10 +7,8 @@ Provides common functionality used across multiple test modules:
 - Response validation
 """
 
-import json
-import urllib.request
-import urllib.error
 from typing import Dict, Any, Optional
+import asyncio
 
 
 def make_mcp_request(
@@ -20,7 +18,7 @@ def make_mcp_request(
     timeout: int = 10
 ) -> Optional[Dict[str, Any]]:
     """
-    Make an MCP tool call request to the server.
+    Make an MCP tool call request to the server using the MCP Python SDK.
 
     Args:
         port: Server port number
@@ -29,43 +27,59 @@ def make_mcp_request(
         timeout: Request timeout in seconds (default: 10)
 
     Returns:
-        Parsed JSON response dictionary, or None if request fails
+        Tool call result dictionary, or None if request fails
 
     Example:
         >>> response = make_mcp_request(8080, "list-programs")
-        >>> assert response["jsonrpc"] == "2.0"
+        >>> assert response is not None
     """
+    try:
+        # Use asyncio to run the async MCP client
+        return asyncio.run(_make_mcp_request_async(port, tool_name, arguments, timeout))
+    except Exception as e:
+        print(f"MCP request failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+
+
+async def _make_mcp_request_async(
+    port: int,
+    tool_name: str,
+    arguments: Optional[Dict[str, Any]],
+    timeout: int
+) -> Optional[Dict[str, Any]]:
+    """
+    Async implementation of MCP request using StreamableHTTP transport.
+    """
+    from mcp.client.streamable_http import streamablehttp_client
+    from mcp import ClientSession
+
     url = f"http://localhost:{port}/mcp/message"
 
-    # MCP JSON-RPC 2.0 request format
-    request_data = {
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": "tools/call",
-        "params": {
-            "name": tool_name,
-            "arguments": arguments or {}
-        }
-    }
-
     try:
-        req = urllib.request.Request(
-            url,
-            data=json.dumps(request_data).encode('utf-8'),
-            headers={'Content-Type': 'application/json'}
-        )
+        # Use the streamable HTTP client from MCP SDK
+        async with streamablehttp_client(url, timeout=float(timeout)) as (read_stream, write_stream, get_session_id):
+            async with ClientSession(read_stream, write_stream) as session:
+                # Initialize the session
+                await session.initialize()
 
-        with urllib.request.urlopen(req, timeout=timeout) as response:
-            return json.loads(response.read().decode('utf-8'))
+                # Call the tool
+                result = await session.call_tool(
+                    name=tool_name,
+                    arguments=arguments or {}
+                )
 
-    except urllib.error.URLError as e:
-        print(f"MCP request failed (connection): {e}")
-        return None
-    except json.JSONDecodeError as e:
-        print(f"MCP request failed (invalid JSON): {e}")
-        return None
+                # Return the tool call result
+                return {
+                    "content": result.content,
+                    "isError": result.isError if hasattr(result, 'isError') else False
+                }
+
     except Exception as e:
-        print(f"MCP request failed (unexpected): {e}")
+        print(f"Async MCP request failed: {e}")
+        import traceback
+        traceback.print_exc()
         return None
 
 
@@ -152,13 +166,13 @@ def get_response_result(response: Optional[Dict[str, Any]]) -> Any:
     Extract the result from an MCP response.
 
     Args:
-        response: Response from make_mcp_request()
+        response: Response from make_mcp_request() containing 'content' and 'isError' fields
 
     Returns:
-        The result value from the response
+        The content from the response
 
     Raises:
-        AssertionError: If response is None, has an error, or missing result
+        AssertionError: If response is None or has an error
 
     Example:
         >>> response = make_mcp_request(8080, "list-programs")
@@ -166,9 +180,8 @@ def get_response_result(response: Optional[Dict[str, Any]]) -> Any:
     """
     assert response is not None, "Server did not respond"
 
-    if "error" in response:
-        error_msg = response.get("error", {}).get("message", "Unknown error")
-        raise AssertionError(f"MCP call returned error: {error_msg}")
+    if response.get("isError", False):
+        raise AssertionError(f"MCP call returned error: {response.get('content')}")
 
-    assert "result" in response, "Response missing result field"
-    return response["result"]
+    assert "content" in response, "Response missing content field"
+    return response["content"]

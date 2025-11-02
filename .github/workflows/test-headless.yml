@@ -58,21 +58,24 @@ jobs:
         unzip -q "$EXTENSION_ZIP" -d "$GHIDRA_INSTALL_DIR/Ghidra/Extensions/"
         ls -la "$GHIDRA_INSTALL_DIR/Ghidra/Extensions/"
 
+    - name: Install uv
+      uses: astral-sh/setup-uv@v5
+      with:
+        enable-cache: true
+
     - name: Install Python dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r tests/requirements.txt
+      run: uv sync --prerelease=allow
 
     - name: Verify PyGhidra Installation
       run: |
-        python -c "import pyghidra; print(f'PyGhidra version: {pyghidra.__version__}')"
+        uv run python -c "import pyghidra; print(f'PyGhidra version: {pyghidra.__version__}')"
         echo "GHIDRA_INSTALL_DIR: $GHIDRA_INSTALL_DIR"
 
     - name: Run Headless Integration Tests
       id: headless_test
       run: |
         echo "::group::Running headless integration tests"
-        pytest tests/ -v --timeout=60 --tb=short --junitxml=test-results.xml
+        uv run pytest tests/ -v --timeout=60 --tb=short --junitxml=test-results.xml
         echo "::endgroup::"
       timeout-minutes: 10
       env:

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-ReVa (Reverse Engineering Assistant) is a Ghidra extension that provides a Model Context Protocol (MCP) server for AI-assisted reverse engineering. It uses a streamable transport (SSE) and implements various tools for interacting with Ghidra's capabilities.
+ReVa (Reverse Engineering Assistant) is a Ghidra extension that provides a Model Context Protocol (MCP) server for AI-assisted reverse engineering. It uses a streamable transport (not SSE) and implements various tools for interacting with Ghidra's capabilities.
 
 ## Build and Test Commands
 
@@ -13,6 +13,9 @@ ReVa (Reverse Engineering Assistant) is a Ghidra extension that provides a Model
 # Set Ghidra installation directory first
 export GHIDRA_INSTALL_DIR=/path/to/ghidra
 gradle
+
+# Install directly to Ghidra's extension directory
+gradle install
 ```
 
 ### Testing
@@ -43,7 +46,7 @@ ReVa follows a layered architecture with clear separation of concerns:
   - `util/` - **Foundational utilities** (AddressUtil, ProgramLookupUtil, DataTypeParserUtil, etc.)
   - `plugin/` - **Ghidra plugin infrastructure** (ConfigManager, RevaProgramManager, lifecycle)
   - `server/` - **MCP server implementation** (McpServerManager, Jetty, streamable transport)
-  - `tools/` - **Tool providers** (decompiler, functions, strings, etc.) - 12 specialized packages
+  - `tools/` - **Tool providers** (decompiler, functions, strings, etc.) - 11 specialized packages
   - `resources/` - **MCP resource providers** (read-only data exposure)
   - `services/` - **Service layer integration** (abstraction between plugins and MCP)
   - `ui/` - **User interface components** (optional, minimal implementation)
@@ -55,7 +58,7 @@ ReVa follows a layered architecture with clear separation of concerns:
 ### Package-Level Documentation
 Each major package contains its own CLAUDE.md file with detailed implementation guidance:
 - **Essential Infrastructure**: `util/`, `plugin/`, `server/` - Core systems documentation
-- **Tool Providers**: Each of the 12 tool packages has comprehensive implementation guides
+- **Tool Providers**: Each of the 11 tool packages has comprehensive implementation guides
 - **Supporting Systems**: `resources/`, `services/`, `ui/` - Specialized component documentation
 
 ## Development Guidelines
@@ -114,9 +117,9 @@ The server uses streamable transport (SSE) on port 8080 by default. Configuratio
 
 ## External Dependencies
 - Ghidra source code location: `../ghidra`
-- MCP SDK: io.modelcontextprotocol.sdk v0.11.1 (uses MCP BOM)
-- Jackson: 2.17.0 (forced version for compatibility)
-- Jetty: 11.0.25 (embedded servlet support)
+- MCP SDK: io.modelcontextprotocol.sdk v0.14.0 (uses MCP BOM)
+- Jackson: 2.19.2 (forced version for compatibility)
+- Jetty: 11.0.26 (embedded servlet support)
 - Target: Java 21, Ghidra 11.4+
 
 ## Program Identification
@@ -139,7 +142,7 @@ The server uses streamable transport (SSE) on port 8080 by default. Configuratio
 - **Java**: Target Java 21, minimum Ghidra 11.4+
 - **Testing**: Integration tests require `java.awt.headless=false` (GUI environment)
 - **Build**: Use `gradle` directly, not gradle wrapper
-- **MCP SDK**: v0.11.1 with forced Jackson 2.17.0 for compatibility
+- **MCP SDK**: v0.14.0 with forced Jackson 2.19.2 for compatibility
 
 ## Important Notes
 - Don't revert to SSE transport (already using streamable)

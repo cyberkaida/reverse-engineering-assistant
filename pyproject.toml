@@ -1,11 +1,60 @@
 [project]
 name = "reverse-engineering-assistant"
-version = "1.0.0"
-description = "ReVa - Reverse Engineering Assistant for Ghidra with MCP server"
+version = "3.0.0"
+description = "ReVa - AI-powered Reverse Engineering Assistant for Ghidra with MCP server and Claude CLI integration"
+readme = "README.md"
 requires-python = ">=3.10"
+license = {text = "Apache-2.0"}
+authors = [
+    {name = "cyberkaida", email = "cyberkaida@users.noreply.github.com"}
+]
+maintainers = [
+    {name = "cyberkaida"}
+]
+keywords = [
+    "reverse-engineering",
+    "ghidra",
+    "mcp",
+    "ai",
+    "disassembly",
+    "decompiler",
+    "binary-analysis",
+    "claude",
+    "security-research"
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Natural Language :: English",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Java",
+    "Topic :: Security",
+    "Topic :: Software Development :: Disassemblers",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+]
+
 dependencies = [
     "pyghidra>=1.0.0",
+    "mcp",
+    "httpx>=0.27.0,<1.0",
+    "httpx-sse>=0.4.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/cyberkaida/reverse-engineering-assistant"
+Documentation = "https://github.com/cyberkaida/reverse-engineering-assistant/tree/main/docs"
+Repository = "https://github.com/cyberkaida/reverse-engineering-assistant"
+Issues = "https://github.com/cyberkaida/reverse-engineering-assistant/issues"
+Changelog = "https://github.com/cyberkaida/reverse-engineering-assistant/releases"
+
+[project.scripts]
+mcp-reva = "reva_cli.__main__:main"
 
 [project.optional-dependencies]
 test = [
@@ -22,7 +71,8 @@ requires = ["setuptools>=45", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-py-modules = []
+packages = ["reva_cli"]
+package-dir = {"" = "src"}
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

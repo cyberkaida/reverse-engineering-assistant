@@ -17,6 +17,7 @@ package reva.plugin;
 
 import java.io.File;
 import java.io.IOException;
+import java.net.ServerSocket;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
@@ -272,6 +273,21 @@ public class ConfigManager implements ConfigurationBackendListener {
     public void setServerPort(int port) {
         backend.setInt(SERVER_OPTIONS, SERVER_PORT, port);
         // onConfigurationChanged() will be called automatically
+    }
+
+    /**
+     * Find and set a random available port
+     * This is useful for headless mode with stdio transport where port conflicts should be avoided
+     * @return The port number that was selected
+     * @throws IOException if no port is available
+     */
+    public int setRandomAvailablePort() throws IOException {
+        try (ServerSocket socket = new ServerSocket(0)) {
+            int port = socket.getLocalPort();
+            setServerPort(port);
+            Msg.info(this, "Selected random available port: " + port);
+            return port;
+        }
     }
 
     /**

@@ -677,9 +677,12 @@ wheels = [
 
 [[package]]
 name = "reverse-engineering-assistant"
-version = "1.0.0"
+version = "3.0.0"
 source = { editable = "." }
 dependencies = [
+    { name = "httpx" },
+    { name = "httpx-sse" },
+    { name = "mcp" },
     { name = "pyghidra" },
 ]
 
@@ -706,8 +709,11 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "httpx", specifier = ">=0.27.0,<1.0" },
     { name = "httpx", marker = "extra == 'test'", specifier = ">=0.27.0,<1.0" },
+    { name = "httpx-sse", specifier = ">=0.4.0" },
     { name = "httpx-sse", marker = "extra == 'test'", specifier = ">=0.4.0" },
+    { name = "mcp" },
     { name = "mcp", marker = "extra == 'test'" },
     { name = "pyghidra", specifier = ">=1.0.0" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=7.0.0" },

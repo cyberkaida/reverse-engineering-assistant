@@ -22,8 +22,6 @@ import ghidra.framework.Application;
 import ghidra.framework.ApplicationConfiguration;
 import ghidra.framework.HeadlessGhidraApplicationConfiguration;
 import utility.application.ApplicationLayout;
-import ghidra.framework.model.Project;
-import ghidra.framework.project.DefaultProjectManager;
 import ghidra.util.Msg;
 import ghidra.GhidraApplicationLayout;
 
@@ -58,12 +56,13 @@ public class RevaHeadlessLauncher {
     private ConfigManager configManager;
     private File configFile;
     private boolean autoInitializeGhidra;
+    private boolean useRandomPort;
 
     /**
      * Constructor with default settings (in-memory configuration)
      */
     public RevaHeadlessLauncher() {
-        this(null, true);
+        this(null, true, false);
     }
 
     /**
@@ -71,7 +70,7 @@ public class RevaHeadlessLauncher {
      * @param configFile The configuration file to load, or null for defaults
      */
     public RevaHeadlessLauncher(File configFile) {
-        this(configFile, true);
+        this(configFile, true, false);
     }
 
     /**
@@ -80,17 +79,28 @@ public class RevaHeadlessLauncher {
      * @param configFilePath Path to the configuration file
      */
     public RevaHeadlessLauncher(String configFilePath) {
-        this(new File(configFilePath), true);
+        this(new File(configFilePath), true, false);
+    }
+
+    /**
+     * Constructor with random port option
+     * @param configFile The configuration file to load, or null for defaults
+     * @param useRandomPort Whether to use a random available port instead of configured port
+     */
+    public RevaHeadlessLauncher(File configFile, boolean useRandomPort) {
+        this(configFile, true, useRandomPort);
     }
 
     /**
      * Constructor with full control
      * @param configFile The configuration file to load, or null for defaults
      * @param autoInitializeGhidra Whether to automatically initialize Ghidra if not already initialized
+     * @param useRandomPort Whether to use a random available port instead of configured port
      */
-    public RevaHeadlessLauncher(File configFile, boolean autoInitializeGhidra) {
+    public RevaHeadlessLauncher(File configFile, boolean autoInitializeGhidra, boolean useRandomPort) {
         this.configFile = configFile;
         this.autoInitializeGhidra = autoInitializeGhidra;
+        this.useRandomPort = useRandomPort;
     }
 
     /**
@@ -127,6 +137,12 @@ public class RevaHeadlessLauncher {
         } else {
             Msg.info(this, "Using default configuration (in-memory)");
             configManager = new ConfigManager();
+        }
+
+        // Use random port if requested
+        if (useRandomPort) {
+            int randomPort = configManager.setRandomAvailablePort();
+            Msg.info(this, "Using random port: " + randomPort);
         }
 
         // Create and start server manager

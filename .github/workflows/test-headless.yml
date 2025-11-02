@@ -65,54 +65,32 @@ jobs:
         unzip -q "$EXTENSION_ZIP" -d "$GHIDRA_INSTALL_DIR/Ghidra/Extensions/"
         ls -la "$GHIDRA_INSTALL_DIR/Ghidra/Extensions/"
 
-    - name: Install PyGhidra
+    - name: Install Python dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install pyghidra
+        pip install -r tests/requirements.txt
 
     - name: Verify PyGhidra Installation
       run: |
         python -c "import pyghidra; print(f'PyGhidra version: {pyghidra.__version__}')"
         echo "GHIDRA_INSTALL_DIR: $GHIDRA_INSTALL_DIR"
 
-    - name: Make scripts executable
-      run: chmod +x scripts/*.py
-
-    - name: Run Headless Quick Test
+    - name: Run Headless Integration Tests
       id: headless_test
       run: |
-        echo "::group::Running headless quick test"
-        python scripts/test_headless_quick.py
+        echo "::group::Running headless integration tests"
+        pytest tests/ -v --timeout=60 --tb=short --junitxml=test-results.xml
         echo "::endgroup::"
-      timeout-minutes: 5
+      timeout-minutes: 10
       env:
         GHIDRA_INSTALL_DIR: ${{ env.GHIDRA_INSTALL_DIR }}
 
-    - name: Test with Custom Port
-      if: success()
-      run: |
-        echo "::group::Testing custom port configuration"
-        timeout 30s python scripts/reva_headless_server.py --port 9090 --timeout 20 || true
-        echo "::endgroup::"
-      timeout-minutes: 2
-      env:
-        GHIDRA_INSTALL_DIR: ${{ env.GHIDRA_INSTALL_DIR }}
-
-    - name: Test with Configuration File
-      if: success()
-      run: |
-        echo "::group::Testing with configuration file"
-        # Create a test config
-        cat > test-config.properties << EOF
-        reva.server.options.server.port=8888
-        reva.server.options.server.host=127.0.0.1
-        reva.server.options.debug.mode=true
-        EOF
-        timeout 30s python scripts/reva_headless_server.py --config test-config.properties --timeout 20 || true
-        echo "::endgroup::"
-      timeout-minutes: 2
-      env:
-        GHIDRA_INSTALL_DIR: ${{ env.GHIDRA_INSTALL_DIR }}
+    - name: Publish Test Results
+      uses: EnricoMi/publish-unit-test-result-action@v2
+      if: always()
+      with:
+        files: test-results.xml
+        check_name: Headless Tests (${{ matrix.os }}, Ghidra ${{ matrix.ghidra-version }}, Python ${{ matrix.python-version }})
 
     - name: Upload test artifacts
       uses: actions/upload-artifact@v4
@@ -120,6 +98,7 @@ jobs:
       with:
         name: headless-test-logs-${{ matrix.os }}-ghidra-${{ matrix.ghidra-version }}-py-${{ matrix.python-version }}
         path: |
+          test-results.xml
           *.log
-          test-config.properties
+          .pytest_cache/
         if-no-files-found: ignore

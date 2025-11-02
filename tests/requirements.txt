@@ -1,0 +1,11 @@
+# ReVa Headless Integration Test Dependencies
+
+# PyGhidra for headless Ghidra integration
+pyghidra>=1.0.0
+
+# Pytest framework
+pytest>=7.0.0
+pytest-timeout>=2.0.0
+
+# Optional: Better test output
+pytest-sugar>=0.9.0

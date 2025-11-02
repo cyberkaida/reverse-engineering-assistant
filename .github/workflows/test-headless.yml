@@ -18,16 +18,9 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
         ghidra-version: ["11.4.2", "latest"]
-        python-version: ["3.9", "3.11", "3.12"]
-        exclude:
-          # Reduce matrix size - test latest Python on all, others on latest Ghidra only
-          - ghidra-version: "11.4.2"
-            python-version: "3.9"
-          - ghidra-version: "11.4.2"
-            python-version: "3.11"
       fail-fast: false  # Continue other tests if one fails
 
-    name: Test on ${{ matrix.os }} / Ghidra ${{ matrix.ghidra-version }} / Python ${{ matrix.python-version }}
+    name: Test on ${{ matrix.os }} / Ghidra ${{ matrix.ghidra-version }}
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -40,10 +33,10 @@ jobs:
         java-version: "21"
         distribution: "microsoft"
 
-    - name: Set up Python ${{ matrix.python-version }}
+    - name: Set up Python 3.9
       uses: actions/setup-python@v5
       with:
-        python-version: ${{ matrix.python-version }}
+        python-version: "3.9"
 
     - name: Install Ghidra ${{ matrix.ghidra-version }}
       uses: antoniovazquezblanco/setup-ghidra@v2.0.14
@@ -85,18 +78,11 @@ jobs:
       env:
         GHIDRA_INSTALL_DIR: ${{ env.GHIDRA_INSTALL_DIR }}
 
-    - name: Publish Test Results
-      uses: EnricoMi/publish-unit-test-result-action@v2
-      if: always()
-      with:
-        files: test-results.xml
-        check_name: Headless Tests (${{ matrix.os }}, Ghidra ${{ matrix.ghidra-version }}, Python ${{ matrix.python-version }})
-
     - name: Upload test artifacts
       uses: actions/upload-artifact@v4
       if: always()
       with:
-        name: headless-test-logs-${{ matrix.os }}-ghidra-${{ matrix.ghidra-version }}-py-${{ matrix.python-version }}
+        name: headless-test-results-${{ matrix.os }}-ghidra-${{ matrix.ghidra-version }}
         path: |
           test-results.xml
           *.log

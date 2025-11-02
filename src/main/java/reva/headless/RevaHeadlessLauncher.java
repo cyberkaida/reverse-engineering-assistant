@@ -20,8 +20,8 @@ import java.io.IOException;
 
 import ghidra.framework.Application;
 import ghidra.framework.ApplicationConfiguration;
-import ghidra.framework.ApplicationLayout;
 import ghidra.framework.HeadlessGhidraApplicationConfiguration;
+import utility.application.ApplicationLayout;
 import ghidra.framework.model.Project;
 import ghidra.framework.project.DefaultProjectManager;
 import ghidra.util.Msg;

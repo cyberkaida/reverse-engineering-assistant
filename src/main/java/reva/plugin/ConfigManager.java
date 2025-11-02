@@ -100,6 +100,16 @@ public class ConfigManager implements ConfigurationBackendListener {
     }
 
     /**
+     * Constructor for headless mode with configuration file path
+     * Convenience constructor for PyGhidra scripts that use string paths
+     * @param configFilePath Path to the configuration file
+     * @throws IOException if the file cannot be read
+     */
+    public ConfigManager(String configFilePath) throws IOException {
+        this(new File(configFilePath));
+    }
+
+    /**
      * Constructor for headless mode with in-memory configuration (uses defaults)
      */
     public ConfigManager() {
@@ -244,6 +254,15 @@ public class ConfigManager implements ConfigurationBackendListener {
      */
     public int getServerPort() {
         return (Integer) cachedOptions.getOrDefault(SERVER_PORT, DEFAULT_PORT);
+    }
+
+    /**
+     * Get the server port (convenience method)
+     * Alias for getServerPort() - useful for PyGhidra scripts
+     * @return The configured server port
+     */
+    public int getPort() {
+        return getServerPort();
     }
 
     /**

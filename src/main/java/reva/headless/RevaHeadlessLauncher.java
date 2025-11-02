@@ -75,6 +75,15 @@ public class RevaHeadlessLauncher {
     }
 
     /**
+     * Constructor with configuration file path
+     * Convenience constructor for PyGhidra scripts that use string paths
+     * @param configFilePath Path to the configuration file
+     */
+    public RevaHeadlessLauncher(String configFilePath) {
+        this(new File(configFilePath), true);
+    }
+
+    /**
      * Constructor with full control
      * @param configFile The configuration file to load, or null for defaults
      * @param autoInitializeGhidra Whether to automatically initialize Ghidra if not already initialized

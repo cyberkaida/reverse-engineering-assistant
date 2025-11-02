@@ -3,7 +3,7 @@ Test ReVa MCP tool functionality.
 
 Verifies that:
 - Tools can be called and return results
-- list-programs works
+- list-open-programs works
 - list-strings works
 - Other key tools are accessible
 """
@@ -16,8 +16,8 @@ class TestProgramTools:
     """Test program-related MCP tools"""
 
     def test_list_programs(self, mcp_client):
-        """list-programs tool returns program list"""
-        response = mcp_client.call_tool("list-programs")
+        """list-open-programs tool returns program list"""
+        response = mcp_client.call_tool("list-open-programs")
         result = get_response_result(response)
 
         # Should return some content
@@ -28,8 +28,8 @@ class TestProgramTools:
         assert isinstance(content, list)
 
     def test_list_programs_includes_format(self, mcp_client):
-        """list-programs result has expected structure"""
-        response = mcp_client.call_tool("list-programs")
+        """list-open-programs result has expected structure"""
+        response = mcp_client.call_tool("list-open-programs")
         result = get_response_result(response)
 
         # Should have content
@@ -98,7 +98,7 @@ class TestToolRegistration:
     """Test that key tools are registered"""
 
     @pytest.mark.parametrize("tool_name", [
-        "list-programs",
+        "list-open-programs",
         "list-functions",
         "list-strings",
         "get-decompilation",

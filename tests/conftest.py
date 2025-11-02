@@ -137,7 +137,7 @@ def mcp_client(server):
 
     Example:
         def test_something(mcp_client):
-            response = mcp_client.call_tool("list-programs")
+            response = mcp_client.call_tool("list-open-programs")
             assert response is not None
     """
     from tests.helpers import make_mcp_request
@@ -153,7 +153,7 @@ def mcp_client(server):
             Call an MCP tool.
 
             Args:
-                name: Tool name (e.g., "list-programs")
+                name: Tool name (e.g., "list-open-programs")
                 arguments: Tool arguments dictionary (optional)
                 timeout: Request timeout in seconds (default: 10)
 

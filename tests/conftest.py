@@ -163,3 +163,170 @@ def mcp_client(server):
             return make_mcp_request(self.port, name, arguments, timeout)
 
     yield MCPClient(server.getPort())
+
+
+# ============================================================================
+# CLI-Specific Fixtures
+# ============================================================================
+
+@pytest.fixture
+def isolated_workspace(tmp_path, monkeypatch):
+    """
+    Create an isolated workspace for CLI tests.
+
+    Creates a temporary directory and changes the current working directory
+    to it. This ensures CLI tests don't interfere with each other or the
+    actual repository.
+
+    Scope: function (new workspace for each test)
+
+    Yields:
+        Path: Temporary directory path (cwd is set to this path)
+
+    Example:
+        def test_cli_creates_project(isolated_workspace):
+            # cwd is now tmp_path
+            assert Path.cwd() == isolated_workspace
+            # CLI will create .reva/ here
+    """
+    original_cwd = Path.cwd()
+    monkeypatch.chdir(tmp_path)
+    print(f"\n[Fixture] Created isolated workspace: {tmp_path}")
+
+    yield tmp_path
+
+    # Restore original cwd (cleanup)
+    monkeypatch.chdir(original_cwd)
+
+
+@pytest.fixture
+def test_binary(isolated_workspace):
+    """
+    Create a minimal test binary for import testing.
+
+    Generates a tiny valid executable that can be imported into Ghidra.
+    The binary is created in the isolated_workspace.
+
+    Scope: function (new binary for each test)
+
+    Yields:
+        Path: Path to the created binary file
+
+    Example:
+        def test_import_binary(test_binary):
+            assert test_binary.exists()
+            assert test_binary.stat().st_size > 0
+    """
+    from tests.helpers import create_minimal_binary
+
+    binary_path = isolated_workspace / "test.exe"
+    create_minimal_binary(binary_path)
+
+    print(f"[Fixture] Created test binary: {binary_path} ({binary_path.stat().st_size} bytes)")
+
+    yield binary_path
+
+
+@pytest.fixture
+def cli_process(isolated_workspace):
+    """
+    Start mcp-reva CLI as a subprocess.
+
+    Starts the CLI in the isolated workspace and automatically terminates
+    it after the test completes.
+
+    Scope: function (new process for each test)
+
+    Yields:
+        subprocess.Popen: Running mcp-reva process
+
+    Example:
+        def test_cli_startup(cli_process):
+            # Process is running
+            assert cli_process.poll() is None
+            # Can interact with stdin/stdout
+            cli_process.stdin.write('{"jsonrpc":"2.0"}\n')
+    """
+    import subprocess
+    import time
+
+    print(f"\n[Fixture] Starting mcp-reva CLI subprocess...")
+
+    proc = subprocess.Popen(
+        ["uv", "run", "mcp-reva"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        cwd=isolated_workspace
+    )
+
+    # Give it a moment to start
+    time.sleep(0.5)
+
+    if proc.poll() is not None:
+        # Process already exited - capture error
+        _, stderr = proc.communicate()
+        raise RuntimeError(f"mcp-reva failed to start: {stderr}")
+
+    print(f"[Fixture] mcp-reva started (PID: {proc.pid})")
+
+    yield proc
+
+    # Cleanup: Terminate process
+    print(f"[Fixture] Terminating mcp-reva (PID: {proc.pid})...")
+    proc.terminate()
+
+    try:
+        proc.wait(timeout=5)
+        print(f"[Fixture] Process terminated gracefully")
+    except subprocess.TimeoutExpired:
+        print(f"[Fixture] Process didn't terminate, killing...")
+        proc.kill()
+        proc.wait()
+
+
+@pytest.fixture
+async def mcp_stdio_client(isolated_workspace):
+    """
+    Create an MCP client that connects to mcp-reva via stdio.
+
+    Uses the official MCP Python SDK stdio_client to spawn mcp-reva
+    as a subprocess and communicate via stdin/stdout.
+
+    Scope: function (new client for each test)
+
+    Yields:
+        ClientSession: MCP client session connected to mcp-reva
+
+    Example:
+        @pytest.mark.asyncio
+        async def test_initialize(mcp_stdio_client):
+            result = await mcp_stdio_client.initialize()
+            assert result.server_info.name == "ReVa"
+    """
+    from mcp.client.stdio import stdio_client, StdioServerParameters
+    from mcp import ClientSession
+    from pathlib import Path
+
+    # Configure mcp-reva as stdio server
+    server_params = StdioServerParameters(
+        command="uv",
+        args=["run", "mcp-reva"],
+        cwd=str(isolated_workspace)
+    )
+
+    print(f"\n[Fixture] Starting mcp-reva via stdio_client in {isolated_workspace}...")
+
+    # Connect to mcp-reva via stdio
+    async with stdio_client(server_params) as (read_stream, write_stream):
+        async with ClientSession(read_stream, write_stream) as session:
+            print("[Fixture] Initializing MCP session...")
+
+            # Initialize the session
+            init_result = await session.initialize()
+            print(f"[Fixture] MCP session initialized: {init_result.server_info.name} v{init_result.server_info.version}")
+
+            yield session
+
+            print("[Fixture] Closing MCP session...")

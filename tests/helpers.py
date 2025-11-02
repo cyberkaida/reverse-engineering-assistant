@@ -192,3 +192,207 @@ def get_response_result(response: Optional[Dict[str, Any]]) -> Any:
 
     assert "content" in response, "Response missing content field"
     return response["content"]
+
+
+# ============================================================================
+# CLI Helper Functions
+# ============================================================================
+
+def create_minimal_binary(path: Path, arch: str = "x86") -> Path:
+    """
+    Create a minimal valid binary for testing.
+
+    Creates a tiny but valid executable that Ghidra can recognize and import.
+    The binary is as small as possible while still being valid.
+
+    Args:
+        path: Path where binary should be created
+        arch: Architecture (currently only "x86" supported)
+
+    Returns:
+        Path to the created binary
+
+    Example:
+        >>> binary = create_minimal_binary(Path("test.exe"))
+        >>> assert binary.exists()
+        >>> assert binary.stat().st_size > 0
+    """
+    import sys
+    import platform
+
+    # Create minimal ELF (Linux/Unix) - 45 bytes
+    # This is a minimal ELF that exits immediately
+    elf_bytes = bytes([
+        # ELF Header
+        0x7f, 0x45, 0x4c, 0x46,  # Magic: 0x7f, 'E', 'L', 'F'
+        0x01,                     # Class: 32-bit
+        0x01,                     # Data: Little endian
+        0x01,                     # Version: Current
+        0x00,                     # OS/ABI: System V
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  # Padding
+        0x02, 0x00,               # Type: Executable
+        0x03, 0x00,               # Machine: x86
+        0x01, 0x00, 0x00, 0x00,   # Version: 1
+        0x00, 0x00, 0x00, 0x00,   # Entry point: 0 (will fail but Ghidra can analyze)
+        0x34, 0x00, 0x00, 0x00,   # Program header offset: 52
+        0x00, 0x00, 0x00, 0x00,   # Section header offset: 0
+        0x00, 0x00, 0x00, 0x00,   # Flags: 0
+        0x34, 0x00,               # ELF header size: 52
+        0x20, 0x00,               # Program header size: 32
+        0x00, 0x00,               # Program header count: 0
+        0x00, 0x00,               # Section header size: 0
+        0x00, 0x00,               # Section header count: 0
+        0x00, 0x00,               # Section name string table index: 0
+    ])
+
+    path.write_bytes(elf_bytes)
+    path.chmod(0o755)  # Make executable
+
+    return path
+
+
+def send_mcp_message(
+    process,
+    method: str,
+    params: Optional[Dict[str, Any]] = None,
+    msg_id: int = 1
+) -> None:
+    """
+    Send a JSON-RPC message to subprocess stdin.
+
+    Args:
+        process: subprocess.Popen instance
+        method: MCP method name (e.g., "initialize", "tools/list")
+        params: Method parameters (optional)
+        msg_id: Message ID for JSON-RPC
+
+    Example:
+        >>> send_mcp_message(proc, "initialize", {}, 1)
+        >>> send_mcp_message(proc, "tools/list", None, 2)
+    """
+    import json
+
+    message = {
+        "jsonrpc": "2.0",
+        "id": msg_id,
+        "method": method
+    }
+
+    if params is not None:
+        message["params"] = params
+
+    json_str = json.dumps(message)
+    process.stdin.write(json_str + "\n")
+    process.stdin.flush()
+
+
+def read_mcp_response(process, timeout: float = 10.0) -> Dict[str, Any]:
+    """
+    Read a JSON-RPC response from subprocess stdout.
+
+    Args:
+        process: subprocess.Popen instance
+        timeout: Maximum time to wait for response in seconds
+
+    Returns:
+        Parsed JSON-RPC response dictionary
+
+    Raises:
+        TimeoutError: If response not received within timeout
+        RuntimeError: If process died
+        json.JSONDecodeError: If response is not valid JSON
+
+    Example:
+        >>> response = read_mcp_response(proc, timeout=5.0)
+        >>> assert response["jsonrpc"] == "2.0"
+    """
+    import json
+    import select
+    import time
+
+    start_time = time.time()
+
+    while True:
+        # Check if process died
+        if process.poll() is not None:
+            _, stderr = process.communicate()
+            raise RuntimeError(f"Process died: {stderr}")
+
+        # Check timeout
+        elapsed = time.time() - start_time
+        if elapsed > timeout:
+            raise TimeoutError(f"No response received within {timeout} seconds")
+
+        # Try to read with remaining timeout
+        remaining = timeout - elapsed
+
+        # Use select on Unix, just readline with short timeout on Windows
+        import sys
+        if sys.platform != "win32":
+            ready, _, _ = select.select([process.stdout], [], [], min(remaining, 0.1))
+            if ready:
+                line = process.stdout.readline()
+                if line:
+                    return json.loads(line.strip())
+        else:
+            # Windows doesn't support select on pipes, just try reading
+            # This might block but we have timeout logic
+            line = process.stdout.readline()
+            if line:
+                return json.loads(line.strip())
+
+        time.sleep(0.05)  # Small sleep to avoid busy waiting
+
+
+def wait_for_server_ready(process, timeout: float = 60.0) -> bool:
+    """
+    Wait for server to print "Bridge ready" message to stderr.
+
+    Monitors stderr for the startup completion message.
+
+    Args:
+        process: subprocess.Popen instance
+        timeout: Maximum time to wait in seconds
+
+    Returns:
+        True if server became ready, False otherwise
+
+    Example:
+        >>> assert wait_for_server_ready(proc, timeout=30)
+    """
+    import time
+    import select
+    import sys
+
+    start_time = time.time()
+    stderr_buffer = ""
+
+    while True:
+        # Check if process died
+        if process.poll() is not None:
+            return False
+
+        # Check timeout
+        elapsed = time.time() - start_time
+        if elapsed > timeout:
+            return False
+
+        remaining = timeout - elapsed
+
+        # Read from stderr
+        if sys.platform != "win32":
+            ready, _, _ = select.select([process.stderr], [], [], min(remaining, 0.1))
+            if ready:
+                char = process.stderr.read(1)
+                if char:
+                    stderr_buffer += char
+                    # Check for ready message
+                    if "Bridge ready" in stderr_buffer or "bridge ready" in stderr_buffer.lower():
+                        return True
+        else:
+            # Windows: use non-blocking approach
+            # This is less efficient but works on Windows
+            time.sleep(0.1)
+            # Check if there's stderr to read (this is imperfect on Windows)
+
+        time.sleep(0.05)

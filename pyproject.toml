@@ -59,6 +59,7 @@ mcp-reva = "reva_cli.__main__:main"
 [project.optional-dependencies]
 test = [
     "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
     "pytest-timeout>=2.0.0",
     "pytest-sugar>=0.9.0",
     "mcp",
@@ -81,11 +82,19 @@ python_classes = ["Test*"]
 python_functions = ["test_*"]
 timeout = 60
 addopts = "-v --tb=short"
+markers = [
+    "unit: Fast unit tests with mocked dependencies",
+    "integration: Integration tests with real PyGhidra",
+    "e2e: End-to-end tests via subprocess",
+    "cli: All CLI-specific tests",
+    "slow: Tests that take more than 5 seconds"
+]
 
 [dependency-groups]
 dev = [
     "pyghidra>=1.0.0",
     "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
     "pytest-timeout>=2.0.0",
     "pytest-sugar>=0.9.0",
     "mcp",

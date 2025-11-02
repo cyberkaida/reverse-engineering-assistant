@@ -62,13 +62,20 @@ async def _make_mcp_request_async(
         async with streamablehttp_client(url, timeout=float(timeout)) as (read_stream, write_stream, get_session_id):
             async with ClientSession(read_stream, write_stream) as session:
                 # Initialize the session
-                await session.initialize()
+                init_result = await session.initialize()
+                print(f"DEBUG: Initialized session, server info: {init_result}")
+
+                # List available tools for debugging
+                tools_result = await session.list_tools()
+                print(f"DEBUG: Available tools: {tools_result}")
 
                 # Call the tool
+                print(f"DEBUG: Calling tool '{tool_name}' with arguments {arguments}")
                 result = await session.call_tool(
                     name=tool_name,
                     arguments=arguments or {}
                 )
+                print(f"DEBUG: Tool call result: {result}")
 
                 # Return the tool call result
                 return {

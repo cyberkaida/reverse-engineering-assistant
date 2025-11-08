@@ -304,6 +304,15 @@ public class ProjectToolProvider extends AbstractToolProvider {
             DomainFile domainFile = program.getDomainFile();
 
             try {
+                // Save program first (required before version control operations)
+                if (program.canSave()) {
+                    try {
+                        program.save(message, TaskMonitor.DUMMY);
+                    } catch (java.io.IOException e) {
+                        return createErrorResult("Failed to save program: " + e.getMessage());
+                    }
+                }
+
                 if (domainFile.canAddToRepository()) {
                     // New file - add to version control
                     domainFile.addToVersionControl(message, !keepCheckedOut, TaskMonitor.DUMMY);
@@ -336,12 +345,21 @@ public class ProjectToolProvider extends AbstractToolProvider {
 
                     return createJsonResult(result);
                 }
+                else if (!domainFile.isVersioned()) {
+                    // Not versioned - changes were already saved at the beginning
+                    Map<String, Object> result = new HashMap<>();
+                    result.put("success", true);
+                    result.put("action", "saved");
+                    result.put("programPath", programPath);
+                    result.put("message", message);
+                    result.put("isVersioned", false);
+                    result.put("info", "Program is not under version control - changes were saved instead");
+
+                    return createJsonResult(result);
+                }
                 else {
-                    // Determine specific reason why checkin is not possible
-                    if (!domainFile.isVersioned()) {
-                        return createErrorResult("Program is not under version control: " + programPath);
-                    }
-                    else if (!domainFile.isCheckedOut()) {
+                    // Other version control errors
+                    if (!domainFile.isCheckedOut()) {
                         return createErrorResult("Program is not checked out and cannot be modified: " + programPath);
                     }
                     else if (!domainFile.modifiedSinceCheckout()) {
@@ -356,6 +374,39 @@ public class ProjectToolProvider extends AbstractToolProvider {
                 return createErrorResult("Checkin failed: " + e.getMessage());
             }
         });
+    }
+
+    /**
+     * Collect imported files and add them to version control
+     * @param destFolder The destination folder where files were imported
+     * @param importedBaseName The base name of the imported file/directory
+     * @param versionedFiles List to track successfully versioned files
+     * @param errors List to track version control errors
+     */
+    private void collectImportedFiles(DomainFolder destFolder, String importedBaseName,
+                                     List<String> versionedFiles, List<String> errors) {
+        try {
+            // Find newly imported files in the destination folder
+            for (DomainFile file : destFolder.getFiles()) {
+                // Check if this file can be added to version control
+                if (file.canAddToRepository()) {
+                    try {
+                        // Add to version control with initial commit message
+                        file.addToVersionControl("Initial import via ReVa", false, TaskMonitor.DUMMY);
+                        versionedFiles.add(file.getPathname());
+                    } catch (Exception e) {
+                        errors.add("Failed to add " + file.getPathname() + " to version control: " + e.getMessage());
+                    }
+                }
+            }
+
+            // Recursively process subfolders
+            for (DomainFolder subfolder : destFolder.getFolders()) {
+                collectImportedFiles(subfolder, importedBaseName, versionedFiles, errors);
+            }
+        } catch (Exception e) {
+            errors.add("Error collecting imported files: " + e.getMessage());
+        }
     }
 
     /**
@@ -615,6 +666,12 @@ public class ProjectToolProvider extends AbstractToolProvider {
         analyzeProperty.put("description", "Run auto-analysis after import (default: false)");
         properties.put("analyzeAfterImport", analyzeProperty);
 
+        // enableVersionControl parameter (optional)
+        Map<String, Object> versionControlProperty = new HashMap<>();
+        versionControlProperty.put("type", "boolean");
+        versionControlProperty.put("description", "Automatically add imported files to version control (default: true)");
+        properties.put("enableVersionControl", versionControlProperty);
+
         List<String> required = List.of("path");
 
         // Create the tool
@@ -636,6 +693,7 @@ public class ProjectToolProvider extends AbstractToolProvider {
                 boolean recursive = getOptionalBoolean(request, "recursive", true);
                 int maxDepth = getOptionalInt(request, "maxDepth", 20);
                 boolean analyzeAfterImport = getOptionalBoolean(request, "analyzeAfterImport", false);
+                boolean enableVersionControl = getOptionalBoolean(request, "enableVersionControl", true);
 
                 // Validate file exists
                 File file = new File(path);
@@ -680,6 +738,16 @@ public class ProjectToolProvider extends AbstractToolProvider {
                 ImportBatchTask importTask = new ImportBatchTask(batchInfo, destFolder, null, true, false);
                 TaskLauncher launcher = new TaskLauncher(importTask, null);
 
+                // Track imported files for version control
+                List<String> versionedFiles = new ArrayList<>();
+                List<String> versionControlErrors = new ArrayList<>();
+
+                // Add imported files to version control if requested
+                if (enableVersionControl) {
+                    // Get all files that were imported
+                    collectImportedFiles(destFolder, file.getName(), versionedFiles, versionControlErrors);
+                }
+
                 // Create result data
                 Map<String, Object> result = new HashMap<>();
                 result.put("success", true);
@@ -690,7 +758,20 @@ public class ProjectToolProvider extends AbstractToolProvider {
                 result.put("maxDepthUsed", maxDepth);
                 result.put("wasRecursive", recursive);
                 result.put("analyzeAfterImport", analyzeAfterImport);
-                result.put("message", "Import completed successfully. " + batchInfo.getTotalCount() + " files imported.");
+                result.put("enableVersionControl", enableVersionControl);
+
+                if (enableVersionControl) {
+                    result.put("filesAddedToVersionControl", versionedFiles.size());
+                    if (!versionControlErrors.isEmpty()) {
+                        result.put("versionControlErrors", versionControlErrors);
+                    }
+                }
+
+                String message = "Import completed successfully. " + batchInfo.getTotalCount() + " files imported";
+                if (enableVersionControl && versionedFiles.size() > 0) {
+                    message += ", " + versionedFiles.size() + " added to version control";
+                }
+                result.put("message", message + ".");
 
                 return createJsonResult(result);
 

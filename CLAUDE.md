@@ -57,6 +57,35 @@ uv run mcp-reva --verbose
 uv pip install -e .
 ```
 
+### Running the Complete Test Suite
+
+**Run all Java unit tests:**
+```bash
+gradle test
+```
+
+**Run all Java integration tests:**
+```bash
+gradle integrationTest
+```
+
+**Run all Python tests (unit, integration, and e2e):**
+```bash
+uv run pytest
+```
+
+**Run specific Python test categories:**
+```bash
+uv run pytest -m unit         # Unit tests only
+uv run pytest -m integration  # Integration tests only
+uv run pytest -m e2e          # End-to-end tests only
+```
+
+**Run complete test suite (Java + Python):**
+```bash
+gradle test && gradle integrationTest && uv run pytest
+```
+
 ### Running ReVa
 
 **GUI Mode (Ghidra Plugin):**

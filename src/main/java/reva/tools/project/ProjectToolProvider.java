@@ -37,6 +37,7 @@ import ghidra.program.model.lang.LanguageNotFoundException;
 import ghidra.program.model.lang.LanguageService;
 import ghidra.program.util.DefaultLanguageService;
 import ghidra.program.model.listing.Program;
+import ghidra.util.Msg;
 import ghidra.util.task.TaskMonitor;
 import ghidra.util.task.TimeoutTaskMonitor;
 import java.util.concurrent.TimeUnit;
@@ -319,9 +320,24 @@ public class ProjectToolProvider extends AbstractToolProvider {
                     }
                 }
 
+                // Release program from cache before version control operations
+                // Version control requires no active consumers on the domain file
+                boolean wasCached = RevaProgramManager.releaseProgramFromCache(program);
+                if (wasCached) {
+                    Msg.debug(this, "Released program from cache for version control: " + programPath);
+                }
+
                 if (domainFile.canAddToRepository()) {
                     // New file - add to version control
                     domainFile.addToVersionControl(message, !keepCheckedOut, TaskMonitor.DUMMY);
+
+                    // Re-open program to cache if it was cached and we're keeping it checked out
+                    if (wasCached && keepCheckedOut) {
+                        Program reopenedProgram = RevaProgramManager.reopenProgramToCache(programPath);
+                        if (reopenedProgram != null) {
+                            Msg.debug(this, "Re-opened program to cache after version control: " + programPath);
+                        }
+                    }
 
                     Map<String, Object> result = new HashMap<>();
                     result.put("success", true);
@@ -339,6 +355,14 @@ public class ProjectToolProvider extends AbstractToolProvider {
                     DefaultCheckinHandler checkinHandler = new DefaultCheckinHandler(
                         message + "\n💜🐉✨ (ReVa)", keepCheckedOut, false);
                     domainFile.checkin(checkinHandler, TaskMonitor.DUMMY);
+
+                    // Re-open program to cache if it was cached and we're keeping it checked out
+                    if (wasCached && keepCheckedOut) {
+                        Program reopenedProgram = RevaProgramManager.reopenProgramToCache(programPath);
+                        if (reopenedProgram != null) {
+                            Msg.debug(this, "Re-opened program to cache after checkin: " + programPath);
+                        }
+                    }
 
                     Map<String, Object> result = new HashMap<>();
                     result.put("success", true);
@@ -380,6 +404,25 @@ public class ProjectToolProvider extends AbstractToolProvider {
                 return createErrorResult("Checkin failed: " + e.getMessage());
             }
         });
+    }
+
+    /**
+     * Recursively collect all program paths from a folder and its subfolders
+     * @param folder The folder to collect from
+     * @param programPaths List to accumulate program paths
+     */
+    private void collectAllProgramPaths(DomainFolder folder, List<String> programPaths) {
+        // Collect programs in this folder
+        for (DomainFile file : folder.getFiles()) {
+            if (file.getContentType().equals("Program")) {
+                programPaths.add(file.getPathname());
+            }
+        }
+
+        // Recursively collect from subfolders
+        for (DomainFolder subfolder : folder.getFolders()) {
+            collectAllProgramPaths(subfolder, programPaths);
+        }
     }
 
     /**
@@ -831,6 +874,10 @@ public class ProjectToolProvider extends AbstractToolProvider {
                         versionedFiles, analyzedFiles, errors, vcMonitor);
                 }
 
+                // Collect all imported program paths
+                List<String> importedProgramPaths = new ArrayList<>();
+                collectAllProgramPaths(destFolder, importedProgramPaths);
+
                 // Create result data
                 Map<String, Object> result = new HashMap<>();
                 result.put("success", true);
@@ -842,13 +889,16 @@ public class ProjectToolProvider extends AbstractToolProvider {
                 result.put("wasRecursive", recursive);
                 result.put("analyzeAfterImport", analyzeAfterImport);
                 result.put("enableVersionControl", enableVersionControl);
+                result.put("importedPrograms", importedProgramPaths);
 
                 if (enableVersionControl) {
                     result.put("filesAddedToVersionControl", versionedFiles.size());
+                    result.put("versionedPrograms", versionedFiles);
                 }
 
                 if (analyzeAfterImport) {
                     result.put("filesAnalyzed", analyzedFiles.size());
+                    result.put("analyzedPrograms", analyzedFiles);
                 }
 
                 if (!errors.isEmpty()) {

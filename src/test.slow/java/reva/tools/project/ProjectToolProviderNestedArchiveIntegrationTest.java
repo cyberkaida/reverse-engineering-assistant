@@ -100,7 +100,7 @@ public class ProjectToolProviderNestedArchiveIntegrationTest extends RevaIntegra
         withMcpClient(createMcpTransport(), client -> {
             try {
                 client.initialize();
-                
+
                 McpSchema.CallToolResult result = client.callTool(new McpSchema.CallToolRequest(
                     "import-file",
                     Map.of(
@@ -110,11 +110,105 @@ public class ProjectToolProviderNestedArchiveIntegrationTest extends RevaIntegra
 
                 assertNotNull("Result should not be null", result);
                 assertTrue("Tool should have error for non-existent file", result.isError());
-                
+
                 String errorMessage = ((io.modelcontextprotocol.spec.McpSchema.TextContent) result.content().get(0)).text();
-                assertTrue("Error should mention file not found", 
+                assertTrue("Error should mention file not found",
                     errorMessage.contains("does not exist"));
-                
+
+                return null;
+            } catch (Exception e) {
+                throw new RuntimeException("Test failed", e);
+            }
+        });
+    }
+
+    /**
+     * Test importing a file with version control enabled (default behavior)
+     */
+    @Test
+    public void testImportWithVersionControlEnabled() throws Exception {
+        String testFilePath = "/bin/ls";
+
+        if (!new File(testFilePath).exists()) {
+            // Skip test if file doesn't exist
+            return;
+        }
+
+        withMcpClient(createMcpTransport(), client -> {
+            try {
+                client.initialize();
+
+                // Import with default enableVersionControl=true
+                McpSchema.CallToolResult result = client.callTool(new McpSchema.CallToolRequest(
+                    "import-file",
+                    Map.of(
+                        "path", testFilePath
+                    )
+                ));
+
+                assertNotNull("Result should not be null", result);
+                assertNotNull("Response content should not be null", result.content());
+                assertFalse("Tool should not have error", result.isError());
+
+                String responseJson = ((io.modelcontextprotocol.spec.McpSchema.TextContent) result.content().get(0)).text();
+                Map<String, Object> response = objectMapper.readValue(responseJson, new TypeReference<Map<String, Object>>() {});
+
+                assertEquals("Import should be successful", true, response.get("success"));
+                assertEquals("enableVersionControl should be true by default", true, response.get("enableVersionControl"));
+
+                // If project supports version control, should have filesAddedToVersionControl count
+                // (This may be 0 if project doesn't support version control, but field should exist)
+                if (response.containsKey("filesAddedToVersionControl")) {
+                    Integer versionedCount = (Integer) response.get("filesAddedToVersionControl");
+                    assertNotNull("filesAddedToVersionControl should not be null", versionedCount);
+                    assertTrue("filesAddedToVersionControl should be >= 0", versionedCount >= 0);
+                }
+
+                return null;
+            } catch (Exception e) {
+                throw new RuntimeException("Test failed", e);
+            }
+        });
+    }
+
+    /**
+     * Test importing a file with version control explicitly disabled
+     */
+    @Test
+    public void testImportWithVersionControlDisabled() throws Exception {
+        String testFilePath = "/bin/ls";
+
+        if (!new File(testFilePath).exists()) {
+            // Skip test if file doesn't exist
+            return;
+        }
+
+        withMcpClient(createMcpTransport(), client -> {
+            try {
+                client.initialize();
+
+                // Import with enableVersionControl=false
+                McpSchema.CallToolResult result = client.callTool(new McpSchema.CallToolRequest(
+                    "import-file",
+                    Map.of(
+                        "path", testFilePath,
+                        "enableVersionControl", false
+                    )
+                ));
+
+                assertNotNull("Result should not be null", result);
+                assertFalse("Tool should not have error", result.isError());
+
+                String responseJson = ((io.modelcontextprotocol.spec.McpSchema.TextContent) result.content().get(0)).text();
+                Map<String, Object> response = objectMapper.readValue(responseJson, new TypeReference<Map<String, Object>>() {});
+
+                assertEquals("Import should be successful", true, response.get("success"));
+                assertEquals("enableVersionControl should be false", false, response.get("enableVersionControl"));
+
+                // Should not have filesAddedToVersionControl field when disabled
+                assertFalse("Should not have filesAddedToVersionControl when disabled",
+                    response.containsKey("filesAddedToVersionControl"));
+
                 return null;
             } catch (Exception e) {
                 throw new RuntimeException("Test failed", e);

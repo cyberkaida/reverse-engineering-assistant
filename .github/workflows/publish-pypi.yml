@@ -1,0 +1,130 @@
+name: Publish Python 🐍 distribution to PyPI
+
+on:
+  push:
+    tags:
+      - 'v*'
+    branches:
+      - 'develop'
+  workflow_dispatch:
+    inputs:
+      publish_to:
+        description: 'Publish to PyPI, TestPyPI, or both'
+        required: true
+        type: choice
+        options:
+          - 'pypi'
+          - 'testpypi'
+          - 'both'
+        default: 'pypi'
+
+jobs:
+  build:
+    name: Build Python distribution 📦
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # Fetch all history for setuptools_scm to determine version from git tags
+          fetch-depth: 0
+
+      - name: Set up Python 🐍
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install build setuptools_scm
+
+      - name: Verify version extraction
+        run: |
+          python -m setuptools_scm
+          echo "Package version will be: $(python -m setuptools_scm)"
+
+      - name: Build distribution packages
+        run: python -m build
+
+      - name: Store distribution packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-package-distributions
+          path: dist/
+          if-no-files-found: error
+
+  publish-to-testpypi:
+    name: Publish to TestPyPI 🧪
+    # Only run on develop branch pushes or manual dispatch with testpypi/both
+    if: |
+      github.ref == 'refs/heads/develop' ||
+      (github.event_name == 'workflow_dispatch' &&
+       (github.event.inputs.publish_to == 'testpypi' || github.event.inputs.publish_to == 'both'))
+    needs:
+      - build
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/reverse-engineering-assistant
+    permissions:
+      id-token: write  # IMPORTANT: mandatory for trusted publishing
+    steps:
+      - name: Download distributions
+        uses: actions/download-artifact@v5
+        with:
+          name: python-package-distributions
+          path: dist/
+
+      - name: Publish to TestPyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          skip-existing: true
+          verbose: true
+
+  publish-to-pypi:
+    name: Publish to PyPI 🚀
+    # Only run on tag pushes or manual dispatch with pypi/both
+    if: |
+      startsWith(github.ref, 'refs/tags/v') ||
+      (github.event_name == 'workflow_dispatch' &&
+       (github.event.inputs.publish_to == 'pypi' || github.event.inputs.publish_to == 'both'))
+    needs:
+      - build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/reverse-engineering-assistant
+    permissions:
+      contents: write  # IMPORTANT: mandatory for GitHub Releases
+      id-token: write  # IMPORTANT: mandatory for trusted publishing and sigstore
+    steps:
+      - name: Download distributions
+        uses: actions/download-artifact@v5
+        with:
+          name: python-package-distributions
+          path: dist/
+
+      - name: Sign distributions with Sigstore
+        uses: sigstore/gh-action-sigstore-python@v3.0.1
+        with:
+          inputs: >-
+            ./dist/*.tar.gz
+            ./dist/*.whl
+          upload-signing-artifacts: true
+
+      - name: Upload signatures to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          # Upload Python package signatures to existing release created by publish-ghidra.yml
+          gh release upload '${{ github.ref_name }}' ./dist/*.sigstore* --clobber \
+            --repo '${{ github.repository }}'
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          verbose: true

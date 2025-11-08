@@ -176,6 +176,45 @@ public class RevaProgramManager {
     }
 
     /**
+     * Ensure a program is checked out if it's under version control.
+     * This prevents the "Versioned File not Checked Out" dialog when making changes.
+     * @param program The program to check out
+     * @param programPath The path of the program (for logging)
+     */
+    private static void ensureCheckedOut(Program program, String programPath) {
+        if (program == null) {
+            return;
+        }
+
+        DomainFile domainFile = program.getDomainFile();
+        Msg.debug(RevaProgramManager.class,
+            "Program state - versioned: " + domainFile.isVersioned() +
+            ", checked out: " + domainFile.isCheckedOut() +
+            ", read-only: " + domainFile.isReadOnly());
+
+        if (domainFile.isVersioned() && !domainFile.isCheckedOut()) {
+            try {
+                // Attempt non-exclusive checkout
+                Msg.debug(RevaProgramManager.class,
+                    "Attempting auto-checkout for: " + programPath);
+                boolean success = domainFile.checkout(false, TaskMonitor.DUMMY);
+                if (success) {
+                    Msg.info(RevaProgramManager.class,
+                        "Auto-checked out versioned program: " + programPath);
+                } else {
+                    Msg.warn(RevaProgramManager.class,
+                        "Failed to auto-checkout versioned program: " + programPath +
+                        " (may be checked out exclusively by another user)");
+                }
+            } catch (Exception e) {
+                Msg.error(RevaProgramManager.class,
+                    "Could not auto-checkout program " + programPath + ": " + e.getMessage(), e);
+                // Continue anyway - program is still usable in read-only mode
+            }
+        }
+    }
+
+    /**
      * Get a program by its path
      * @param programPath Path to the program
      * @return Program object or null if not found
@@ -192,6 +231,7 @@ public class RevaProgramManager {
             Program registeredProgram = registeredPrograms.get(programPath);
             if (!registeredProgram.isClosed()) {
                 Msg.debug(RevaProgramManager.class, "Found program in registry: " + programPath);
+                ensureCheckedOut(registeredProgram, programPath);
                 return registeredProgram;
             } else {
                 // Remove invalid programs from registry
@@ -205,6 +245,7 @@ public class RevaProgramManager {
             // Ensure the program is still valid
             if (!cachedProgram.isClosed()) {
                 Msg.debug(RevaProgramManager.class, "Found program in cache: " + programPath);
+                ensureCheckedOut(cachedProgram, programPath);
                 return cachedProgram;
             } else {
                 // Remove invalid programs from cache
@@ -225,6 +266,7 @@ public class RevaProgramManager {
                 String canonicalPath = getCanonicalProgramPath(program);
                 programCache.put(canonicalPath, program);
                 Msg.debug(RevaProgramManager.class, "Found program by domain path: " + programPath);
+                ensureCheckedOut(program, programPath);
                 return program;
             }
 
@@ -237,6 +279,7 @@ public class RevaProgramManager {
                 String canonicalPath = getCanonicalProgramPath(program);
                 programCache.put(canonicalPath, program);
                 Msg.debug(RevaProgramManager.class, "Found program by executable path or name: " + programPath);
+                ensureCheckedOut(program, programPath);
                 return program;
             }
         }
@@ -285,12 +328,74 @@ public class RevaProgramManager {
         Program program = programOpener.openProgram(locator, TaskMonitor.DUMMY);
 
         if (program != null) {
+            // Ensure the program is checked out if versioned
+            ensureCheckedOut(program, programPath);
+
             // Use canonical domain path as cache key for consistency
             String canonicalPath = getCanonicalProgramPath(program);
             programCache.put(canonicalPath, program);
         }
 
         return program;
+    }
+
+    /**
+     * Check if a program is currently held in the cache as a consumer
+     * @param program The program to check
+     * @return true if the program is in the cache
+     */
+    public static boolean isProgramCached(Program program) {
+        if (program == null || program.isClosed()) {
+            return false;
+        }
+        String canonicalPath = getCanonicalProgramPath(program);
+        return programCache.containsKey(canonicalPath) &&
+               programCache.get(canonicalPath) == program;
+    }
+
+    /**
+     * Release a program from the cache, removing it as a consumer.
+     * This is needed before version control operations which require no active consumers.
+     * @param program The program to release from cache
+     * @return true if the program was in the cache and released, false otherwise
+     */
+    public static boolean releaseProgramFromCache(Program program) {
+        if (program == null || program.isClosed()) {
+            return false;
+        }
+
+        String canonicalPath = getCanonicalProgramPath(program);
+        Program cachedProgram = programCache.remove(canonicalPath);
+
+        if (cachedProgram != null && cachedProgram == program) {
+            Msg.debug(RevaProgramManager.class,
+                "Releasing program from cache: " + canonicalPath);
+            program.release(programCache);
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Re-open a program and add it back to the cache after it was released.
+     * This restores the cache state after operations that required releasing the program.
+     * @param programPath The path to the program to re-open
+     * @return The re-opened program, or null if it could not be opened
+     */
+    public static Program reopenProgramToCache(String programPath) {
+        if (programPath == null) {
+            return null;
+        }
+
+        Msg.debug(RevaProgramManager.class,
+            "Re-opening program to cache: " + programPath);
+
+        // Clear any existing cache entry first
+        programCache.remove(programPath);
+
+        // Use getProgramByPath which will open and cache the program
+        return getProgramByPath(programPath);
     }
 
     /**

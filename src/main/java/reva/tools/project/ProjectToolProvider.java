@@ -23,6 +23,7 @@ import java.util.Map;
 
 import ghidra.app.plugin.core.analysis.AutoAnalysisManager;
 import ghidra.framework.data.DefaultCheckinHandler;
+import ghidra.framework.model.DomainObject;
 import ghidra.framework.main.AppInfo;
 import ghidra.framework.model.DomainFile;
 import ghidra.framework.model.DomainFolder;
@@ -380,22 +381,77 @@ public class ProjectToolProvider extends AbstractToolProvider {
     }
 
     /**
-     * Collect imported files and add them to version control
+     * Collect imported files, optionally analyze them, and add them to version control
      * @param destFolder The destination folder where files were imported
      * @param importedBaseName The base name of the imported file/directory
+     * @param analyzeAfterImport Whether to run auto-analysis on imported programs
+     * @param analysisTimeoutSeconds Timeout in seconds for analysis operations
      * @param versionedFiles List to track successfully versioned files
-     * @param errors List to track version control errors
+     * @param analyzedFiles List to track successfully analyzed files
+     * @param errors List to track errors
+     * @param monitor Task monitor for cancellation and timeout checking
      */
     private void collectImportedFiles(DomainFolder destFolder, String importedBaseName,
-                                     List<String> versionedFiles, List<String> errors) {
+                                     boolean analyzeAfterImport, int analysisTimeoutSeconds,
+                                     List<String> versionedFiles, List<String> analyzedFiles,
+                                     List<String> errors, TaskMonitor monitor) {
         try {
             // Find newly imported files in the destination folder
             for (DomainFile file : destFolder.getFiles()) {
-                // Check if this file can be added to version control
+                boolean wasAnalyzed = false;
+
+                // Analyze if requested and this is a Program file
+                if (file.getContentType().equals("Program") && analyzeAfterImport) {
+                    try {
+                        // Open program with temporary consumer
+                        Object consumer = new Object();
+                        DomainObject domainObject = file.getDomainObject(consumer, false, false, monitor);
+
+                        if (domainObject instanceof Program) {
+                            Program program = (Program) domainObject;
+                            try {
+                                // Get analysis manager
+                                AutoAnalysisManager analysisManager = AutoAnalysisManager.getAnalysisManager(program);
+                                if (analysisManager != null) {
+                                    // Create timeout monitor for analysis
+                                    TaskMonitor analysisMonitor = TimeoutTaskMonitor.timeoutIn(analysisTimeoutSeconds, TimeUnit.SECONDS);
+
+                                    // Start analysis (async)
+                                    analysisManager.startAnalysis(analysisMonitor);
+
+                                    // Wait for completion with timeout
+                                    analysisManager.waitForAnalysis(null, analysisMonitor);
+
+                                    if (analysisMonitor.isCancelled()) {
+                                        errors.add("Analysis timed out for " + file.getPathname() +
+                                            " after " + analysisTimeoutSeconds + " seconds");
+                                    } else {
+                                        // Save program after analysis
+                                        program.save("Auto-analysis complete", monitor);
+                                        analyzedFiles.add(file.getPathname());
+                                        wasAnalyzed = true;
+                                    }
+                                } else {
+                                    errors.add("Could not get analysis manager for " + file.getPathname());
+                                }
+                            } finally {
+                                // Release program
+                                program.release(consumer);
+                            }
+                        }
+                    } catch (Exception e) {
+                        errors.add("Analysis failed for " + file.getPathname() + ": " + e.getMessage());
+                    }
+                }
+
+                // Add to version control after analysis (or immediately if no analysis)
                 if (file.canAddToRepository()) {
                     try {
-                        // Add to version control with initial commit message
-                        file.addToVersionControl("Initial import via ReVa", false, TaskMonitor.DUMMY);
+                        // Use different commit message based on whether analysis was performed
+                        String commitMessage = wasAnalyzed
+                            ? "Initial import via ReVa (analyzed)"
+                            : "Initial import via ReVa";
+                        file.addToVersionControl(commitMessage, false, monitor);
                         versionedFiles.add(file.getPathname());
                     } catch (Exception e) {
                         errors.add("Failed to add " + file.getPathname() + " to version control: " + e.getMessage());
@@ -405,7 +461,8 @@ public class ProjectToolProvider extends AbstractToolProvider {
 
             // Recursively process subfolders
             for (DomainFolder subfolder : destFolder.getFolders()) {
-                collectImportedFiles(subfolder, importedBaseName, versionedFiles, errors);
+                collectImportedFiles(subfolder, importedBaseName, analyzeAfterImport, analysisTimeoutSeconds,
+                    versionedFiles, analyzedFiles, errors, monitor);
             }
         } catch (Exception e) {
             errors.add("Error collecting imported files: " + e.getMessage());
@@ -737,12 +794,15 @@ public class ProjectToolProvider extends AbstractToolProvider {
                     return createErrorResult("No supported file formats found in: " + path);
                 }
 
-                // Create timeout-protected monitor for import task
+                // Get configuration for timeouts
                 ConfigManager configManager = RevaInternalServiceRegistry.getService(ConfigManager.class);
-                int timeoutSeconds = configManager != null ?
+                int importTimeoutSeconds = configManager != null ?
                     configManager.getDecompilerTimeoutSeconds() * 2 : 300; // 2x decompiler timeout or 5 min default
+                int analysisTimeoutSeconds = configManager != null ?
+                    configManager.getImportAnalysisTimeoutSeconds() : 600; // Default 10 minutes
 
-                TaskMonitor importMonitor = TimeoutTaskMonitor.timeoutIn(timeoutSeconds, TimeUnit.SECONDS);
+                // Create timeout-protected monitor for import task
+                TaskMonitor importMonitor = TimeoutTaskMonitor.timeoutIn(importTimeoutSeconds, TimeUnit.SECONDS);
 
                 // Create and run the import task synchronously (blocks until completion)
                 ImportBatchTask importTask = new ImportBatchTask(batchInfo, destFolder, null, true, false);
@@ -750,18 +810,23 @@ public class ProjectToolProvider extends AbstractToolProvider {
 
                 // Check for timeout or cancellation
                 if (importMonitor.isCancelled()) {
-                    return createErrorResult("Import timed out after " + timeoutSeconds + " seconds. " +
+                    return createErrorResult("Import timed out after " + importTimeoutSeconds + " seconds. " +
                         "Try importing fewer files or increase timeout in ReVa configuration.");
                 }
 
-                // Track imported files for version control
+                // Track imported files for version control and analysis
                 List<String> versionedFiles = new ArrayList<>();
-                List<String> versionControlErrors = new ArrayList<>();
+                List<String> analyzedFiles = new ArrayList<>();
+                List<String> errors = new ArrayList<>();
 
-                // Add imported files to version control if requested (after import completes)
-                if (enableVersionControl) {
-                    // Get all files that were imported
-                    collectImportedFiles(destFolder, file.getName(), versionedFiles, versionControlErrors);
+                // Process imported files: analyze if requested, then add to version control
+                if (enableVersionControl || analyzeAfterImport) {
+                    // Create monitor for version control and analysis operations
+                    TaskMonitor vcMonitor = TimeoutTaskMonitor.timeoutIn(importTimeoutSeconds, TimeUnit.SECONDS);
+
+                    // Get all files that were imported, analyze if requested, and add to version control
+                    collectImportedFiles(destFolder, file.getName(), analyzeAfterImport, analysisTimeoutSeconds,
+                        versionedFiles, analyzedFiles, errors, vcMonitor);
                 }
 
                 // Create result data
@@ -778,12 +843,20 @@ public class ProjectToolProvider extends AbstractToolProvider {
 
                 if (enableVersionControl) {
                     result.put("filesAddedToVersionControl", versionedFiles.size());
-                    if (!versionControlErrors.isEmpty()) {
-                        result.put("versionControlErrors", versionControlErrors);
-                    }
+                }
+
+                if (analyzeAfterImport) {
+                    result.put("filesAnalyzed", analyzedFiles.size());
+                }
+
+                if (!errors.isEmpty()) {
+                    result.put("errors", errors);
                 }
 
                 String message = "Import completed successfully. " + batchInfo.getTotalCount() + " files imported";
+                if (analyzeAfterImport && analyzedFiles.size() > 0) {
+                    message += ", " + analyzedFiles.size() + " analyzed";
+                }
                 if (enableVersionControl && versionedFiles.size() > 0) {
                     message += ", " + versionedFiles.size() + " added to version control";
                 }

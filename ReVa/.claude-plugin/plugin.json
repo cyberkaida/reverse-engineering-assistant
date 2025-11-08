@@ -1,0 +1,8 @@
+{
+  "name": "ReVa",
+  "description": "ReVa (Reverse Engineering Assistant) - AI-assisted binary analysis and reverse engineering with Ghidra integration",
+  "version": "0.1.0",
+  "author": {
+    "name": "CyberKaida"
+  }
+}

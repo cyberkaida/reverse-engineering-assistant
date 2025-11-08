@@ -153,8 +153,8 @@ public class ProjectToolProviderNestedArchiveIntegrationTest extends RevaIntegra
                 String responseJson = ((io.modelcontextprotocol.spec.McpSchema.TextContent) result.content().get(0)).text();
                 Map<String, Object> response = objectMapper.readValue(responseJson, new TypeReference<Map<String, Object>>() {});
 
-                assertEquals("Import should be successful", true, response.get("success"));
-                assertEquals("enableVersionControl should be true by default", true, response.get("enableVersionControl"));
+                assertTrue("Import should be successful", Boolean.TRUE.equals(response.get("success")));
+                assertTrue("enableVersionControl should be true by default", Boolean.TRUE.equals(response.get("enableVersionControl")));
 
                 // If project supports version control, should have filesAddedToVersionControl count
                 // (This may be 0 if project doesn't support version control, but field should exist)
@@ -202,8 +202,8 @@ public class ProjectToolProviderNestedArchiveIntegrationTest extends RevaIntegra
                 String responseJson = ((io.modelcontextprotocol.spec.McpSchema.TextContent) result.content().get(0)).text();
                 Map<String, Object> response = objectMapper.readValue(responseJson, new TypeReference<Map<String, Object>>() {});
 
-                assertEquals("Import should be successful", true, response.get("success"));
-                assertEquals("enableVersionControl should be false", false, response.get("enableVersionControl"));
+                assertTrue("Import should be successful", Boolean.TRUE.equals(response.get("success")));
+                assertFalse("enableVersionControl should be false", Boolean.TRUE.equals(response.get("enableVersionControl")));
 
                 // Should not have filesAddedToVersionControl field when disabled
                 assertFalse("Should not have filesAddedToVersionControl when disabled",

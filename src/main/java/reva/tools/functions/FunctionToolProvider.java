@@ -407,6 +407,37 @@ public class FunctionToolProvider extends AbstractToolProvider {
     }
 
     /**
+     * Normalize a function signature to handle whitespace issues that can cause parsing failures.
+     *
+     * Common issues:
+     * - "char *funcname" fails parsing (space before * in return type)
+     * - "char* funcname" works correctly
+     *
+     * This method normalizes whitespace to ensure consistent parsing.
+     *
+     * @param signature The original C-style function signature
+     * @return Normalized signature with whitespace corrected
+     */
+    private String normalizeFunctionSignature(String signature) {
+        if (signature == null || signature.isEmpty()) {
+            return signature;
+        }
+
+        // Pattern: Match "type *name(" where there's a space before the pointer
+        // This handles cases like "char *fgets(" which fail parsing
+        // Convert to "type* name(" which parses correctly
+        // Regex explanation:
+        //   (\w+)      - Capture word (type name like "char", "int", etc.)
+        //   \s+        - One or more spaces
+        //   \*         - Literal asterisk (pointer)
+        //   (\w+)      - Capture word (function name)
+        //   \(         - Literal opening parenthesis
+        String normalized = signature.replaceAll("(\\w+)\\s+\\*(\\w+)\\(", "$1* $2(");
+
+        return normalized;
+    }
+
+    /**
      * Register a tool to set or update a function prototype using C-style signatures
      */
     private void registerSetFunctionPrototypeTool() {
@@ -449,6 +480,9 @@ public class FunctionToolProvider extends AbstractToolProvider {
                 String signature = getString(request, "signature");
                 boolean createIfNotExists = getOptionalBoolean(request, "createIfNotExists", true);
 
+                // Normalize signature to handle whitespace issues
+                String normalizedSignature = normalizeFunctionSignature(signature);
+
                 // Resolve the address from location
                 Address address = getAddressFromArgs(request, program, "location");
                 if (address == null) {
@@ -480,9 +514,15 @@ public class FunctionToolProvider extends AbstractToolProvider {
                         originalSignature.setVarArgs(existingFunction.hasVarArgs());
                     }
 
-                    functionDef = parser.parse(originalSignature, signature);
+                    functionDef = parser.parse(originalSignature, normalizedSignature);
                 } catch (ParseException e) {
-                    return createErrorResult("Failed to parse function signature: " + e.getMessage());
+                    // Check if the error is about missing datatypes
+                    String errorMsg = e.getMessage();
+                    if (errorMsg != null && errorMsg.contains("Can't resolve datatype")) {
+                        return createErrorResult("Failed to parse function signature: " + errorMsg +
+                            "\n\nHint: The datatype may not be defined in the program. Consider using a basic type (e.g., 'void*' instead of 'FILE*') or import the necessary type definitions.");
+                    }
+                    return createErrorResult("Failed to parse function signature: " + errorMsg);
                 } catch (CancelledException e) {
                     return createErrorResult("Function signature parsing was cancelled");
                 }

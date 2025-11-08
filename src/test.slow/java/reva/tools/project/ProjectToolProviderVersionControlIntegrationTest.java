@@ -87,7 +87,7 @@ public class ProjectToolProviderVersionControlIntegrationTest extends RevaIntegr
                 String responseJson = ((io.modelcontextprotocol.spec.McpSchema.TextContent) result.content().get(0)).text();
                 Map<String, Object> response = objectMapper.readValue(responseJson, new TypeReference<Map<String, Object>>() {});
 
-                assertEquals("Checkin should be successful", true, response.get("success"));
+                assertTrue("Checkin should be successful", Boolean.TRUE.equals(response.get("success")));
 
                 // Should either be added_to_version_control (new file) or saved (if not versioned)
                 String action = (String) response.get("action");
@@ -147,7 +147,7 @@ public class ProjectToolProviderVersionControlIntegrationTest extends RevaIntegr
                 String responseJson = ((io.modelcontextprotocol.spec.McpSchema.TextContent) result.content().get(0)).text();
                 Map<String, Object> response = objectMapper.readValue(responseJson, new TypeReference<Map<String, Object>>() {});
 
-                assertEquals("Operation should be successful", true, response.get("success"));
+                assertTrue("Operation should be successful", Boolean.TRUE.equals(response.get("success")));
 
                 // Action should depend on version control support
                 String action = (String) response.get("action");
@@ -157,7 +157,7 @@ public class ProjectToolProviderVersionControlIntegrationTest extends RevaIntegr
                     assertEquals("Action should be added_to_version_control when supported", "added_to_version_control", action);
                 } else {
                     assertEquals("Action should be saved when version control not supported", "saved", action);
-                    assertEquals("Response should indicate file is not versioned", false, response.get("isVersioned"));
+                    assertFalse("Response should indicate file is not versioned", Boolean.TRUE.equals(response.get("isVersioned")));
                 }
 
                 return null;
@@ -210,7 +210,7 @@ public class ProjectToolProviderVersionControlIntegrationTest extends RevaIntegr
                 String responseJson = ((io.modelcontextprotocol.spec.McpSchema.TextContent) result.content().get(0)).text();
                 Map<String, Object> response = objectMapper.readValue(responseJson, new TypeReference<Map<String, Object>>() {});
 
-                assertEquals("Operation should be successful", true, response.get("success"));
+                assertTrue("Operation should be successful", Boolean.TRUE.equals(response.get("success")));
                 assertEquals("Response should include the commit message", commitMessage, response.get("message"));
 
                 return null;

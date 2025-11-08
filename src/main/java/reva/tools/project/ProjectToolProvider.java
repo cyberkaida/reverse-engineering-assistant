@@ -37,16 +37,19 @@ import ghidra.program.model.lang.LanguageService;
 import ghidra.program.util.DefaultLanguageService;
 import ghidra.program.model.listing.Program;
 import ghidra.util.task.TaskMonitor;
+import ghidra.util.task.TimeoutTaskMonitor;
+import java.util.concurrent.TimeUnit;
 import ghidra.formats.gfilesystem.FSRL;
 import ghidra.formats.gfilesystem.FileSystemService;
 import ghidra.plugins.importer.batch.BatchInfo;
 import ghidra.plugins.importer.tasks.ImportBatchTask;
-import ghidra.util.task.TaskLauncher;
 import io.modelcontextprotocol.server.McpSyncServer;
 import io.modelcontextprotocol.spec.McpSchema;
 import reva.plugin.RevaProgramManager;
+import reva.plugin.ConfigManager;
 import reva.tools.AbstractToolProvider;
 import reva.util.SchemaUtil;
+import reva.util.RevaInternalServiceRegistry;
 
 /**
  * Tool provider for project-related operations.
@@ -734,15 +737,28 @@ public class ProjectToolProvider extends AbstractToolProvider {
                     return createErrorResult("No supported file formats found in: " + path);
                 }
 
-                // Create and launch the import task
+                // Create timeout-protected monitor for import task
+                ConfigManager configManager = RevaInternalServiceRegistry.getService(ConfigManager.class);
+                int timeoutSeconds = configManager != null ?
+                    configManager.getDecompilerTimeoutSeconds() * 2 : 300; // 2x decompiler timeout or 5 min default
+
+                TaskMonitor importMonitor = TimeoutTaskMonitor.timeoutIn(timeoutSeconds, TimeUnit.SECONDS);
+
+                // Create and run the import task synchronously (blocks until completion)
                 ImportBatchTask importTask = new ImportBatchTask(batchInfo, destFolder, null, true, false);
-                TaskLauncher launcher = new TaskLauncher(importTask, null);
+                importTask.run(importMonitor);
+
+                // Check for timeout or cancellation
+                if (importMonitor.isCancelled()) {
+                    return createErrorResult("Import timed out after " + timeoutSeconds + " seconds. " +
+                        "Try importing fewer files or increase timeout in ReVa configuration.");
+                }
 
                 // Track imported files for version control
                 List<String> versionedFiles = new ArrayList<>();
                 List<String> versionControlErrors = new ArrayList<>();
 
-                // Add imported files to version control if requested
+                // Add imported files to version control if requested (after import completes)
                 if (enableVersionControl) {
                     // Get all files that were imported
                     collectImportedFiles(destFolder, file.getName(), versionedFiles, versionControlErrors);

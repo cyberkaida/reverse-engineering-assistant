@@ -1250,7 +1250,7 @@ public class StructureToolProvider extends AbstractToolProvider {
         // Check if the datatype is "undefined" or "undefined1"
         DataType fieldType = comp.getDataType();
         String typeName = fieldType.getName();
-        if (typeName != null && (typeName.equals("undefined") || typeName.startsWith("undefined"))) {
+        if (typeName != null && typeName.startsWith("undefined")) {
             return true;
         }
 

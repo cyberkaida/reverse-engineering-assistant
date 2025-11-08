@@ -434,7 +434,7 @@ public class StructureToolProviderIntegrationTest extends RevaIntegrationTestBas
     }
 
     @Test
-    public void testGetStructureInfoCondendesUndefinedBytes() throws Exception {
+    public void testGetStructureInfoCondensesUndefinedBytes() throws Exception {
         withMcpClient(createMcpTransport(), client -> {
             client.initialize();
 

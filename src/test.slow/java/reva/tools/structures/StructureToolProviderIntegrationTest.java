@@ -499,6 +499,30 @@ public class StructureToolProviderIntegrationTest extends RevaIntegrationTestBas
             }
 
             assertTrue("Should have at least one condensed undefined range", foundCondensed);
+
+            // Verify C representation is also condensed
+            JsonNode cRepresentation = json.get("cRepresentation");
+            assertNotNull("Should have C representation", cRepresentation);
+            String cCode = cRepresentation.asText();
+
+            // C representation should contain condensed undefined arrays
+            assertTrue("C representation should contain condensed undefined ranges",
+                cCode.contains("undefined reserved_0x"));
+            assertTrue("C representation should show offset ranges in comments",
+                cCode.contains("// 0x"));
+
+            // Count lines in C representation (excluding struct declaration and closing brace)
+            String[] cLines = cCode.split("\n");
+            int fieldLines = 0;
+            for (String line : cLines) {
+                if (line.trim().endsWith(";")) {
+                    fieldLines++;
+                }
+            }
+
+            // Should have much fewer lines than the original 100 components
+            assertTrue("C representation should have fewer than 20 lines due to condensing",
+                fieldLines < 20);
         });
     }
 

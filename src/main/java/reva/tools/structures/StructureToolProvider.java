@@ -911,36 +911,68 @@ public class StructureToolProvider extends AbstractToolProvider {
     }
 
     /**
-     * Generate C representation of a structure
+     * Generate C representation of a structure with undefined byte condensing
      */
     private String generateCRepresentation(Structure struct) {
         StringBuilder sb = new StringBuilder();
         sb.append("struct ").append(struct.getName()).append(" {\n");
-        
-        for (int i = 0; i < struct.getNumComponents(); i++) {
+
+        int i = 0;
+        while (i < struct.getNumComponents()) {
             DataTypeComponent comp = struct.getComponent(i);
             sb.append("    ");
-            
-            DataType fieldType = comp.getDataType();
-            if (comp.isBitFieldComponent()) {
-                BitFieldDataType bitfield = (BitFieldDataType) fieldType;
-                sb.append(bitfield.getBaseDataType().getDisplayName());
-                sb.append(" ").append(comp.getFieldName());
-                sb.append(" : ").append(bitfield.getBitSize());
+
+            // Check if this is an undefined field that should be condensed
+            if (isUndefinedField(comp)) {
+                // Count consecutive undefined bytes
+                int startOffset = comp.getOffset();
+                int totalLength = 0;
+                int count = 0;
+
+                while (i < struct.getNumComponents()) {
+                    DataTypeComponent nextComp = struct.getComponent(i);
+                    if (!isUndefinedField(nextComp)) {
+                        break;
+                    }
+                    totalLength += nextComp.getLength();
+                    count++;
+                    i++;
+                }
+
+                // Generate condensed line with offset range comment
+                sb.append("undefined reserved_0x");
+                sb.append(String.format("%x", startOffset));
+                sb.append("[").append(count).append("]");
+                sb.append(";");
+                sb.append(" // 0x");
+                sb.append(String.format("%x", startOffset));
+                sb.append("-0x");
+                sb.append(String.format("%x", startOffset + totalLength - 1));
+                sb.append("\n");
             } else {
-                sb.append(fieldType.getDisplayName());
-                sb.append(" ").append(comp.getFieldName());
+                // Regular field - output as-is
+                DataType fieldType = comp.getDataType();
+                if (comp.isBitFieldComponent()) {
+                    BitFieldDataType bitfield = (BitFieldDataType) fieldType;
+                    sb.append(bitfield.getBaseDataType().getDisplayName());
+                    sb.append(" ").append(comp.getFieldName());
+                    sb.append(" : ").append(bitfield.getBitSize());
+                } else {
+                    sb.append(fieldType.getDisplayName());
+                    sb.append(" ").append(comp.getFieldName());
+                }
+
+                sb.append(";");
+
+                if (comp.getComment() != null) {
+                    sb.append(" // ").append(comp.getComment());
+                }
+
+                sb.append("\n");
+                i++;
             }
-            
-            sb.append(";");
-            
-            if (comp.getComment() != null) {
-                sb.append(" // ").append(comp.getComment());
-            }
-            
-            sb.append("\n");
         }
-        
+
         sb.append("};");
         return sb.toString();
     }

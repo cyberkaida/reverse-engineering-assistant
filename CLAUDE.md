@@ -4,58 +4,142 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-ReVa (Reverse Engineering Assistant) is a Ghidra extension that provides a Model Context Protocol (MCP) server for AI-assisted reverse engineering. It uses a streamable transport (SSE) and implements various tools for interacting with Ghidra's capabilities.
+ReVa (Reverse Engineering Assistant) is a Ghidra extension that provides a Model Context Protocol (MCP) server for AI-assisted reverse engineering. It supports both GUI and headless modes, with streamable HTTP transport for direct connections and stdio transport for Claude CLI integration.
 
 ## Build and Test Commands
 
-### Building
+### Java Extension (Ghidra Plugin)
 ```bash
 # Set Ghidra installation directory first
 export GHIDRA_INSTALL_DIR=/path/to/ghidra
+
+# Build the extension
 gradle
+
+# Install directly to Ghidra's extension directory
+gradle install
+
+# Java unit tests (no Ghidra environment)
+gradle test --info
+
+# Integration tests (require GUI/headed environment, fork=1)
+gradle integrationTest --info
+
+# Run specific test class
+gradle integrationTest --tests "*DecompilerToolProviderIntegrationTest" --info
+
+# Run specific test method
+gradle test --tests "*AddressUtilTest.testFormatAddress" --info
 ```
 
-### Testing
-- Unit tests: `gradle test --info`
-- Integration tests (require GUI/headed environment): `gradle integrationTest --info`
-- Run specific tests: Use standard gradle test filtering with both test targets
-- Single test class: `gradle integrationTest --tests "*DecompilerToolProviderIntegrationTest" --info`
-- Single test method: `gradle test --tests "*AddressUtilTest.testFormatAddress" --info`
-- Debug tests: Increase logging or modify test code directly - cannot use curl to test MCP server
+**Important**: Use `gradle` directly, NOT gradle wrapper (`./gradlew`)
 
-**Important**: Do not use gradle wrapper (`./gradlew`), use `gradle` directly.
+### Python CLI and Tests
+```bash
+# Setup Python environment with uv
+uv sync
+
+# Run all Python tests
+uv run pytest
+
+# Run specific test file
+uv run pytest tests/test_cli.py -v
+
+# Run tests by marker
+uv run pytest -m unit      # Fast unit tests with mocks
+uv run pytest -m integration  # Integration tests with PyGhidra
+uv run pytest -m e2e       # End-to-end subprocess tests
+
+# Run CLI locally
+uv run mcp-reva --verbose
+
+# Install CLI for development
+uv pip install -e .
+```
+
+### Running ReVa
+
+**GUI Mode (Ghidra Plugin):**
+1. Start Ghidra and open a project
+2. Server runs on http://localhost:8080/mcp/message (streamable transport)
+
+**Headless Mode (Python Script):**
+```bash
+python scripts/reva_headless_server.py --wait
+```
+
+**Claude CLI Mode (Stdio Transport):**
+```bash
+# Add to Claude CLI
+claude mcp add ReVa -- mcp-reva
+
+# Run manually for testing
+mcp-reva --verbose
+```
 
 ## Project Structure
 
 ### Architecture Overview
-ReVa follows a layered architecture with clear separation of concerns:
+ReVa has three operational modes sharing the same core:
 
-- **Foundation Layer** (`util/`) - Core utilities and patterns used everywhere
-- **Integration Layer** (`plugin/`) - Ghidra plugin infrastructure and configuration
-- **Service Layer** (`services/`) - Service integration and coordination
-- **Server Layer** (`server/`) - MCP server with Jetty and streamable transport
-- **Resource Layer** (`resources/`) - MCP resource providers for read-only data
-- **Tool Layer** (`tools/`) - MCP tool providers for interactive operations
-- **UI Layer** (`ui/`) - Optional user interface components
+**1. GUI Mode (Ghidra Plugin)**
+```
+RevaApplicationPlugin → McpServerManager → Jetty (HTTP) → MCP Tools/Resources
+                     ↓
+                ConfigManager (ToolOptions backend)
+```
 
-### Key Directories
-- `src/main/java/reva/` - Main source code
-  - `util/` - **Foundational utilities** (AddressUtil, ProgramLookupUtil, DataTypeParserUtil, etc.)
-  - `plugin/` - **Ghidra plugin infrastructure** (ConfigManager, RevaProgramManager, lifecycle)
-  - `server/` - **MCP server implementation** (McpServerManager, Jetty, streamable transport)
-  - `tools/` - **Tool providers** (decompiler, functions, strings, etc.) - 12 specialized packages
-  - `resources/` - **MCP resource providers** (read-only data exposure)
-  - `services/` - **Service layer integration** (abstraction between plugins and MCP)
-  - `ui/` - **User interface components** (optional, minimal implementation)
+**2. Headless Mode (PyGhidra Script)**
+```
+RevaHeadlessLauncher → McpServerManager → Jetty (HTTP) → MCP Tools/Resources
+                     ↓
+                ConfigManager (File/InMemory backend)
+```
 
-### Test Organization
-- `src/test/` - Unit tests (no Ghidra environment required)
-- `src/test.slow/` - Integration tests (require Ghidra environment)
+**3. Claude CLI Mode (Stdio Transport)**
+```
+mcp-reva CLI → PyGhidra → ReVaLauncher → Jetty (HTTP)
+            ↓                           ↓
+    StdioBridge (async) ←────────→ MCP Tools/Resources
+            ↓
+    ProjectManager (temp project lifecycle)
+```
+
+### Core Java Components
+- **Foundation Layer** (`util/`) - AddressUtil, ProgramLookupUtil, DataTypeParserUtil, etc.
+- **Plugin Layer** (`plugin/`) - ConfigManager, RevaProgramManager, Ghidra lifecycle
+- **Server Layer** (`server/`) - McpServerManager, Jetty server, streamable transport
+- **Tool Layer** (`tools/`) - 11 specialized tool packages (decompiler, functions, strings, etc.)
+- **Resource Layer** (`resources/`) - Read-only MCP resource providers
+- **Headless Layer** (`headless/`) - RevaHeadlessLauncher for PyGhidra integration
+
+### Python CLI Components
+- **CLI Entry** (`src/reva_cli/__main__.py`) - mcp-reva command, blocking initialization
+- **Launcher** (`launcher.py`) - ReVa server lifecycle (wraps Java RevaHeadlessLauncher)
+- **Stdio Bridge** (`stdio_bridge.py`) - Async MCP stdio ↔ HTTP proxy
+- **Project Manager** (`project_manager.py`) - Temporary project creation/cleanup
+
+### Directory Structure
+```
+src/main/java/reva/          # Java extension code
+  ├── util/                  # Foundational utilities (ALWAYS use these!)
+  ├── plugin/                # ConfigManager, plugin lifecycle
+  ├── server/                # McpServerManager, Jetty
+  ├── tools/                 # 11 tool provider packages
+  ├── resources/             # MCP resource providers
+  ├── headless/              # RevaHeadlessLauncher
+  └── ui/                    # Optional GUI components
+src/test/                    # Java unit tests (no Ghidra)
+src/test.slow/               # Java integration tests (GUI required, fork=1)
+src/reva_cli/                # Python CLI for stdio transport
+tests/                       # Python tests (pytest)
+scripts/                     # Helper scripts (reva_headless_server.py)
+```
 
 ### Package-Level Documentation
 Each major package contains its own CLAUDE.md file with detailed implementation guidance:
 - **Essential Infrastructure**: `util/`, `plugin/`, `server/` - Core systems documentation
-- **Tool Providers**: Each of the 12 tool packages has comprehensive implementation guides
+- **Tool Providers**: Each of the 11 tool packages has comprehensive implementation guides
 - **Supporting Systems**: `resources/`, `services/`, `ui/` - Specialized component documentation
 
 ## Development Guidelines
@@ -107,17 +191,39 @@ When adding new tools to DecompilerToolProvider:
 
 ## MCP Server Configuration
 
-The server uses streamable transport (SSE) on port 8080 by default. Configuration is managed through:
-- `ConfigManager` - Handles server configuration
-- `McpServerManager` - Manages the MCP server lifecycle
-- Transport: HttpServletStreamableServerTransportProvider (streamable transport)
+### Transport Modes
+
+**HTTP Streamable (GUI & Headless modes):**
+- Default port: 8080
+- Endpoint: http://localhost:8080/mcp/message
+- Transport: HttpServletStreamableServerTransportProvider
+- Used by: GUI plugin, headless scripts, direct HTTP clients
+
+**Stdio (Claude CLI mode):**
+- Uses stdin/stdout for MCP protocol
+- StdioBridge proxies to local HTTP server (random port)
+- Automatic project creation/cleanup
+- Used by: `mcp-reva` command, Claude CLI
+
+### Configuration Management
+- **GUI Mode**: ConfigManager with ToolOptions backend (persists in Ghidra settings)
+- **Headless Mode**: ConfigManager with File or InMemory backend
+- **Claude CLI Mode**: Uses random port, minimal config (optimized for stdio)
 
 ## External Dependencies
-- Ghidra source code location: `../ghidra`
-- MCP SDK: io.modelcontextprotocol.sdk v0.11.1 (uses MCP BOM)
-- Jackson: 2.17.0 (forced version for compatibility)
-- Jetty: 11.0.25 (embedded servlet support)
-- Target: Java 21, Ghidra 11.4+
+
+### Java
+- Ghidra: 11.4+ (source at `../ghidra`)
+- Java: 21+
+- MCP SDK: io.modelcontextprotocol.sdk v0.14.0 (BOM-managed)
+- Jackson: 2.19.2 (force-resolved for MCP SDK compatibility)
+- Jetty: 11.0.26 (embedded servlet server)
+
+### Python
+- Python: 3.10+ (managed via uv)
+- PyGhidra: 1.0.0+ (Ghidra initialization)
+- MCP: Latest (stdio transport implementation)
+- httpx + httpx-sse: MCP HTTP client (for StdioBridge)
 
 ## Program Identification
 - **ALWAYS use `programPath` for program identifiers** in both tool inputs and outputs
@@ -130,22 +236,43 @@ The server uses streamable transport (SSE) on port 8080 by default. Configuratio
 ## Architecture Decision Records
 
 ### MCP Implementation
-- **Transport**: Uses streamable transport (HttpServletStreamableServerTransportProvider), not SSE
-- **Server**: Embedded Jetty server with servlet-based MCP endpoints
-- **Thread Safety**: ConcurrentHashMap for multi-tool coordination, volatile fields for state
-- **Tool Pattern**: AbstractToolProvider base class with consistent parameter extraction and error handling
+- **Transport (Java)**: HttpServletStreamableServerTransportProvider (NOT SSE) via Jetty
+- **Transport (Python)**: Stdio ↔ HTTP proxy via async StdioBridge
+- **Server**: Embedded Jetty servlet server, thread-safe with ConcurrentHashMap
+- **Tool Pattern**: AbstractToolProvider base class with consistent error handling
+- **Config Pattern**: Backend abstraction (ToolOptions/File/InMemory) for multi-mode support
+
+### Python CLI Design
+- **Blocking Init**: PyGhidra/server startup before asyncio.run() to avoid event loop blocking
+- **Stdio Bridge**: Async MCP client/server proxying HTTP (enables Claude CLI integration)
+- **Project Lifecycle**: Temporary projects auto-created/cleaned for stdio mode
+- **Port Strategy**: Random ports for CLI mode to avoid conflicts
 
 ### Development Constraints
 - **Java**: Target Java 21, minimum Ghidra 11.4+
-- **Testing**: Integration tests require `java.awt.headless=false` (GUI environment)
-- **Build**: Use `gradle` directly, not gradle wrapper
-- **MCP SDK**: v0.11.1 with forced Jackson 2.17.0 for compatibility
+- **Python**: 3.10+, uv for dependency management
+- **Testing (Java)**: Integration tests require `java.awt.headless=false`, fork=1
+- **Testing (Python)**: pytest with markers (unit/integration/e2e/cli)
+- **Build**: Use `gradle` directly, NOT `./gradlew`
+- **MCP SDK**: v0.14.0 with forced Jackson 2.19.2 for compatibility
 
 ## Important Notes
-- Don't revert to SSE transport (already using streamable)
-- Fork every integration test to prevent configuration conflicts
-- **Memory Management**: Always dispose DecompInterface instances to prevent leaks
-- **Read-Before-Modify**: Decompiler tools enforce function reading before modification
-- **Error Messages**: Provide specific, actionable error messages with suggestions
-- When reading the test report, use the read tool or grep, do not use `open`.
-- If you have compatibility problems and things do not compile because of jackson or the MCP SDK. `rm lib/*.jar` can help clean and fix these.
+
+### Critical
+- **NEVER revert to SSE transport** - uses streamable HttpServlet transport
+- **Memory**: Always dispose DecompInterface instances to prevent leaks
+- **Testing**: Fork every Java integration test (forkEvery=1) to prevent conflicts
+- **Python Init**: PyGhidra/server must initialize BEFORE asyncio.run() in CLI
+
+### Common Issues
+- **Jackson conflicts**: `rm lib/*.jar` and rebuild to fix MCP SDK compatibility
+- **Test reports**: Use Read tool or Grep, NOT `open` command
+- **CI logs**: Use Task agent to read (very long logs, context-intensive)
+- **Stdio mode**: Requires clean stdin/stdout - no debug prints to stdout
+
+### Testing Strategy
+- **Java unit tests**: Fast, no Ghidra environment, test utilities/logic
+- **Java integration tests**: Slow, require GUI (headless=false), fork=1, validate state changes
+- **Python unit tests**: Fast, mock PyGhidra, test CLI logic
+- **Python integration tests**: Require PyGhidra, test actual server
+- **Python e2e tests**: Subprocess tests, test full CLI lifecycle

@@ -309,9 +309,11 @@ public class ProjectToolProvider extends AbstractToolProvider {
 
             try {
                 // Save program first (required before version control operations)
-                if (program.canSave()) {
+                // Skip save for read-only programs (common in test environments)
+                if (!domainFile.isReadOnly()) {
                     try {
                         program.save(message, TaskMonitor.DUMMY);
+                        program.flushEvents();  // Ensure SAVED event is processed
                     } catch (java.io.IOException e) {
                         return createErrorResult("Failed to save program: " + e.getMessage());
                     }

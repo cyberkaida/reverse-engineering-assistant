@@ -31,6 +31,7 @@ import ghidra.program.model.symbol.SourceType;
 import ghidra.program.model.symbol.SymbolTable;
 import io.modelcontextprotocol.spec.McpSchema;
 import reva.RevaIntegrationTestBase;
+import reva.plugin.RevaProgramManager;
 
 /**
  * Integration tests for version control operations in ProjectToolProvider.
@@ -52,22 +53,29 @@ public class ProjectToolProviderVersionControlIntegrationTest extends RevaIntegr
     @Test
     public void testCheckinProgram() throws Exception {
         withMcpClient(createMcpTransport(), client -> {
+            Program testProgram = null;
             try {
                 client.initialize();
 
                 // Create a test program
-                Program program = createDefaultProgram("test-checkin", "x86:LE:64:default", this);
-                String programPath = program.getDomainFile().getPathname();
+                testProgram = createDefaultProgram("test-checkin", "x86:LE:64:default", this);
+                String programPath = testProgram.getDomainFile().getPathname();
+
+                // Register the program so it can be found by tools
+                RevaProgramManager.registerProgram(testProgram);
+                if (serverManager != null) {
+                    serverManager.programOpened(testProgram, tool);
+                }
 
                 // Make changes to the program (add a label)
-                int transactionID = program.startTransaction("Add test label");
+                int transactionID = testProgram.startTransaction("Add test label");
                 try {
-                    SymbolTable symbolTable = program.getSymbolTable();
-                    symbolTable.createLabel(program.getAddressFactory().getDefaultAddressSpace().getAddress(0x1000),
+                    SymbolTable symbolTable = testProgram.getSymbolTable();
+                    symbolTable.createLabel(testProgram.getAddressFactory().getDefaultAddressSpace().getAddress(0x1000),
                         "test_label", SourceType.USER_DEFINED);
-                    program.endTransaction(transactionID, true);
+                    testProgram.endTransaction(transactionID, true);
                 } catch (Exception e) {
-                    program.endTransaction(transactionID, false);
+                    testProgram.endTransaction(transactionID, false);
                     throw e;
                 }
 
@@ -82,6 +90,11 @@ public class ProjectToolProviderVersionControlIntegrationTest extends RevaIntegr
 
                 // Verify the response
                 assertNotNull("Result should not be null", result);
+                if (result.isError()) {
+                    // Print error for debugging
+                    String errorMsg = ((io.modelcontextprotocol.spec.McpSchema.TextContent) result.content().get(0)).text();
+                    System.err.println("Tool error: " + errorMsg);
+                }
                 assertFalse("Tool should not have error", result.isError());
 
                 String responseJson = ((io.modelcontextprotocol.spec.McpSchema.TextContent) result.content().get(0)).text();
@@ -97,6 +110,15 @@ public class ProjectToolProviderVersionControlIntegrationTest extends RevaIntegr
                 return null;
             } catch (Exception e) {
                 throw new RuntimeException("Test failed", e);
+            } finally {
+                // Clean up the test program
+                if (testProgram != null) {
+                    RevaProgramManager.unregisterProgram(testProgram);
+                    if (serverManager != null) {
+                        serverManager.programClosed(testProgram, tool);
+                    }
+                    testProgram.release(this);
+                }
             }
         });
     }
@@ -108,23 +130,30 @@ public class ProjectToolProviderVersionControlIntegrationTest extends RevaIntegr
     @Test
     public void testCheckinHandlesVersionControlStatus() throws Exception {
         withMcpClient(createMcpTransport(), client -> {
+            Program testProgram = null;
             try {
                 client.initialize();
 
                 // Create a test program
-                Program program = createDefaultProgram("test-unversioned", "x86:LE:64:default", this);
-                String programPath = program.getDomainFile().getPathname();
-                DomainFile domainFile = program.getDomainFile();
+                testProgram = createDefaultProgram("test-unversioned", "x86:LE:64:default", this);
+                String programPath = testProgram.getDomainFile().getPathname();
+                DomainFile domainFile = testProgram.getDomainFile();
+
+                // Register the program so it can be found by tools
+                RevaProgramManager.registerProgram(testProgram);
+                if (serverManager != null) {
+                    serverManager.programOpened(testProgram, tool);
+                }
 
                 // Make changes to the program
-                int transactionID = program.startTransaction("Add test label");
+                int transactionID = testProgram.startTransaction("Add test label");
                 try {
-                    SymbolTable symbolTable = program.getSymbolTable();
-                    symbolTable.createLabel(program.getAddressFactory().getDefaultAddressSpace().getAddress(0x2000),
+                    SymbolTable symbolTable = testProgram.getSymbolTable();
+                    symbolTable.createLabel(testProgram.getAddressFactory().getDefaultAddressSpace().getAddress(0x2000),
                         "test_label_unversioned", SourceType.USER_DEFINED);
-                    program.endTransaction(transactionID, true);
+                    testProgram.endTransaction(transactionID, true);
                 } catch (Exception e) {
-                    program.endTransaction(transactionID, false);
+                    testProgram.endTransaction(transactionID, false);
                     throw e;
                 }
 
@@ -142,6 +171,11 @@ public class ProjectToolProviderVersionControlIntegrationTest extends RevaIntegr
 
                 // Verify the response
                 assertNotNull("Result should not be null", result);
+                if (result.isError()) {
+                    // Print error for debugging
+                    String errorMsg = ((io.modelcontextprotocol.spec.McpSchema.TextContent) result.content().get(0)).text();
+                    System.err.println("Tool error: " + errorMsg);
+                }
                 assertFalse("Tool should not have error", result.isError());
 
                 String responseJson = ((io.modelcontextprotocol.spec.McpSchema.TextContent) result.content().get(0)).text();
@@ -163,6 +197,15 @@ public class ProjectToolProviderVersionControlIntegrationTest extends RevaIntegr
                 return null;
             } catch (Exception e) {
                 throw new RuntimeException("Test failed", e);
+            } finally {
+                // Clean up the test program
+                if (testProgram != null) {
+                    RevaProgramManager.unregisterProgram(testProgram);
+                    if (serverManager != null) {
+                        serverManager.programClosed(testProgram, tool);
+                    }
+                    testProgram.release(this);
+                }
             }
         });
     }
@@ -173,22 +216,29 @@ public class ProjectToolProviderVersionControlIntegrationTest extends RevaIntegr
     @Test
     public void testCheckinWithCommitMessage() throws Exception {
         withMcpClient(createMcpTransport(), client -> {
+            Program testProgram = null;
             try {
                 client.initialize();
 
                 // Create a test program
-                Program program = createDefaultProgram("test-message", "x86:LE:64:default", this);
-                String programPath = program.getDomainFile().getPathname();
+                testProgram = createDefaultProgram("test-message", "x86:LE:64:default", this);
+                String programPath = testProgram.getDomainFile().getPathname();
+
+                // Register the program so it can be found by tools
+                RevaProgramManager.registerProgram(testProgram);
+                if (serverManager != null) {
+                    serverManager.programOpened(testProgram, tool);
+                }
 
                 // Make changes to the program
-                int transactionID = program.startTransaction("Add test label");
+                int transactionID = testProgram.startTransaction("Add test label");
                 try {
-                    SymbolTable symbolTable = program.getSymbolTable();
-                    symbolTable.createLabel(program.getAddressFactory().getDefaultAddressSpace().getAddress(0x3000),
+                    SymbolTable symbolTable = testProgram.getSymbolTable();
+                    symbolTable.createLabel(testProgram.getAddressFactory().getDefaultAddressSpace().getAddress(0x3000),
                         "test_label_message", SourceType.USER_DEFINED);
-                    program.endTransaction(transactionID, true);
+                    testProgram.endTransaction(transactionID, true);
                 } catch (Exception e) {
-                    program.endTransaction(transactionID, false);
+                    testProgram.endTransaction(transactionID, false);
                     throw e;
                 }
 
@@ -205,6 +255,11 @@ public class ProjectToolProviderVersionControlIntegrationTest extends RevaIntegr
 
                 // Verify the response
                 assertNotNull("Result should not be null", result);
+                if (result.isError()) {
+                    // Print error for debugging
+                    String errorMsg = ((io.modelcontextprotocol.spec.McpSchema.TextContent) result.content().get(0)).text();
+                    System.err.println("Tool error: " + errorMsg);
+                }
                 assertFalse("Tool should not have error", result.isError());
 
                 String responseJson = ((io.modelcontextprotocol.spec.McpSchema.TextContent) result.content().get(0)).text();
@@ -216,6 +271,15 @@ public class ProjectToolProviderVersionControlIntegrationTest extends RevaIntegr
                 return null;
             } catch (Exception e) {
                 throw new RuntimeException("Test failed", e);
+            } finally {
+                // Clean up the test program
+                if (testProgram != null) {
+                    RevaProgramManager.unregisterProgram(testProgram);
+                    if (serverManager != null) {
+                        serverManager.programClosed(testProgram, tool);
+                    }
+                    testProgram.release(this);
+                }
             }
         });
     }

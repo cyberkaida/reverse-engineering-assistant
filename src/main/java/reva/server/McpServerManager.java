@@ -87,16 +87,27 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
     private volatile PluginTool activeTool;
 
     /**
-     * Constructor. Initializes the MCP server with all capabilities.
+     * Constructor for GUI mode. Initializes the MCP server with all capabilities.
+     * This constructor creates a ConfigManager from the PluginTool for backward compatibility.
      * @param pluginTool The plugin tool, used for configuration
      */
     public McpServerManager(PluginTool pluginTool) {
-        // Initialize configuration
-        configManager = new ConfigManager(pluginTool);
+        this(new ConfigManager(pluginTool));
+    }
+
+    /**
+     * Constructor with ConfigManager. Initializes the MCP server with all capabilities.
+     * This is the primary constructor used by both GUI and headless modes.
+     * @param configManager The configuration manager to use
+     */
+    public McpServerManager(ConfigManager configManager) {
+        // Store configuration
+        this.configManager = configManager;
         RevaInternalServiceRegistry.registerService(ConfigManager.class, configManager);
 
         // Register as a config change listener
         configManager.addConfigChangeListener(this);
+
         // Initialize thread pool
         threadPool = GThreadPool.getPrivateThreadPool("ReVa");
         RevaInternalServiceRegistry.registerService(GThreadPool.class, threadPool);

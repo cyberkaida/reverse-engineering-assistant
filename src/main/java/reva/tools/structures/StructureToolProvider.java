@@ -57,6 +57,8 @@ public class StructureToolProvider extends AbstractToolProvider {
         registerValidateCStructureTool();
         registerCreateStructureTool();
         registerAddStructureFieldTool();
+        registerModifyStructureFieldTool();
+        registerModifyStructureFromCTool();
         registerGetStructureInfoTool();
         registerListStructuresTool();
         registerApplyStructureTool();
@@ -402,6 +404,283 @@ public class StructureToolProvider extends AbstractToolProvider {
     }
 
     /**
+     * Register tool to modify existing structure fields
+     */
+    private void registerModifyStructureFieldTool() {
+        Map<String, Object> properties = new HashMap<>();
+        properties.put("programPath", SchemaUtil.createStringProperty("Path of the program"));
+        properties.put("structureName", SchemaUtil.createStringProperty("Name of the structure"));
+        properties.put("fieldName", SchemaUtil.createOptionalStringProperty("Name of the field to modify (use this OR offset)"));
+        properties.put("offset", SchemaUtil.createOptionalNumberProperty("Offset of the field to modify (use this OR fieldName)"));
+        properties.put("newDataType", SchemaUtil.createOptionalStringProperty("New data type for the field"));
+        properties.put("newFieldName", SchemaUtil.createOptionalStringProperty("New name for the field"));
+        properties.put("newComment", SchemaUtil.createOptionalStringProperty("New comment for the field"));
+        properties.put("newLength", SchemaUtil.createOptionalNumberProperty("New length for the field (advanced)"));
+
+        List<String> required = new ArrayList<>();
+        required.add("programPath");
+        required.add("structureName");
+
+        McpSchema.Tool tool = McpSchema.Tool.builder()
+            .name("modify-structure-field")
+            .title("Modify Structure Field")
+            .description("Modify an existing field in a structure. Supports changing data type, name, comment, and length. " +
+                         "Identify the field by name OR offset. At least one modification parameter (newDataType, newFieldName, newComment, or newLength) is required.")
+            .inputSchema(createSchema(properties, required))
+            .build();
+
+        registerTool(tool, (exchange, request) -> {
+            try {
+                // Get program and parameters using helper methods
+                Program program = getProgramFromArgs(request);
+                String structureName = getString(request, "structureName");
+                String fieldName = getOptionalString(request, "fieldName", null);
+                Integer offset = getOptionalInteger(request.arguments(), "offset", null);
+                String newDataTypeStr = getOptionalString(request, "newDataType", null);
+                String newFieldName = getOptionalString(request, "newFieldName", null);
+                String newComment = getOptionalString(request, "newComment", null);
+                Integer newLength = getOptionalInteger(request.arguments(), "newLength", null);
+
+                // Validate: must have either fieldName or offset
+                if (fieldName == null && offset == null) {
+                    return createErrorResult("Must specify either fieldName or offset to identify the field to modify");
+                }
+
+                // Validate: must have at least one modification
+                if (newDataTypeStr == null && newFieldName == null && newComment == null && newLength == null) {
+                    return createErrorResult("Must specify at least one modification (newDataType, newFieldName, newComment, or newLength)");
+                }
+
+                DataTypeManager dtm = program.getDataTypeManager();
+
+                // Find the structure
+                DataType dt = findDataTypeByName(dtm, structureName);
+                if (dt == null) {
+                    return createErrorResult("Structure not found: " + structureName);
+                }
+
+                if (!(dt instanceof Structure)) {
+                    return createErrorResult("Data type is not a structure: " + structureName + " (unions not supported for field modification)");
+                }
+
+                Structure struct = (Structure) dt;
+
+                // Find the field component
+                DataTypeComponent targetComponent = null;
+                int targetOrdinal = -1;
+
+                if (offset != null) {
+                    // Find by offset
+                    targetComponent = struct.getComponentAt(offset);
+                    if (targetComponent == null) {
+                        return createErrorResult("No field found at offset " + offset + " in structure " + structureName);
+                    }
+                    targetOrdinal = targetComponent.getOrdinal();
+                } else {
+                    // Find by name
+                    for (int i = 0; i < struct.getNumComponents(); i++) {
+                        DataTypeComponent comp = struct.getComponent(i);
+                        if (fieldName.equals(comp.getFieldName())) {
+                            targetComponent = comp;
+                            targetOrdinal = i;
+                            break;
+                        }
+                    }
+                    if (targetComponent == null) {
+                        return createErrorResult("Field not found: " + fieldName + " in structure " + structureName);
+                    }
+                }
+
+                // Determine what we're replacing with
+                DataType replacementDataType = targetComponent.getDataType();
+                String replacementFieldName = targetComponent.getFieldName();
+                String replacementComment = targetComponent.getComment();
+                int replacementLength = targetComponent.getLength();
+
+                // Parse new data type if provided
+                if (newDataTypeStr != null) {
+                    try {
+                        // First try using the program's own DTM directly
+                        DataTypeParser parser = new DataTypeParser(dtm, dtm, null, AllowedDataTypes.ALL);
+                        replacementDataType = parser.parse(newDataTypeStr);
+                    } catch (Exception e) {
+                        // Fallback to the utility method
+                        try {
+                            replacementDataType = DataTypeParserUtil.parseDataTypeObjectFromString(newDataTypeStr, "");
+                        } catch (Exception e2) {
+                            return createErrorResult("Invalid data type: " + newDataTypeStr);
+                        }
+                    }
+
+                    if (replacementDataType == null) {
+                        return createErrorResult("Invalid data type: " + newDataTypeStr);
+                    }
+
+                    // Update length to match new data type if not explicitly provided
+                    if (newLength == null) {
+                        replacementLength = replacementDataType.getLength();
+                    }
+                }
+
+                // Apply new field name if provided
+                if (newFieldName != null) {
+                    replacementFieldName = newFieldName;
+                }
+
+                // Apply new comment if provided
+                if (newComment != null) {
+                    replacementComment = newComment;
+                }
+
+                // Apply new length if provided
+                if (newLength != null) {
+                    replacementLength = newLength;
+                }
+
+                int txId = program.startTransaction("Modify Structure Field");
+                try {
+                    // Use replace() to update the field
+                    struct.replace(targetOrdinal, replacementDataType, replacementLength,
+                                   replacementFieldName, replacementComment);
+
+                    program.endTransaction(txId, true);
+
+                    Map<String, Object> result = createDetailedStructureInfo(struct);
+                    result.put("message", "Successfully modified field in structure: " + structureName);
+                    result.put("modifiedField", replacementFieldName);
+                    return createJsonResult(result);
+
+                } catch (Exception e) {
+                    program.endTransaction(txId, false);
+                    Msg.error(this, "Failed to modify field", e);
+                    return createErrorResult("Failed to modify field: " + e.getMessage());
+                }
+            } catch (Exception e) {
+                return createErrorResult("Error: " + e.getMessage());
+            }
+        });
+    }
+
+    /**
+     * Register tool to modify a structure using a C definition
+     */
+    private void registerModifyStructureFromCTool() {
+        Map<String, Object> properties = new HashMap<>();
+        properties.put("programPath", SchemaUtil.createStringProperty("Path of the program"));
+        properties.put("cDefinition", SchemaUtil.createStringProperty("Complete C structure definition with modifications"));
+
+        List<String> required = new ArrayList<>();
+        required.add("programPath");
+        required.add("cDefinition");
+
+        McpSchema.Tool tool = McpSchema.Tool.builder()
+            .name("modify-structure-from-c")
+            .title("Modify Structure from C")
+            .description("Modify an existing structure using a C-style definition. " +
+                         "The structure name must match an existing structure. " +
+                         "Fields will be added, modified, or removed to match the definition. " +
+                         "Best practice: Read the structure with get-structure-info before modifying to understand the current layout.")
+            .inputSchema(createSchema(properties, required))
+            .build();
+
+        registerTool(tool, (exchange, request) -> {
+            try {
+                // Get program and parameters using helper methods
+                Program program = getProgramFromArgs(request);
+                String cDefinition = getString(request, "cDefinition");
+
+                DataTypeManager dtm = program.getDataTypeManager();
+
+                // Parse the C definition
+                DataType parsedDt = null;
+                try {
+                    CParser parser = new CParser(dtm);
+                    parsedDt = parser.parse(cDefinition);
+                } catch (Exception e) {
+                    return createErrorResult("Failed to parse C definition: " + e.getMessage());
+                }
+
+                if (parsedDt == null) {
+                    return createErrorResult("Failed to parse structure definition");
+                }
+
+                if (!(parsedDt instanceof Structure)) {
+                    return createErrorResult("Parsed definition is not a structure (unions not supported for modification)");
+                }
+
+                Structure parsedStruct = (Structure) parsedDt;
+                String structureName = parsedStruct.getName();
+
+                // Find existing structure
+                DataType existingDt = findDataTypeByName(dtm, structureName);
+                if (existingDt == null) {
+                    return createErrorResult("Structure not found: " + structureName + ". Use parse-c-structure to create a new structure instead.");
+                }
+
+                if (!(existingDt instanceof Structure)) {
+                    return createErrorResult("Existing data type is not a structure: " + structureName);
+                }
+
+                Structure existingStruct = (Structure) existingDt;
+
+                int txId = program.startTransaction("Modify Structure from C");
+                try {
+                    // Clear existing structure and rebuild from parsed definition
+                    // We'll do this by replacing all components
+
+                    // First, remove all existing components
+                    while (existingStruct.getNumComponents() > 0) {
+                        existingStruct.delete(0);
+                    }
+
+                    // Now add all components from the parsed structure
+                    for (int i = 0; i < parsedStruct.getNumComponents(); i++) {
+                        DataTypeComponent comp = parsedStruct.getComponent(i);
+                        DataType fieldType = comp.getDataType();
+
+                        // Resolve the field type in the program's DTM
+                        fieldType = dtm.resolve(fieldType, DataTypeConflictHandler.DEFAULT_HANDLER);
+
+                        if (comp.isBitFieldComponent()) {
+                            // Handle bitfield
+                            BitFieldDataType bitfield = (BitFieldDataType) fieldType;
+                            existingStruct.addBitField(
+                                bitfield.getBaseDataType(),
+                                bitfield.getBitSize(),
+                                comp.getFieldName(),
+                                comp.getComment()
+                            );
+                        } else {
+                            // Regular field
+                            existingStruct.add(fieldType, comp.getFieldName(), comp.getComment());
+                        }
+                    }
+
+                    // Copy other properties
+                    if (parsedStruct.getDescription() != null) {
+                        existingStruct.setDescription(parsedStruct.getDescription());
+                    }
+                    existingStruct.setPackingEnabled(parsedStruct.isPackingEnabled());
+
+                    program.endTransaction(txId, true);
+
+                    Map<String, Object> result = createDetailedStructureInfo(existingStruct);
+                    result.put("message", "Successfully modified structure from C definition: " + structureName);
+                    result.put("fieldsCount", existingStruct.getNumComponents());
+                    return createJsonResult(result);
+
+                } catch (Exception e) {
+                    program.endTransaction(txId, false);
+                    Msg.error(this, "Failed to modify structure from C", e);
+                    return createErrorResult("Failed to modify structure: " + e.getMessage());
+                }
+            } catch (Exception e) {
+                return createErrorResult("Error: " + e.getMessage());
+            }
+        });
+    }
+
+    /**
      * Register tool to get structure information
      */
     private void registerGetStructureInfoTool() {
@@ -598,13 +877,14 @@ public class StructureToolProvider extends AbstractToolProvider {
     }
 
     /**
-     * Register tool to delete a structure
+     * Register tool to delete a structure with reference checking
      */
     private void registerDeleteStructureTool() {
         Map<String, Object> properties = new HashMap<>();
         properties.put("programPath", SchemaUtil.createStringProperty("Path of the program"));
         properties.put("structureName", SchemaUtil.createStringProperty("Name of the structure to delete"));
-        
+        properties.put("force", SchemaUtil.createOptionalBooleanProperty("Force deletion even if structure is referenced (default: false)"));
+
         List<String> required = new ArrayList<>();
         required.add("programPath");
         required.add("structureName");
@@ -612,7 +892,9 @@ public class StructureToolProvider extends AbstractToolProvider {
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("delete-structure")
             .title("Delete Structure")
-            .description("Delete a structure from the program")
+            .description("Delete a structure from the program. " +
+                         "Checks for references (function signatures, variables, memory) before deletion. " +
+                         "Use force=true to delete anyway despite references.")
             .inputSchema(createSchema(properties, required))
             .build();
 
@@ -621,29 +903,94 @@ public class StructureToolProvider extends AbstractToolProvider {
                 // Get program and parameters using helper methods
                 Program program = getProgramFromArgs(request);
                 String structureName = getString(request, "structureName");
+                boolean force = getOptionalBoolean(request, "force", false);
 
                 DataTypeManager dtm = program.getDataTypeManager();
                 DataType dt = findDataTypeByName(dtm, structureName);
-                
+
                 if (dt == null) {
                     return createErrorResult("Structure not found: " + structureName);
                 }
-                
+
+                // Check for references to this structure
+                List<String> functionReferences = new ArrayList<>();
+                List<String> memoryReferences = new ArrayList<>();
+
+                // Check function parameters and return types
+                ghidra.program.model.listing.FunctionIterator functions = program.getFunctionManager().getFunctions(true);
+                while (functions.hasNext()) {
+                    ghidra.program.model.listing.Function func = functions.next();
+
+                    // Check return type
+                    if (func.getReturnType().isEquivalent(dt)) {
+                        functionReferences.add(func.getName() + " (return type)");
+                    }
+
+                    // Check parameters
+                    for (ghidra.program.model.listing.Parameter param : func.getParameters()) {
+                        if (param.getDataType().isEquivalent(dt)) {
+                            functionReferences.add(func.getName() + " (parameter: " + param.getName() + ")");
+                        }
+                    }
+
+                    // Check local variables
+                    for (ghidra.program.model.listing.Variable var : func.getAllVariables()) {
+                        if (var.getDataType().isEquivalent(dt)) {
+                            functionReferences.add(func.getName() + " (variable: " + var.getName() + ")");
+                        }
+                    }
+                }
+
+                // Check memory for applied instances
+                Listing listing = program.getListing();
+                ghidra.program.model.listing.DataIterator dataIter = listing.getDefinedData(true);
+                while (dataIter.hasNext()) {
+                    Data data = dataIter.next();
+                    if (data.getDataType().isEquivalent(dt)) {
+                        memoryReferences.add(AddressUtil.formatAddress(data.getAddress()));
+                    }
+                }
+
+                int totalReferences = functionReferences.size() + memoryReferences.size();
+
+                // If references exist and not forcing, return warning
+                if (totalReferences > 0 && !force) {
+                    Map<String, Object> result = new HashMap<>();
+                    result.put("canDelete", false);
+                    result.put("deleted", false);
+
+                    Map<String, Object> references = new HashMap<>();
+                    references.put("count", totalReferences);
+                    references.put("functions", functionReferences);
+                    references.put("memoryLocations", memoryReferences);
+                    result.put("references", references);
+
+                    result.put("warning", "Structure '" + structureName + "' is referenced in " +
+                               functionReferences.size() + " function(s) and " +
+                               memoryReferences.size() + " memory location(s). " +
+                               "Use force=true to delete anyway.");
+
+                    return createJsonResult(result);
+                }
+
+                // Proceed with deletion
                 int txId = program.startTransaction("Delete Structure");
                 try {
                     boolean removed = dtm.remove(dt, null);
-                    
+
                     program.endTransaction(txId, true);
-                    
+
                     if (removed) {
                         Map<String, Object> result = new HashMap<>();
                         result.put("message", "Successfully deleted structure: " + structureName);
                         result.put("deleted", true);
+                        result.put("hadReferences", totalReferences > 0);
+                        result.put("referencesCleared", totalReferences);
                         return createJsonResult(result);
                     } else {
-                        return createErrorResult("Failed to delete structure (may be in use)");
+                        return createErrorResult("Failed to delete structure (may be locked or in use by another process)");
                     }
-                    
+
                 } catch (Exception e) {
                     program.endTransaction(txId, false);
                     Msg.error(this, "Failed to delete structure", e);
@@ -803,78 +1150,176 @@ public class StructureToolProvider extends AbstractToolProvider {
      */
     private Map<String, Object> createDetailedStructureInfo(Composite composite) {
         Map<String, Object> info = createStructureInfo(composite);
-        
-        // Add field information
+
+        // Add field information with undefined byte condensing
         List<Map<String, Object>> fields = new ArrayList<>();
-        for (int i = 0; i < composite.getNumComponents(); i++) {
+
+        int i = 0;
+        while (i < composite.getNumComponents()) {
             DataTypeComponent comp = composite.getComponent(i);
-            Map<String, Object> fieldInfo = new HashMap<>();
-            
-            fieldInfo.put("ordinal", comp.getOrdinal());
-            fieldInfo.put("offset", comp.getOffset());
-            fieldInfo.put("length", comp.getLength());
-            fieldInfo.put("fieldName", comp.getFieldName());
-            fieldInfo.put("comment", comp.getComment());
-            
-            DataType fieldType = comp.getDataType();
-            fieldInfo.put("dataType", fieldType.getDisplayName());
-            fieldInfo.put("dataTypeSize", fieldType.getLength());
-            
-            // Check if it's a bitfield
-            if (comp.isBitFieldComponent()) {
-                BitFieldDataType bitfield = (BitFieldDataType) fieldType;
-                fieldInfo.put("isBitfield", true);
-                fieldInfo.put("bitSize", bitfield.getBitSize());
-                fieldInfo.put("bitOffset", bitfield.getBitOffset());
-                fieldInfo.put("baseDataType", bitfield.getBaseDataType().getDisplayName());
-            } else {
+
+            // Check if this is an undefined byte that should be condensed
+            if (isUndefinedField(comp)) {
+                // Count consecutive undefined bytes
+                int startOffset = comp.getOffset();
+                int startOrdinal = comp.getOrdinal();
+                int totalLength = 0;
+                int count = 0;
+
+                while (i < composite.getNumComponents()) {
+                    DataTypeComponent nextComp = composite.getComponent(i);
+                    if (!isUndefinedField(nextComp)) {
+                        break;
+                    }
+                    totalLength += nextComp.getLength();
+                    count++;
+                    i++;
+                }
+
+                // Create a condensed entry for the undefined range
+                Map<String, Object> fieldInfo = new HashMap<>();
+                fieldInfo.put("ordinal", startOrdinal);
+                fieldInfo.put("offset", startOffset);
+                fieldInfo.put("length", totalLength);
+                fieldInfo.put("fieldName", "<undefined>");
+                fieldInfo.put("dataType", "undefined");
+                fieldInfo.put("dataTypeSize", totalLength);
                 fieldInfo.put("isBitfield", false);
+                fieldInfo.put("isCondensed", true);
+                fieldInfo.put("componentCount", count);
+
+                fields.add(fieldInfo);
+            } else {
+                // Regular field - add as-is
+                Map<String, Object> fieldInfo = new HashMap<>();
+
+                fieldInfo.put("ordinal", comp.getOrdinal());
+                fieldInfo.put("offset", comp.getOffset());
+                fieldInfo.put("length", comp.getLength());
+                fieldInfo.put("fieldName", comp.getFieldName());
+                fieldInfo.put("comment", comp.getComment());
+
+                DataType fieldType = comp.getDataType();
+                fieldInfo.put("dataType", fieldType.getDisplayName());
+                fieldInfo.put("dataTypeSize", fieldType.getLength());
+
+                // Check if it's a bitfield
+                if (comp.isBitFieldComponent()) {
+                    BitFieldDataType bitfield = (BitFieldDataType) fieldType;
+                    fieldInfo.put("isBitfield", true);
+                    fieldInfo.put("bitSize", bitfield.getBitSize());
+                    fieldInfo.put("bitOffset", bitfield.getBitOffset());
+                    fieldInfo.put("baseDataType", bitfield.getBaseDataType().getDisplayName());
+                } else {
+                    fieldInfo.put("isBitfield", false);
+                }
+
+                fieldInfo.put("isCondensed", false);
+
+                fields.add(fieldInfo);
+                i++;
             }
-            
-            fields.add(fieldInfo);
         }
-        
+
         info.put("fields", fields);
-        
+
         // Add C representation
         if (composite instanceof Structure) {
             info.put("cRepresentation", generateCRepresentation((Structure) composite));
         }
-        
+
         return info;
     }
 
     /**
-     * Generate C representation of a structure
+     * Check if a field is an undefined/default field that should be condensed
+     */
+    private boolean isUndefinedField(DataTypeComponent comp) {
+        // Check if the field name is null or empty (undefined)
+        String fieldName = comp.getFieldName();
+        if (fieldName == null || fieldName.isEmpty()) {
+            return true;
+        }
+
+        // Check if it's a Ghidra default field name like "field_0x0", "field_0x1", etc.
+        // These are generated for undefined structure areas
+        if (fieldName.startsWith("field_0x") || fieldName.startsWith("field0x")) {
+            return true;
+        }
+
+        // Check if the datatype is "undefined" or "undefined1"
+        DataType fieldType = comp.getDataType();
+        String typeName = fieldType.getName();
+        if (typeName != null && typeName.startsWith("undefined")) {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Generate C representation of a structure with undefined byte condensing
      */
     private String generateCRepresentation(Structure struct) {
         StringBuilder sb = new StringBuilder();
         sb.append("struct ").append(struct.getName()).append(" {\n");
-        
-        for (int i = 0; i < struct.getNumComponents(); i++) {
+
+        int i = 0;
+        while (i < struct.getNumComponents()) {
             DataTypeComponent comp = struct.getComponent(i);
             sb.append("    ");
-            
-            DataType fieldType = comp.getDataType();
-            if (comp.isBitFieldComponent()) {
-                BitFieldDataType bitfield = (BitFieldDataType) fieldType;
-                sb.append(bitfield.getBaseDataType().getDisplayName());
-                sb.append(" ").append(comp.getFieldName());
-                sb.append(" : ").append(bitfield.getBitSize());
+
+            // Check if this is an undefined field that should be condensed
+            if (isUndefinedField(comp)) {
+                // Count consecutive undefined bytes
+                int startOffset = comp.getOffset();
+                int totalLength = 0;
+                int count = 0;
+
+                while (i < struct.getNumComponents()) {
+                    DataTypeComponent nextComp = struct.getComponent(i);
+                    if (!isUndefinedField(nextComp)) {
+                        break;
+                    }
+                    totalLength += nextComp.getLength();
+                    count++;
+                    i++;
+                }
+
+                // Generate condensed line with offset range comment
+                sb.append("undefined reserved_0x");
+                sb.append(String.format("%x", startOffset));
+                sb.append("[").append(count).append("]");
+                sb.append(";");
+                sb.append(" // 0x");
+                sb.append(String.format("%x", startOffset));
+                sb.append("-0x");
+                sb.append(String.format("%x", startOffset + totalLength - 1));
+                sb.append("\n");
             } else {
-                sb.append(fieldType.getDisplayName());
-                sb.append(" ").append(comp.getFieldName());
+                // Regular field - output as-is
+                DataType fieldType = comp.getDataType();
+                if (comp.isBitFieldComponent()) {
+                    BitFieldDataType bitfield = (BitFieldDataType) fieldType;
+                    sb.append(bitfield.getBaseDataType().getDisplayName());
+                    sb.append(" ").append(comp.getFieldName());
+                    sb.append(" : ").append(bitfield.getBitSize());
+                } else {
+                    sb.append(fieldType.getDisplayName());
+                    sb.append(" ").append(comp.getFieldName());
+                }
+
+                sb.append(";");
+
+                if (comp.getComment() != null) {
+                    sb.append(" // ").append(comp.getComment());
+                }
+
+                sb.append("\n");
+                i++;
             }
-            
-            sb.append(";");
-            
-            if (comp.getComment() != null) {
-                sb.append(" // ").append(comp.getComment());
-            }
-            
-            sb.append("\n");
         }
-        
+
         sb.append("};");
         return sb.toString();
     }

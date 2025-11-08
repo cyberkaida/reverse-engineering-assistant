@@ -52,6 +52,7 @@ public class ConfigManager implements ConfigurationBackendListener {
     public static final String DEBUG_MODE = "Debug Mode";
     public static final String MAX_DECOMPILER_SEARCH_FUNCTIONS = "Max Decompiler Search Functions";
     public static final String DECOMPILER_TIMEOUT_SECONDS = "Decompiler Timeout Seconds";
+    public static final String IMPORT_ANALYSIS_TIMEOUT_SECONDS = "Import Analysis Timeout Seconds";
 
     // Default values
     private static final int DEFAULT_PORT = 8080;
@@ -62,6 +63,7 @@ public class ConfigManager implements ConfigurationBackendListener {
     private static final boolean DEFAULT_DEBUG_MODE = false;
     private static final int DEFAULT_MAX_DECOMPILER_SEARCH_FUNCTIONS = 1000;
     private static final int DEFAULT_DECOMPILER_TIMEOUT_SECONDS = 10;
+    private static final int DEFAULT_IMPORT_ANALYSIS_TIMEOUT_SECONDS = 600;
 
     private final ConfigurationBackend backend;
     private final Map<String, Object> cachedOptions = new ConcurrentHashMap<>();
@@ -171,6 +173,8 @@ public class ConfigManager implements ConfigurationBackendListener {
             "Maximum number of functions before discouraging decompiler search");
         toolOptions.registerOption(DECOMPILER_TIMEOUT_SECONDS, DEFAULT_DECOMPILER_TIMEOUT_SECONDS, help,
             "Timeout in seconds for decompiler operations");
+        toolOptions.registerOption(IMPORT_ANALYSIS_TIMEOUT_SECONDS, DEFAULT_IMPORT_ANALYSIS_TIMEOUT_SECONDS, help,
+            "Timeout in seconds for analyzing each imported file (default: 10 minutes)");
     }
 
     /**
@@ -196,6 +200,8 @@ public class ConfigManager implements ConfigurationBackendListener {
             backend.getInt(SERVER_OPTIONS, MAX_DECOMPILER_SEARCH_FUNCTIONS, DEFAULT_MAX_DECOMPILER_SEARCH_FUNCTIONS));
         cachedOptions.put(DECOMPILER_TIMEOUT_SECONDS,
             backend.getInt(SERVER_OPTIONS, DECOMPILER_TIMEOUT_SECONDS, DEFAULT_DECOMPILER_TIMEOUT_SECONDS));
+        cachedOptions.put(IMPORT_ANALYSIS_TIMEOUT_SECONDS,
+            backend.getInt(SERVER_OPTIONS, IMPORT_ANALYSIS_TIMEOUT_SECONDS, DEFAULT_IMPORT_ANALYSIS_TIMEOUT_SECONDS));
 
         Msg.debug(this, "Loaded ReVa configuration settings");
     }
@@ -414,6 +420,23 @@ public class ConfigManager implements ConfigurationBackendListener {
      */
     public void setDecompilerTimeoutSeconds(int timeoutSeconds) {
         backend.setInt(SERVER_OPTIONS, DECOMPILER_TIMEOUT_SECONDS, timeoutSeconds);
+        // onConfigurationChanged() will be called automatically
+    }
+
+    /**
+     * Get the import analysis timeout in seconds
+     * @return The configured timeout in seconds for analyzing imported files
+     */
+    public int getImportAnalysisTimeoutSeconds() {
+        return (Integer) cachedOptions.getOrDefault(IMPORT_ANALYSIS_TIMEOUT_SECONDS, DEFAULT_IMPORT_ANALYSIS_TIMEOUT_SECONDS);
+    }
+
+    /**
+     * Set the import analysis timeout in seconds
+     * @param timeoutSeconds The timeout in seconds
+     */
+    public void setImportAnalysisTimeoutSeconds(int timeoutSeconds) {
+        backend.setInt(SERVER_OPTIONS, IMPORT_ANALYSIS_TIMEOUT_SECONDS, timeoutSeconds);
         // onConfigurationChanged() will be called automatically
     }
 

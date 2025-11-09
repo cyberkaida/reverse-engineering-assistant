@@ -23,6 +23,7 @@ import java.util.Map;
 
 import ghidra.app.plugin.core.analysis.AutoAnalysisManager;
 import ghidra.framework.data.DefaultCheckinHandler;
+import ghidra.framework.model.DomainObject;
 import ghidra.framework.main.AppInfo;
 import ghidra.framework.model.DomainFile;
 import ghidra.framework.model.DomainFolder;
@@ -36,17 +37,21 @@ import ghidra.program.model.lang.LanguageNotFoundException;
 import ghidra.program.model.lang.LanguageService;
 import ghidra.program.util.DefaultLanguageService;
 import ghidra.program.model.listing.Program;
+import ghidra.util.Msg;
 import ghidra.util.task.TaskMonitor;
+import ghidra.util.task.TimeoutTaskMonitor;
+import java.util.concurrent.TimeUnit;
 import ghidra.formats.gfilesystem.FSRL;
 import ghidra.formats.gfilesystem.FileSystemService;
 import ghidra.plugins.importer.batch.BatchInfo;
 import ghidra.plugins.importer.tasks.ImportBatchTask;
-import ghidra.util.task.TaskLauncher;
 import io.modelcontextprotocol.server.McpSyncServer;
 import io.modelcontextprotocol.spec.McpSchema;
 import reva.plugin.RevaProgramManager;
+import reva.plugin.ConfigManager;
 import reva.tools.AbstractToolProvider;
 import reva.util.SchemaUtil;
+import reva.util.RevaInternalServiceRegistry;
 
 /**
  * Tool provider for project-related operations.
@@ -304,9 +309,35 @@ public class ProjectToolProvider extends AbstractToolProvider {
             DomainFile domainFile = program.getDomainFile();
 
             try {
+                // Save program first (required before version control operations)
+                // Skip save for read-only programs (common in test environments)
+                if (!domainFile.isReadOnly()) {
+                    try {
+                        program.save(message, TaskMonitor.DUMMY);
+                        program.flushEvents();  // Ensure SAVED event is processed
+                    } catch (java.io.IOException e) {
+                        return createErrorResult("Failed to save program: " + e.getMessage());
+                    }
+                }
+
+                // Release program from cache before version control operations
+                // Version control requires no active consumers on the domain file
+                boolean wasCached = RevaProgramManager.releaseProgramFromCache(program);
+                if (wasCached) {
+                    Msg.debug(this, "Released program from cache for version control: " + programPath);
+                }
+
                 if (domainFile.canAddToRepository()) {
                     // New file - add to version control
                     domainFile.addToVersionControl(message, !keepCheckedOut, TaskMonitor.DUMMY);
+
+                    // Re-open program to cache if it was cached and we're keeping it checked out
+                    if (wasCached && keepCheckedOut) {
+                        Program reopenedProgram = RevaProgramManager.reopenProgramToCache(programPath);
+                        if (reopenedProgram != null) {
+                            Msg.debug(this, "Re-opened program to cache after version control: " + programPath);
+                        }
+                    }
 
                     Map<String, Object> result = new HashMap<>();
                     result.put("success", true);
@@ -325,6 +356,14 @@ public class ProjectToolProvider extends AbstractToolProvider {
                         message + "\n💜🐉✨ (ReVa)", keepCheckedOut, false);
                     domainFile.checkin(checkinHandler, TaskMonitor.DUMMY);
 
+                    // Re-open program to cache if it was cached and we're keeping it checked out
+                    if (wasCached && keepCheckedOut) {
+                        Program reopenedProgram = RevaProgramManager.reopenProgramToCache(programPath);
+                        if (reopenedProgram != null) {
+                            Msg.debug(this, "Re-opened program to cache after checkin: " + programPath);
+                        }
+                    }
+
                     Map<String, Object> result = new HashMap<>();
                     result.put("success", true);
                     result.put("action", "checked_in");
@@ -336,12 +375,21 @@ public class ProjectToolProvider extends AbstractToolProvider {
 
                     return createJsonResult(result);
                 }
+                else if (!domainFile.isVersioned()) {
+                    // Not versioned - changes were already saved at the beginning
+                    Map<String, Object> result = new HashMap<>();
+                    result.put("success", true);
+                    result.put("action", "saved");
+                    result.put("programPath", programPath);
+                    result.put("message", message);
+                    result.put("isVersioned", false);
+                    result.put("info", "Program is not under version control - changes were saved instead");
+
+                    return createJsonResult(result);
+                }
                 else {
-                    // Determine specific reason why checkin is not possible
-                    if (!domainFile.isVersioned()) {
-                        return createErrorResult("Program is not under version control: " + programPath);
-                    }
-                    else if (!domainFile.isCheckedOut()) {
+                    // Other version control errors
+                    if (!domainFile.isCheckedOut()) {
                         return createErrorResult("Program is not checked out and cannot be modified: " + programPath);
                     }
                     else if (!domainFile.modifiedSinceCheckout()) {
@@ -356,6 +404,114 @@ public class ProjectToolProvider extends AbstractToolProvider {
                 return createErrorResult("Checkin failed: " + e.getMessage());
             }
         });
+    }
+
+    /**
+     * Recursively collect all program paths from a folder and its subfolders
+     * @param folder The folder to collect from
+     * @param programPaths List to accumulate program paths
+     */
+    private void collectAllProgramPaths(DomainFolder folder, List<String> programPaths) {
+        // Collect programs in this folder
+        for (DomainFile file : folder.getFiles()) {
+            if (file.getContentType().equals("Program")) {
+                programPaths.add(file.getPathname());
+            }
+        }
+
+        // Recursively collect from subfolders
+        for (DomainFolder subfolder : folder.getFolders()) {
+            collectAllProgramPaths(subfolder, programPaths);
+        }
+    }
+
+    /**
+     * Collect imported files, optionally analyze them, and add them to version control
+     * @param destFolder The destination folder where files were imported
+     * @param importedBaseName The base name of the imported file/directory
+     * @param analyzeAfterImport Whether to run auto-analysis on imported programs
+     * @param analysisTimeoutSeconds Timeout in seconds for analysis operations
+     * @param versionedFiles List to track successfully versioned files
+     * @param analyzedFiles List to track successfully analyzed files
+     * @param errors List to track errors
+     * @param monitor Task monitor for cancellation and timeout checking
+     */
+    private void collectImportedFiles(DomainFolder destFolder, String importedBaseName,
+                                     boolean analyzeAfterImport, int analysisTimeoutSeconds,
+                                     List<String> versionedFiles, List<String> analyzedFiles,
+                                     List<String> errors, TaskMonitor monitor) {
+        try {
+            // Find newly imported files in the destination folder
+            for (DomainFile file : destFolder.getFiles()) {
+                boolean wasAnalyzed = false;
+
+                // Analyze if requested and this is a Program file
+                if (file.getContentType().equals("Program") && analyzeAfterImport) {
+                    try {
+                        // Open program with temporary consumer
+                        Object consumer = new Object();
+                        DomainObject domainObject = file.getDomainObject(consumer, false, false, monitor);
+
+                        if (domainObject instanceof Program) {
+                            Program program = (Program) domainObject;
+                            try {
+                                // Get analysis manager
+                                AutoAnalysisManager analysisManager = AutoAnalysisManager.getAnalysisManager(program);
+                                if (analysisManager != null) {
+                                    // Create timeout monitor for analysis
+                                    TaskMonitor analysisMonitor = TimeoutTaskMonitor.timeoutIn(analysisTimeoutSeconds, TimeUnit.SECONDS);
+
+                                    // Start analysis (async)
+                                    analysisManager.startAnalysis(analysisMonitor);
+
+                                    // Wait for completion with timeout
+                                    analysisManager.waitForAnalysis(null, analysisMonitor);
+
+                                    if (analysisMonitor.isCancelled()) {
+                                        errors.add("Analysis timed out for " + file.getPathname() +
+                                            " after " + analysisTimeoutSeconds + " seconds");
+                                    } else {
+                                        // Save program after analysis
+                                        program.save("Auto-analysis complete", monitor);
+                                        analyzedFiles.add(file.getPathname());
+                                        wasAnalyzed = true;
+                                    }
+                                } else {
+                                    errors.add("Could not get analysis manager for " + file.getPathname());
+                                }
+                            } finally {
+                                // Release program
+                                program.release(consumer);
+                            }
+                        }
+                    } catch (Exception e) {
+                        errors.add("Analysis failed for " + file.getPathname() + ": " + e.getMessage());
+                    }
+                }
+
+                // Add to version control after analysis (or immediately if no analysis)
+                if (file.canAddToRepository()) {
+                    try {
+                        // Use different commit message based on whether analysis was performed
+                        String commitMessage = wasAnalyzed
+                            ? "Initial import via ReVa (analyzed)"
+                            : "Initial import via ReVa";
+                        file.addToVersionControl(commitMessage, false, monitor);
+                        versionedFiles.add(file.getPathname());
+                    } catch (Exception e) {
+                        errors.add("Failed to add " + file.getPathname() + " to version control: " + e.getMessage());
+                    }
+                }
+            }
+
+            // Recursively process subfolders
+            for (DomainFolder subfolder : destFolder.getFolders()) {
+                collectImportedFiles(subfolder, importedBaseName, analyzeAfterImport, analysisTimeoutSeconds,
+                    versionedFiles, analyzedFiles, errors, monitor);
+            }
+        } catch (Exception e) {
+            errors.add("Error collecting imported files: " + e.getMessage());
+        }
     }
 
     /**
@@ -615,6 +771,12 @@ public class ProjectToolProvider extends AbstractToolProvider {
         analyzeProperty.put("description", "Run auto-analysis after import (default: false)");
         properties.put("analyzeAfterImport", analyzeProperty);
 
+        // enableVersionControl parameter (optional)
+        Map<String, Object> versionControlProperty = new HashMap<>();
+        versionControlProperty.put("type", "boolean");
+        versionControlProperty.put("description", "Automatically add imported files to version control (default: true)");
+        properties.put("enableVersionControl", versionControlProperty);
+
         List<String> required = List.of("path");
 
         // Create the tool
@@ -636,6 +798,7 @@ public class ProjectToolProvider extends AbstractToolProvider {
                 boolean recursive = getOptionalBoolean(request, "recursive", true);
                 int maxDepth = getOptionalInt(request, "maxDepth", 20);
                 boolean analyzeAfterImport = getOptionalBoolean(request, "analyzeAfterImport", false);
+                boolean enableVersionControl = getOptionalBoolean(request, "enableVersionControl", true);
 
                 // Validate file exists
                 File file = new File(path);
@@ -676,9 +839,44 @@ public class ProjectToolProvider extends AbstractToolProvider {
                     return createErrorResult("No supported file formats found in: " + path);
                 }
 
-                // Create and launch the import task
+                // Get configuration for timeouts
+                ConfigManager configManager = RevaInternalServiceRegistry.getService(ConfigManager.class);
+                int importTimeoutSeconds = configManager != null ?
+                    configManager.getDecompilerTimeoutSeconds() * 2 : 300; // 2x decompiler timeout or 5 min default
+                int analysisTimeoutSeconds = configManager != null ?
+                    configManager.getImportAnalysisTimeoutSeconds() : 600; // Default 10 minutes
+
+                // Create timeout-protected monitor for import task
+                TaskMonitor importMonitor = TimeoutTaskMonitor.timeoutIn(importTimeoutSeconds, TimeUnit.SECONDS);
+
+                // Create and run the import task synchronously (blocks until completion)
                 ImportBatchTask importTask = new ImportBatchTask(batchInfo, destFolder, null, true, false);
-                TaskLauncher launcher = new TaskLauncher(importTask, null);
+                importTask.run(importMonitor);
+
+                // Check for timeout or cancellation
+                if (importMonitor.isCancelled()) {
+                    return createErrorResult("Import timed out after " + importTimeoutSeconds + " seconds. " +
+                        "Try importing fewer files or increase timeout in ReVa configuration.");
+                }
+
+                // Track imported files for version control and analysis
+                List<String> versionedFiles = new ArrayList<>();
+                List<String> analyzedFiles = new ArrayList<>();
+                List<String> errors = new ArrayList<>();
+
+                // Process imported files: analyze if requested, then add to version control
+                if (enableVersionControl || analyzeAfterImport) {
+                    // Create monitor for version control and analysis operations
+                    TaskMonitor vcMonitor = TimeoutTaskMonitor.timeoutIn(importTimeoutSeconds, TimeUnit.SECONDS);
+
+                    // Get all files that were imported, analyze if requested, and add to version control
+                    collectImportedFiles(destFolder, file.getName(), analyzeAfterImport, analysisTimeoutSeconds,
+                        versionedFiles, analyzedFiles, errors, vcMonitor);
+                }
+
+                // Collect all imported program paths
+                List<String> importedProgramPaths = new ArrayList<>();
+                collectAllProgramPaths(destFolder, importedProgramPaths);
 
                 // Create result data
                 Map<String, Object> result = new HashMap<>();
@@ -690,7 +888,31 @@ public class ProjectToolProvider extends AbstractToolProvider {
                 result.put("maxDepthUsed", maxDepth);
                 result.put("wasRecursive", recursive);
                 result.put("analyzeAfterImport", analyzeAfterImport);
-                result.put("message", "Import completed successfully. " + batchInfo.getTotalCount() + " files imported.");
+                result.put("enableVersionControl", enableVersionControl);
+                result.put("importedPrograms", importedProgramPaths);
+
+                if (enableVersionControl) {
+                    result.put("filesAddedToVersionControl", versionedFiles.size());
+                    result.put("versionedPrograms", versionedFiles);
+                }
+
+                if (analyzeAfterImport) {
+                    result.put("filesAnalyzed", analyzedFiles.size());
+                    result.put("analyzedPrograms", analyzedFiles);
+                }
+
+                if (!errors.isEmpty()) {
+                    result.put("errors", errors);
+                }
+
+                String message = "Import completed successfully. " + batchInfo.getTotalCount() + " files imported";
+                if (analyzeAfterImport && analyzedFiles.size() > 0) {
+                    message += ", " + analyzedFiles.size() + " analyzed";
+                }
+                if (enableVersionControl && versionedFiles.size() > 0) {
+                    message += ", " + versionedFiles.size() + " added to version control";
+                }
+                result.put("message", message + ".");
 
                 return createJsonResult(result);
 

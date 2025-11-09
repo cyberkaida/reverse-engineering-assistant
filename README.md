@@ -58,23 +58,30 @@ Alternatively, you can build it from source. To do this, clone the repository an
 
 ```bash
 export GHIDRA_INSTALL_DIR=/path/to/ghidra
-gradle
+gradle install
 ```
-
-Then install the extension (in `dist/`) using the Ghidra extension manager. You can also extract the release zip to
-the Ghidra extensions directory globally at `${GHIDRA_INSTALL_DIR}/Ghidra/Extensions`.
 
 After installing the extension you need to activate it in two places:
 
 1. In the Project view, open the File menu and select "Configure". Click the "Configure all plugins" button on the top right of the menu (it looks like a plug). Check the "ReVa Application Plugin"
 2. In the Code Browser tool (Click the Dragon icon or open a File), open the File menu and select "Configure". Click the "Configure all plugins" button on the top right of the menu (it looks like a plug). Check the "ReVa Plugin". Then Press File and select "Save Tool". This will enable ReVa by default.
 
+# Usage
+
+There are two ways to use ReVa, with the Ghidra UI in assistant mode or in headless mode. Headless mode is ideal for automation and CI/CD pipelines, while the assistant mode is great for interactive analysis.
+
+## Assistant Mode
+
+In assistant mode, ReVa connects to your running Ghidra and can work with you on your project. It can work in real time on the same file or on other files in your project. This is useful for deep analysis, ReVa can help identify algorithms, rename variables, fix datatypes, and many other parts of analysis.
+
 ## MCP configuration
 
 ReVa uses the [Model Context Protocol (MCP)](https://modelcontextprotocol.io/faqs) to communicate with the LLM.
 
 ReVa uses the [streamable MCP transport](https://modelcontextprotocol.io/docs/concepts/transports#streamable-http)
-and will listen on port `8080` by default, you can change this in the Ghidra settings from the project view.
+and will listen on port `8080` by default, you can change this in the Ghidra settings from the project view. This allows many clients to connec to the same UI for interactive use.
+
+You can also run ReVa in headless mode, this works best with a single client and for automation.
 
 You will need to configure your MCP client to connect to ReVa, this depends on the client you are using.
 
@@ -160,6 +167,49 @@ Add ReVa to your oterm `config.json` file:
     }
   }
 }
+```
+
+## Headless Mode
+
+ReVa can run in headless Ghidra mode without the GUI, making it ideal for:
+
+- **Automation** - CI/CD pipelines and automated analysis
+- **Docker** - Containerized reverse engineering workflows
+- **PyGhidra** - Python-based automation
+
+### Quick Start (Headless)
+
+```bash
+# Set Ghidra installation directory, this must always be in your environment
+export GHIDRA_INSTALL_DIR=/path/to/ghidra
+uv tool install reverse-engineering-assistant
+claude mcp add --scope user ReVa -- mcp-reva
+
+claude -p "Import /bin/ls with ReVa and tell me how it works"
+```
+
+A project will be created in the current working directory in `.reva/projects/`.
+If you run claude from the same directory, you can import many files into the same project.
+
+### PyGhidra Integration
+
+You can also use ReVa directly from PyGhidra scripts:
+
+```python
+import pyghidra
+pyghidra.start()
+
+from reva.headless import RevaHeadlessLauncher
+
+# Start server
+launcher = RevaHeadlessLauncher()
+launcher.start()
+
+if launcher.waitForServer(30000):
+    print(f"Server ready on port {launcher.getPort()}")
+    # ... your analysis code with your agent ...
+
+launcher.stop()
 ```
 
 # Support

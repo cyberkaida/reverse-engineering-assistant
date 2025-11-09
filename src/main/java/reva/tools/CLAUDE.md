@@ -11,8 +11,9 @@ The `reva.tools` package implements MCP (Model Context Protocol) tool providers 
 ### Base Classes
 - **ToolProvider** - Interface defining the contract for all tool providers
 - **AbstractToolProvider** - Base implementation providing common functionality:
-  - Parameter extraction and validation helper methods
+  - Parameter extraction and validation helper methods with automatic type conversion
   - JSON serialization utilities
+  - **Automatic exception wrapping** - registerTool() wraps handlers to catch IllegalArgumentException and ProgramValidationException
   - Error handling and logging
   - MCP tool registration patterns
   - Program validation and address resolution
@@ -22,6 +23,50 @@ Each tool provider package contains:
 - `[Domain]ToolProvider.java` - Main provider class extending AbstractToolProvider
 - Individual tool implementations registered in `registerTools()` method
 - Domain-specific utility methods for Ghidra API interactions
+- Optional package-level CLAUDE.md with specialized guidance
+
+### Tool Registration Pattern
+**Follow this consistent pattern for all tools**:
+```java
+private void registerMyTool() {
+    // 1. Define schema properties
+    Map<String, Object> properties = new HashMap<>();
+    properties.put("programPath", Map.of(
+        "type", "string",
+        "description", "Path to the program"
+    ));
+    properties.put("optionalParam", Map.of(
+        "type", "integer",
+        "description", "Optional parameter",
+        "default", 100
+    ));
+
+    // 2. Define required parameters
+    List<String> required = List.of("programPath");
+
+    // 3. Create tool with schema
+    McpSchema.Tool tool = McpSchema.Tool.builder()
+        .name("domain-action")
+        .title("Human Readable Title")
+        .description("Detailed description for AI models")
+        .inputSchema(createSchema(properties, required))
+        .build();
+
+    // 4. Register with handler (automatic exception wrapping)
+    registerTool(tool, (exchange, request) -> {
+        // Parameter extraction (throws caught automatically)
+        Program program = getProgramFromArgs(request);
+        int param = getOptionalInt(request, "optionalParam", 100);
+
+        // Tool logic here
+        Map<String, Object> result = Map.of(
+            "success", true,
+            "data", actualData,
+            "programPath", program.getDomainFile().getPathname()
+        );
+        return createJsonResult(result);
+    });
+}
 
 ## Development Guidelines
 
@@ -56,33 +101,37 @@ Each tool provider package contains:
 
 ### Parameter Handling
 
-**ALWAYS use AbstractToolProvider helper methods** for parameter extraction:
+**ALWAYS use AbstractToolProvider helper methods** for parameter extraction. These methods handle automatic type conversion:
 
 ```java
-// Required parameters
-String programPath = getString(request, "programPath");
-int count = getInt(request, "maxCount");
-boolean includeThunks = getBoolean(args, "includeThunks");
+// Required parameters (auto-converts types)
+String programPath = getString(request, "programPath");  // Converts non-strings via toString()
+int count = getInt(request, "maxCount");                 // Parses strings, converts Number types
+boolean includeThunks = getBoolean(args, "includeThunks"); // Handles "true"/"false" strings
 
 // Optional parameters with defaults
 String filterPattern = getOptionalString(request, "pattern", ".*");
-int startIndex = getOptionalInt(request, "startIndex", 0);
+int startIndex = getOptionalInt(request, "startIndex", 0);  // Returns primitive int
 boolean verbose = getOptionalBoolean(request, "verbose", false);
+
+// Optional with nullable return (can distinguish "not provided" from "default")
+Integer optionalLimit = getOptionalInteger(args, "limit", null);  // Returns Integer (can be null)
 
 // Maps and lists
 Map<String, String> mappings = getStringMap(args, "mappings");
+Map<String, Object> options = getOptionalMap(args, "options", Map.of());
 List<String> addresses = getOptionalStringList(args, "addresses", List.of());
 ```
 
-**Wrap parameter extraction in try-catch** to convert IllegalArgumentException to user-friendly errors:
+**Exception handling is automatic** - registerTool() wraps handlers to catch exceptions:
 ```java
-try {
-    String programPath = getString(request, "programPath");
-    Program program = getValidatedProgram(programPath);
-    // ... tool logic
-} catch (IllegalArgumentException | ProgramValidationException e) {
-    return createErrorResult(e.getMessage());
-}
+// NO try-catch needed for IllegalArgumentException or ProgramValidationException!
+// The registerTool() method automatically catches and converts to error responses
+String programPath = getString(request, "programPath");  // Throws if missing
+Program program = getValidatedProgram(programPath);     // Throws if invalid
+// ... tool logic
+
+// Only catch for custom error handling or cleanup
 ```
 
 ### Program and Address Resolution
@@ -133,6 +182,62 @@ import reva.util.AddressUtil;
 String formattedAddress = AddressUtil.formatAddress(address); // Returns "0x" + address.toString()
 ```
 
+### Critical Utility Usage
+
+**ALWAYS use ReVa utilities instead of direct Ghidra APIs** for consistency:
+
+**Address and Symbol Utilities**:
+- `AddressUtil.formatAddress(address)` - **REQUIRED** for all address formatting in JSON output
+- `AddressUtil.resolveAddressOrSymbol(program, addressOrSymbol)` - Resolve addresses or symbol names
+- `AddressUtil.getContainingFunction(program, address)` - Get function containing an address
+
+**Program and Data Type Utilities**:
+- `ProgramLookupUtil.getValidatedProgram(programPath)` - **REQUIRED** for program resolution with helpful errors
+- `DataTypeParserUtil.parseDataTypeObjectFromString(dtm, typeString)` - Parse datatype strings ("char*", "int[10]")
+
+**Symbol and Variable Utilities**:
+- `SymbolUtil.isDefaultSymbolName(name)` - Filter Ghidra-generated names (FUN_, DAT_, etc.)
+- `HighFunctionDBUtil.updateDBVariable(symbol, name, type, source)` - **REQUIRED** for persisting variable changes
+
+**Analysis and Comparison Utilities**:
+- `SimilarityComparator` - Compare functions and strings by similarity scoring (LCS-based)
+- `DecompilationContextUtil.buildContext(program, function)` - Build rich context for decompilation responses
+- `DecompilationDiffUtil` - Compare decompilations before/after changes
+
+**Support Utilities**:
+- `DebugLogger` - Debug logging with conditional output
+- `RevaInternalServiceRegistry.getService(ServiceClass.class)` - Access services like ConfigManager
+
+### Common Patterns and Best Practices
+
+**Thread Safety for Multi-Tool Coordination**:
+```java
+// Use concurrent collections for shared state
+private final Map<String, Long> tracker = new ConcurrentHashMap<>();
+
+// Use atomic types for counting
+AtomicInteger count = new AtomicInteger(0);
+count.incrementAndGet();
+
+// Use volatile for state flags
+private volatile boolean isProcessing = false;
+```
+
+**Service Access Pattern**:
+```java
+import reva.util.RevaInternalServiceRegistry;
+import reva.plugin.ConfigManager;
+
+ConfigManager configManager = RevaInternalServiceRegistry.getService(ConfigManager.class);
+int timeout = configManager.getDecompilerTimeoutSeconds();
+```
+
+**Pagination Best Practices**:
+- Always provide count tools before listing tools
+- Use default max of 50-100 items per page
+- Include pagination metadata in responses
+- Use AtomicInteger for efficient iteration counting
+
 ### Transaction Management
 
 **Use transactions for all program modifications**:
@@ -182,11 +287,37 @@ When working with decompilation (especially in DecompilerToolProvider):
 
 ## Error Handling
 
+### Automatic Exception Wrapping
+**The registerTool() method automatically wraps handlers** with safe execution:
+```java
+// From AbstractToolProvider.registerTool():
+java.util.function.BiFunction<..., McpSchema.CallToolResult> safeHandler =
+    (exchange, request) -> {
+        try {
+            return handler.apply(exchange, request);
+        } catch (IllegalArgumentException e) {
+            return createErrorResult(e.getMessage());
+        } catch (ProgramValidationException e) {
+            return createErrorResult(e.getMessage());
+        } catch (Exception e) {
+            logError("Unexpected error in tool execution", e);
+            return createErrorResult("Tool execution failed: " + e.getMessage());
+        }
+    };
+```
+
 ### Exception Hierarchy
-- **IllegalArgumentException** - Invalid parameters (auto-converted to error response)
-- **ProgramValidationException** - Program not found or invalid state (auto-converted to error response)
+- **IllegalArgumentException** - Invalid parameters (**auto-caught and converted** to error response)
+- **ProgramValidationException** - Program not found or invalid state (**auto-caught and converted** to error response)
 - **McpError** - MCP protocol errors (propagated to server)
 - **RuntimeException** - Unexpected errors (logged and converted to generic error response)
+
+### When to Use Try-Catch in Tool Handlers
+**Only use explicit try-catch for**:
+- Custom error messages or recovery logic
+- Transaction rollback on specific errors
+- Resource cleanup (e.g., DecompInterface disposal with finally)
+- Domain-specific exception types (DuplicateNameException, InvalidInputException, etc.)
 
 ### Error Response Guidelines
 - Be specific about what went wrong
@@ -208,6 +339,89 @@ When working with decompilation (especially in DecompilerToolProvider):
 - JSON response formatting
 - Error handling paths
 - Edge cases in helper methods
+
+## Practical Implementation Tips
+
+### Parameter Schema Best Practices
+**Provide helpful defaults and descriptions**:
+```java
+properties.put("maxCount", Map.of(
+    "type", "integer",
+    "description", "Maximum number of items to return (recommended: 100)",
+    "default", 100
+));
+properties.put("includeComments", Map.of(
+    "type", "boolean",
+    "description", "Whether to include comments in the output",
+    "default", false
+));
+```
+
+### Response Metadata
+**Always include programPath and pagination info**:
+```java
+Map<String, Object> result = Map.of(
+    "success", true,
+    "data", actualData,
+    "programPath", program.getDomainFile().getPathname(),
+    "pagination", Map.of(
+        "startIndex", startIndex,
+        "returned", actualData.size(),
+        "requested", maxCount
+    )
+);
+```
+
+### Iterator vs Iterable Gotchas
+**Be aware of Ghidra API iterator patterns**:
+```java
+// LocalSymbolMap returns Iterator, NOT Iterable - cannot use for-each
+Iterator<HighSymbol> symbolIter = localSymMap.getSymbols();
+while (symbolIter.hasNext()) {  // Use while loop
+    HighSymbol symbol = symbolIter.next();
+    // Process
+}
+
+// FunctionIterator IS Iterable - can use for-each or while
+FunctionIterator functions = functionManager.getFunctions(true);
+functions.forEach(function -> { /* Process */ });  // This works
+```
+
+### Efficient Pagination Pattern
+**Use atomic counters for clean pagination logic**:
+```java
+AtomicInteger currentIndex = new AtomicInteger(0);
+AtomicInteger collected = new AtomicInteger(0);
+
+FunctionIterator functions = program.getFunctionManager().getFunctions(true);
+while (functions.hasNext() && collected.get() < maxCount) {
+    Function function = functions.next();
+
+    // Skip until reaching start index
+    if (currentIndex.getAndIncrement() < startIndex) {
+        continue;
+    }
+
+    // Collect this item
+    items.add(processFunction(function));
+    collected.incrementAndGet();
+}
+```
+
+### Timeout Configuration Pattern
+**Use ConfigManager for configurable timeouts**:
+```java
+private TaskMonitor createTimeoutMonitor() {
+    ConfigManager config = RevaInternalServiceRegistry.getService(ConfigManager.class);
+    int timeoutSeconds = config.getDecompilerTimeoutSeconds();
+    return TimeoutTaskMonitor.timeoutIn(timeoutSeconds, TimeUnit.SECONDS);
+}
+
+// Check for timeout
+if (monitor.isCancelled()) {
+    return createErrorResult("Operation timed out after " + timeoutSeconds + " seconds");
+}
+```
 
 ## Tool Categories
 
@@ -234,9 +448,13 @@ When working with decompilation (especially in DecompilerToolProvider):
 ## Important Notes
 
 - **Program identification**: Always use `programPath` parameter for program identification
-- **Parameter validation**: Wrap all parameter extraction in try-catch blocks
+- **Automatic exception handling**: registerTool() automatically catches IllegalArgumentException and ProgramValidationException
+- **Type conversion**: Helper methods automatically convert types (Number to int, String to boolean, etc.)
 - **Address formatting**: Use AddressUtil.formatAddress() consistently
 - **Transactions**: Required for all program modifications
+- **Thread safety**: Use ConcurrentHashMap and AtomicInteger for shared state
+- **Service access**: Use RevaInternalServiceRegistry to get services like ConfigManager
 - **Error messages**: Be helpful and specific
 - **JSON responses**: Follow consistent structure patterns
 - **Decompiler lifecycle**: Always dispose of DecompInterface instances
+- **Timeout management**: Use createTimeoutMonitor() for long-running operations

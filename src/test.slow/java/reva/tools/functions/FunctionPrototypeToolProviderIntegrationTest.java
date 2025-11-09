@@ -28,9 +28,14 @@ import ghidra.program.model.address.Address;
 import ghidra.program.model.address.AddressSet;
 import ghidra.program.model.data.IntegerDataType;
 import ghidra.program.model.data.PointerDataType;
+import ghidra.program.model.data.Structure;
+import ghidra.program.model.data.StructureDataType;
 import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.FunctionManager;
+import ghidra.program.model.listing.Parameter;
 import ghidra.program.model.symbol.SourceType;
+import ghidra.program.model.lang.CompilerSpec;
+import ghidra.program.model.lang.PrototypeModel;
 import io.modelcontextprotocol.spec.McpSchema.CallToolRequest;
 import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
 import io.modelcontextprotocol.spec.McpSchema.TextContent;
@@ -265,6 +270,237 @@ public class FunctionPrototypeToolProviderIntegrationTest extends RevaIntegratio
                 assertEquals("src", parameters.get(1).get("name").asText());
                 assertEquals("n", parameters.get(2).get("name").asText());
                 
+            } catch (Exception e) {
+                fail("Test failed with exception: " + e.getMessage());
+            }
+        });
+    }
+
+    @Test
+    public void testChangeAutoParameterTypeEnablesCustomStorage() throws Exception {
+        // Create a function with __thiscall calling convention that has auto 'this' parameter
+        Address thiscallAddr = program.getAddressFactory().getDefaultAddressSpace().getAddress(0x01005000);
+
+        int txId = program.startTransaction("Create __thiscall function");
+        try {
+            FunctionManager fm = program.getFunctionManager();
+            Function thiscallFunc = fm.createFunction("Graphics_PostProcessPixelData", thiscallAddr,
+                new AddressSet(thiscallAddr, thiscallAddr.add(50)), SourceType.USER_DEFINED);
+
+            // Set calling convention to __thiscall (if available)
+            CompilerSpec compilerSpec = program.getCompilerSpec();
+            PrototypeModel[] callingConventions = compilerSpec.getCallingConventions();
+            String thiscallConvention = null;
+            for (PrototypeModel model : callingConventions) {
+                if (model.getName().toLowerCase().contains("thiscall")) {
+                    thiscallConvention = model.getName();
+                    break;
+                }
+            }
+
+            if (thiscallConvention != null) {
+                thiscallFunc.setCallingConvention(thiscallConvention);
+            }
+
+            // Create a simple structure type for testing
+            Structure myStruct = new StructureDataType("Graphics_Renderer", 0);
+            myStruct.add(new IntegerDataType(), "field1", null);
+            myStruct.add(new IntegerDataType(), "field2", null);
+            program.getDataTypeManager().addDataType(myStruct, null);
+
+        } finally {
+            program.endTransaction(txId, true);
+        }
+
+        env.open(program);
+
+        withMcpClient(createMcpTransport(), client -> {
+            try {
+                client.initialize();
+
+                // Get the function to check initial state
+                FunctionManager fm = program.getFunctionManager();
+                Function beforeFunc = fm.getFunctionAt(thiscallAddr);
+                assertNotNull("Function should exist", beforeFunc);
+
+                // Check if it has auto-parameters before the change
+                boolean hadAutoParams = false;
+                for (Parameter param : beforeFunc.getParameters()) {
+                    if (param.isAutoParameter()) {
+                        hadAutoParams = true;
+                        break;
+                    }
+                }
+
+                // Try to change the 'this' parameter type to Graphics_Renderer*
+                CallToolResult result = client.callTool(new CallToolRequest(
+                    "set-function-prototype",
+                    Map.of(
+                        "programPath", programPath,
+                        "location", "0x01005000",
+                        "signature", "int Graphics_PostProcessPixelData(Graphics_Renderer* this, int imageData)"
+                    )
+                ));
+
+                if (result.isError()) {
+                    TextContent errorContent = (TextContent) result.content().get(0);
+                    fail("Tool should not have errors, but got: " + errorContent.text());
+                }
+
+                TextContent content = (TextContent) result.content().get(0);
+                JsonNode jsonResult = objectMapper.readTree(content.text());
+
+                // Check that the tool succeeded
+                assertEquals("Tool should succeed", true, jsonResult.get("success").asBoolean());
+
+                // Check that custom storage is now enabled
+                assertEquals("Custom storage should be enabled", true,
+                    jsonResult.get("usingCustomStorage").asBoolean());
+
+                // If there were auto-params, custom storage should have been enabled
+                if (hadAutoParams) {
+                    assertEquals("Custom storage should have been enabled automatically", true,
+                        jsonResult.get("customStorageEnabled").asBoolean());
+                }
+
+                // Verify function was actually updated in program
+                Function updatedFunc = fm.getFunctionAt(thiscallAddr);
+                assertNotNull("Function should exist in program", updatedFunc);
+                assertEquals("Graphics_PostProcessPixelData", updatedFunc.getName());
+
+                // Verify the parameter type was actually changed
+                Parameter[] params = updatedFunc.getParameters();
+                assertTrue("Should have at least one parameter", params.length >= 1);
+
+                // Check that 'this' parameter now has Graphics_Renderer* type
+                Parameter thisParam = params[0];
+                assertEquals("this", thisParam.getName());
+                assertTrue("Parameter should be a pointer to Graphics_Renderer",
+                    thisParam.getDataType().toString().contains("Graphics_Renderer"));
+
+                // Verify custom storage is enabled in the actual function
+                assertTrue("Function should have custom storage enabled",
+                    updatedFunc.hasCustomVariableStorage());
+
+            } catch (Exception e) {
+                fail("Test failed with exception: " + e.getMessage());
+            }
+        });
+    }
+
+    @Test
+    public void testChangeRegularParameterDoesNotEnableCustomStorage() throws Exception {
+        // Create a function with __thiscall calling convention that has auto 'this' parameter
+        Address thiscallAddr = program.getAddressFactory().getDefaultAddressSpace().getAddress(0x01006000);
+
+        int txId = program.startTransaction("Create __thiscall function for regular param test");
+        try {
+            FunctionManager fm = program.getFunctionManager();
+            Function thiscallFunc = fm.createFunction("processImage", thiscallAddr,
+                new AddressSet(thiscallAddr, thiscallAddr.add(50)), SourceType.USER_DEFINED);
+
+            // Set calling convention to __thiscall (if available)
+            CompilerSpec compilerSpec = program.getCompilerSpec();
+            PrototypeModel[] callingConventions = compilerSpec.getCallingConventions();
+            String thiscallConvention = null;
+            for (PrototypeModel model : callingConventions) {
+                if (model.getName().toLowerCase().contains("thiscall")) {
+                    thiscallConvention = model.getName();
+                    break;
+                }
+            }
+
+            if (thiscallConvention != null) {
+                thiscallFunc.setCallingConvention(thiscallConvention);
+            }
+
+        } finally {
+            program.endTransaction(txId, true);
+        }
+
+        env.open(program);
+
+        withMcpClient(createMcpTransport(), client -> {
+            try {
+                client.initialize();
+
+                // Get the function to check initial state
+                FunctionManager fm = program.getFunctionManager();
+                Function beforeFunc = fm.getFunctionAt(thiscallAddr);
+                assertNotNull("Function should exist", beforeFunc);
+
+                // Check initial state - should NOT have custom storage
+                assertFalse("Function should not have custom storage initially",
+                    beforeFunc.hasCustomVariableStorage());
+
+                // Check if it has auto-parameters
+                boolean hasAutoParams = false;
+                for (Parameter param : beforeFunc.getParameters()) {
+                    if (param.isAutoParameter()) {
+                        hasAutoParams = true;
+                        break;
+                    }
+                }
+
+                // Only continue test if the function actually has auto-parameters
+                if (!hasAutoParams) {
+                    // Skip test if no auto-params (calling convention doesn't inject them)
+                    return;
+                }
+
+                // Change ONLY a regular parameter, NOT the 'this' parameter
+                // Keep 'void *this' unchanged, but change int to char*
+                CallToolResult result = client.callTool(new CallToolRequest(
+                    "set-function-prototype",
+                    Map.of(
+                        "programPath", programPath,
+                        "location", "0x01006000",
+                        "signature", "void processImage(void* this, char* imageData)"
+                    )
+                ));
+
+                if (result.isError()) {
+                    TextContent errorContent = (TextContent) result.content().get(0);
+                    fail("Tool should not have errors, but got: " + errorContent.text());
+                }
+
+                TextContent content = (TextContent) result.content().get(0);
+                JsonNode jsonResult = objectMapper.readTree(content.text());
+
+                // Check that the tool succeeded
+                assertEquals("Tool should succeed", true, jsonResult.get("success").asBoolean());
+
+                // Custom storage should NOT have been enabled since we didn't change the auto-parameter
+                assertEquals("Custom storage should NOT be enabled", false,
+                    jsonResult.get("customStorageEnabled").asBoolean());
+                assertEquals("Function should NOT be using custom storage", false,
+                    jsonResult.get("usingCustomStorage").asBoolean());
+
+                // Verify function was actually updated in program
+                Function updatedFunc = fm.getFunctionAt(thiscallAddr);
+                assertNotNull("Function should exist in program", updatedFunc);
+
+                // Verify custom storage is NOT enabled
+                assertFalse("Function should NOT have custom storage enabled",
+                    updatedFunc.hasCustomVariableStorage());
+
+                // Verify the regular parameter type was changed
+                Parameter[] params = updatedFunc.getParameters();
+                assertTrue("Should have at least two parameters", params.length >= 2);
+
+                // Find the non-auto parameter (should be second one in this case)
+                Parameter regularParam = null;
+                for (Parameter param : params) {
+                    if (!param.isAutoParameter()) {
+                        regularParam = param;
+                        break;
+                    }
+                }
+
+                assertNotNull("Should have a regular parameter", regularParam);
+                assertTrue("Regular parameter should be char*",
+                    regularParam.getDataType().toString().contains("char"));
+
             } catch (Exception e) {
                 fail("Test failed with exception: " + e.getMessage());
             }

@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "ReVa": {
+      "command": "uv",
+      "args": ["run", "mcp-reva"],
+      "env": {
+        "UV_WORKING_DIRECTORY": "${CLAUDE_PLUGIN_ROOT}/../"
+      }
+    }
+  }
+}

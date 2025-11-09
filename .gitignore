@@ -13,3 +13,6 @@ __pycache__
 
 # Java heap dump files
 *.hprof
+
+# ReVa local project directories
+.reva/

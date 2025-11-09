@@ -64,7 +64,7 @@ jobs:
         DISPLAY: :99
 
     - name: Upload test results
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v5
       if: always()
       with:
         name: test-results-${{ matrix.ghidra-version }}
@@ -137,7 +137,7 @@ jobs:
         distribution: "microsoft"
 
     - name: Initialize CodeQL
-      uses: github/codeql-action/init@v3
+      uses: github/codeql-action/init@v4
       with:
         languages: java
         # Use security-extended queries for more thorough analysis
@@ -158,6 +158,6 @@ jobs:
       run: gradle buildExtension
 
     - name: Perform CodeQL Analysis
-      uses: github/codeql-action/analyze@v3
+      uses: github/codeql-action/analyze@v4
       with:
         category: "/language:java"

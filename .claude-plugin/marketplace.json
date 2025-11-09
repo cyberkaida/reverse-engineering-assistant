@@ -1,0 +1,14 @@
+{
+  "name": "reva",
+  "description": "ReVa - AI-assisted binary analysis and reverse engineering with Ghidra integration",
+  "owner": {
+    "name": "CyberKaida"
+  },
+  "plugins": [
+    {
+      "name": "ReVa",
+      "source": "./ReVa",
+      "description": "AI-assisted binary analysis and reverse engineering with Ghidra integration"
+    }
+  ]
+}

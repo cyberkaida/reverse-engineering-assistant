@@ -356,6 +356,88 @@ public class FunctionToolProvider extends AbstractToolProvider {
     }
 
     /**
+     * Check if applying a new signature would require custom storage to be enabled.
+     * This is needed when the new signature modifies an auto-parameter's data type.
+     *
+     * @param function The function being updated
+     * @param newSignature The parsed new function signature
+     * @return true if custom storage needs to be enabled to apply this signature
+     */
+    private boolean needsCustomStorageForSignature(Function function, FunctionDefinitionDataType newSignature) {
+        if (function == null || newSignature == null) {
+            return false;
+        }
+
+        // Get existing parameters and new parameter definitions
+        Parameter[] existingParams = function.getParameters();
+        ParameterDefinition[] newParams = newSignature.getArguments();
+
+        // Check each existing auto-parameter to see if its type is being changed
+        for (int i = 0; i < existingParams.length; i++) {
+            Parameter existingParam = existingParams[i];
+
+            // Only care about auto-parameters with auto storage
+            if (!existingParam.isAutoParameter() || !existingParam.getVariableStorage().isAutoStorage()) {
+                continue;
+            }
+
+            // If the new signature has a parameter at this index, check if type is changing
+            if (i < newParams.length) {
+                ParameterDefinition newParam = newParams[i];
+
+                // Compare data types - if they're different, we need custom storage
+                if (!existingParam.getDataType().isEquivalent(newParam.getDataType())) {
+                    logInfo("Detected auto-parameter '" + existingParam.getName() +
+                            "' type change from " + existingParam.getDataType() +
+                            " to " + newParam.getDataType() +
+                            " - custom storage required");
+                    return true;
+                }
+            }
+            // If new signature has fewer parameters and would remove an auto-parameter,
+            // we also need custom storage to handle this
+            else {
+                logInfo("Auto-parameter '" + existingParam.getName() +
+                        "' would be removed - custom storage required");
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Normalize a function signature to handle whitespace issues that can cause parsing failures.
+     *
+     * Common issues:
+     * - "char *funcname" fails parsing (space before * in return type)
+     * - "char* funcname" works correctly
+     *
+     * This method normalizes whitespace to ensure consistent parsing.
+     *
+     * @param signature The original C-style function signature
+     * @return Normalized signature with whitespace corrected
+     */
+    private String normalizeFunctionSignature(String signature) {
+        if (signature == null || signature.isEmpty()) {
+            return signature;
+        }
+
+        // Pattern: Match "type *name(" where there's a space before the pointer
+        // This handles cases like "char *fgets(" which fail parsing
+        // Convert to "type* name(" which parses correctly
+        // Regex explanation:
+        //   (\w+)      - Capture word (type name like "char", "int", etc.)
+        //   \s+        - One or more spaces
+        //   \*         - Literal asterisk (pointer)
+        //   (\w+)      - Capture word (function name)
+        //   \(         - Literal opening parenthesis
+        String normalized = signature.replaceAll("(\\w+)\\s+\\*(\\w+)\\(", "$1* $2(");
+
+        return normalized;
+    }
+
+    /**
      * Register a tool to set or update a function prototype using C-style signatures
      */
     private void registerSetFunctionPrototypeTool() {
@@ -398,6 +480,9 @@ public class FunctionToolProvider extends AbstractToolProvider {
                 String signature = getString(request, "signature");
                 boolean createIfNotExists = getOptionalBoolean(request, "createIfNotExists", true);
 
+                // Normalize signature to handle whitespace issues
+                String normalizedSignature = normalizeFunctionSignature(signature);
+
                 // Resolve the address from location
                 Address address = getAddressFromArgs(request, program, "location");
                 if (address == null) {
@@ -429,9 +514,15 @@ public class FunctionToolProvider extends AbstractToolProvider {
                         originalSignature.setVarArgs(existingFunction.hasVarArgs());
                     }
 
-                    functionDef = parser.parse(originalSignature, signature);
+                    functionDef = parser.parse(originalSignature, normalizedSignature);
                 } catch (ParseException e) {
-                    return createErrorResult("Failed to parse function signature: " + e.getMessage());
+                    // Check if the error is about missing datatypes
+                    String errorMsg = e.getMessage();
+                    if (errorMsg != null && errorMsg.contains("Can't resolve datatype")) {
+                        return createErrorResult("Failed to parse function signature: " + errorMsg +
+                            "\n\nHint: The datatype may not be defined in the program. Consider using a basic type (e.g., 'void*' instead of 'FILE*') or import the necessary type definitions.");
+                    }
+                    return createErrorResult("Failed to parse function signature: " + errorMsg);
                 } catch (CancelledException e) {
                     return createErrorResult("Function signature parsing was cancelled");
                 }
@@ -458,19 +549,47 @@ public class FunctionToolProvider extends AbstractToolProvider {
                         }
                     }
 
+                    // Check if we need to enable custom storage to modify auto-parameters
+                    // Only enable it if an auto-parameter's type is actually being changed
+                    boolean needsCustomStorage = needsCustomStorageForSignature(function, functionDef);
+                    boolean wasUsingCustomStorage = function.hasCustomVariableStorage();
+
+                    if (needsCustomStorage && !wasUsingCustomStorage) {
+                        // Enable custom storage to allow modifying auto-parameters like 'this'
+                        function.setCustomVariableStorage(true);
+                        logInfo("Enabled custom storage for function " + function.getName() +
+                                " to allow modifying auto-parameters (e.g., 'this' in __thiscall)");
+                    }
+
                     // Update function name if it's different
                     if (!function.getName().equals(functionDef.getName())) {
                         function.setName(functionDef.getName(), SourceType.USER_DEFINED);
                     }
 
                     // Convert ParameterDefinitions to Variables (Parameters extend Variable)
+                    // If using custom storage, preserve existing parameter storage where possible
                     List<Variable> parameters = new ArrayList<>();
                     ParameterDefinition[] paramDefs = functionDef.getArguments();
-                    for (ParameterDefinition paramDef : paramDefs) {
-                        parameters.add(new ParameterImpl(
-                            paramDef.getName(),
-                            paramDef.getDataType(),
-                            program));
+                    Parameter[] existingParams = function.getParameters();
+
+                    for (int i = 0; i < paramDefs.length; i++) {
+                        ParameterDefinition paramDef = paramDefs[i];
+
+                        // If using custom storage and this parameter index exists, preserve its storage
+                        if (function.hasCustomVariableStorage() && i < existingParams.length) {
+                            // Preserve the existing parameter's storage when updating its type
+                            parameters.add(new ParameterImpl(
+                                paramDef.getName(),
+                                paramDef.getDataType(),
+                                existingParams[i].getVariableStorage(),
+                                program));
+                        } else {
+                            // Create parameter without explicit storage (will be auto-assigned)
+                            parameters.add(new ParameterImpl(
+                                paramDef.getName(),
+                                paramDef.getDataType(),
+                                program));
+                        }
                     }
 
                     // Update the function signature
@@ -478,9 +597,12 @@ public class FunctionToolProvider extends AbstractToolProvider {
                     function.setReturnType(functionDef.getReturnType(), SourceType.USER_DEFINED);
 
                     // Then update parameters
-                    function.replaceParameters(parameters,
-                        Function.FunctionUpdateType.DYNAMIC_STORAGE_ALL_PARAMS,
-                        true, SourceType.USER_DEFINED);
+                    // Use appropriate update type based on whether we're using custom storage
+                    Function.FunctionUpdateType updateType = function.hasCustomVariableStorage()
+                        ? Function.FunctionUpdateType.CUSTOM_STORAGE
+                        : Function.FunctionUpdateType.DYNAMIC_STORAGE_ALL_PARAMS;
+
+                    function.replaceParameters(parameters, updateType, true, SourceType.USER_DEFINED);
 
                     // Set varargs if needed
                     if (functionDef.hasVarArgs() != function.hasVarArgs()) {
@@ -496,6 +618,8 @@ public class FunctionToolProvider extends AbstractToolProvider {
                     result.put("function", createFunctionInfo(function));
                     result.put("address", AddressUtil.formatAddress(address));
                     result.put("parsedSignature", functionDef.toString());
+                    result.put("customStorageEnabled", needsCustomStorage && !wasUsingCustomStorage);
+                    result.put("usingCustomStorage", function.hasCustomVariableStorage());
 
                     return createJsonResult(result);
 

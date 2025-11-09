@@ -433,6 +433,313 @@ public class StructureToolProviderIntegrationTest extends RevaIntegrationTestBas
         });
     }
 
+    @Test
+    public void testGetStructureInfoCondensesUndefinedBytes() throws Exception {
+        withMcpClient(createMcpTransport(), client -> {
+            client.initialize();
+
+            // Create a structure with a specific size that will have many undefined bytes
+            Map<String, Object> createArgs = new HashMap<>();
+            createArgs.put("programPath", programPath);
+            createArgs.put("name", "LargeStruct");
+            createArgs.put("size", 100); // 100 bytes
+
+            CallToolResult createResult = client.callTool(new CallToolRequest("create-structure", createArgs));
+            assertMcpResultNotError(createResult, "Create structure should not error");
+
+            // Add just a few defined fields, leaving many undefined bytes
+            Map<String, Object> addArgs1 = new HashMap<>();
+            addArgs1.put("programPath", programPath);
+            addArgs1.put("structureName", "LargeStruct");
+            addArgs1.put("fieldName", "firstField");
+            addArgs1.put("dataType", "int");
+            addArgs1.put("offset", 0);
+
+            client.callTool(new CallToolRequest("add-structure-field", addArgs1));
+
+            Map<String, Object> addArgs2 = new HashMap<>();
+            addArgs2.put("programPath", programPath);
+            addArgs2.put("structureName", "LargeStruct");
+            addArgs2.put("fieldName", "lastField");
+            addArgs2.put("dataType", "int");
+            addArgs2.put("offset", 96); // Near the end
+
+            client.callTool(new CallToolRequest("add-structure-field", addArgs2));
+
+            // Get structure info
+            Map<String, Object> infoArgs = new HashMap<>();
+            infoArgs.put("programPath", programPath);
+            infoArgs.put("structureName", "LargeStruct");
+
+            CallToolResult result = client.callTool(new CallToolRequest("get-structure-info", infoArgs));
+
+            assertNotNull("Result should not be null", result);
+            assertMcpResultNotError(result, "Result should not be an error");
+
+            TextContent content = (TextContent) result.content().get(0);
+            JsonNode json = parseJsonContent(content.text());
+
+            JsonNode fields = json.get("fields");
+            assertNotNull("Should have fields", fields);
+
+            // Verify that undefined bytes were condensed
+            // Should have: firstField, condensed undefined range, lastField
+            // Instead of 100+ individual undefined byte fields
+            assertTrue("Should have fewer than 10 fields due to condensing", fields.size() < 10);
+
+            // Check for condensed field
+            boolean foundCondensed = false;
+            for (JsonNode field : fields) {
+                if (field.has("isCondensed") && field.get("isCondensed").asBoolean()) {
+                    foundCondensed = true;
+                    assertEquals("<undefined>", field.get("fieldName").asText());
+                    assertTrue("Condensed range should have componentCount > 1",
+                        field.get("componentCount").asInt() > 1);
+                }
+            }
+
+            assertTrue("Should have at least one condensed undefined range", foundCondensed);
+
+            // Verify C representation is also condensed
+            JsonNode cRepresentation = json.get("cRepresentation");
+            assertNotNull("Should have C representation", cRepresentation);
+            String cCode = cRepresentation.asText();
+
+            // C representation should contain condensed undefined arrays
+            assertTrue("C representation should contain condensed undefined ranges",
+                cCode.contains("undefined reserved_0x"));
+            assertTrue("C representation should show offset ranges in comments",
+                cCode.contains("// 0x"));
+
+            // Count lines in C representation (excluding struct declaration and closing brace)
+            String[] cLines = cCode.split("\n");
+            int fieldLines = 0;
+            for (String line : cLines) {
+                if (line.trim().endsWith(";")) {
+                    fieldLines++;
+                }
+            }
+
+            // Should have much fewer lines than the original 100 components
+            assertTrue("C representation should have fewer than 20 lines due to condensing",
+                fieldLines < 20);
+        });
+    }
+
+    @Test
+    public void testModifyStructureFieldDataType() throws Exception {
+        withMcpClient(createMcpTransport(), client -> {
+            client.initialize();
+
+            // First create a structure with a field
+            Map<String, Object> createArgs = new HashMap<>();
+            createArgs.put("programPath", programPath);
+            createArgs.put("cDefinition", "struct ModifyTest1 { void *field1; int field2; };");
+
+            CallToolResult createResult = client.callTool(new CallToolRequest("parse-c-structure", createArgs));
+            assertMcpResultNotError(createResult, "Structure creation should succeed");
+
+            // Verify initial structure
+            DataTypeManager dtm = program.getDataTypeManager();
+            DataType dt = findDataTypeByName(dtm, "ModifyTest1");
+            assertNotNull("Structure should exist", dt);
+            Structure struct = (Structure) dt;
+            assertEquals("Should have 2 fields", 2, struct.getNumComponents());
+
+            // Verify field1 is void *
+            ghidra.program.model.data.DataTypeComponent field1Before = struct.getComponent(0);
+            assertEquals("field1", field1Before.getFieldName());
+            assertTrue("field1 should be pointer", field1Before.getDataType().getName().contains("pointer") ||
+                       field1Before.getDataType().getDisplayName().contains("*"));
+
+            // Modify field1 to be int *
+            Map<String, Object> modifyArgs = new HashMap<>();
+            modifyArgs.put("programPath", programPath);
+            modifyArgs.put("structureName", "ModifyTest1");
+            modifyArgs.put("fieldName", "field1");
+            modifyArgs.put("newDataType", "int *");
+
+            CallToolResult modifyResult = client.callTool(new CallToolRequest("modify-structure-field", modifyArgs));
+            assertMcpResultNotError(modifyResult, "Field modification should succeed");
+
+            TextContent content = (TextContent) modifyResult.content().get(0);
+            JsonNode json = parseJsonContent(content.text());
+            assertEquals("Successfully modified field in structure: ModifyTest1", json.get("message").asText());
+
+            // Verify the field was actually modified in the program
+            dt = findDataTypeByName(dtm, "ModifyTest1");
+            struct = (Structure) dt;
+            ghidra.program.model.data.DataTypeComponent field1After = struct.getComponent(0);
+            assertEquals("field1", field1After.getFieldName());
+
+            // Verify data type changed (int * instead of void *)
+            String fieldTypeName = field1After.getDataType().getDisplayName();
+            assertTrue("field1 should now be int pointer, got: " + fieldTypeName,
+                       fieldTypeName.contains("int") && fieldTypeName.contains("*"));
+        });
+    }
+
+    @Test
+    public void testModifyStructureFieldName() throws Exception {
+        withMcpClient(createMcpTransport(), client -> {
+            client.initialize();
+
+            // Create a structure
+            Map<String, Object> createArgs = new HashMap<>();
+            createArgs.put("programPath", programPath);
+            createArgs.put("cDefinition", "struct ModifyTest2 { int oldName; };");
+
+            CallToolResult createResult = client.callTool(new CallToolRequest("parse-c-structure", createArgs));
+            assertMcpResultNotError(createResult, "Structure creation should succeed");
+
+            // Rename the field
+            Map<String, Object> modifyArgs = new HashMap<>();
+            modifyArgs.put("programPath", programPath);
+            modifyArgs.put("structureName", "ModifyTest2");
+            modifyArgs.put("fieldName", "oldName");
+            modifyArgs.put("newFieldName", "newName");
+
+            CallToolResult modifyResult = client.callTool(new CallToolRequest("modify-structure-field", modifyArgs));
+            assertMcpResultNotError(modifyResult, "Field rename should succeed");
+
+            // Verify the field was renamed in the program
+            DataTypeManager dtm = program.getDataTypeManager();
+            DataType dt = findDataTypeByName(dtm, "ModifyTest2");
+            Structure struct = (Structure) dt;
+            ghidra.program.model.data.DataTypeComponent field = struct.getComponent(0);
+            assertEquals("Field should be renamed to newName", "newName", field.getFieldName());
+        });
+    }
+
+    @Test
+    public void testModifyStructureFieldByOffset() throws Exception {
+        withMcpClient(createMcpTransport(), client -> {
+            client.initialize();
+
+            // Create a structure
+            Map<String, Object> createArgs = new HashMap<>();
+            createArgs.put("programPath", programPath);
+            createArgs.put("cDefinition", "struct ModifyTest3 { int field1; char field2; };");
+
+            CallToolResult createResult = client.callTool(new CallToolRequest("parse-c-structure", createArgs));
+            assertMcpResultNotError(createResult, "Structure creation should succeed");
+
+            // Get offset of field2 (should be at offset 4 after the int)
+            DataTypeManager dtm = program.getDataTypeManager();
+            DataType dt = findDataTypeByName(dtm, "ModifyTest3");
+            Structure struct = (Structure) dt;
+            int field2Offset = struct.getComponent(1).getOffset();
+
+            // Modify field2 by offset instead of name
+            Map<String, Object> modifyArgs = new HashMap<>();
+            modifyArgs.put("programPath", programPath);
+            modifyArgs.put("structureName", "ModifyTest3");
+            modifyArgs.put("offset", field2Offset);
+            modifyArgs.put("newDataType", "short");
+
+            CallToolResult modifyResult = client.callTool(new CallToolRequest("modify-structure-field", modifyArgs));
+            assertMcpResultNotError(modifyResult, "Field modification by offset should succeed");
+
+            // Verify the field was modified
+            dt = findDataTypeByName(dtm, "ModifyTest3");
+            struct = (Structure) dt;
+            ghidra.program.model.data.DataTypeComponent field2 = struct.getComponentAt(field2Offset);
+            assertEquals("field2", field2.getFieldName());
+            assertTrue("field2 should now be short",
+                       field2.getDataType().getName().contains("short"));
+        });
+    }
+
+    @Test
+    public void testModifyStructureFromC() throws Exception {
+        withMcpClient(createMcpTransport(), client -> {
+            client.initialize();
+
+            // Create initial structure
+            Map<String, Object> createArgs = new HashMap<>();
+            createArgs.put("programPath", programPath);
+            createArgs.put("cDefinition", "struct ModifyTest4 { int field1; char field2; };");
+
+            CallToolResult createResult = client.callTool(new CallToolRequest("parse-c-structure", createArgs));
+            assertMcpResultNotError(createResult, "Structure creation should succeed");
+
+            // Verify initial structure
+            DataTypeManager dtm = program.getDataTypeManager();
+            DataType dt = findDataTypeByName(dtm, "ModifyTest4");
+            Structure struct = (Structure) dt;
+            assertEquals("Should have 2 fields initially", 2, struct.getNumComponents());
+
+            // Modify structure using C definition
+            Map<String, Object> modifyArgs = new HashMap<>();
+            modifyArgs.put("programPath", programPath);
+            modifyArgs.put("cDefinition", "struct ModifyTest4 { int field1; short field2; long field3; };");
+
+            CallToolResult modifyResult = client.callTool(new CallToolRequest("modify-structure-from-c", modifyArgs));
+            assertMcpResultNotError(modifyResult, "Structure modification from C should succeed");
+
+            TextContent content = (TextContent) modifyResult.content().get(0);
+            JsonNode json = parseJsonContent(content.text());
+            assertEquals("Successfully modified structure from C definition: ModifyTest4",
+                         json.get("message").asText());
+            assertEquals(3, json.get("fieldsCount").asInt());
+
+            // Verify the structure was modified in the program
+            dt = findDataTypeByName(dtm, "ModifyTest4");
+            struct = (Structure) dt;
+            assertEquals("Should now have 3 fields", 3, struct.getNumComponents());
+
+            // Verify field types
+            ghidra.program.model.data.DataTypeComponent field1 = struct.getComponent(0);
+            ghidra.program.model.data.DataTypeComponent field2 = struct.getComponent(1);
+            ghidra.program.model.data.DataTypeComponent field3 = struct.getComponent(2);
+
+            assertEquals("field1", field1.getFieldName());
+            assertEquals("field2", field2.getFieldName());
+            assertEquals("field3", field3.getFieldName());
+
+            assertTrue("field2 should be short", field2.getDataType().getName().contains("short"));
+            assertTrue("field3 should be long", field3.getDataType().getName().contains("long"));
+        });
+    }
+
+    @Test
+    public void testDeleteStructureWithForceParameter() throws Exception {
+        withMcpClient(createMcpTransport(), client -> {
+            client.initialize();
+
+            // Create a structure
+            Map<String, Object> createArgs = new HashMap<>();
+            createArgs.put("programPath", programPath);
+            createArgs.put("cDefinition", "struct DeleteTestForce { int field1; };");
+
+            CallToolResult createResult = client.callTool(new CallToolRequest("parse-c-structure", createArgs));
+            assertMcpResultNotError(createResult, "Structure creation should succeed");
+
+            // Verify structure exists
+            DataTypeManager dtm = program.getDataTypeManager();
+            DataType dt = findDataTypeByName(dtm, "DeleteTestForce");
+            assertNotNull("Structure should exist", dt);
+
+            // Delete structure (no references, so should succeed even without force)
+            Map<String, Object> deleteArgs = new HashMap<>();
+            deleteArgs.put("programPath", programPath);
+            deleteArgs.put("structureName", "DeleteTestForce");
+
+            CallToolResult deleteResult = client.callTool(new CallToolRequest("delete-structure", deleteArgs));
+            assertMcpResultNotError(deleteResult, "Delete should succeed");
+
+            TextContent content = (TextContent) deleteResult.content().get(0);
+            JsonNode json = parseJsonContent(content.text());
+
+            assertTrue("deleted should be true", json.get("deleted").asBoolean());
+            assertEquals("Successfully deleted structure: DeleteTestForce", json.get("message").asText());
+
+            // Verify structure was deleted
+            dt = findDataTypeByName(dtm, "DeleteTestForce");
+            assertNull("Structure should be deleted", dt);
+        });
+    }
+
     /**
      * Helper method to find a data type by name in all categories
      */

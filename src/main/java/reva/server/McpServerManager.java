@@ -368,7 +368,7 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
      * @return true if the server is ready
      */
     public boolean isServerReady() {
-        return httpServer != null && httpServer.getState().equals(org.eclipse.jetty.server.Server.STARTED);
+        return httpServer != null && httpServer.isStarted();
     }
 
     /**

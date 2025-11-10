@@ -83,9 +83,9 @@ configurations {
 	// Force Jackson 2.19.2 to be compatible with MCP SDK v0.14.0
 	all {
 		resolutionStrategy {
-			force 'com.fasterxml.jackson.core:jackson-core:2.19.2'
-			force 'com.fasterxml.jackson.core:jackson-databind:2.19.2'
-			force 'com.fasterxml.jackson.core:jackson-annotations:2.19.2'
+			force 'com.fasterxml.jackson.core:jackson-core:2.20.1'
+			force 'com.fasterxml.jackson.core:jackson-databind:2.20.1'
+			force 'com.fasterxml.jackson.core:jackson-annotations:2.20.1'
 			force 'com.fasterxml.jackson.dataformat:jackson-dataformat-yaml:2.19.2'
 		}
 	}
@@ -117,9 +117,9 @@ dependencies {
 	implementation "org.eclipse.jetty:jetty-servlet:11.0.26"
 
 	// Force Jackson 2.19.2 to be compatible with MCP SDK v0.14.0
-	implementation "com.fasterxml.jackson.core:jackson-core:2.19.2"
-	implementation "com.fasterxml.jackson.core:jackson-databind:2.19.2"
-	implementation "com.fasterxml.jackson.core:jackson-annotations:2.19.2"
+	implementation "com.fasterxml.jackson.core:jackson-core:2.20.1"
+	implementation "com.fasterxml.jackson.core:jackson-databind:2.20.1"
+	implementation "com.fasterxml.jackson.core:jackson-annotations:2.20.1"
 
 	// Testing dependencies
 	testImplementation "org.mockito:mockito-core:5.20.0"

@@ -33,7 +33,7 @@ jobs:
         distribution: "microsoft"
 
     - name: Install Ghidra 🐉
-      uses: antoniovazquezblanco/setup-ghidra@v2.0.14
+      uses: antoniovazquezblanco/setup-ghidra@v2.0.15
       with:
         version: ${{ matrix.ghidra-version }}
 
@@ -95,7 +95,7 @@ jobs:
         distribution: "microsoft"
 
     - name: Install Ghidra 🐉
-      uses: antoniovazquezblanco/setup-ghidra@v2.0.14
+      uses: antoniovazquezblanco/setup-ghidra@v2.0.15
       with:
         version: "latest"
 
@@ -143,7 +143,7 @@ jobs:
         queries: security-extended,security-and-quality
 
     - name: Install Ghidra 🐉
-      uses: antoniovazquezblanco/setup-ghidra@v2.0.14
+      uses: antoniovazquezblanco/setup-ghidra@v2.0.15
       with:
         version: "latest"
 

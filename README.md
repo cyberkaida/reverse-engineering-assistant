@@ -70,22 +70,22 @@ After installing the extension you need to activate it in two places:
 
 There are two ways to use ReVa, with the Ghidra UI in assistant mode or in headless mode. Headless mode is ideal for automation and CI/CD pipelines, while the assistant mode is great for interactive analysis.
 
-## Assistant Mode
-
 In assistant mode, ReVa connects to your running Ghidra and can work with you on your project. It can work in real time on the same file or on other files in your project. This is useful for deep analysis, ReVa can help identify algorithms, rename variables, fix datatypes, and many other parts of analysis.
 
-## MCP configuration
+In headless mode, ReVa runs without the Ghidra UI. This is useful for automation, CI/CD pipelines, or when you want to run ReVa in a pipeline. ReVa manages starting Ghidra
+and projects for you. This is useful when you do not need the Ghidra UI and want ReVa
+to work on its own.
 
-ReVa uses the [Model Context Protocol (MCP)](https://modelcontextprotocol.io/faqs) to communicate with the LLM.
+You select which mode with the MCP configuration in your MCP client.
+
+### Assistant Mode
+
+In assistant mode, you run Ghidra with ReVa installed and connect your MCP client to the ReVa MCP server running in Ghidra. You must first start Ghidra and open a project.
 
 ReVa uses the [streamable MCP transport](https://modelcontextprotocol.io/docs/concepts/transports#streamable-http)
-and will listen on port `8080` by default, you can change this in the Ghidra settings from the project view. This allows many clients to connec to the same UI for interactive use.
+and will listen on port `8080` by default, you can change this in the Ghidra settings from the project view. This allows many clients to connect to the same UI for interactive use.
 
-You can also run ReVa in headless mode, this works best with a single client and for automation.
-
-You will need to configure your MCP client to connect to ReVa, this depends on the client you are using.
-
-### Claude Code
+#### Claude Code
 
 Claude Code is the recommended client for ReVa, performance is excellent and Claude Code
 handles large binaries and projects well.
@@ -101,45 +101,16 @@ To enable all ReVa commands by default, and avoid prompts for tool use, you can 
 the `/permissions` command in Claude Code and add a rule for `mcp__ReVa`. This will
 allow ReVa to use all of its tools without prompting you for permission.
 
-### Claude
-
-With Claude you can open your MCP configuration file by opening the Claude
-app, opening the settings and then the Developer tab. You can click `Edit Config` to
-locate the configuration file.
-
-Add a block to the `mcpServers` section of the configuration file:
-
-```json
-{
-  "mcpServers": {
-    "ReVa": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "mcp-remote",
-        "http://localhost:8080/mcp/message"
-      ]
-    }
-  }
-}
-
-```
-
-### VSCode
-
-> If you use Claude Desktop, there is an [automatic discovery feature in VSCode](https://code.visualstudio.com/docs/copilot/chat/mcp-servers#_automatic-discovery-of-mcp-servers)
-> that will automatically configure the MCP server for you.
+#### VSCode
 
 VSCode has a built in MCP client, instructions to configure it can be found
 in the [GitHub Copilot documentation](https://code.visualstudio.com/docs/copilot/chat/mcp-servers#_add-an-mcp-server-to-your-user-settings).
-
-Note that VSCode supports streamable transports natively, so you do not need to use `mcp-remote`.
 
 ```json
 {
   "mcp": {
     "servers": {
-      "ReVa": {
+      "ReVa Assistant": {
         "type": "http",
         "url": "http://localhost:8080/mcp/message"
       }
@@ -148,28 +119,7 @@ Note that VSCode supports streamable transports natively, so you do not need to 
 }
 ```
 
-### oterm - Ollama
-
-[oterm](https://ggozad.github.io/oterm/) is a TUI interface for [Ollama](https://ollama.com) and works well locally with ReVa.
-
-For best results, use a reasoning model like `Qwen3`.
-
-See the [oterm documentation](https://ggozad.github.io/oterm/mcp/) for instructions on how to configure
-oterm to use ReVa.
-
-Add ReVa to your oterm `config.json` file:
-
-```json
-{
-  "mcpServers": {
-    "ReVa": {
-      "url": "http://localhost:8080/mcp/message"
-    }
-  }
-}
-```
-
-## Headless Mode
+### Headless Mode
 
 ReVa can run in headless Ghidra mode without the GUI, making it ideal for:
 
@@ -177,7 +127,7 @@ ReVa can run in headless Ghidra mode without the GUI, making it ideal for:
 - **Docker** - Containerized reverse engineering workflows
 - **PyGhidra** - Python-based automation
 
-### Quick Start (Headless)
+#### Claude Code
 
 ```bash
 # Set Ghidra installation directory, this must always be in your environment
@@ -189,9 +139,9 @@ claude -p "Import /bin/ls with ReVa and tell me how it works"
 ```
 
 A project will be created in the current working directory in `.reva/projects/`.
-If you run claude from the same directory, you can import many files into the same project.
+If you run claude from the same directory, you can import many files into the same project. Just ask ReVa to work on the new file.
 
-### PyGhidra Integration
+#### PyGhidra Integration
 
 You can also use ReVa directly from PyGhidra scripts:
 
@@ -211,6 +161,26 @@ if launcher.waitForServer(30000):
 
 launcher.stop()
 ```
+
+# Claude Code Marketplace
+
+The ReVa repo includes a [Claude Code marketplace and plugins](https://claude.com/blog/claude-code-plugins)
+to make using ReVa easier. These include skills and scripts to help ReVa work better with Claude Code.
+
+You can install with:
+
+```bash
+claude plugin marketplace add cyberkaida/reverse-engineering-assistant
+```
+
+This will add the [ReVa skills](/ReVa/skills/) to your Claude Code installation.
+
+- Binary Triage
+- Deep Analysis
+- Cryptography Analysis
+- CTF guides
+
+I will be adding more skills over time to help with reverse engineering tasks.
 
 # Support
 

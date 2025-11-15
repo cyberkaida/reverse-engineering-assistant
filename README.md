@@ -73,7 +73,7 @@ There are two ways to use ReVa, with the Ghidra UI in assistant mode or in headl
 In assistant mode, ReVa connects to your running Ghidra and can work with you on your project. It can work in real time on the same file or on other files in your project. This is useful for deep analysis, ReVa can help identify algorithms, rename variables, fix datatypes, and many other parts of analysis.
 
 In headless mode, ReVa runs without the Ghidra UI. This is useful for automation, CI/CD pipelines, or when you want to run ReVa in a pipeline. ReVa manages starting Ghidra
-and projects for you. This is useful when you do not need the Ghidra UI and want ReVa
+and projects for you. Projects in headless mode are ephemeral (session-scoped) and automatically cleaned up. This is useful when you do not need the Ghidra UI and want ReVa
 to work on its own.
 
 You select which mode with the MCP configuration in your MCP client.

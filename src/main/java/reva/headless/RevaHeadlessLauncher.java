@@ -18,9 +18,11 @@ package reva.headless;
 import java.io.File;
 import java.io.IOException;
 
+import ghidra.base.project.GhidraProject;
 import ghidra.framework.Application;
 import ghidra.framework.ApplicationConfiguration;
 import ghidra.framework.HeadlessGhidraApplicationConfiguration;
+import ghidra.framework.model.ProjectLocator;
 import utility.application.ApplicationLayout;
 import ghidra.util.Msg;
 import ghidra.GhidraApplicationLayout;
@@ -33,6 +35,8 @@ import reva.server.McpServerManager;
  * <p>
  * This class enables ReVa to run in headless Ghidra mode without the GUI plugin system.
  * It can be invoked from pyghidra or other headless contexts.
+ * <p>
+ * Projects are ephemeral in stdio mode - created in temp directories and cleaned up on exit.
  * <p>
  * Usage from pyghidra:
  * <pre>
@@ -57,6 +61,9 @@ public class RevaHeadlessLauncher {
     private File configFile;
     private boolean autoInitializeGhidra;
     private boolean useRandomPort;
+    private File projectLocation;
+    private String projectName;
+    private GhidraProject ghidraProject;
 
     /**
      * Constructor with default settings (in-memory configuration)
@@ -98,9 +105,35 @@ public class RevaHeadlessLauncher {
      * @param useRandomPort Whether to use a random available port instead of configured port
      */
     public RevaHeadlessLauncher(File configFile, boolean autoInitializeGhidra, boolean useRandomPort) {
+        this(configFile, autoInitializeGhidra, useRandomPort, null, null);
+    }
+
+    /**
+     * Constructor with project parameters
+     * @param configFile The configuration file to load, or null for defaults
+     * @param useRandomPort Whether to use a random available port instead of configured port
+     * @param projectLocation The directory where projects are stored (e.g., .reva/projects)
+     * @param projectName The name of the project to create/open
+     */
+    public RevaHeadlessLauncher(File configFile, boolean useRandomPort, File projectLocation, String projectName) {
+        this(configFile, true, useRandomPort, projectLocation, projectName);
+    }
+
+    /**
+     * Constructor with full control and project parameters
+     * @param configFile The configuration file to load, or null for defaults
+     * @param autoInitializeGhidra Whether to automatically initialize Ghidra if not already initialized
+     * @param useRandomPort Whether to use a random available port instead of configured port
+     * @param projectLocation The directory where projects are stored (e.g., .reva/projects), or null for no project
+     * @param projectName The name of the project to create/open, or null for no project
+     */
+    public RevaHeadlessLauncher(File configFile, boolean autoInitializeGhidra, boolean useRandomPort,
+                               File projectLocation, String projectName) {
         this.configFile = configFile;
         this.autoInitializeGhidra = autoInitializeGhidra;
         this.useRandomPort = useRandomPort;
+        this.projectLocation = projectLocation;
+        this.projectName = projectName;
     }
 
     /**
@@ -145,11 +178,53 @@ public class RevaHeadlessLauncher {
             Msg.info(this, "Using random port: " + randomPort);
         }
 
+        // Create/open persistent project if location and name specified
+        if (projectLocation != null && projectName != null) {
+            try {
+                ghidraProject = createOrOpenProject(projectLocation, projectName);
+                Msg.info(this, "Opened project: " + projectName);
+            } catch (Exception e) {
+                throw new IOException("Failed to create/open project: " + projectName, e);
+            }
+        }
+
         // Create and start server manager
         serverManager = new McpServerManager(configManager);
         serverManager.startServer();
 
         Msg.info(this, "ReVa MCP server started in headless mode");
+    }
+
+    /**
+     * Create or open a persistent Ghidra project
+     * @param location The directory where projects are stored
+     * @param name The project name
+     * @return The opened GhidraProject
+     * @throws IOException if project creation/opening fails
+     */
+    private GhidraProject createOrOpenProject(File location, String name) throws IOException {
+        try {
+            // Ensure project directory exists
+            if (!location.exists()) {
+                if (!location.mkdirs()) {
+                    throw new IOException("Failed to create project directory: " + location.getAbsolutePath());
+                }
+            }
+
+            String projectLocationPath = location.getAbsolutePath();
+            ProjectLocator locator = new ProjectLocator(projectLocationPath, name);
+
+            // Check if project already exists
+            if (locator.getMarkerFile().exists() && locator.getProjectDir().exists()) {
+                Msg.info(this, "Opening existing project: " + name + " at " + projectLocationPath);
+                return GhidraProject.openProject(projectLocationPath, name, true);
+            } else {
+                Msg.info(this, "Creating new project: " + name + " at " + projectLocationPath);
+                return GhidraProject.createProject(projectLocationPath, name, false);
+            }
+        } catch (Exception e) {
+            throw new IOException("Failed to create/open project: " + name, e);
+        }
     }
 
     /**
@@ -166,6 +241,18 @@ public class RevaHeadlessLauncher {
         if (configManager != null) {
             configManager.dispose();
             configManager = null;
+        }
+
+        // Close Ghidra project (but don't delete it - it's persistent)
+        if (ghidraProject != null) {
+            try {
+                Msg.info(this, "Closing project: " + projectName);
+                ghidraProject.close();
+            } catch (Exception e) {
+                Msg.error(this, "Error closing project: " + e.getMessage(), e);
+            } finally {
+                ghidraProject = null;
+            }
         }
 
         Msg.info(this, "ReVa MCP server stopped");

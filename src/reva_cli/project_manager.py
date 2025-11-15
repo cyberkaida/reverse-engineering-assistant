@@ -26,9 +26,28 @@ class ProjectManager:
         else:
             self.projects_dir = Path(projects_dir)
 
-        self.projects_dir.mkdir(parents=True, exist_ok=True)
+        # Don't create directory here - defer until first tool use (lazy initialization)
         self.project = None
         self._opened_programs = []
+        self._initialized = False
+
+    def _ensure_initialized(self):
+        """
+        Ensure the project directory exists and project is opened.
+
+        This implements lazy initialization - the .reva directory and Ghidra project
+        are only created when first needed (e.g., when importing a binary).
+        """
+        if self._initialized:
+            return
+
+        # Create projects directory
+        self.projects_dir.mkdir(parents=True, exist_ok=True)
+
+        # Open/create the Ghidra project
+        self.open_project()
+
+        self._initialized = True
 
     def get_project_name(self) -> str:
         """
@@ -111,8 +130,8 @@ class ProjectManager:
         Returns:
             Imported Program instance, or None if import fails
         """
-        if not self.project:
-            raise RuntimeError("No project opened. Call open_project() first.")
+        # Ensure project is initialized (lazy initialization on first use)
+        self._ensure_initialized()
 
         if not binary_path.exists():
             print(f"Warning: Binary not found: {binary_path}", file=sys.stderr)

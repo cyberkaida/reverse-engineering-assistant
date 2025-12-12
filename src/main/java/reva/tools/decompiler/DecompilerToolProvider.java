@@ -111,6 +111,317 @@ public class DecompilerToolProvider extends AbstractToolProvider {
         return RevaInternalServiceRegistry.getService(ConfigManager.class).getDecompilerTimeoutSeconds();
     }
 
+    // ============================================================================
+    // Helper Infrastructure for Decompiler Operations
+    // ============================================================================
+
+    /** Expiry time for read tracking entries (30 minutes) */
+    private static final long READ_TRACKING_EXPIRY_MS = TimeUnit.MINUTES.toMillis(30);
+
+    /** Map of Ghidra comment types to their string names for JSON output */
+    private static final Map<CommentType, String> COMMENT_TYPE_NAMES = Map.of(
+        CommentType.PRE, "pre",
+        CommentType.EOL, "eol",
+        CommentType.POST, "post",
+        CommentType.PLATE, "plate",
+        CommentType.REPEATABLE, "repeatable"
+    );
+
+    /**
+     * Result of a safe decompilation attempt. Encapsulates either a successful
+     * decompilation result or an error message.
+     */
+    private record DecompilationAttempt(
+        DecompileResults results,
+        String errorMessage,
+        boolean success
+    ) {
+        static DecompilationAttempt success(DecompileResults results) {
+            return new DecompilationAttempt(results, null, true);
+        }
+
+        static DecompilationAttempt failure(String message) {
+            return new DecompilationAttempt(null, message, false);
+        }
+    }
+
+    /**
+     * Functional interface for processing high-level symbols during variable iteration.
+     */
+    @FunctionalInterface
+    private interface SymbolProcessor {
+        /**
+         * Process a single symbol.
+         * @param symbol The high-level symbol to process
+         * @return true if processing was successful and changed something, false otherwise
+         * @throws DuplicateNameException if a name conflict occurs
+         * @throws InvalidInputException if the input is invalid
+         */
+        boolean process(HighSymbol symbol) throws DuplicateNameException, InvalidInputException;
+    }
+
+    /**
+     * Creates and configures a DecompInterface for standard decompilation operations.
+     * The caller is responsible for disposing the decompiler in a finally block.
+     *
+     * @param program The program to decompile
+     * @param toolName The name of the tool (for logging)
+     * @return A configured and initialized DecompInterface, or null if initialization failed
+     */
+    private DecompInterface createConfiguredDecompiler(Program program, String toolName) {
+        DecompInterface decompiler = new DecompInterface();
+        decompiler.toggleCCode(true);
+        decompiler.toggleSyntaxTree(true);
+        decompiler.setSimplificationStyle("decompile");
+
+        if (!decompiler.openProgram(program)) {
+            logError(toolName + ": Failed to initialize decompiler for " + program.getName());
+            decompiler.dispose();
+            return null;
+        }
+        return decompiler;
+    }
+
+    /**
+     * Decompiles a function with timeout handling and consistent error reporting.
+     *
+     * @param decompiler The initialized decompiler to use
+     * @param function The function to decompile
+     * @param toolName The name of the tool (for logging)
+     * @return DecompilationAttempt containing either the results or an error message
+     */
+    private DecompilationAttempt decompileFunctionSafely(
+            DecompInterface decompiler,
+            Function function,
+            String toolName) {
+        TaskMonitor timeoutMonitor = createTimeoutMonitor();
+        DecompileResults results = decompiler.decompileFunction(function, 0, timeoutMonitor);
+
+        if (isTimedOut(timeoutMonitor)) {
+            String msg = "Decompilation timed out after " + getTimeoutSeconds() + " seconds";
+            logError(toolName + ": " + msg + " for " + function.getName());
+            return DecompilationAttempt.failure(msg);
+        }
+
+        if (!results.decompileCompleted()) {
+            String msg = "Decompilation failed: " + results.getErrorMessage();
+            logError(toolName + ": " + msg + " for " + function.getName());
+            return DecompilationAttempt.failure(msg);
+        }
+
+        return DecompilationAttempt.success(results);
+    }
+
+    /**
+     * Gets updated decompilation after modifications and creates a diff against the original.
+     *
+     * @param program The program containing the function
+     * @param function The function to re-decompile
+     * @param beforeDecompilation The original decompilation text to compare against
+     * @param toolName The name of the tool (for logging)
+     * @return Map containing diff results or error information
+     */
+    private Map<String, Object> getDecompilationDiff(
+            Program program,
+            Function function,
+            String beforeDecompilation,
+            String toolName) {
+        Map<String, Object> result = new HashMap<>();
+
+        DecompInterface newDecompiler = createConfiguredDecompiler(program, toolName + "-diff");
+        if (newDecompiler == null) {
+            result.put("decompilationError", "Failed to initialize decompiler for diff");
+            return result;
+        }
+
+        try {
+            DecompilationAttempt attempt = decompileFunctionSafely(newDecompiler, function, toolName + "-diff");
+            if (!attempt.success()) {
+                result.put("decompilationError", attempt.errorMessage());
+                return result;
+            }
+
+            String afterDecompilation = attempt.results().getDecompiledFunction().getC();
+            DecompilationDiffUtil.DiffResult diff =
+                DecompilationDiffUtil.createDiff(beforeDecompilation, afterDecompilation);
+
+            if (diff.hasChanges()) {
+                result.put("changes", DecompilationDiffUtil.toMap(diff));
+            } else {
+                result.put("changes", Map.of(
+                    "hasChanges", false,
+                    "summary", "No changes detected in decompilation"
+                ));
+            }
+        } catch (Exception e) {
+            logError(toolName + "-diff: Error during diff decompilation", e);
+            result.put("decompilationError", "Exception during decompilation: " + e.getMessage());
+        } finally {
+            newDecompiler.dispose();
+        }
+
+        return result;
+    }
+
+    /**
+     * Processes all variables (local and global) in a high function using the provided processor.
+     *
+     * @param highFunction The high function containing the variables
+     * @param processor The processor to apply to each symbol
+     * @param toolName The name of the tool (for logging)
+     * @return The number of symbols successfully processed
+     */
+    private int processAllVariables(HighFunction highFunction, SymbolProcessor processor, String toolName) {
+        int processedCount = 0;
+
+        // Process local variables
+        Iterator<HighSymbol> localVars = highFunction.getLocalSymbolMap().getSymbols();
+        while (localVars.hasNext()) {
+            HighSymbol symbol = localVars.next();
+            try {
+                if (processor.process(symbol)) {
+                    processedCount++;
+                }
+            } catch (DuplicateNameException | InvalidInputException e) {
+                logError(toolName + ": Failed to process local variable " + symbol.getName(), e);
+            }
+        }
+
+        // Process global variables
+        Iterator<HighSymbol> globalVars = highFunction.getGlobalSymbolMap().getSymbols();
+        while (globalVars.hasNext()) {
+            HighSymbol symbol = globalVars.next();
+            try {
+                if (processor.process(symbol)) {
+                    processedCount++;
+                }
+            } catch (DuplicateNameException | InvalidInputException e) {
+                logError(toolName + ": Failed to process global variable " + symbol.getName(), e);
+            }
+        }
+
+        return processedCount;
+    }
+
+    /**
+     * Finds the address corresponding to a line number in decompiled code.
+     *
+     * @param program The program
+     * @param clangLines The decompiled code lines
+     * @param lineNumber The line number to find (1-based)
+     * @return The address for the line, or null if not found
+     */
+    private Address findAddressForLine(Program program, List<ClangLine> clangLines, int lineNumber) {
+        for (ClangLine clangLine : clangLines) {
+            if (clangLine.getLineNumber() == lineNumber) {
+                List<ClangToken> tokens = clangLine.getAllTokens();
+
+                // Find the first address on this line
+                for (ClangToken token : tokens) {
+                    Address tokenAddr = token.getMinAddress();
+                    if (tokenAddr != null) {
+                        return tokenAddr;
+                    }
+                }
+
+                // If no direct address, find closest
+                if (!tokens.isEmpty()) {
+                    return DecompilerUtils.getClosestAddress(program, tokens.get(0));
+                }
+                break;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Processes variable data type changes for all variables in a high function.
+     * This method handles the specific logic for data type changes including error collection.
+     *
+     * @param highFunction The high function containing the variables
+     * @param mappings Map of variable names to new data type strings
+     * @param archiveName Optional archive name for data type lookup
+     * @param errors List to collect error messages
+     * @param toolName The name of the tool (for logging)
+     * @return The number of variables successfully changed
+     */
+    private int processVariableDataTypeChanges(
+            HighFunction highFunction,
+            Map<String, String> mappings,
+            String archiveName,
+            List<String> errors,
+            String toolName) {
+        int changedCount = 0;
+
+        // Process local variables
+        Iterator<HighSymbol> localVars = highFunction.getLocalSymbolMap().getSymbols();
+        while (localVars.hasNext()) {
+            HighSymbol symbol = localVars.next();
+            if (processDataTypeChange(symbol, mappings, archiveName, errors, toolName)) {
+                changedCount++;
+            }
+        }
+
+        // Process global variables
+        Iterator<HighSymbol> globalVars = highFunction.getGlobalSymbolMap().getSymbols();
+        while (globalVars.hasNext()) {
+            HighSymbol symbol = globalVars.next();
+            if (processDataTypeChange(symbol, mappings, archiveName, errors, toolName)) {
+                changedCount++;
+            }
+        }
+
+        return changedCount;
+    }
+
+    /**
+     * Processes a single data type change for a symbol.
+     *
+     * @param symbol The symbol to process
+     * @param mappings Map of variable names to new data type strings
+     * @param archiveName Optional archive name for data type lookup
+     * @param errors List to collect error messages
+     * @param toolName The name of the tool (for logging)
+     * @return true if the data type was changed, false otherwise
+     */
+    private boolean processDataTypeChange(
+            HighSymbol symbol,
+            Map<String, String> mappings,
+            String archiveName,
+            List<String> errors,
+            String toolName) {
+        String varName = symbol.getName();
+        String newDataTypeString = mappings.get(varName);
+
+        if (newDataTypeString == null) {
+            return false;
+        }
+
+        try {
+            DataType newDataType = DataTypeParserUtil.parseDataTypeObjectFromString(
+                newDataTypeString, archiveName);
+
+            if (newDataType == null) {
+                errors.add("Could not find data type: " + newDataTypeString + " for variable " + varName);
+                return false;
+            }
+
+            HighFunctionDBUtil.updateDBVariable(symbol, null, newDataType, SourceType.USER_DEFINED);
+            logInfo(toolName + ": Changed data type of variable " + varName + " to " + newDataTypeString);
+            return true;
+        } catch (DuplicateNameException | InvalidInputException e) {
+            errors.add("Failed to change data type of variable " + varName + " to " + newDataTypeString + ": " + e.getMessage());
+        } catch (Exception e) {
+            errors.add("Error parsing data type " + newDataTypeString + " for variable " + varName + ": " + e.getMessage());
+        }
+
+        return false;
+    }
+
+    // ============================================================================
+    // Tool Registration Methods
+    // ============================================================================
+
     /**
      * Register a tool to get decompiled code for a function with line range support (Claude Code style)
      */
@@ -232,7 +543,7 @@ public class DecompilerToolProvider extends AbstractToolProvider {
             }
 
             // Add function details
-            resultData.put("address", "0x" + function.getEntryPoint().toString());
+            resultData.put("address", AddressUtil.formatAddress(function.getEntryPoint()));
 
             // Get function metadata
             Map<String, String> metadata = new HashMap<>();
@@ -257,64 +568,55 @@ public class DecompilerToolProvider extends AbstractToolProvider {
 
             // Get function bounds
             AddressSetView body = function.getBody();
-            resultData.put("startAddress", "0x" + function.getEntryPoint().toString());
-            resultData.put("endAddress", "0x" + body.getMaxAddress().toString());
+            resultData.put("startAddress", AddressUtil.formatAddress(function.getEntryPoint()));
+            resultData.put("endAddress", AddressUtil.formatAddress(body.getMaxAddress()));
             resultData.put("sizeInBytes", body.getNumAddresses());
 
-            // Get decompilation using DecompInterface
+            // Get decompilation using helper methods
+            final String toolName = "get-decompilation";
+            logInfo(toolName + ": Starting decompilation for function " + function.getName() +
+                    " at " + AddressUtil.formatAddress(function.getEntryPoint()) + " in " + program.getName());
+
+            DecompInterface decompiler = createConfiguredDecompiler(program, toolName);
+            if (decompiler == null) {
+                resultData.put("decompilationError", "Failed to initialize decompiler");
+                resultData.put("decompilation", "");
+                return createJsonResult(resultData);
+            }
+
             try {
-                DecompInterface decompiler = new DecompInterface();
-                decompiler.toggleCCode(true);
-                decompiler.toggleSyntaxTree(true);
-                decompiler.setSimplificationStyle("decompile");
-
-                // Initialize and open the decompiler on the current program
-                boolean decompInitialized = decompiler.openProgram(program);
-                if (!decompInitialized) {
-                    resultData.put("decompilationError", "Failed to initialize decompiler");
-                    resultData.put("decompilation", "");
-                } else {
-                    // Decompile the function with timeout
-                    TaskMonitor timeoutMonitor = createTimeoutMonitor();
-                    DecompileResults decompileResults = decompiler.decompileFunction(function, 0, timeoutMonitor);
-                    if (isTimedOut(timeoutMonitor)) {
-                        return createErrorResult("Decompilation timed out after " + getTimeoutSeconds() + " seconds");
-                    }
-
-                    if (decompileResults.decompileCompleted()) {
-                        // Get the decompiled code and markup
-                        DecompiledFunction decompiledFunction = decompileResults.getDecompiledFunction();
-                        ClangTokenGroup markup = decompileResults.getCCodeMarkup();
-
-                        // Get synchronized decompilation with optional assembly listing and comments
-                        Map<String, Object> syncedContent = getSynchronizedContent(program, markup, decompiledFunction.getC(),
-                            offset, limit, includeDisassembly, includeComments, includeIncomingReferences, includeReferenceContext, function);
-
-                        // Add content to results
-                        resultData.putAll(syncedContent);
-
-                        // Get additional details like high-level function signature
-                        resultData.put("decompSignature", decompiledFunction.getSignature());
-
-                        // Track that this function's decompilation has been read
-                        // Use the program path for consistency with validation checks
-                        String programPath = getString(request, "programPath");
-                        String functionKey = programPath + ":" + function.getName();
-                        readDecompilationTracker.put(functionKey, System.currentTimeMillis());
-
-                    } else {
-                        resultData.put("decompilationError", "Decompilation failed: " +
-                            decompileResults.getErrorMessage());
-                        resultData.put("decompilation", "");
-                    }
-
-                    // Clean up
-                    decompiler.dispose();
+                DecompilationAttempt attempt = decompileFunctionSafely(decompiler, function, toolName);
+                if (!attempt.success()) {
+                    return createErrorResult(attempt.errorMessage());
                 }
+
+                // Get the decompiled code and markup
+                DecompiledFunction decompiledFunction = attempt.results().getDecompiledFunction();
+                ClangTokenGroup markup = attempt.results().getCCodeMarkup();
+
+                // Get synchronized decompilation with optional assembly listing and comments
+                Map<String, Object> syncedContent = getSynchronizedContent(program, markup, decompiledFunction.getC(),
+                    offset, limit, includeDisassembly, includeComments, includeIncomingReferences, includeReferenceContext, function);
+
+                // Add content to results
+                resultData.putAll(syncedContent);
+
+                // Get additional details like high-level function signature
+                resultData.put("decompSignature", decompiledFunction.getSignature());
+
+                // Track that this function's decompilation has been read
+                String programPath = getString(request, "programPath");
+                String functionKey = programPath + ":" + AddressUtil.formatAddress(function.getEntryPoint());
+                readDecompilationTracker.put(functionKey, System.currentTimeMillis());
+
+                logInfo(toolName + ": Successfully decompiled " + function.getName());
+
             } catch (Exception e) {
-                logError("Error during decompilation", e);
+                logError(toolName + ": Exception during decompilation of " + function.getName(), e);
                 resultData.put("decompilationError", "Exception during decompilation: " + e.getMessage());
                 resultData.put("decompilation", "");
+            } finally {
+                decompiler.dispose();
             }
 
             return createJsonResult(resultData);
@@ -452,146 +754,74 @@ public class DecompilerToolProvider extends AbstractToolProvider {
 
             // Validate that the LLM has read the decompilation for this function first
             String programPath = getString(request, "programPath");
-            String functionKey = programPath + ":" + function.getName();
+            String functionKey = programPath + ":" + AddressUtil.formatAddress(function.getEntryPoint());
             if (!hasReadDecompilation(functionKey)) {
                 return createErrorResult("You must read the decompilation for function '" + function.getName() +
                     "' using get-decompilation tool before making variable changes. This ensures you understand the current state of the code.");
             }
 
-            // Initialize the decompiler
-            DecompInterface decompiler = new DecompInterface();
-            decompiler.toggleCCode(true);
-            decompiler.toggleSyntaxTree(true);
-            decompiler.setSimplificationStyle("decompile");
+            // Initialize the decompiler using helper methods
+            final String toolName = "rename-variables";
+            logInfo(toolName + ": Starting variable rename for function " + function.getName() + " in " + program.getName());
 
-            boolean decompInitialized = decompiler.openProgram(program);
-            if (!decompInitialized) {
+            DecompInterface decompiler = createConfiguredDecompiler(program, toolName);
+            if (decompiler == null) {
                 return createErrorResult("Failed to initialize decompiler");
             }
 
-            // Decompile the function to get the "before" state
-            TaskMonitor timeoutMonitor = createTimeoutMonitor();
-            DecompileResults decompileResults = decompiler.decompileFunction(function, 0, timeoutMonitor);
-            if (isTimedOut(timeoutMonitor)) {
-                decompiler.dispose();
-                return createErrorResult("Decompilation timed out after " + getTimeoutSeconds() + " seconds");
-            }
-            if (!decompileResults.decompileCompleted()) {
-                decompiler.dispose();
-                return createErrorResult("Decompilation failed: " + decompileResults.getErrorMessage());
-            }
+            String beforeDecompilation;
+            int renamedCount = 0;
 
-            // Capture the original decompilation for diff comparison
-            String beforeDecompilation = decompileResults.getDecompiledFunction().getC();
-
-            // Track if we actually renamed any variables
-            boolean anyRenamed = false;
-
-            // Process variable mappings
             try {
+                // Decompile the function to get the "before" state
+                DecompilationAttempt attempt = decompileFunctionSafely(decompiler, function, toolName);
+                if (!attempt.success()) {
+                    return createErrorResult(attempt.errorMessage());
+                }
+
+                // Capture the original decompilation for diff comparison
+                beforeDecompilation = attempt.results().getDecompiledFunction().getC();
+
+                // Process variable mappings
                 int transactionId = program.startTransaction("Rename Variables");
+                try {
+                    HighFunction highFunction = attempt.results().getHighFunction();
 
-                // Get the high function from the decompile results
-                HighFunction highFunction = decompileResults.getHighFunction();
-
-                // Process variables using a manual approach since HighFunction.getSymbols() isn't available
-                Iterator<HighSymbol> localVars = highFunction.getLocalSymbolMap().getSymbols();
-                while (localVars.hasNext()) {
-                    HighSymbol symbol = localVars.next();
-                    String oldName = symbol.getName();
-                    String newName = mappings.get(oldName);
-
-                    if (newName != null) {
-                        try {
-                            // Update the variable name in the database using HighFunctionDBUtil
+                    // Process all variables using helper
+                    renamedCount = processAllVariables(highFunction, symbol -> {
+                        String newName = mappings.get(symbol.getName());
+                        if (newName != null) {
                             HighFunctionDBUtil.updateDBVariable(symbol, newName, null, SourceType.USER_DEFINED);
-                            anyRenamed = true;
-                            logInfo("Renamed local variable " + oldName + " to " + newName);
+                            logInfo(toolName + ": Renamed variable " + symbol.getName() + " to " + newName);
+                            return true;
                         }
-                        catch (DuplicateNameException | InvalidInputException e) {
-                            logError("Failed to rename local variable " + oldName + " to " + newName, e);
-                        }
-                    }
+                        return false;
+                    }, toolName);
+
+                    program.endTransaction(transactionId, true);
+                } catch (Exception e) {
+                    program.endTransaction(transactionId, false);
+                    logError(toolName + ": Error during variable renaming", e);
+                    return createErrorResult("Failed to rename variables: " + e.getMessage());
                 }
-
-                // Also check global variables
-                Iterator<HighSymbol> globalVars = highFunction.getGlobalSymbolMap().getSymbols();
-                while (globalVars.hasNext()) {
-                    HighSymbol symbol = globalVars.next();
-                    String oldName = symbol.getName();
-                    String newName = mappings.get(oldName);
-
-                    if (newName != null) {
-                        try {
-                            // Update the variable name in the database using HighFunctionDBUtil
-                            HighFunctionDBUtil.updateDBVariable(symbol, newName, null, SourceType.USER_DEFINED);
-                            anyRenamed = true;
-                            logInfo("Renamed global variable " + oldName + " to " + newName);
-                        }
-                        catch (DuplicateNameException | InvalidInputException e) {
-                            logError("Failed to rename global variable " + oldName + " to " + newName, e);
-                        }
-                    }
-                }
-
-                program.endTransaction(transactionId, true);
-            }
-            catch (Exception e) {
-                logError("Error during variable renaming", e);
-                return createErrorResult("Failed to rename variables: " + e.getMessage());
-            }
-            finally {
+            } finally {
                 decompiler.dispose();
             }
 
-            if (!anyRenamed) {
+            if (renamedCount == 0) {
                 return createErrorResult("No matching variables found to rename");
             }
 
-            // Now get the updated decompilation and create diff
+            // Build result and get diff using helper
             Map<String, Object> resultData = new HashMap<>();
             resultData.put("programName", program.getName());
             resultData.put("functionName", function.getName());
-            resultData.put("address", "0x" + function.getEntryPoint().toString());
+            resultData.put("address", AddressUtil.formatAddress(function.getEntryPoint()));
             resultData.put("variablesRenamed", true);
+            resultData.put("renamedCount", renamedCount);
 
-            // Get updated decompilation
-            DecompInterface newDecompiler = new DecompInterface();
-            newDecompiler.toggleCCode(true);
-            newDecompiler.toggleSyntaxTree(true);
-            newDecompiler.setSimplificationStyle("decompile");
-            newDecompiler.openProgram(program);
-
-            try {
-                TaskMonitor newTimeoutMonitor = createTimeoutMonitor();
-                DecompileResults newResults = newDecompiler.decompileFunction(function, 0, newTimeoutMonitor);
-                if (isTimedOut(newTimeoutMonitor)) {
-                    newDecompiler.dispose();
-                    return createErrorResult("Decompilation timed out after " + getTimeoutSeconds() + " seconds");
-                }
-                if (newResults.decompileCompleted()) {
-                    DecompiledFunction decompiledFunction = newResults.getDecompiledFunction();
-                    String afterDecompilation = decompiledFunction.getC();
-
-                    // Create diff showing only changed parts
-                    DecompilationDiffUtil.DiffResult diff = DecompilationDiffUtil.createDiff(beforeDecompilation, afterDecompilation);
-                    if (diff.hasChanges()) {
-                        resultData.put("changes", DecompilationDiffUtil.toMap(diff));
-                    } else {
-                        resultData.put("changes", Map.of("hasChanges", false, "summary", "No changes detected in decompilation"));
-                    }
-                } else {
-                    resultData.put("decompilationError", "Decompilation failed after renaming: " +
-                        newResults.getErrorMessage());
-                }
-            }
-            catch (Exception e) {
-                logError("Error during final decompilation", e);
-                resultData.put("decompilationError", "Exception during decompilation: " + e.getMessage());
-            }
-            finally {
-                newDecompiler.dispose();
-            }
+            // Get updated decompilation and create diff using helper
+            resultData.putAll(getDecompilationDiff(program, function, beforeDecompilation, toolName));
 
             return createJsonResult(resultData);
         });
@@ -655,176 +885,74 @@ public class DecompilerToolProvider extends AbstractToolProvider {
 
             // Validate that the LLM has read the decompilation for this function first
             String programPath = getString(request, "programPath");
-            String functionKey = programPath + ":" + function.getName();
+            String functionKey = programPath + ":" + AddressUtil.formatAddress(function.getEntryPoint());
             if (!hasReadDecompilation(functionKey)) {
                 return createErrorResult("You must read the decompilation for function '" + function.getName() +
                     "' using get-decompilation tool before making datatype changes. This ensures you understand the current state of the code.");
             }
 
-            // Initialize the decompiler
-            DecompInterface decompiler = new DecompInterface();
-            decompiler.toggleCCode(true);
-            decompiler.toggleSyntaxTree(true);
-            decompiler.setSimplificationStyle("decompile");
+            // Initialize the decompiler using helper methods
+            final String toolName = "change-variable-datatypes";
+            logInfo(toolName + ": Starting datatype change for function " + function.getName() + " in " + program.getName());
 
-            boolean decompInitialized = decompiler.openProgram(program);
-            if (!decompInitialized) {
+            DecompInterface decompiler = createConfiguredDecompiler(program, toolName);
+            if (decompiler == null) {
                 return createErrorResult("Failed to initialize decompiler");
             }
 
-            // Decompile the function to get the "before" state
-            TaskMonitor timeoutMonitor = createTimeoutMonitor();
-            DecompileResults decompileResults = decompiler.decompileFunction(function, 0, timeoutMonitor);
-            if (isTimedOut(timeoutMonitor)) {
-                decompiler.dispose();
-                return createErrorResult("Decompilation timed out after " + getTimeoutSeconds() + " seconds");
-            }
-            if (!decompileResults.decompileCompleted()) {
-                decompiler.dispose();
-                return createErrorResult("Decompilation failed: " + decompileResults.getErrorMessage());
-            }
-
-            // Capture the original decompilation for diff comparison
-            String beforeDecompilation = decompileResults.getDecompiledFunction().getC();
-
-            // Track if we actually changed any data types
-            boolean anyChanged = false;
+            String beforeDecompilation;
             List<String> errors = new ArrayList<>();
+            int changedCount = 0;
 
-            // Process variable mappings
-            int transactionId = program.startTransaction("Change Variable Data Types");
-            boolean transactionSuccess = false;
             try {
-                // Get the high function from the decompile results
-                HighFunction highFunction = decompileResults.getHighFunction();
-
-                // Process local variables
-                Iterator<HighSymbol> localVars = highFunction.getLocalSymbolMap().getSymbols();
-                while (localVars.hasNext()) {
-                    HighSymbol symbol = localVars.next();
-                    String varName = symbol.getName();
-                    String newDataTypeString = mappings.get(varName);
-
-                    if (newDataTypeString != null) {
-                        try {
-                            // Parse the new data type string
-                            DataType newDataType = DataTypeParserUtil.parseDataTypeObjectFromString(
-                                newDataTypeString, archiveName);
-
-                            if (newDataType == null) {
-                                errors.add("Could not find data type: " + newDataTypeString + " for variable " + varName);
-                                continue;
-                            }
-
-                            // Update the variable data type in the database using HighFunctionDBUtil
-                            HighFunctionDBUtil.updateDBVariable(symbol, null, newDataType, SourceType.USER_DEFINED);
-                            anyChanged = true;
-                            logInfo("Changed data type of local variable " + varName + " to " + newDataTypeString);
-                        }
-                        catch (DuplicateNameException | InvalidInputException e) {
-                            errors.add("Failed to change data type of local variable " + varName + " to " + newDataTypeString + ": " + e.getMessage());
-                        }
-                        catch (Exception e) {
-                            errors.add("Error parsing data type " + newDataTypeString + " for variable " + varName + ": " + e.getMessage());
-                        }
-                    }
+                // Decompile the function to get the "before" state
+                DecompilationAttempt attempt = decompileFunctionSafely(decompiler, function, toolName);
+                if (!attempt.success()) {
+                    return createErrorResult(attempt.errorMessage());
                 }
 
-                // Process global variables
-                Iterator<HighSymbol> globalVars = highFunction.getGlobalSymbolMap().getSymbols();
-                while (globalVars.hasNext()) {
-                    HighSymbol symbol = globalVars.next();
-                    String varName = symbol.getName();
-                    String newDataTypeString = mappings.get(varName);
+                // Capture the original decompilation for diff comparison
+                beforeDecompilation = attempt.results().getDecompiledFunction().getC();
 
-                    if (newDataTypeString != null) {
-                        try {
-                            // Parse the new data type string
-                            DataType newDataType = DataTypeParserUtil.parseDataTypeObjectFromString(
-                                newDataTypeString, archiveName);
+                // Process variable mappings
+                int transactionId = program.startTransaction("Change Variable Data Types");
+                boolean transactionSuccess = false;
+                try {
+                    HighFunction highFunction = attempt.results().getHighFunction();
 
-                            if (newDataType == null) {
-                                errors.add("Could not find data type: " + newDataTypeString + " for variable " + varName);
-                                continue;
-                            }
+                    // Process all variables - need custom logic here due to error collection
+                    changedCount = processVariableDataTypeChanges(
+                        highFunction, mappings, archiveName, errors, toolName);
 
-                            // Update the variable data type in the database using HighFunctionDBUtil
-                            HighFunctionDBUtil.updateDBVariable(symbol, null, newDataType, SourceType.USER_DEFINED);
-                            anyChanged = true;
-                            logInfo("Changed data type of global variable " + varName + " to " + newDataTypeString);
-                        }
-                        catch (DuplicateNameException | InvalidInputException e) {
-                            errors.add("Failed to change data type of global variable " + varName + " to " + newDataTypeString + ": " + e.getMessage());
-                        }
-                        catch (Exception e) {
-                            errors.add("Error parsing data type " + newDataTypeString + " for variable " + varName + ": " + e.getMessage());
-                        }
-                    }
+                    transactionSuccess = true;
+                } catch (Exception e) {
+                    logError(toolName + ": Error during variable data type changes", e);
+                    return createErrorResult("Failed to change variable data types: " + e.getMessage());
+                } finally {
+                    program.endTransaction(transactionId, transactionSuccess);
                 }
-
-                transactionSuccess = true;
-            }
-            catch (Exception e) {
-                logError("Error during variable data type changes", e);
-                return createErrorResult("Failed to change variable data types: " + e.getMessage());
-            }
-            finally {
-                program.endTransaction(transactionId, transactionSuccess);
+            } finally {
                 decompiler.dispose();
             }
 
-            if (!anyChanged && errors.isEmpty()) {
+            if (changedCount == 0 && errors.isEmpty()) {
                 return createErrorResult("No matching variables found to change data types");
             }
 
-            // Now get the updated decompilation and create diff
+            // Build result and get diff using helper
             Map<String, Object> resultData = new HashMap<>();
             resultData.put("programName", program.getName());
             resultData.put("functionName", function.getName());
-            resultData.put("address", "0x" + function.getEntryPoint().toString());
-            resultData.put("dataTypesChanged", anyChanged);
+            resultData.put("address", AddressUtil.formatAddress(function.getEntryPoint()));
+            resultData.put("dataTypesChanged", changedCount > 0);
+            resultData.put("changedCount", changedCount);
 
             if (!errors.isEmpty()) {
                 resultData.put("errors", errors);
             }
 
-            // Get updated decompilation
-            DecompInterface newDecompiler = new DecompInterface();
-            newDecompiler.toggleCCode(true);
-            newDecompiler.toggleSyntaxTree(true);
-            newDecompiler.setSimplificationStyle("decompile");
-            newDecompiler.openProgram(program);
-
-            try {
-                TaskMonitor newTimeoutMonitor = createTimeoutMonitor();
-                DecompileResults newResults = newDecompiler.decompileFunction(function, 0, newTimeoutMonitor);
-                if (isTimedOut(newTimeoutMonitor)) {
-                    newDecompiler.dispose();
-                    return createErrorResult("Decompilation timed out after " + getTimeoutSeconds() + " seconds");
-                }
-                if (newResults.decompileCompleted()) {
-                    DecompiledFunction decompiledFunction = newResults.getDecompiledFunction();
-                    String afterDecompilation = decompiledFunction.getC();
-
-                    // Create diff showing only changed parts
-                    DecompilationDiffUtil.DiffResult diff = DecompilationDiffUtil.createDiff(beforeDecompilation, afterDecompilation);
-                    if (diff.hasChanges()) {
-                        resultData.put("changes", DecompilationDiffUtil.toMap(diff));
-                    } else {
-                        resultData.put("changes", Map.of("hasChanges", false, "summary", "No changes detected in decompilation"));
-                    }
-                } else {
-                    resultData.put("decompilationError", "Decompilation failed after changing data types: " +
-                        newResults.getErrorMessage());
-                }
-            }
-            catch (Exception e) {
-                logError("Error during final decompilation", e);
-                resultData.put("decompilationError", "Exception during decompilation: " + e.getMessage());
-            }
-            finally {
-                newDecompiler.dispose();
-            }
+            // Get updated decompilation and create diff using helper
+            resultData.putAll(getDecompilationDiff(program, function, beforeDecompilation, toolName));
 
             return createJsonResult(resultData);
         });
@@ -1044,19 +1172,18 @@ public class DecompilerToolProvider extends AbstractToolProvider {
     private List<Map<String, Object>> searchDecompilationInProgram(Program program, String pattern,
             int maxResults, boolean caseSensitive, io.modelcontextprotocol.server.McpSyncServerExchange exchange) {
         List<Map<String, Object>> results = new ArrayList<>();
+        final String toolName = "search-decompilation";
+
+        logInfo(toolName + ": Starting search in " + program.getName() + " for pattern: " + pattern);
 
         try {
             // Compile the regex pattern
             int flags = caseSensitive ? 0 : Pattern.CASE_INSENSITIVE;
             Pattern regex = Pattern.compile(pattern, flags);
 
-            // Initialize decompiler
-            DecompInterface decompiler = new DecompInterface();
-            decompiler.toggleCCode(true);
-            decompiler.toggleSyntaxTree(true);
-            decompiler.setSimplificationStyle("decompile");
-
-            if (!decompiler.openProgram(program)) {
+            // Initialize decompiler using helper
+            DecompInterface decompiler = createConfiguredDecompiler(program, toolName);
+            if (decompiler == null) {
                 return results; // Failed to initialize decompiler
             }
 
@@ -1064,16 +1191,16 @@ public class DecompilerToolProvider extends AbstractToolProvider {
                 // Count total functions for progress tracking
                 int totalFunctions = program.getFunctionManager().getFunctionCount();
                 int processedFunctions = 0;
-                
+
                 // Generate unique progress token for this search
                 String progressToken = "search-" + System.currentTimeMillis();
-                
+
                 // Send initial progress notification
                 if (exchange != null) {
                     exchange.progressNotification(new McpSchema.ProgressNotification(
                         progressToken, 0.0, (double) totalFunctions, "Starting decompilation search..."));
                 }
-                
+
                 // Iterate through all functions
                 FunctionIterator functions = program.getFunctionManager().getFunctions(true);
                 while (functions.hasNext() && results.size() < maxResults) {
@@ -1086,72 +1213,95 @@ public class DecompilerToolProvider extends AbstractToolProvider {
                     }
 
                     try {
-                        // Decompile the function
+                        // Use inline decompilation here instead of decompileFunctionSafely because:
+                        // 1. We want to continue to the next function on timeout (not return an error)
+                        // 2. We don't need the DecompilationAttempt wrapper for this use case
                         TaskMonitor functionTimeoutMonitor = createTimeoutMonitor();
                         DecompileResults decompileResults = decompiler.decompileFunction(function, 0, functionTimeoutMonitor);
                         if (isTimedOut(functionTimeoutMonitor)) {
-                            Msg.warn(DecompilerToolProvider.class, "Decompilation timed out for function " + function.getName() +
-                                " after " + getTimeoutSeconds() + " seconds");
+                            Msg.warn(DecompilerToolProvider.class, toolName + ": Decompilation timed out for function " +
+                                function.getName() + " after " + getTimeoutSeconds() + " seconds");
                             continue; // Skip this function and continue with the next one
                         }
 
                         if (decompileResults.decompileCompleted()) {
-                            DecompiledFunction decompiledFunction = decompileResults.getDecompiledFunction();
-                            String decompCode = decompiledFunction.getC();
-
-                            // Search each line
-                            String[] lines = decompCode.split("\n");
-                            for (int i = 0; i < lines.length && results.size() < maxResults; i++) {
-                                String line = lines[i];
-                                Matcher matcher = regex.matcher(line);
-
-                                if (matcher.find()) {
-                                    Map<String, Object> result = new HashMap<>();
-                                    result.put("functionName", function.getName());
-                                    result.put("functionAddress", "0x" + function.getEntryPoint().toString());
-                                    result.put("lineNumber", i + 1);
-                                    result.put("lineContent", line.trim());
-                                    result.put("matchStart", matcher.start());
-                                    result.put("matchEnd", matcher.end());
-                                    result.put("matchedText", matcher.group());
-
-                                    results.add(result);
-                                }
-                            }
+                            // Search the decompiled code for matches
+                            searchDecompiledCode(function, decompileResults, regex, results, maxResults);
                         }
                     } catch (Exception e) {
                         // Skip this function if decompilation fails
-                        logError("Failed to decompile function: " + function.getName(), e);
+                        logError(toolName + ": Failed to decompile function: " + function.getName(), e);
                         continue;
                     }
-                    
+
                     // Send progress update every 10 functions or when search is complete
-                    if (exchange != null && (processedFunctions % 10 == 0 || results.size() >= maxResults || !functions.hasNext())) {
-                        String message;
-                        if (results.size() >= maxResults) {
-                            message = String.format("Found %d matches (max results reached)", results.size());
-                        } else if (!functions.hasNext()) {
-                            message = String.format("Search complete - found %d matches", results.size());
-                        } else {
-                            message = String.format("Processed %d/%d functions - found %d matches so far", 
-                                processedFunctions, totalFunctions, results.size());
-                        }
-                        
-                        exchange.progressNotification(new McpSchema.ProgressNotification(
-                            progressToken, (double) processedFunctions, (double) totalFunctions, message));
-                    }
+                    sendSearchProgress(exchange, progressToken, processedFunctions, totalFunctions,
+                        results.size(), maxResults, functions.hasNext());
                 }
             } finally {
                 decompiler.dispose();
             }
 
         } catch (PatternSyntaxException e) {
-            logError("Invalid regex pattern: " + pattern, e);
+            logError(toolName + ": Invalid regex pattern: " + pattern, e);
         } catch (Exception e) {
-            logError("Error during decompilation search", e);
+            logError(toolName + ": Error during decompilation search", e);
         }
 
         return results;
+    }
+
+    /**
+     * Searches decompiled code for regex matches and adds results to the list.
+     */
+    private void searchDecompiledCode(Function function, DecompileResults decompileResults,
+            Pattern regex, List<Map<String, Object>> results, int maxResults) {
+        DecompiledFunction decompiledFunction = decompileResults.getDecompiledFunction();
+        String decompCode = decompiledFunction.getC();
+
+        // Search each line
+        String[] lines = decompCode.split("\n");
+        for (int i = 0; i < lines.length && results.size() < maxResults; i++) {
+            String line = lines[i];
+            Matcher matcher = regex.matcher(line);
+
+            if (matcher.find()) {
+                Map<String, Object> result = new HashMap<>();
+                result.put("functionName", function.getName());
+                result.put("functionAddress", AddressUtil.formatAddress(function.getEntryPoint()));
+                result.put("lineNumber", i + 1);
+                result.put("lineContent", line.trim());
+                result.put("matchStart", matcher.start());
+                result.put("matchEnd", matcher.end());
+                result.put("matchedText", matcher.group());
+
+                results.add(result);
+            }
+        }
+    }
+
+    /**
+     * Sends progress notification for search operation.
+     */
+    private void sendSearchProgress(io.modelcontextprotocol.server.McpSyncServerExchange exchange,
+            String progressToken, int processedFunctions, int totalFunctions,
+            int resultsCount, int maxResults, boolean hasMoreFunctions) {
+        if (exchange == null || (processedFunctions % 10 != 0 && resultsCount < maxResults && hasMoreFunctions)) {
+            return;
+        }
+
+        String message;
+        if (resultsCount >= maxResults) {
+            message = String.format("Found %d matches (max results reached)", resultsCount);
+        } else if (!hasMoreFunctions) {
+            message = String.format("Search complete - found %d matches", resultsCount);
+        } else {
+            message = String.format("Processed %d/%d functions - found %d matches so far",
+                processedFunctions, totalFunctions, resultsCount);
+        }
+
+        exchange.progressNotification(new McpSchema.ProgressNotification(
+            progressToken, (double) processedFunctions, (double) totalFunctions, message));
     }
 
     /**
@@ -1165,9 +1315,9 @@ public class DecompilerToolProvider extends AbstractToolProvider {
             return false;
         }
 
-        // Consider decompilation "read" if it was accessed within the last 30 minutes
-        long thirtyMinutesAgo = System.currentTimeMillis() - (30 * 60 * 1000);
-        return lastReadTime > thirtyMinutesAgo;
+        // Consider decompilation "read" if it was accessed within the expiry window
+        long expiryThreshold = System.currentTimeMillis() - READ_TRACKING_EXPIRY_MS;
+        return lastReadTime > expiryThreshold;
     }
 
     /**
@@ -1202,17 +1352,10 @@ public class DecompilerToolProvider extends AbstractToolProvider {
 
                 // Get comments at these addresses
                 Listing listing = program.getListing();
-                Map<CommentType, String> commentTypes = Map.of(
-                    CommentType.PRE, "pre",
-                    CommentType.EOL, "eol",
-                    CommentType.POST, "post",
-                    CommentType.PLATE, "plate",
-                    CommentType.REPEATABLE, "repeatable"
-                );
                 for (Address addr : lineAddresses) {
                     CodeUnit cu = listing.getCodeUnitAt(addr);
                     if (cu != null) {
-                        for (Map.Entry<CommentType, String> entry : commentTypes.entrySet()) {
+                        for (Map.Entry<CommentType, String> entry : COMMENT_TYPE_NAMES.entrySet()) {
                             addCommentIfExists(comments, cu, entry.getKey(), entry.getValue(), addr);
                         }
                     }
@@ -1239,19 +1382,12 @@ public class DecompilerToolProvider extends AbstractToolProvider {
             AddressSetView body = function.getBody();
 
             CodeUnitIterator codeUnits = listing.getCodeUnits(body, true);
-            Map<CommentType, String> commentTypes = Map.of(
-                CommentType.PRE, "pre",
-                CommentType.EOL, "eol",
-                CommentType.POST, "post",
-                CommentType.PLATE, "plate",
-                CommentType.REPEATABLE, "repeatable"
-            );
             while (codeUnits.hasNext()) {
                 CodeUnit cu = codeUnits.next();
                 Address addr = cu.getAddress();
 
                 // Check all comment types
-                for (Map.Entry<CommentType, String> entry : commentTypes.entrySet()) {
+                for (Map.Entry<CommentType, String> entry : COMMENT_TYPE_NAMES.entrySet()) {
                     addCommentIfExists(comments, cu, entry.getKey(), entry.getValue(), addr);
                 }
             }
@@ -1349,61 +1485,35 @@ public class DecompilerToolProvider extends AbstractToolProvider {
 
             // Validate that the LLM has read the decompilation for this function first
             String programPath = getString(request, "programPath");
-            String functionKey = programPath + ":" + function.getName();
+            String functionKey = programPath + ":" + AddressUtil.formatAddress(function.getEntryPoint());
             if (!hasReadDecompilation(functionKey)) {
                 return createErrorResult("You must read the decompilation for function '" + function.getName() +
                     "' using get-decompilation tool before setting comments. This ensures you understand the current state of the code.");
             }
 
-            // Initialize the decompiler
-            DecompInterface decompiler = new DecompInterface();
-            decompiler.toggleCCode(true);
-            decompiler.toggleSyntaxTree(true);
-            decompiler.setSimplificationStyle("decompile");
+            // Initialize the decompiler using helper methods
+            final String toolName = "set-decompilation-comment";
+            logInfo(toolName + ": Setting comment for function " + function.getName() +
+                    " line " + lineNumber + " in " + program.getName());
 
-            boolean decompInitialized = decompiler.openProgram(program);
-            if (!decompInitialized) {
+            DecompInterface decompiler = createConfiguredDecompiler(program, toolName);
+            if (decompiler == null) {
                 return createErrorResult("Failed to initialize decompiler");
             }
 
             try {
                 // Decompile the function
-                TaskMonitor lastTimeoutMonitor = createTimeoutMonitor();
-                DecompileResults decompileResults = decompiler.decompileFunction(function, 0, lastTimeoutMonitor);
-                if (isTimedOut(lastTimeoutMonitor)) {
-                    decompiler.dispose();
-                    return createErrorResult("Decompilation timed out after " + getTimeoutSeconds() + " seconds");
-                }
-                if (!decompileResults.decompileCompleted()) {
-                    return createErrorResult("Decompilation failed: " + decompileResults.getErrorMessage());
+                DecompilationAttempt attempt = decompileFunctionSafely(decompiler, function, toolName);
+                if (!attempt.success()) {
+                    return createErrorResult(attempt.errorMessage());
                 }
 
                 // Get the decompiled code and markup
-                ClangTokenGroup markup = decompileResults.getCCodeMarkup();
+                ClangTokenGroup markup = attempt.results().getCCodeMarkup();
                 List<ClangLine> clangLines = DecompilerUtils.toLines(markup);
 
                 // Find the address for the specified line number
-                Address targetAddress = null;
-                for (ClangLine clangLine : clangLines) {
-                    if (clangLine.getLineNumber() == lineNumber) {
-                        List<ClangToken> tokens = clangLine.getAllTokens();
-
-                        // Find the first address on this line
-                        for (ClangToken token : tokens) {
-                            Address tokenAddr = token.getMinAddress();
-                            if (tokenAddr != null) {
-                                targetAddress = tokenAddr;
-                                break;
-                            }
-                        }
-
-                        // If no direct address, find closest
-                        if (targetAddress == null && !tokens.isEmpty()) {
-                            targetAddress = DecompilerUtils.getClosestAddress(program, tokens.get(0));
-                        }
-                        break;
-                    }
-                }
+                Address targetAddress = findAddressForLine(program, clangLines, lineNumber);
 
                 if (targetAddress == null) {
                     return createErrorResult("Could not find an address for line " + lineNumber +
@@ -1425,13 +1535,15 @@ public class DecompilerToolProvider extends AbstractToolProvider {
                     result.put("comment", comment);
 
                     program.endTransaction(transactionId, true);
+
+                    logInfo(toolName + ": Successfully set comment at " + targetAddress);
                     return createJsonResult(result);
                 } catch (Exception e) {
                     program.endTransaction(transactionId, false);
                     throw e;
                 }
             } catch (Exception e) {
-                logError("Error setting decompilation comment", e);
+                logError(toolName + ": Error setting comment for " + function.getName(), e);
                 return createErrorResult("Failed to set comment: " + e.getMessage());
             } finally {
                 decompiler.dispose();

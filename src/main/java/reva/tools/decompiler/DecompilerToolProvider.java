@@ -995,26 +995,31 @@ public class DecompilerToolProvider extends AbstractToolProvider {
 
             // Include incoming references at the top level if requested
             if (includeIncomingReferences) {
-                List<Map<String, Object>> incomingRefs = DecompilationContextUtil
-                    .getEnhancedIncomingReferences(program, function, includeReferenceContext);
-                if (!incomingRefs.isEmpty()) {
-                    // Limit the number of incoming references to prevent overwhelming output
-                    int maxIncomingRefs = 10;
-                    if (incomingRefs.size() > maxIncomingRefs) {
-                        // Include only the first few references
-                        List<Map<String, Object>> limitedRefs = new ArrayList<>(incomingRefs.subList(0, maxIncomingRefs));
-                        result.put("incomingReferences", limitedRefs);
+                // Limit references early to avoid expensive decompilation of calling functions
+                int maxIncomingRefs = 10;
 
-                        // Add metadata about the limitation
+                // First, count total references quickly (without decompilation context)
+                int totalRefCount = 0;
+                var refIterator = program.getReferenceManager().getReferencesTo(function.getEntryPoint());
+                while (refIterator.hasNext()) {
+                    refIterator.next();
+                    totalRefCount++;
+                }
+
+                // Now get the limited set with context (this is the expensive part)
+                List<Map<String, Object>> incomingRefs = DecompilationContextUtil
+                    .getEnhancedIncomingReferences(program, function, includeReferenceContext, maxIncomingRefs);
+
+                if (!incomingRefs.isEmpty()) {
+                    result.put("incomingReferences", incomingRefs);
+                    result.put("totalIncomingReferences", totalRefCount);
+
+                    if (totalRefCount > maxIncomingRefs) {
                         result.put("incomingReferencesLimited", true);
-                        result.put("totalIncomingReferences", incomingRefs.size());
                         result.put("incomingReferencesMessage", String.format(
                             "Showing first %d of %d references. Use 'find-cross-references' tool with location='%s' and direction='to' to see all references.",
-                            maxIncomingRefs, incomingRefs.size(), function.getName()
+                            maxIncomingRefs, totalRefCount, function.getName()
                         ));
-                    } else {
-                        result.put("incomingReferences", incomingRefs);
-                        result.put("totalIncomingReferences", incomingRefs.size());
                     }
                 }
             }

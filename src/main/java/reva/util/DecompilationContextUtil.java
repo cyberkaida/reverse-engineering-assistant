@@ -188,6 +188,21 @@ public class DecompilationContextUtil {
      * @return List of enhanced reference maps
      */
     public static List<Map<String, Object>> getEnhancedIncomingReferences(Program program, Function targetFunction, boolean includeContext) {
+        // Default to no limit for backwards compatibility
+        return getEnhancedIncomingReferences(program, targetFunction, includeContext, -1);
+    }
+
+    /**
+     * Get enhanced incoming reference information for a function with line numbers and optional context.
+     * This overload allows limiting the number of references to prevent performance issues.
+     *
+     * @param program The Ghidra program
+     * @param targetFunction The function to get incoming references for
+     * @param includeContext Whether to include code context snippets (expensive - requires decompilation per reference)
+     * @param maxRefs Maximum number of references to return (-1 for no limit)
+     * @return List of enhanced reference maps
+     */
+    public static List<Map<String, Object>> getEnhancedIncomingReferences(Program program, Function targetFunction, boolean includeContext, int maxRefs) {
         List<Map<String, Object>> enhancedRefs = new ArrayList<>();
 
         if (program == null || targetFunction == null) {
@@ -198,10 +213,33 @@ public class DecompilationContextUtil {
             // Get references to this function's entry point
             ReferenceIterator incomingRefs = program.getReferenceManager().getReferencesTo(targetFunction.getEntryPoint());
 
+            // Count total references first for logging (quick iteration)
+            int totalRefs = 0;
+            var countIterator = program.getReferenceManager().getReferencesTo(targetFunction.getEntryPoint());
+            while (countIterator.hasNext()) {
+                countIterator.next();
+                totalRefs++;
+            }
+
+            DebugLogger.debug(DecompilationContextUtil.class,
+                String.format("getEnhancedIncomingReferences: Function '%s' has %d total references, processing up to %d with context=%s",
+                    targetFunction.getName(), totalRefs, maxRefs > 0 ? maxRefs : totalRefs, includeContext));
+
+            int processed = 0;
+            int contextFetched = 0;
+
             while (incomingRefs.hasNext()) {
+                // Stop early if we've reached the limit
+                if (maxRefs > 0 && enhancedRefs.size() >= maxRefs) {
+                    DebugLogger.debug(DecompilationContextUtil.class,
+                        String.format("getEnhancedIncomingReferences: Reached limit of %d references, stopping early", maxRefs));
+                    break;
+                }
+
                 Reference ref = incomingRefs.next();
                 Address fromAddress = ref.getFromAddress();
                 Function fromFunction = program.getFunctionManager().getFunctionContaining(fromAddress);
+                processed++;
 
                 Map<String, Object> refInfo = new HashMap<>();
                 refInfo.put("fromAddress", AddressUtil.formatAddress(fromAddress));
@@ -224,8 +262,16 @@ public class DecompilationContextUtil {
                     if (lineNumber > 0) {
                         refInfo.put("fromLine", lineNumber);
 
-                        // Add context if requested
+                        // Add context if requested (this is expensive - requires decompilation)
                         if (includeContext) {
+                            contextFetched++;
+                            // Log progress every 3 context fetches (each is a decompilation)
+                            if (contextFetched % 3 == 0) {
+                                DebugLogger.debug(DecompilationContextUtil.class,
+                                    String.format("getEnhancedIncomingReferences: Fetched context for %d/%d references (decompiling calling functions)",
+                                        contextFetched, maxRefs > 0 ? Math.min(maxRefs, totalRefs) : totalRefs));
+                            }
+
                             String context = getDecompilationContext(program, fromFunction, lineNumber, 1);
                             if (context != null) {
                                 refInfo.put("context", context);
@@ -236,6 +282,11 @@ public class DecompilationContextUtil {
 
                 enhancedRefs.add(refInfo);
             }
+
+            DebugLogger.debug(DecompilationContextUtil.class,
+                String.format("getEnhancedIncomingReferences: Completed - processed %d references, fetched %d contexts, returning %d results",
+                    processed, contextFetched, enhancedRefs.size()));
+
         } catch (Exception e) {
             Msg.error(DecompilationContextUtil.class, "Error getting enhanced incoming references", e);
         }

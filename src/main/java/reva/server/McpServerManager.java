@@ -60,6 +60,7 @@ import reva.tools.bookmarks.BookmarkToolProvider;
 import reva.tools.imports.ImportExportToolProvider;
 import reva.tools.dataflow.DataFlowToolProvider;
 import reva.tools.callgraph.CallGraphToolProvider;
+import reva.tools.constants.ConstantSearchToolProvider;
 import reva.util.RevaInternalServiceRegistry;
 
 /**
@@ -174,6 +175,7 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
         toolProviders.add(new ImportExportToolProvider(server));
         toolProviders.add(new DataFlowToolProvider(server));
         toolProviders.add(new CallGraphToolProvider(server));
+        toolProviders.add(new ConstantSearchToolProvider(server));
 
         // Register all tools with the server
         // Note: As of MCP SDK v0.14.0, tool registration is idempotent and replaces duplicates

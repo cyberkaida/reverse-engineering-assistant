@@ -57,6 +57,7 @@ import reva.tools.symbols.SymbolToolProvider;
 import reva.tools.xrefs.CrossReferencesToolProvider;
 import reva.tools.comments.CommentToolProvider;
 import reva.tools.bookmarks.BookmarkToolProvider;
+import reva.tools.imports.ImportExportToolProvider;
 import reva.util.RevaInternalServiceRegistry;
 
 /**
@@ -168,6 +169,7 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
         toolProviders.add(new StructureToolProvider(server));
         toolProviders.add(new CommentToolProvider(server));
         toolProviders.add(new BookmarkToolProvider(server));
+        toolProviders.add(new ImportExportToolProvider(server));
 
         // Register all tools with the server
         // Note: As of MCP SDK v0.14.0, tool registration is idempotent and replaces duplicates

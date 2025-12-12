@@ -46,6 +46,9 @@ import ghidra.program.model.listing.Instruction;
 import ghidra.program.model.listing.Listing;
 import ghidra.program.model.listing.Program;
 import ghidra.program.model.address.AddressSet;
+import ghidra.program.model.symbol.Reference;
+import ghidra.program.model.symbol.ReferenceIterator;
+import ghidra.program.model.symbol.ReferenceManager;
 import ghidra.program.model.symbol.SourceType;
 import ghidra.program.model.pcode.HighFunction;
 import ghidra.program.model.pcode.HighFunctionDBUtil;
@@ -91,6 +94,8 @@ public class DecompilerToolProvider extends AbstractToolProvider {
         registerRenameVariablesTool();
         registerChangeVariableDataTypesTool();
         registerSetDecompilationCommentTool();
+        registerGetCallersDecompiledTool();
+        registerGetReferencersDecompiledTool();
     }
 
     /**
@@ -1554,5 +1559,379 @@ public class DecompilerToolProvider extends AbstractToolProvider {
                 decompiler.dispose();
             }
         });
+    }
+
+    // ============================================================================
+    // Bulk Decompilation Tools
+    // ============================================================================
+
+    /**
+     * Register a tool to get decompilation of all functions that call a target function.
+     * This is a bulk operation that combines cross-reference lookup with decompilation.
+     */
+    private void registerGetCallersDecompiledTool() {
+        Map<String, Object> properties = new HashMap<>();
+        properties.put("programPath", Map.of(
+            "type", "string",
+            "description", "Path in the Ghidra Project to the program"
+        ));
+        properties.put("functionNameOrAddress", Map.of(
+            "type", "string",
+            "description", "Target function name or address to find callers for"
+        ));
+        properties.put("maxCallers", Map.of(
+            "type", "integer",
+            "description", "Maximum number of calling functions to decompile (default: 10)",
+            "default", 10
+        ));
+        properties.put("startIndex", Map.of(
+            "type", "integer",
+            "description", "Starting index for pagination (0-based)",
+            "default", 0
+        ));
+        properties.put("includeCallContext", Map.of(
+            "type", "boolean",
+            "description", "Whether to highlight the line containing the call in each decompilation",
+            "default", true
+        ));
+
+        List<String> required = List.of("programPath", "functionNameOrAddress");
+
+        McpSchema.Tool tool = McpSchema.Tool.builder()
+            .name("get-callers-decompiled")
+            .title("Get Callers Decompiled")
+            .description("Decompile all functions that call a target function. Returns bulk decompilation results with optional call site highlighting. Use for understanding how a function is used throughout the codebase.")
+            .inputSchema(createSchema(properties, required))
+            .build();
+
+        registerTool(tool, (exchange, request) -> {
+            final String toolName = "get-callers-decompiled";
+
+            Program program = getProgramFromArgs(request);
+            int maxCallers = getOptionalInt(request, "maxCallers", 10);
+            int startIndex = getOptionalInt(request, "startIndex", 0);
+            boolean includeCallContext = getOptionalBoolean(request, "includeCallContext", true);
+
+            // Validate parameters
+            if (maxCallers <= 0 || maxCallers > 50) {
+                return createErrorResult("maxCallers must be between 1 and 50");
+            }
+            if (startIndex < 0) {
+                return createErrorResult("startIndex must be non-negative");
+            }
+
+            // Resolve the target function using standard helper
+            Function targetFunction;
+            try {
+                targetFunction = getFunctionFromArgs(request.arguments(), program, "functionNameOrAddress");
+            } catch (IllegalArgumentException e) {
+                return createErrorResult("Function not found: " + e.getMessage() + " in program " + program.getName() +
+                    ". Tried as address/symbol and function name.");
+            }
+
+            // Get all references to this function
+            ReferenceManager refManager = program.getReferenceManager();
+            ReferenceIterator refIter = refManager.getReferencesTo(targetFunction.getEntryPoint());
+
+            // Collect unique calling functions (with a max limit to prevent memory issues)
+            final int MAX_TOTAL_CALLERS = 500;
+            Set<Function> callingFunctions = new HashSet<>();
+            Map<Function, List<Address>> callSites = new HashMap<>();
+
+            while (refIter.hasNext() && callingFunctions.size() < MAX_TOTAL_CALLERS) {
+                Reference ref = refIter.next();
+                if (ref.getReferenceType().isCall() || ref.getReferenceType().isFlow()) {
+                    Address fromAddr = ref.getFromAddress();
+                    Function caller = program.getFunctionManager().getFunctionContaining(fromAddr);
+                    if (caller != null && !caller.equals(targetFunction)) {
+                        callingFunctions.add(caller);
+                        callSites.computeIfAbsent(caller, k -> new ArrayList<>()).add(fromAddr);
+                    }
+                }
+            }
+
+            // Convert to list for pagination
+            List<Function> callerList = new ArrayList<>(callingFunctions);
+            int totalCallers = callerList.size();
+
+            // Apply pagination
+            int endIndex = Math.min(startIndex + maxCallers, totalCallers);
+            List<Function> pageCallers = startIndex < totalCallers
+                ? callerList.subList(startIndex, endIndex)
+                : List.of();
+
+            // Get program path for tracking
+            String programPath = program.getDomainFile().getPathname();
+
+            // Decompile each caller
+            List<Map<String, Object>> decompilations = new ArrayList<>();
+            DecompInterface decompiler = createConfiguredDecompiler(program, toolName);
+
+            if (decompiler == null) {
+                return createErrorResult("Failed to initialize decompiler");
+            }
+
+            try {
+                for (Function caller : pageCallers) {
+                    Map<String, Object> callerResult = new HashMap<>();
+                    callerResult.put("functionName", caller.getName());
+                    callerResult.put("address", AddressUtil.formatAddress(caller.getEntryPoint()));
+                    callerResult.put("callSites", callSites.get(caller).stream()
+                        .map(AddressUtil::formatAddress)
+                        .toList());
+
+                    DecompilationAttempt attempt = decompileFunctionSafely(decompiler, caller, toolName);
+                    if (attempt.success()) {
+                        String decompCode = attempt.results().getDecompiledFunction().getC();
+                        callerResult.put("decompilation", decompCode);
+                        callerResult.put("success", true);
+
+                        // Find call line numbers if requested
+                        if (includeCallContext) {
+                            List<Integer> callLineNumbers = findCallLineNumbers(
+                                attempt.results(), callSites.get(caller));
+                            callerResult.put("callLineNumbers", callLineNumbers);
+                        }
+
+                        // Track that this function's decompilation has been read
+                        String functionKey = programPath + ":" + AddressUtil.formatAddress(caller.getEntryPoint());
+                        readDecompilationTracker.put(functionKey, System.currentTimeMillis());
+                    } else {
+                        callerResult.put("success", false);
+                        callerResult.put("error", attempt.errorMessage());
+                    }
+
+                    decompilations.add(callerResult);
+                }
+            } finally {
+                decompiler.dispose();
+            }
+
+            // Build result
+            Map<String, Object> result = new HashMap<>();
+            result.put("programPath", programPath);
+            result.put("targetFunction", targetFunction.getName());
+            result.put("targetAddress", AddressUtil.formatAddress(targetFunction.getEntryPoint()));
+            result.put("totalCallers", totalCallers);
+            result.put("startIndex", startIndex);
+            result.put("returnedCount", decompilations.size());
+            result.put("nextStartIndex", startIndex + decompilations.size());
+            result.put("hasMore", endIndex < totalCallers);
+            result.put("callers", decompilations);
+
+            return createJsonResult(result);
+        });
+    }
+
+    /**
+     * Register a tool to get decompilation of all functions that reference an address.
+     * This handles both code and data references.
+     */
+    private void registerGetReferencersDecompiledTool() {
+        Map<String, Object> properties = new HashMap<>();
+        properties.put("programPath", Map.of(
+            "type", "string",
+            "description", "Path in the Ghidra Project to the program"
+        ));
+        properties.put("addressOrSymbol", Map.of(
+            "type", "string",
+            "description", "Target address or symbol name to find references to (e.g., '0x00401000', 'global_var', 'my_label')"
+        ));
+        properties.put("maxReferencers", Map.of(
+            "type", "integer",
+            "description", "Maximum number of referencing functions to decompile (default: 10)",
+            "default", 10
+        ));
+        properties.put("startIndex", Map.of(
+            "type", "integer",
+            "description", "Starting index for pagination (0-based)",
+            "default", 0
+        ));
+        properties.put("includeDataRefs", Map.of(
+            "type", "boolean",
+            "description", "Whether to include data references (reads/writes), not just calls",
+            "default", true
+        ));
+        properties.put("includeRefContext", Map.of(
+            "type", "boolean",
+            "description", "Whether to include reference line numbers in decompilation",
+            "default", true
+        ));
+
+        List<String> required = List.of("programPath", "addressOrSymbol");
+
+        McpSchema.Tool tool = McpSchema.Tool.builder()
+            .name("get-referencers-decompiled")
+            .title("Get Referencers Decompiled")
+            .description("Decompile all functions that reference a specific address or symbol. Useful for understanding how global variables, data, or code locations are used. Includes both code and data references by default.")
+            .inputSchema(createSchema(properties, required))
+            .build();
+
+        registerTool(tool, (exchange, request) -> {
+            final String toolName = "get-referencers-decompiled";
+
+            Program program = getProgramFromArgs(request);
+            String addressOrSymbol = getString(request, "addressOrSymbol");
+            int maxReferencers = getOptionalInt(request, "maxReferencers", 10);
+            int startIndex = getOptionalInt(request, "startIndex", 0);
+            boolean includeDataRefs = getOptionalBoolean(request, "includeDataRefs", true);
+            boolean includeRefContext = getOptionalBoolean(request, "includeRefContext", true);
+
+            // Validate parameters
+            if (maxReferencers <= 0 || maxReferencers > 50) {
+                return createErrorResult("maxReferencers must be between 1 and 50");
+            }
+            if (startIndex < 0) {
+                return createErrorResult("startIndex must be non-negative");
+            }
+
+            // Resolve the target address
+            Address targetAddress = AddressUtil.resolveAddressOrSymbol(program, addressOrSymbol);
+            if (targetAddress == null) {
+                return createErrorResult("Could not resolve address or symbol: " + addressOrSymbol +
+                    " in program " + program.getName());
+            }
+
+            // Get all references to this address
+            ReferenceManager refManager = program.getReferenceManager();
+            ReferenceIterator refIter = refManager.getReferencesTo(targetAddress);
+
+            // Collect unique referencing functions with their reference addresses (with max limit)
+            final int MAX_TOTAL_REFERENCERS = 500;
+            Set<Function> referencingFunctions = new HashSet<>();
+            Map<Function, List<Map<String, Object>>> refDetails = new HashMap<>();
+            // Also store raw addresses for line number lookup
+            Map<Function, List<Address>> refAddressesMap = new HashMap<>();
+
+            while (refIter.hasNext() && referencingFunctions.size() < MAX_TOTAL_REFERENCERS) {
+                Reference ref = refIter.next();
+
+                // Filter by reference type if requested
+                if (!includeDataRefs && !ref.getReferenceType().isFlow()) {
+                    continue;
+                }
+
+                Address fromAddr = ref.getFromAddress();
+                Function refFunc = program.getFunctionManager().getFunctionContaining(fromAddr);
+                if (refFunc != null) {
+                    referencingFunctions.add(refFunc);
+
+                    Map<String, Object> refInfo = new HashMap<>();
+                    refInfo.put("fromAddress", AddressUtil.formatAddress(fromAddr));
+                    refInfo.put("refType", ref.getReferenceType().toString());
+                    refInfo.put("isCall", ref.getReferenceType().isCall());
+                    refInfo.put("isData", ref.getReferenceType().isData());
+                    refInfo.put("isRead", ref.getReferenceType().isRead());
+                    refInfo.put("isWrite", ref.getReferenceType().isWrite());
+
+                    refDetails.computeIfAbsent(refFunc, k -> new ArrayList<>()).add(refInfo);
+                    // Store raw address for line number lookup
+                    refAddressesMap.computeIfAbsent(refFunc, k -> new ArrayList<>()).add(fromAddr);
+                }
+            }
+
+            // Convert to list for pagination
+            List<Function> refList = new ArrayList<>(referencingFunctions);
+            int totalReferencers = refList.size();
+
+            // Apply pagination
+            int endIndex = Math.min(startIndex + maxReferencers, totalReferencers);
+            List<Function> pageRefs = startIndex < totalReferencers
+                ? refList.subList(startIndex, endIndex)
+                : List.of();
+
+            // Get program path for tracking
+            String programPath = program.getDomainFile().getPathname();
+
+            // Decompile each referencing function
+            List<Map<String, Object>> decompilations = new ArrayList<>();
+            DecompInterface decompiler = createConfiguredDecompiler(program, toolName);
+
+            if (decompiler == null) {
+                return createErrorResult("Failed to initialize decompiler");
+            }
+
+            try {
+                for (Function refFunc : pageRefs) {
+                    Map<String, Object> funcResult = new HashMap<>();
+                    funcResult.put("functionName", refFunc.getName());
+                    funcResult.put("address", AddressUtil.formatAddress(refFunc.getEntryPoint()));
+                    funcResult.put("references", refDetails.get(refFunc));
+
+                    DecompilationAttempt attempt = decompileFunctionSafely(decompiler, refFunc, toolName);
+                    if (attempt.success()) {
+                        String decompCode = attempt.results().getDecompiledFunction().getC();
+                        funcResult.put("decompilation", decompCode);
+                        funcResult.put("success", true);
+
+                        // Find reference line numbers if requested using pre-collected addresses
+                        if (includeRefContext) {
+                            List<Address> refAddresses = refAddressesMap.get(refFunc);
+                            if (refAddresses != null) {
+                                List<Integer> refLineNumbers = findCallLineNumbers(attempt.results(), refAddresses);
+                                funcResult.put("referenceLineNumbers", refLineNumbers);
+                            }
+                        }
+
+                        // Track that this function's decompilation has been read
+                        String functionKey = programPath + ":" + AddressUtil.formatAddress(refFunc.getEntryPoint());
+                        readDecompilationTracker.put(functionKey, System.currentTimeMillis());
+                    } else {
+                        funcResult.put("success", false);
+                        funcResult.put("error", attempt.errorMessage());
+                    }
+
+                    decompilations.add(funcResult);
+                }
+            } finally {
+                decompiler.dispose();
+            }
+
+            // Build result
+            Map<String, Object> result = new HashMap<>();
+            result.put("programPath", programPath);
+            result.put("targetAddress", AddressUtil.formatAddress(targetAddress));
+            result.put("resolvedFrom", addressOrSymbol);
+            result.put("totalReferencers", totalReferencers);
+            result.put("startIndex", startIndex);
+            result.put("returnedCount", decompilations.size());
+            result.put("nextStartIndex", startIndex + decompilations.size());
+            result.put("hasMore", endIndex < totalReferencers);
+            result.put("includeDataRefs", includeDataRefs);
+            result.put("referencers", decompilations);
+
+            return createJsonResult(result);
+        });
+    }
+
+    /**
+     * Find line numbers in decompiled code that correspond to specific addresses.
+     */
+    private List<Integer> findCallLineNumbers(DecompileResults results, List<Address> addresses) {
+        List<Integer> lineNumbers = new ArrayList<>();
+
+        if (results == null || addresses == null || addresses.isEmpty()) {
+            return lineNumbers;
+        }
+
+        ClangTokenGroup markup = results.getCCodeMarkup();
+        if (markup == null) {
+            return lineNumbers;
+        }
+
+        Set<Address> addressSet = new HashSet<>(addresses);
+        List<ClangLine> lines = DecompilerUtils.toLines(markup);
+
+        for (ClangLine line : lines) {
+            for (ClangToken token : line.getAllTokens()) {
+                Address tokenAddr = token.getMinAddress();
+                if (tokenAddr != null && addressSet.contains(tokenAddr)) {
+                    lineNumbers.add(line.getLineNumber());
+                    break; // Only add line once
+                }
+            }
+        }
+
+        return lineNumbers;
     }
 }

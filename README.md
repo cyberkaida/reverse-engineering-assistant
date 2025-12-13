@@ -1,5 +1,8 @@
 # ReVa - Ghidra MCP Server for AI-Powered Reverse Engineering
 
+[![Run in Smithery](https://smithery.ai/badge/skills/cyberkaida)](https://smithery.ai/skills?ns=cyberkaida&utm_source=github&utm_medium=badge)
+
+
 > A Ghidra extension that provides a [Model Context Protocol (MCP)](https://modelcontextprotocol.io/faqs) server for AI-assisted reverse engineering
 
 ReVa (Reverse Engineering Assistant) is a **Ghidra MCP server** that enables AI language models to interact with Ghidra's powerful reverse engineering capabilities. ReVa uses

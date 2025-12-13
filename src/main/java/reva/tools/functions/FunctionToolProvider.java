@@ -81,6 +81,12 @@ public class FunctionToolProvider extends AbstractToolProvider {
     /** Log a warning if similarity search takes longer than this (milliseconds) */
     private static final long SLOW_SEARCH_THRESHOLD_MS = 5000;
 
+    /** Maximum function info cache entries (one per program/filter combination) */
+    private static final int MAX_FUNCTION_INFO_CACHE_ENTRIES = 10;
+
+    /** Timeout for building function info cache in seconds */
+    private static final int FUNCTION_INFO_CACHE_TIMEOUT_SECONDS = 300;
+
     /** Maximum unique candidates to track before early termination (memory protection) */
     private static final int MAX_UNIQUE_CANDIDATES = 10000;
 
@@ -117,6 +123,31 @@ public class FunctionToolProvider extends AbstractToolProvider {
         new ConcurrentHashMap<>();
 
     /**
+     * Cache key for raw function info (shared between get-functions and get-functions-by-similarity).
+     */
+    private record FunctionInfoCacheKey(String programPath, boolean filterDefaultNames) {}
+
+    /**
+     * Cached function info list with metadata.
+     */
+    private record CachedFunctionInfo(
+        List<Map<String, Object>> functions,
+        long timestamp,
+        long programModificationNumber
+    ) {
+        boolean isExpired() {
+            return System.currentTimeMillis() - timestamp > CACHE_EXPIRATION_MS;
+        }
+    }
+
+    /**
+     * Thread-safe cache for raw function info (shared between listing tools).
+     * Computing function info is expensive due to caller/callee counts.
+     */
+    private final ConcurrentHashMap<FunctionInfoCacheKey, CachedFunctionInfo> functionInfoCache =
+        new ConcurrentHashMap<>();
+
+    /**
      * Constructor
      * @param server The MCP server
      */
@@ -125,27 +156,131 @@ public class FunctionToolProvider extends AbstractToolProvider {
     }
 
     /**
-     * Clear cached similarity results when a program is closed.
+     * Clear cached results when a program is closed.
      */
     @Override
     public void programClosed(Program program) {
         super.programClosed(program);
 
         String programPath = program.getDomainFile().getPathname();
-        int removedCount = 0;
 
-        // Thread-safe removal using ConcurrentHashMap's keySet iteration
-        for (SimilarityCacheKey key : similarityCache.keySet()) {
-            if (key.programPath().equals(programPath)) {
-                if (similarityCache.remove(key) != null) {
-                    removedCount++;
-                }
-            }
+        // Clear similarity cache using removeIf (thread-safe, no iterator-while-modifying)
+        int beforeSimilarity = similarityCache.size();
+        similarityCache.entrySet().removeIf(entry -> entry.getKey().programPath().equals(programPath));
+        int removedSimilarity = beforeSimilarity - similarityCache.size();
+
+        // Clear function info cache using removeIf (thread-safe, no iterator-while-modifying)
+        int beforeFunctionInfo = functionInfoCache.size();
+        functionInfoCache.entrySet().removeIf(entry -> entry.getKey().programPath().equals(programPath));
+        int removedFunctionInfo = beforeFunctionInfo - functionInfoCache.size();
+
+        if (removedSimilarity > 0 || removedFunctionInfo > 0) {
+            logInfo("FunctionToolProvider: Cleared " + removedSimilarity +
+                " similarity cache entries and " + removedFunctionInfo +
+                " function info cache entries for closed program: " + programPath);
+        }
+    }
+
+    /**
+     * Get function info list from cache or build it.
+     * This is the shared cache used by both get-functions and get-functions-by-similarity.
+     *
+     * @param program The program to get function info from
+     * @param filterDefaultNames Whether to filter out default Ghidra names
+     * @return List of function info maps (never null, but may be empty if timeout)
+     */
+    private List<Map<String, Object>> getOrBuildFunctionInfoCache(Program program, boolean filterDefaultNames) {
+        String programPath = program.getDomainFile().getPathname();
+        FunctionInfoCacheKey cacheKey = new FunctionInfoCacheKey(programPath, filterDefaultNames);
+        long currentModNumber = program.getModificationNumber();
+
+        // Check cache first (thread-safe read)
+        CachedFunctionInfo cached = functionInfoCache.get(cacheKey);
+        if (cached != null && !cached.isExpired() && cached.programModificationNumber() == currentModNumber) {
+            logInfo("FunctionToolProvider: Using cached function info for " + programPath);
+            return cached.functions();
         }
 
-        if (removedCount > 0) {
-            logInfo("FunctionToolProvider: Cleared " + removedCount +
-                " cached similarity results for closed program: " + programPath);
+        // Synchronize cache building to prevent duplicate work from concurrent requests
+        synchronized (functionInfoCache) {
+            // Double-check after acquiring lock (another thread may have built it)
+            cached = functionInfoCache.get(cacheKey);
+            if (cached != null && !cached.isExpired() && cached.programModificationNumber() == currentModNumber) {
+                return cached.functions();
+            }
+
+            // Build function info list with timeout support
+            logInfo("FunctionToolProvider: Building function info cache for " + programPath);
+            long startTime = System.currentTimeMillis();
+
+            TaskMonitor monitor = TimeoutTaskMonitor.timeoutIn(FUNCTION_INFO_CACHE_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            List<Map<String, Object>> functionList = new ArrayList<>();
+            FunctionIterator functions = program.getFunctionManager().getFunctions(true);
+            int processed = 0;
+
+            while (functions.hasNext()) {
+                // Check for timeout periodically
+                if (processed % 100 == 0 && monitor.isCancelled()) {
+                    logInfo("FunctionToolProvider: Cache build timed out after " + processed + " functions");
+                    break;
+                }
+
+                Function function = functions.next();
+                processed++;
+
+                // Skip default Ghidra function names if filtering is enabled
+                if (filterDefaultNames && SymbolUtil.isDefaultSymbolName(function.getName())) {
+                    continue;
+                }
+
+                functionList.add(createFunctionInfo(function, monitor));
+            }
+
+            // Enforce cache size limit before adding new entry
+            evictFunctionInfoCacheIfNeeded();
+
+            // Cache the results
+            CachedFunctionInfo newCached = new CachedFunctionInfo(
+                List.copyOf(functionList),
+                System.currentTimeMillis(),
+                currentModNumber
+            );
+            functionInfoCache.put(cacheKey, newCached);
+
+            long elapsed = System.currentTimeMillis() - startTime;
+            if (elapsed > SLOW_SEARCH_THRESHOLD_MS) {
+                logInfo("FunctionToolProvider: Building function info cache took " +
+                    (elapsed / 1000) + "s (" + functionList.size() + " functions)");
+            }
+
+            return functionList;
+        }
+    }
+
+    /**
+     * Evict oldest function info cache entries if cache is at capacity.
+     * Must be called while holding functionInfoCache lock.
+     */
+    private void evictFunctionInfoCacheIfNeeded() {
+        // Remove expired entries first
+        functionInfoCache.entrySet().removeIf(entry -> entry.getValue().isExpired());
+
+        // Evict oldest entries if still over limit
+        while (functionInfoCache.size() >= MAX_FUNCTION_INFO_CACHE_ENTRIES) {
+            FunctionInfoCacheKey oldest = null;
+            long oldestTime = Long.MAX_VALUE;
+            for (var entry : functionInfoCache.entrySet()) {
+                if (entry.getValue().timestamp() < oldestTime) {
+                    oldestTime = entry.getValue().timestamp();
+                    oldest = entry.getKey();
+                }
+            }
+            if (oldest != null) {
+                functionInfoCache.remove(oldest);
+                logInfo("FunctionToolProvider: Evicted function info cache entry for: " + oldest.programPath());
+            } else {
+                break;
+            }
         }
     }
 
@@ -267,40 +402,24 @@ public class FunctionToolProvider extends AbstractToolProvider {
             PaginationParams pagination = getPaginationParams(request);
             boolean filterDefaultNames = getOptionalBoolean(request, "filterDefaultNames", true);
 
-            // Get the functions from the program
-            List<Map<String, Object>> functionData = new ArrayList<>();
+            // Get function info from shared cache (or build it)
+            List<Map<String, Object>> allFunctions = getOrBuildFunctionInfoCache(program, filterDefaultNames);
+            int totalCount = allFunctions.size();
 
-            AtomicInteger currentIndex = new AtomicInteger(0);
-
-            // Iterate through all functions
-            FunctionIterator functions = program.getFunctionManager().getFunctions(true);
-            functions.forEach(function -> {
-                // Skip default Ghidra function names if filtering is enabled
-                if (filterDefaultNames && SymbolUtil.isDefaultSymbolName(function.getName())) {
-                    return;
-                }
-
-                int index = currentIndex.getAndIncrement();
-                // Skip functions before the start index
-                if (index < pagination.startIndex()) {
-                    return;
-                }
-
-                // Stop after we've collected maxCount functions
-                if (functionData.size() >= pagination.maxCount()) {
-                    return;
-                }
-
-                functionData.add(createFunctionInfo(function));
-            });
+            // Apply pagination
+            int startIndex = pagination.startIndex();
+            int endIndex = Math.min(startIndex + pagination.maxCount(), totalCount);
+            List<Map<String, Object>> functionData = startIndex < totalCount
+                ? allFunctions.subList(startIndex, endIndex)
+                : Collections.emptyList();
 
             // Add metadata about the filtering
             Map<String, Object> metadataInfo = new HashMap<>();
-            metadataInfo.put("startIndex", pagination.startIndex());
+            metadataInfo.put("startIndex", startIndex);
             metadataInfo.put("requestedCount", pagination.maxCount());
             metadataInfo.put("actualCount", functionData.size());
-            metadataInfo.put("nextStartIndex", pagination.startIndex() + functionData.size());
-            metadataInfo.put("totalProcessed", currentIndex.get());
+            metadataInfo.put("nextStartIndex", startIndex + functionData.size());
+            metadataInfo.put("totalCount", totalCount);
             metadataInfo.put("filterDefaultNames", filterDefaultNames);
 
             // Create combined result
@@ -369,7 +488,7 @@ public class FunctionToolProvider extends AbstractToolProvider {
 
             logInfo("get-functions-by-similarity: Searching for '" + searchString + "' in " + program.getName());
 
-            // Check cache for existing results
+            // Check similarity cache for existing sorted results (thread-safe read)
             SimilarityCacheKey cacheKey = new SimilarityCacheKey(programPath, searchString, filterDefaultNames);
             long currentModNumber = program.getModificationNumber();
             CachedSearchResult cached = similarityCache.get(cacheKey);
@@ -384,88 +503,81 @@ public class FunctionToolProvider extends AbstractToolProvider {
                 sortedFunctions = cached.sortedFunctions();
                 originalTotalCount = cached.totalCount();
             } else {
-                // Cache miss - compute results
-                long startTime = System.currentTimeMillis();
+                // Cache miss - need to build similarity results
+                // IMPORTANT: Get function info FIRST (outside similarityCache lock) to avoid deadlock
+                // This ensures consistent lock ordering: functionInfoCache before similarityCache
+                List<Map<String, Object>> allFunctions = getOrBuildFunctionInfoCache(program, filterDefaultNames);
 
-                // Create timeout monitor
-                final TaskMonitor monitor = TimeoutTaskMonitor.timeoutIn(SIMILARITY_SEARCH_TIMEOUT_SECONDS, TimeUnit.SECONDS);
-
-                // Pre-filter: collect functions that contain search string as substring first
-                // This dramatically reduces the number of functions to sort with expensive LCS
-                String searchLower = searchString.toLowerCase();
-                List<Map<String, Object>> substringMatches = new ArrayList<>();
-                List<Map<String, Object>> nonMatches = new ArrayList<>();
-
-                // Iterate through all functions
-                FunctionIterator functions = program.getFunctionManager().getFunctions(true);
-                int processed = 0;
-
-                while (functions.hasNext()) {
-                    // Check for timeout/cancellation periodically
-                    if (processed % 1000 == 0 && monitor.isCancelled()) {
-                        return createErrorResult("Similarity search timed out after processing " +
-                            processed + " functions. Try a more specific search string.");
-                    }
-
-                    Function function = functions.next();
-                    processed++;
-
-                    // Skip default Ghidra function names if filtering is enabled
-                    if (filterDefaultNames && SymbolUtil.isDefaultSymbolName(function.getName())) {
-                        continue;
-                    }
-
-                    // Collect function data
-                    Map<String, Object> functionInfo = createFunctionInfo(function);
-                    String nameLower = function.getName().toLowerCase();
-
-                    // Pre-filter: separate substring matches from non-matches
-                    if (nameLower.contains(searchLower)) {
-                        substringMatches.add(functionInfo);
+                // Now synchronize on similarityCache to prevent duplicate similarity computation
+                synchronized (similarityCache) {
+                    // Double-check after acquiring lock (another thread may have computed while we fetched function info)
+                    cached = similarityCache.get(cacheKey);
+                    if (cached != null && !cached.isExpired() && cached.programModificationNumber() == currentModNumber) {
+                        wasCacheHit = true;
+                        sortedFunctions = cached.sortedFunctions();
+                        originalTotalCount = cached.totalCount();
                     } else {
-                        nonMatches.add(functionInfo);
-                    }
-                }
+                        long startTime = System.currentTimeMillis();
 
-                // Create comparator for LCS-based similarity sorting
-                SimilarityComparator<Map<String, Object>> comparator = new SimilarityComparator<>(searchString,
-                    new SimilarityComparator.StringExtractor<Map<String, Object>>() {
-                        @Override
-                        public String extract(Map<String, Object> item) {
-                            return (String) item.get("name");
+                        // Pre-filter: collect functions that contain search string as substring first
+                        // This dramatically reduces the number of functions to sort with expensive LCS
+                        String searchLower = searchString.toLowerCase();
+                        List<Map<String, Object>> substringMatches = new ArrayList<>();
+                        List<Map<String, Object>> nonMatches = new ArrayList<>();
+
+                        for (Map<String, Object> functionInfo : allFunctions) {
+                            String name = (String) functionInfo.get("name");
+                            String nameLower = name.toLowerCase();
+
+                            // Pre-filter: separate substring matches from non-matches
+                            if (nameLower.contains(searchLower)) {
+                                substringMatches.add(functionInfo);
+                            } else {
+                                nonMatches.add(functionInfo);
+                            }
                         }
-                    });
 
-                // Sort substring matches first (best candidates, typically small list)
-                Collections.sort(substringMatches, comparator);
+                        // Create comparator for LCS-based similarity sorting
+                        SimilarityComparator<Map<String, Object>> comparator = new SimilarityComparator<>(searchString,
+                            new SimilarityComparator.StringExtractor<Map<String, Object>>() {
+                                @Override
+                                public String extract(Map<String, Object> item) {
+                                    return (String) item.get("name");
+                                }
+                            });
 
-                // Only sort non-matches if substring matches are few (optimization)
-                if (substringMatches.size() < 1000 && !nonMatches.isEmpty()) {
-                    Collections.sort(nonMatches, comparator);
-                }
+                        // Sort substring matches first (best candidates, typically small list)
+                        Collections.sort(substringMatches, comparator);
 
-                // Combine results: substring matches first, then non-matches
-                sortedFunctions = new ArrayList<>(substringMatches.size() + nonMatches.size());
-                sortedFunctions.addAll(substringMatches);
-                sortedFunctions.addAll(nonMatches);
-                originalTotalCount = sortedFunctions.size();
+                        // Only sort non-matches if substring matches are few (optimization)
+                        if (substringMatches.size() < 1000 && !nonMatches.isEmpty()) {
+                            Collections.sort(nonMatches, comparator);
+                        }
 
-                // Limit cached results to prevent memory bloat
-                List<Map<String, Object>> toCache = sortedFunctions.size() > MAX_CACHED_RESULTS_PER_SEARCH
-                    ? List.copyOf(sortedFunctions.subList(0, MAX_CACHED_RESULTS_PER_SEARCH))
-                    : List.copyOf(sortedFunctions);
+                        // Combine results: substring matches first, then non-matches
+                        sortedFunctions = new ArrayList<>(substringMatches.size() + nonMatches.size());
+                        sortedFunctions.addAll(substringMatches);
+                        sortedFunctions.addAll(nonMatches);
+                        originalTotalCount = sortedFunctions.size();
 
-                // Evict expired cache entries and store new results
-                evictExpiredCacheEntries();
-                CachedSearchResult newCached = new CachedSearchResult(toCache, System.currentTimeMillis(),
-                    originalTotalCount, currentModNumber);
-                similarityCache.put(cacheKey, newCached);
+                        // Limit cached results to prevent memory bloat using stream for efficiency
+                        List<Map<String, Object>> toCache = sortedFunctions.stream()
+                            .limit(MAX_CACHED_RESULTS_PER_SEARCH)
+                            .toList();
 
-                // Log warning if search took a long time
-                long elapsed = System.currentTimeMillis() - startTime;
-                if (elapsed > SLOW_SEARCH_THRESHOLD_MS) {
-                    logInfo("get-functions-by-similarity: Search for '" + searchString +
-                        "' took " + (elapsed / 1000) + "s (" + originalTotalCount + " functions)");
+                        // Evict expired cache entries and store new results
+                        evictExpiredCacheEntries();
+                        CachedSearchResult newCached = new CachedSearchResult(toCache, System.currentTimeMillis(),
+                            originalTotalCount, currentModNumber);
+                        similarityCache.put(cacheKey, newCached);
+
+                        // Log warning if search took a long time
+                        long elapsed = System.currentTimeMillis() - startTime;
+                        if (elapsed > SLOW_SEARCH_THRESHOLD_MS) {
+                            logInfo("get-functions-by-similarity: Search for '" + searchString +
+                                "' took " + (elapsed / 1000) + "s (" + originalTotalCount + " functions)");
+                        }
+                    }
                 }
             }
 
@@ -538,19 +650,20 @@ public class FunctionToolProvider extends AbstractToolProvider {
     /**
      * Create a map of function information
      * @param function The function to extract information from
-     * @return Map containing function properties
+     * @param monitor TaskMonitor for cancellation support (can be null for quick operations)
+     * @return Immutable map containing function properties
      */
-    private Map<String, Object> createFunctionInfo(Function function) {
+    private Map<String, Object> createFunctionInfo(Function function, TaskMonitor monitor) {
         Map<String, Object> functionInfo = new HashMap<>();
 
-        // Basic information
+        // Basic information - use AddressUtil for consistent formatting
         functionInfo.put("name", function.getName());
-        functionInfo.put("address", "0x" + function.getEntryPoint().toString());
+        functionInfo.put("address", AddressUtil.formatAddress(function.getEntryPoint()));
 
-        // Get the function's body to determine the end address and size
+        // Get the function's body to determine the end address and size (cache to avoid duplicate call)
         AddressSetView body = function.getBody();
         if (body != null && body.getMaxAddress() != null) {
-            functionInfo.put("endAddress", "0x" + body.getMaxAddress().toString());
+            functionInfo.put("endAddress", AddressUtil.formatAddress(body.getMaxAddress()));
             functionInfo.put("sizeInBytes", body.getNumAddresses());
         } else {
             functionInfo.put("sizeInBytes", 0);
@@ -561,19 +674,36 @@ public class FunctionToolProvider extends AbstractToolProvider {
         functionInfo.put("returnType", function.getReturnType().toString());
         functionInfo.put("isExternal", function.isExternal());
         functionInfo.put("isThunk", function.isThunk());
-        functionInfo.put("bodySize", function.getBody().getNumAddresses());
 
-        // Add parameters info
+        // Analysis progress indicators (helps prioritize which functions to investigate)
+        functionInfo.put("isDefaultName", SymbolUtil.isDefaultSymbolName(function.getName()));
+
+        // Use provided monitor for caller/callee counts (these can be slow for complex programs)
+        TaskMonitor countMonitor = (monitor != null) ? monitor : TaskMonitor.DUMMY;
+        int callerCount = function.getCallingFunctions(countMonitor).size();
+        // Check if operation was cancelled - use -1 to indicate incomplete data
+        if (countMonitor.isCancelled()) {
+            functionInfo.put("callerCount", -1);
+            functionInfo.put("calleeCount", -1);
+        } else {
+            functionInfo.put("callerCount", callerCount);
+            int calleeCount = function.getCalledFunctions(countMonitor).size();
+            functionInfo.put("calleeCount", countMonitor.isCancelled() ? -1 : calleeCount);
+        }
+
+        // Add parameters info (as immutable list of immutable maps)
         List<Map<String, String>> parameters = new ArrayList<>();
         for (int i = 0; i < function.getParameterCount(); i++) {
-            Map<String, String> paramInfo = new HashMap<>();
-            paramInfo.put("name", function.getParameter(i).getName());
-            paramInfo.put("dataType", function.getParameter(i).getDataType().toString());
-            parameters.add(paramInfo);
+            // Use Map.of for immutable parameter info
+            parameters.add(Map.of(
+                "name", function.getParameter(i).getName(),
+                "dataType", function.getParameter(i).getDataType().toString()
+            ));
         }
-        functionInfo.put("parameters", parameters);
+        functionInfo.put("parameters", List.copyOf(parameters));
 
-        return functionInfo;
+        // Return immutable copy to prevent cache corruption
+        return Collections.unmodifiableMap(functionInfo);
     }
 
     /**
@@ -836,7 +966,7 @@ public class FunctionToolProvider extends AbstractToolProvider {
                     Map<String, Object> result = new HashMap<>();
                     result.put("success", true);
                     result.put("created", existingFunction == null);
-                    result.put("function", createFunctionInfo(function));
+                    result.put("function", createFunctionInfo(function, null));
                     result.put("address", AddressUtil.formatAddress(address));
                     result.put("parsedSignature", functionDef.toString());
                     result.put("customStorageEnabled", needsCustomStorage && !wasUsingCustomStorage);
@@ -1157,7 +1287,7 @@ public class FunctionToolProvider extends AbstractToolProvider {
                 Map<String, Object> result = new HashMap<>();
                 result.put("success", true);
                 result.put("programPath", programPath);
-                result.put("function", createFunctionInfo(createdFunc));
+                result.put("function", createFunctionInfo(createdFunc, null));
                 result.put("address", AddressUtil.formatAddress(address));
                 result.put("nameWasProvided", name != null && !name.isEmpty());
 

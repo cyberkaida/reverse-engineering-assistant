@@ -90,6 +90,26 @@ public class DecompilerToolProvider extends AbstractToolProvider {
         super(server);
     }
 
+    /**
+     * Clean up read tracking entries when a program is closed.
+     */
+    @Override
+    public void programClosed(Program program) {
+        super.programClosed(program);
+
+        String programPath = program.getDomainFile().getPathname();
+
+        // Remove read tracking entries for the closed program using removeIf (thread-safe)
+        int beforeSize = readDecompilationTracker.size();
+        readDecompilationTracker.entrySet().removeIf(entry -> entry.getKey().startsWith(programPath + ":"));
+        int removed = beforeSize - readDecompilationTracker.size();
+
+        if (removed > 0) {
+            logInfo("DecompilerToolProvider: Cleared " + removed +
+                " read tracking entries for closed program: " + programPath);
+        }
+    }
+
     @Override
     public void registerTools() {
         registerGetDecompilationTool();
@@ -125,6 +145,18 @@ public class DecompilerToolProvider extends AbstractToolProvider {
 
     /** Expiry time for read tracking entries (30 minutes) */
     private static final long READ_TRACKING_EXPIRY_MS = TimeUnit.MINUTES.toMillis(30);
+
+    /** Maximum callers to include in get-decompilation response */
+    private static final int MAX_CALLERS_IN_DECOMPILATION = 50;
+
+    /** Maximum callees to include in get-decompilation response */
+    private static final int MAX_CALLEES_IN_DECOMPILATION = 50;
+
+    /** Check timeout every N instructions during reference counting */
+    private static final int TIMEOUT_CHECK_INSTRUCTION_INTERVAL = 100;
+
+    /** Check timeout every N references during reference counting */
+    private static final int TIMEOUT_CHECK_REFERENCE_INTERVAL = 50;
 
     /** Map of Ghidra comment types to their string names for JSON output */
     private static final Map<CommentType, String> COMMENT_TYPE_NAMES = Map.of(
@@ -426,6 +458,111 @@ public class DecompilerToolProvider extends AbstractToolProvider {
         return false;
     }
 
+    /**
+     * Result of counting call references with timeout handling.
+     */
+    private record CallCountResult(
+        Map<Address, Integer> callCounts,
+        boolean timedOut
+    ) {}
+
+    /**
+     * Count call references for a function (either callers or callees) with timeout handling.
+     * This method handles the iteration over instructions and references consistently.
+     *
+     * @param program The program
+     * @param function The function to count calls for
+     * @param countCallers true to count callers (references TO this function),
+     *                     false to count callees (references FROM this function)
+     * @return CallCountResult containing the counts and timeout status
+     */
+    private CallCountResult countCallsWithTimeout(Program program, Function function, boolean countCallers) {
+        TaskMonitor monitor = createTimeoutMonitor();
+        Map<Address, Integer> callCounts = new HashMap<>();
+        boolean timedOut = false;
+
+        ReferenceManager refManager = program.getReferenceManager();
+        Listing listing = program.getListing();
+        AddressSetView functionBody = function.getBody();
+
+        int instrCount = 0;
+        int refCount = 0;
+
+        for (Instruction instr : listing.getInstructions(functionBody, true)) {
+            // Check timeout periodically on instruction boundary
+            if (++instrCount % TIMEOUT_CHECK_INSTRUCTION_INTERVAL == 0 && monitor.isCancelled()) {
+                timedOut = true;
+                break;
+            }
+
+            if (countCallers) {
+                // For callers: get references TO each instruction in this function
+                ReferenceIterator refsTo = refManager.getReferencesTo(instr.getAddress());
+                while (refsTo.hasNext()) {
+                    // Check timeout in inner loop for addresses with many references
+                    if (++refCount % TIMEOUT_CHECK_REFERENCE_INTERVAL == 0 && monitor.isCancelled()) {
+                        timedOut = true;
+                        break;
+                    }
+                    Reference ref = refsTo.next();
+                    if (ref.getReferenceType().isCall()) {
+                        Function caller = program.getFunctionManager().getFunctionContaining(ref.getFromAddress());
+                        if (caller != null) {
+                            callCounts.merge(caller.getEntryPoint(), 1, Integer::sum);
+                        }
+                    }
+                }
+                if (timedOut) break;
+            } else {
+                // For callees: get references FROM each instruction in this function
+                // No inner-loop timeout check needed here because getReferencesFrom() typically
+                // returns very few references per instruction (usually 0-1 call targets),
+                // unlike getReferencesTo() which can return thousands for popular functions
+                Reference[] refsFrom = instr.getReferencesFrom();
+                for (Reference ref : refsFrom) {
+                    if (ref.getReferenceType().isCall()) {
+                        callCounts.merge(ref.getToAddress(), 1, Integer::sum);
+                    }
+                }
+            }
+        }
+
+        return new CallCountResult(callCounts, timedOut);
+    }
+
+    /**
+     * Build a list of caller/callee info maps for the result.
+     *
+     * @param functions The set of functions (callers or callees)
+     * @param callCounts Map of entry point addresses to call counts
+     * @param maxCount Maximum number to include
+     * @param isCallers true if building caller info, false for callee info
+     * @return List of function info maps
+     */
+    private List<Map<String, Object>> buildCallListInfo(
+            Set<Function> functions,
+            Map<Address, Integer> callCounts,
+            int maxCount,
+            boolean isCallers) {
+        List<Map<String, Object>> resultList = new ArrayList<>();
+        int count = 0;
+
+        for (Function func : functions) {
+            if (count >= maxCount) break;
+
+            Map<String, Object> funcInfo = new HashMap<>();
+            funcInfo.put("name", func.getName());
+            funcInfo.put("address", AddressUtil.formatAddress(func.getEntryPoint()));
+            funcInfo.put("signature", func.getSignature().getPrototypeString());
+            funcInfo.put("callCount", callCounts.getOrDefault(func.getEntryPoint(), 0));
+
+            resultList.add(funcInfo);
+            count++;
+        }
+
+        return resultList;
+    }
+
     // ============================================================================
     // Tool Registration Methods
     // ============================================================================
@@ -474,6 +611,16 @@ public class DecompilerToolProvider extends AbstractToolProvider {
             "description", "Whether to include code context snippets from calling functions (requires includeIncomingReferences)",
             "default", true
         ));
+        properties.put("includeCallers", Map.of(
+            "type", "boolean",
+            "description", "Include list of functions that call this one (name, address, signature). Use for understanding function usage without bulk decompilation.",
+            "default", false
+        ));
+        properties.put("includeCallees", Map.of(
+            "type", "boolean",
+            "description", "Include list of functions this one calls (name, address, signature). Use for understanding function dependencies without bulk decompilation.",
+            "default", false
+        ));
 
         List<String> required = List.of("programPath", "functionNameOrAddress");
 
@@ -481,7 +628,7 @@ public class DecompilerToolProvider extends AbstractToolProvider {
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("get-decompilation")
             .title("Get Function Decompilation")
-            .description("Get decompiled code for a function with line range support. Defaults to 50 lines to conserve context - start with small chunks (10-20 lines) then expand as needed using offset/limit. Updating variable data types and names can significantly improve decompilation quality.")
+            .description("Get decompiled code for a function with line range support. Defaults to 50 lines to conserve context - start with small chunks (10-20 lines) then expand as needed using offset/limit. Updating variable data types and names can significantly improve decompilation quality. Use includeCallers/includeCallees to get caller/callee lists in one call (avoids separate tool invocations).")
             .inputSchema(createSchema(properties, required))
             .build();
 
@@ -496,6 +643,8 @@ public class DecompilerToolProvider extends AbstractToolProvider {
             boolean includeComments = getOptionalBoolean(request, "includeComments", false);
             boolean includeIncomingReferences = getOptionalBoolean(request, "includeIncomingReferences", true);
             boolean includeReferenceContext = getOptionalBoolean(request, "includeReferenceContext", true);
+            boolean includeCallers = getOptionalBoolean(request, "includeCallers", false);
+            boolean includeCallees = getOptionalBoolean(request, "includeCallees", false);
 
             Map<String, Object> resultData = new HashMap<>();
             resultData.put("programName", program.getName());
@@ -674,6 +823,59 @@ public class DecompilerToolProvider extends AbstractToolProvider {
                 resultData.put("decompilation", "");
             } finally {
                 decompiler.dispose();
+            }
+
+            // Add caller/callee information if requested (outside decompiler scope)
+            if (includeCallers && !isUndefinedFunction) {
+                TaskMonitor callerMonitor = createTimeoutMonitor();
+                Set<Function> callers = function.getCallingFunctions(callerMonitor);
+
+                if (callerMonitor.isCancelled()) {
+                    resultData.put("callersError", "Operation timed out while getting callers");
+                } else {
+                    int totalCallers = callers.size();
+
+                    // Count calls using shared helper (separate timeout monitor)
+                    CallCountResult countResult = countCallsWithTimeout(program, function, true);
+                    List<Map<String, Object>> callersList = buildCallListInfo(
+                        callers, countResult.callCounts(), MAX_CALLERS_IN_DECOMPILATION, true);
+
+                    resultData.put("callers", callersList);
+                    resultData.put("callerCount", callersList.size());
+                    resultData.put("totalCallerCount", totalCallers);
+                    if (totalCallers > MAX_CALLERS_IN_DECOMPILATION) {
+                        resultData.put("callersLimited", true);
+                    }
+                    if (countResult.timedOut()) {
+                        resultData.put("callerCallCountsIncomplete", true);
+                    }
+                }
+            }
+
+            if (includeCallees && !isUndefinedFunction) {
+                TaskMonitor calleeMonitor = createTimeoutMonitor();
+                Set<Function> callees = function.getCalledFunctions(calleeMonitor);
+
+                if (calleeMonitor.isCancelled()) {
+                    resultData.put("calleesError", "Operation timed out while getting callees");
+                } else {
+                    int totalCallees = callees.size();
+
+                    // Count calls using shared helper (separate timeout monitor)
+                    CallCountResult countResult = countCallsWithTimeout(program, function, false);
+                    List<Map<String, Object>> calleesList = buildCallListInfo(
+                        callees, countResult.callCounts(), MAX_CALLEES_IN_DECOMPILATION, false);
+
+                    resultData.put("callees", calleesList);
+                    resultData.put("calleeCount", calleesList.size());
+                    resultData.put("totalCalleeCount", totalCallees);
+                    if (totalCallees > MAX_CALLEES_IN_DECOMPILATION) {
+                        resultData.put("calleesLimited", true);
+                    }
+                    if (countResult.timedOut()) {
+                        resultData.put("calleeCallCountsIncomplete", true);
+                    }
+                }
             }
 
             return createJsonResult(resultData);

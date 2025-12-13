@@ -148,6 +148,26 @@ public class FunctionToolProvider extends AbstractToolProvider {
         new ConcurrentHashMap<>();
 
     /**
+     * Helper class to track undefined function candidate info including reference types.
+     */
+    private static class CandidateInfo {
+        private final List<Address> references = new ArrayList<>();
+        private boolean hasCallRef = false;
+        private boolean hasDataRef = false;
+
+        void addReference(Address fromAddr, boolean isCall, boolean isData) {
+            references.add(fromAddr);
+            if (isCall) hasCallRef = true;
+            if (isData) hasDataRef = true;
+        }
+
+        int referenceCount() { return references.size(); }
+        List<Address> references() { return references; }
+        boolean hasCallRef() { return hasCallRef; }
+        boolean hasDataRef() { return hasDataRef; }
+    }
+
+    /**
      * Constructor
      * @param server The MCP server
      */
@@ -989,7 +1009,7 @@ public class FunctionToolProvider extends AbstractToolProvider {
 
     /**
      * Register a tool to find undefined function candidates - addresses that receive
-     * CALL references but are not defined as functions.
+     * CALL or DATA references but are not defined as functions.
      */
     private void registerUndefinedFunctionCandidatesTool() {
         Map<String, Object> properties = new HashMap<>();
@@ -1007,9 +1027,9 @@ public class FunctionToolProvider extends AbstractToolProvider {
             "description", "Starting index for pagination (0-based)",
             "default", 0
         ));
-        properties.put("minCallCount", Map.of(
+        properties.put("minReferenceCount", Map.of(
             "type", "integer",
-            "description", "Minimum number of callers required to be a candidate (default: 1)",
+            "description", "Minimum number of references required to be a candidate (default: 1)",
             "default", 1
         ));
 
@@ -1018,8 +1038,8 @@ public class FunctionToolProvider extends AbstractToolProvider {
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("get-undefined-function-candidates")
             .title("Get Undefined Function Candidates")
-            .description("Find addresses that receive CALL references but are not defined as functions. " +
-                "Returns only valid function candidates (with instructions), excluding IAT thunks and data pointers. " +
+            .description("Find addresses in executable memory with valid instructions that are referenced but not defined as functions. " +
+                "Includes both CALL references and DATA references (function pointers, callbacks, exception handlers). " +
                 "Use get-decompilation to preview candidates, then create-function to define them permanently.")
             .inputSchema(createSchema(properties, required))
             .build();
@@ -1029,11 +1049,11 @@ public class FunctionToolProvider extends AbstractToolProvider {
             String programPath = program.getDomainFile().getPathname();
             int maxCandidates = getOptionalInt(request, "maxCandidates", 100);
             int startIndex = getOptionalInt(request, "startIndex", 0);
-            int minCallCount = getOptionalInt(request, "minCallCount", 1);
+            int minReferenceCount = getOptionalInt(request, "minReferenceCount", 1);
 
-            // Validate minCallCount
-            if (minCallCount < 1) {
-                return createErrorResult("minCallCount must be at least 1");
+            // Validate minReferenceCount
+            if (minReferenceCount < 1) {
+                return createErrorResult("minReferenceCount must be at least 1");
             }
 
             logInfo("get-undefined-function-candidates: Scanning " + program.getName());
@@ -1042,8 +1062,9 @@ public class FunctionToolProvider extends AbstractToolProvider {
             FunctionManager funcMgr = program.getFunctionManager();
             ReferenceManager refMgr = program.getReferenceManager();
 
-            // Collect all CALL targets and their call counts
-            Map<Address, List<Address>> callTargets = new HashMap<>();
+            // Collect all reference targets and track reference types
+            // Key: target address, Value: map with "callers" list and "hasCallRef"/"hasDataRef" flags
+            Map<Address, CandidateInfo> candidates = new HashMap<>();
             ReferenceIterator refIter = refMgr.getReferenceIterator(program.getMinAddress());
 
             int refsScanned = 0;
@@ -1053,8 +1074,11 @@ public class FunctionToolProvider extends AbstractToolProvider {
                 Reference ref = refIter.next();
                 refsScanned++;
 
-                // Only interested in CALL references
-                if (!ref.getReferenceType().isCall()) {
+                boolean isCallRef = ref.getReferenceType().isCall();
+                boolean isDataRef = ref.getReferenceType().isData();
+
+                // Only interested in CALL and DATA references (function calls and function pointers)
+                if (!isCallRef && !isDataRef) {
                     continue;
                 }
 
@@ -1090,12 +1114,12 @@ public class FunctionToolProvider extends AbstractToolProvider {
                     continue;
                 }
 
-                // Track this call target
-                callTargets.computeIfAbsent(targetAddr, k -> new ArrayList<>())
-                    .add(ref.getFromAddress());
+                // Track this candidate
+                CandidateInfo info = candidates.computeIfAbsent(targetAddr, k -> new CandidateInfo());
+                info.addReference(ref.getFromAddress(), isCallRef, isDataRef);
 
                 // Memory protection: stop if too many unique candidates
-                if (callTargets.size() >= MAX_UNIQUE_CANDIDATES) {
+                if (candidates.size() >= MAX_UNIQUE_CANDIDATES) {
                     earlyTermination = true;
                     logInfo("get-undefined-function-candidates: Early termination at " +
                         MAX_UNIQUE_CANDIDATES + " unique candidates (memory protection)");
@@ -1103,40 +1127,43 @@ public class FunctionToolProvider extends AbstractToolProvider {
                 }
             }
 
-            // Filter by minimum call count and sort by call count (descending)
-            List<Map.Entry<Address, List<Address>>> sortedCandidates = callTargets.entrySet().stream()
-                .filter(e -> e.getValue().size() >= minCallCount)
-                .sorted((a, b) -> Integer.compare(b.getValue().size(), a.getValue().size()))
+            // Filter by minimum reference count and sort by reference count (descending)
+            List<Map.Entry<Address, CandidateInfo>> sortedCandidates = candidates.entrySet().stream()
+                .filter(e -> e.getValue().referenceCount() >= minReferenceCount)
+                .sorted((a, b) -> Integer.compare(b.getValue().referenceCount(), a.getValue().referenceCount()))
                 .toList();
 
             int totalCandidates = sortedCandidates.size();
 
             // Apply pagination
-            List<Map<String, Object>> candidates = new ArrayList<>();
+            List<Map<String, Object>> candidatesList = new ArrayList<>();
             int endIndex = Math.min(startIndex + maxCandidates, sortedCandidates.size());
 
             for (int i = startIndex; i < endIndex; i++) {
-                Map.Entry<Address, List<Address>> entry = sortedCandidates.get(i);
+                Map.Entry<Address, CandidateInfo> entry = sortedCandidates.get(i);
                 Address addr = entry.getKey();
-                List<Address> callers = entry.getValue();
+                CandidateInfo info = entry.getValue();
 
                 Map<String, Object> candidate = new HashMap<>();
                 candidate.put("address", AddressUtil.formatAddress(addr));
-                candidate.put("callCount", callers.size());
+                candidate.put("referenceCount", info.referenceCount());
+                candidate.put("hasCallReference", info.hasCallRef());
+                candidate.put("hasDataReference", info.hasDataRef());
 
-                // Include sample callers (up to 5)
-                List<String> sampleCallers = new ArrayList<>();
-                for (int j = 0; j < Math.min(5, callers.size()); j++) {
-                    Address callerAddr = callers.get(j);
-                    Function callerFunc = funcMgr.getFunctionContaining(callerAddr);
-                    if (callerFunc != null) {
-                        sampleCallers.add(callerFunc.getName() + " (" +
-                            AddressUtil.formatAddress(callerAddr) + ")");
+                // Include sample references (up to 5)
+                List<String> sampleReferences = new ArrayList<>();
+                List<Address> refs = info.references();
+                for (int j = 0; j < Math.min(5, refs.size()); j++) {
+                    Address refAddr = refs.get(j);
+                    Function refFunc = funcMgr.getFunctionContaining(refAddr);
+                    if (refFunc != null) {
+                        sampleReferences.add(refFunc.getName() + " (" +
+                            AddressUtil.formatAddress(refAddr) + ")");
                     } else {
-                        sampleCallers.add(AddressUtil.formatAddress(callerAddr));
+                        sampleReferences.add(AddressUtil.formatAddress(refAddr));
                     }
                 }
-                candidate.put("sampleCallers", sampleCallers);
+                candidate.put("sampleReferences", sampleReferences);
 
                 // Get memory block info
                 MemoryBlock block = program.getMemory().getBlock(addr);
@@ -1150,7 +1177,7 @@ public class FunctionToolProvider extends AbstractToolProvider {
                     candidate.put("existingSymbol", symbol.getName());
                 }
 
-                candidates.add(candidate);
+                candidatesList.add(candidate);
             }
 
             // Log timing for slow operations (with pagination context)
@@ -1164,7 +1191,7 @@ public class FunctionToolProvider extends AbstractToolProvider {
             // Build response
             Map<String, Object> result = new HashMap<>();
             result.put("programPath", programPath);
-            result.put("candidates", candidates);
+            result.put("candidates", candidatesList);
             result.put("totalCandidates", totalCandidates);
             result.put("referencesScanned", refsScanned);
             if (earlyTermination) {
@@ -1174,7 +1201,7 @@ public class FunctionToolProvider extends AbstractToolProvider {
             result.put("pagination", Map.of(
                 "startIndex", startIndex,
                 "maxCandidates", maxCandidates,
-                "returnedCount", candidates.size(),
+                "returnedCount", candidatesList.size(),
                 "hasMore", endIndex < totalCandidates
             ));
 

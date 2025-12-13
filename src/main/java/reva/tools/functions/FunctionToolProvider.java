@@ -18,12 +18,15 @@ package reva.tools.functions;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import ghidra.app.cmd.function.CreateFunctionCmd;
 import ghidra.app.util.cparser.C.ParseException;
 import ghidra.util.task.TaskMonitor;
 import ghidra.util.task.TimeoutTaskMonitor;
@@ -37,11 +40,17 @@ import ghidra.program.model.data.ParameterDefinitionImpl;
 import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.FunctionIterator;
 import ghidra.program.model.listing.FunctionManager;
+import ghidra.program.model.listing.Instruction;
 import ghidra.program.model.listing.Parameter;
 import ghidra.program.model.listing.ParameterImpl;
 import ghidra.program.model.listing.Program;
 import ghidra.program.model.listing.Variable;
+import ghidra.program.model.mem.MemoryBlock;
+import ghidra.program.model.symbol.Reference;
+import ghidra.program.model.symbol.ReferenceIterator;
+import ghidra.program.model.symbol.ReferenceManager;
 import ghidra.program.model.symbol.SourceType;
+import ghidra.program.model.symbol.Symbol;
 import ghidra.util.exception.CancelledException;
 import ghidra.util.exception.DuplicateNameException;
 import ghidra.util.exception.InvalidInputException;
@@ -71,6 +80,14 @@ public class FunctionToolProvider extends AbstractToolProvider {
 
     /** Log a warning if similarity search takes longer than this (milliseconds) */
     private static final long SLOW_SEARCH_THRESHOLD_MS = 5000;
+
+    /** Maximum unique candidates to track before early termination (memory protection) */
+    private static final int MAX_UNIQUE_CANDIDATES = 10000;
+
+    /** Memory block patterns to exclude from undefined function candidates (PLT, GOT, imports) */
+    private static final Set<String> EXCLUDED_BLOCK_PATTERNS = Set.of(
+        ".plt", ".got", ".idata", ".edata", "extern", "external"
+    );
 
     /**
      * Cache key for similarity search results.
@@ -138,6 +155,8 @@ public class FunctionToolProvider extends AbstractToolProvider {
         registerFunctionsTool();
         registerFunctionsBySimilarityTool();
         registerSetFunctionPrototypeTool();
+        registerUndefinedFunctionCandidatesTool();
+        registerCreateFunctionTool();
     }
 
     /**
@@ -172,6 +191,10 @@ public class FunctionToolProvider extends AbstractToolProvider {
             Program program = getProgramFromArgs(request);
             boolean filterDefaultNames = getOptionalBoolean(request, "filterDefaultNames", true);
 
+            logInfo("get-function-count: Counting functions in " + program.getName() +
+                " (filterDefaultNames=" + filterDefaultNames + ")");
+            long startTime = System.currentTimeMillis();
+
             AtomicInteger count = new AtomicInteger(0);
 
             // Iterate through all functions
@@ -184,6 +207,13 @@ public class FunctionToolProvider extends AbstractToolProvider {
 
                 count.incrementAndGet();
             });
+
+            // Log warning if operation took too long
+            long elapsed = System.currentTimeMillis() - startTime;
+            if (elapsed > SLOW_SEARCH_THRESHOLD_MS) {
+                logInfo("get-function-count: Counting " + count.get() + " functions took " +
+                    (elapsed / 1000) + "s in " + program.getName());
+            }
 
             // Create result data
             Map<String, Object> countData = new HashMap<>();
@@ -823,6 +853,319 @@ public class FunctionToolProvider extends AbstractToolProvider {
                 return createErrorResult(e.getMessage());
             } catch (Exception e) {
                 return createErrorResult("Unexpected error: " + e.getMessage());
+            }
+        });
+    }
+
+    /**
+     * Register a tool to find undefined function candidates - addresses that receive
+     * CALL references but are not defined as functions.
+     */
+    private void registerUndefinedFunctionCandidatesTool() {
+        Map<String, Object> properties = new HashMap<>();
+        properties.put("programPath", Map.of(
+            "type", "string",
+            "description", "Path in the Ghidra Project to the program"
+        ));
+        properties.put("maxCandidates", Map.of(
+            "type", "integer",
+            "description", "Maximum number of candidates to return (default: 100)",
+            "default", 100
+        ));
+        properties.put("startIndex", Map.of(
+            "type", "integer",
+            "description", "Starting index for pagination (0-based)",
+            "default", 0
+        ));
+        properties.put("minCallCount", Map.of(
+            "type", "integer",
+            "description", "Minimum number of callers required to be a candidate (default: 1)",
+            "default", 1
+        ));
+
+        List<String> required = List.of("programPath");
+
+        McpSchema.Tool tool = McpSchema.Tool.builder()
+            .name("get-undefined-function-candidates")
+            .title("Get Undefined Function Candidates")
+            .description("Find addresses that receive CALL references but are not defined as functions. " +
+                "Returns only valid function candidates (with instructions), excluding IAT thunks and data pointers. " +
+                "Use get-decompilation to preview candidates, then create-function to define them permanently.")
+            .inputSchema(createSchema(properties, required))
+            .build();
+
+        registerTool(tool, (exchange, request) -> {
+            Program program = getProgramFromArgs(request);
+            String programPath = program.getDomainFile().getPathname();
+            int maxCandidates = getOptionalInt(request, "maxCandidates", 100);
+            int startIndex = getOptionalInt(request, "startIndex", 0);
+            int minCallCount = getOptionalInt(request, "minCallCount", 1);
+
+            // Validate minCallCount
+            if (minCallCount < 1) {
+                return createErrorResult("minCallCount must be at least 1");
+            }
+
+            logInfo("get-undefined-function-candidates: Scanning " + program.getName());
+            long startTime = System.currentTimeMillis();
+
+            FunctionManager funcMgr = program.getFunctionManager();
+            ReferenceManager refMgr = program.getReferenceManager();
+
+            // Collect all CALL targets and their call counts
+            Map<Address, List<Address>> callTargets = new HashMap<>();
+            ReferenceIterator refIter = refMgr.getReferenceIterator(program.getMinAddress());
+
+            int refsScanned = 0;
+            boolean earlyTermination = false;
+
+            while (refIter.hasNext()) {
+                Reference ref = refIter.next();
+                refsScanned++;
+
+                // Only interested in CALL references
+                if (!ref.getReferenceType().isCall()) {
+                    continue;
+                }
+
+                Address targetAddr = ref.getToAddress();
+
+                // Skip if already a defined function
+                if (funcMgr.getFunctionAt(targetAddr) != null) {
+                    continue;
+                }
+
+                // Skip external addresses
+                if (targetAddr.isExternalAddress()) {
+                    continue;
+                }
+
+                // Skip addresses in non-executable memory or special sections
+                MemoryBlock block = program.getMemory().getBlock(targetAddr);
+                if (block == null || !block.isExecute()) {
+                    continue;
+                }
+
+                // Skip PLT/GOT/import entries (common false positives)
+                String blockNameLower = block.getName().toLowerCase();
+                boolean isExcluded = EXCLUDED_BLOCK_PATTERNS.stream()
+                    .anyMatch(blockNameLower::contains);
+                if (isExcluded) {
+                    continue;
+                }
+
+                // Skip addresses without instructions (IAT thunks, data pointers, etc.)
+                // These are not valid function candidates
+                if (program.getListing().getInstructionAt(targetAddr) == null) {
+                    continue;
+                }
+
+                // Track this call target
+                callTargets.computeIfAbsent(targetAddr, k -> new ArrayList<>())
+                    .add(ref.getFromAddress());
+
+                // Memory protection: stop if too many unique candidates
+                if (callTargets.size() >= MAX_UNIQUE_CANDIDATES) {
+                    earlyTermination = true;
+                    logInfo("get-undefined-function-candidates: Early termination at " +
+                        MAX_UNIQUE_CANDIDATES + " unique candidates (memory protection)");
+                    break;
+                }
+            }
+
+            // Filter by minimum call count and sort by call count (descending)
+            List<Map.Entry<Address, List<Address>>> sortedCandidates = callTargets.entrySet().stream()
+                .filter(e -> e.getValue().size() >= minCallCount)
+                .sorted((a, b) -> Integer.compare(b.getValue().size(), a.getValue().size()))
+                .toList();
+
+            int totalCandidates = sortedCandidates.size();
+
+            // Apply pagination
+            List<Map<String, Object>> candidates = new ArrayList<>();
+            int endIndex = Math.min(startIndex + maxCandidates, sortedCandidates.size());
+
+            for (int i = startIndex; i < endIndex; i++) {
+                Map.Entry<Address, List<Address>> entry = sortedCandidates.get(i);
+                Address addr = entry.getKey();
+                List<Address> callers = entry.getValue();
+
+                Map<String, Object> candidate = new HashMap<>();
+                candidate.put("address", AddressUtil.formatAddress(addr));
+                candidate.put("callCount", callers.size());
+
+                // Include sample callers (up to 5)
+                List<String> sampleCallers = new ArrayList<>();
+                for (int j = 0; j < Math.min(5, callers.size()); j++) {
+                    Address callerAddr = callers.get(j);
+                    Function callerFunc = funcMgr.getFunctionContaining(callerAddr);
+                    if (callerFunc != null) {
+                        sampleCallers.add(callerFunc.getName() + " (" +
+                            AddressUtil.formatAddress(callerAddr) + ")");
+                    } else {
+                        sampleCallers.add(AddressUtil.formatAddress(callerAddr));
+                    }
+                }
+                candidate.put("sampleCallers", sampleCallers);
+
+                // Get memory block info
+                MemoryBlock block = program.getMemory().getBlock(addr);
+                if (block != null) {
+                    candidate.put("memoryBlock", block.getName());
+                }
+
+                // Check for any existing symbol
+                Symbol symbol = program.getSymbolTable().getPrimarySymbol(addr);
+                if (symbol != null) {
+                    candidate.put("existingSymbol", symbol.getName());
+                }
+
+                candidates.add(candidate);
+            }
+
+            // Log timing for slow operations (with pagination context)
+            long elapsed = System.currentTimeMillis() - startTime;
+            if (elapsed > SLOW_SEARCH_THRESHOLD_MS) {
+                logInfo("get-undefined-function-candidates: Found " + totalCandidates +
+                    " candidates in " + (elapsed / 1000) + "s (scanned " + refsScanned +
+                    " refs, returning " + startIndex + "-" + endIndex + ")");
+            }
+
+            // Build response
+            Map<String, Object> result = new HashMap<>();
+            result.put("programPath", programPath);
+            result.put("candidates", candidates);
+            result.put("totalCandidates", totalCandidates);
+            result.put("referencesScanned", refsScanned);
+            if (earlyTermination) {
+                result.put("earlyTermination", true);
+                result.put("note", "Scan stopped early due to memory limits. Results may be incomplete.");
+            }
+            result.put("pagination", Map.of(
+                "startIndex", startIndex,
+                "maxCandidates", maxCandidates,
+                "returnedCount", candidates.size(),
+                "hasMore", endIndex < totalCandidates
+            ));
+
+            return createJsonResult(result);
+        });
+    }
+
+    /**
+     * Register a tool to create a function at an address with auto-detected signature.
+     * This is simpler than set-function-prototype as it doesn't require specifying a signature.
+     */
+    private void registerCreateFunctionTool() {
+        Map<String, Object> properties = new HashMap<>();
+        properties.put("programPath", Map.of(
+            "type", "string",
+            "description", "Path in the Ghidra Project to the program"
+        ));
+        properties.put("address", Map.of(
+            "type", "string",
+            "description", "Address where the function should be created (e.g., '0x401000')"
+        ));
+        properties.put("name", Map.of(
+            "type", "string",
+            "description", "Optional name for the function. If not provided, Ghidra will generate a default name (FUN_xxxxxxxx)"
+        ));
+
+        List<String> required = List.of("programPath", "address");
+
+        McpSchema.Tool tool = McpSchema.Tool.builder()
+            .name("create-function")
+            .title("Create Function")
+            .description("Create a function at an address with auto-detected signature. " +
+                "Ghidra will analyze the code to determine the function body, parameters, and return type. " +
+                "Use this after get-undefined-function-candidates to define discovered functions. " +
+                "For explicit signature control, use set-function-prototype instead.")
+            .inputSchema(createSchema(properties, required))
+            .build();
+
+        registerTool(tool, (exchange, request) -> {
+            Program program = getProgramFromArgs(request);
+            String programPath = program.getDomainFile().getPathname();
+            String name = getOptionalString(request, "name", null);
+
+            // Resolve the address using the standard helper
+            Address address = getAddressFromArgs(request, program, "address");
+
+            // Validate address is in executable memory
+            MemoryBlock block = program.getMemory().getBlock(address);
+            if (block == null) {
+                return createErrorResult("Address " + AddressUtil.formatAddress(address) +
+                    " is not in any memory block");
+            }
+            if (!block.isExecute()) {
+                return createErrorResult("Address " + AddressUtil.formatAddress(address) +
+                    " is not in executable memory (block: " + block.getName() + ")");
+            }
+
+            // Check if there's already a function at this address
+            FunctionManager funcMgr = program.getFunctionManager();
+            Function existingFunc = funcMgr.getFunctionAt(address);
+            if (existingFunc != null) {
+                return createErrorResult("Function already exists at " +
+                    AddressUtil.formatAddress(address) + ": " + existingFunc.getName());
+            }
+
+            // Check if there's an instruction at the address
+            Instruction instr = program.getListing().getInstructionAt(address);
+            if (instr == null) {
+                return createErrorResult("No instruction at address " +
+                    AddressUtil.formatAddress(address) +
+                    ". The address may need to be disassembled first.");
+            }
+
+            // Create the function using CreateFunctionCmd
+            int txId = program.startTransaction("Create Function");
+            try {
+                CreateFunctionCmd cmd = new CreateFunctionCmd(address);
+                boolean success = cmd.applyTo(program);
+
+                if (!success) {
+                    program.endTransaction(txId, false);
+                    String statusMsg = cmd.getStatusMsg();
+                    return createErrorResult("Failed to create function at " +
+                        AddressUtil.formatAddress(address) +
+                        (statusMsg != null ? ": " + statusMsg : ""));
+                }
+
+                // Get the created function
+                Function createdFunc = funcMgr.getFunctionAt(address);
+                if (createdFunc == null) {
+                    program.endTransaction(txId, false);
+                    return createErrorResult("Function creation reported success but function not found");
+                }
+
+                // Set custom name if provided
+                if (name != null && !name.isEmpty()) {
+                    try {
+                        createdFunc.setName(name, SourceType.USER_DEFINED);
+                    } catch (DuplicateNameException e) {
+                        // Name already exists, keep the default name
+                        logInfo("create-function: Name '" + name + "' already exists, keeping default name");
+                    } catch (InvalidInputException e) {
+                        logInfo("create-function: Invalid name '" + name + "': " + e.getMessage());
+                    }
+                }
+
+                program.endTransaction(txId, true);
+
+                // Build response
+                Map<String, Object> result = new HashMap<>();
+                result.put("success", true);
+                result.put("programPath", programPath);
+                result.put("function", createFunctionInfo(createdFunc));
+                result.put("address", AddressUtil.formatAddress(address));
+                result.put("nameWasProvided", name != null && !name.isEmpty());
+
+                return createJsonResult(result);
+
+            } catch (Exception e) {
+                program.endTransaction(txId, false);
+                return createErrorResult("Error creating function: " + e.getMessage());
             }
         });
     }

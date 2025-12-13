@@ -45,6 +45,8 @@ import ghidra.program.model.listing.FunctionManager;
 import ghidra.program.model.listing.Instruction;
 import ghidra.program.model.listing.Listing;
 import ghidra.program.model.listing.Program;
+import ghidra.program.model.mem.MemoryBlock;
+import ghidra.util.UndefinedFunction;
 import ghidra.program.model.address.AddressSet;
 import ghidra.program.model.symbol.Reference;
 import ghidra.program.model.symbol.ReferenceIterator;
@@ -79,6 +81,7 @@ public class DecompilerToolProvider extends AbstractToolProvider {
 
     // Track which functions have been read by the LLM to enforce read-before-modify pattern
     private final Map<String, Long> readDecompilationTracker = new ConcurrentHashMap<>();
+
     /**
      * Constructor
      * @param server The MCP server
@@ -498,10 +501,13 @@ public class DecompilerToolProvider extends AbstractToolProvider {
             resultData.put("programName", program.getName());
 
             Function function = null;
+            boolean isUndefinedFunction = false;
+            Address resolvedAddress = null;
 
             // First try to resolve as address or symbol
             Address address = AddressUtil.resolveAddressOrSymbol(program, functionNameOrAddress);
             if (address != null) {
+                resolvedAddress = address;
                 // Get the containing function for this address
                 function = AddressUtil.getContainingFunction(program, address);
                 if (function != null) {
@@ -542,9 +548,55 @@ public class DecompilerToolProvider extends AbstractToolProvider {
                 }
             }
 
+            // If still no function found and we have an address, try UndefinedFunction
+            if (function == null && resolvedAddress != null) {
+                // Validate address is in executable memory
+                MemoryBlock block = program.getMemory().getBlock(resolvedAddress);
+                if (block == null) {
+                    return createErrorResult("Address " + AddressUtil.formatAddress(resolvedAddress) +
+                        " is not in any memory block");
+                }
+                if (!block.isExecute()) {
+                    return createErrorResult("Address " + AddressUtil.formatAddress(resolvedAddress) +
+                        " is not in executable memory (block: " + block.getName() + ")");
+                }
+
+                // Check if there's an instruction at the address
+                Instruction instr = program.getListing().getInstructionAt(resolvedAddress);
+                if (instr == null) {
+                    return createErrorResult("No instruction at address " +
+                        AddressUtil.formatAddress(resolvedAddress) +
+                        ". The address may need to be disassembled first, or it may be in the middle of an instruction.");
+                }
+
+                // Try to create a temporary function using UndefinedFunction
+                // Use timeout monitor to prevent hanging on complex code
+                TaskMonitor undefinedFuncMonitor = createTimeoutMonitor();
+                function = UndefinedFunction.findFunction(program, resolvedAddress, undefinedFuncMonitor);
+                if (function != null) {
+                    isUndefinedFunction = true;
+                    resultData.put("functionName", function.getName());
+                    resultData.put("resolvedFrom", "undefined-function");
+                    resultData.put("inputAddress", AddressUtil.formatAddress(resolvedAddress));
+                    logInfo("get-decompilation: Created temporary function at " +
+                        AddressUtil.formatAddress(resolvedAddress));
+                } else if (undefinedFuncMonitor.isCancelled()) {
+                    return createErrorResult("Operation timed out while analyzing undefined function at " +
+                        AddressUtil.formatAddress(resolvedAddress));
+                }
+            }
+
             if (function == null) {
                 return createErrorResult("Function not found: " + functionNameOrAddress + " in program " + program.getName() +
-                    ". Tried as address/symbol and function name. Check you are not using the mangled name and the namespace is correct.");
+                    ". Tried as address/symbol and function name. If this is an undefined address, ensure it's in executable memory with valid instructions.");
+            }
+
+            // Mark if this is an undefined/temporary function
+            resultData.put("isUndefinedFunction", isUndefinedFunction);
+            if (isUndefinedFunction) {
+                resultData.put("undefinedFunctionNote",
+                    "This is a temporary function created for decompilation preview. " +
+                    "Variable modifications are not supported. Use create-function to define it permanently.");
             }
 
             // Add function details
@@ -750,9 +802,17 @@ public class DecompilerToolProvider extends AbstractToolProvider {
 
             // Get function using helper method
             Function function;
+            String functionNameOrAddress = getString(request, "functionNameOrAddress");
             try {
                 function = getFunctionFromArgs(request.arguments(), program);
             } catch (IllegalArgumentException e) {
+                // Check if this might be an undefined function location
+                if (AddressUtil.isUndefinedFunctionAddress(program, functionNameOrAddress)) {
+                    return createErrorResult("Cannot rename variables at " + functionNameOrAddress +
+                        ": this address has code but no defined function. " +
+                        "Variable modifications require a defined function. " +
+                        "Use create-function to define it first, then retry the rename.");
+                }
                 return createErrorResult("Function not found: " + e.getMessage() + " in program " + program.getName() +
                     ". Tried as address/symbol and function name. Check you are not using the mangled name and the namespace is correct.");
             }
@@ -881,9 +941,17 @@ public class DecompilerToolProvider extends AbstractToolProvider {
 
             // Get function using helper method
             Function function;
+            String functionNameOrAddress = getString(request, "functionNameOrAddress");
             try {
                 function = getFunctionFromArgs(request.arguments(), program);
             } catch (IllegalArgumentException e) {
+                // Check if this might be an undefined function location
+                if (AddressUtil.isUndefinedFunctionAddress(program, functionNameOrAddress)) {
+                    return createErrorResult("Cannot change variable datatypes at " + functionNameOrAddress +
+                        ": this address has code but no defined function. " +
+                        "Variable modifications require a defined function. " +
+                        "Use create-function to define it first, then retry the datatype change.");
+                }
                 return createErrorResult("Function not found: " + e.getMessage() + " in program " + program.getName() +
                     ". Tried as address/symbol and function name. Check you are not using the mangled name and the namespace is correct.");
             }
@@ -1487,9 +1555,17 @@ public class DecompilerToolProvider extends AbstractToolProvider {
 
             // Get function using helper method
             Function function;
+            String functionNameOrAddress = getString(request, "functionNameOrAddress");
             try {
                 function = getFunctionFromArgs(request.arguments(), program);
             } catch (IllegalArgumentException e) {
+                // Check if this might be an undefined function location
+                if (AddressUtil.isUndefinedFunctionAddress(program, functionNameOrAddress)) {
+                    return createErrorResult("Cannot set comment at " + functionNameOrAddress +
+                        ": this address has code but no defined function. " +
+                        "Comments require a defined function. " +
+                        "Use create-function to define it first, then retry.");
+                }
                 return createErrorResult("Function not found: " + e.getMessage());
             }
 

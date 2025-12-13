@@ -20,9 +20,13 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import ghidra.app.util.cparser.C.ParseException;
+import ghidra.util.task.TaskMonitor;
+import ghidra.util.task.TimeoutTaskMonitor;
 import ghidra.app.util.parser.FunctionSignatureParser;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.address.AddressSet;
@@ -52,12 +56,80 @@ import reva.util.SymbolUtil;
  * Tool provider for function-related operations.
  */
 public class FunctionToolProvider extends AbstractToolProvider {
+
+    /** Maximum number of cached similarity search results */
+    private static final int MAX_CACHE_ENTRIES = 50;
+
+    /** Cache expiration time in milliseconds (10 minutes) */
+    private static final long CACHE_EXPIRATION_MS = 10 * 60 * 1000;
+
+    /** Timeout for similarity search operations in seconds */
+    private static final int SIMILARITY_SEARCH_TIMEOUT_SECONDS = 120;
+
+    /** Maximum number of results to cache per search (prevents memory bloat) */
+    private static final int MAX_CACHED_RESULTS_PER_SEARCH = 2000;
+
+    /** Log a warning if similarity search takes longer than this (milliseconds) */
+    private static final long SLOW_SEARCH_THRESHOLD_MS = 5000;
+
+    /**
+     * Cache key for similarity search results.
+     */
+    private record SimilarityCacheKey(String programPath, String searchString, boolean filterDefaultNames) {}
+
+    /**
+     * Cached similarity search result with metadata.
+     */
+    private record CachedSearchResult(
+        List<Map<String, Object>> sortedFunctions,
+        long timestamp,
+        int totalCount,
+        long programModificationNumber
+    ) {
+        boolean isExpired() {
+            return System.currentTimeMillis() - timestamp > CACHE_EXPIRATION_MS;
+        }
+    }
+
+    /**
+     * Thread-safe cache for similarity search results.
+     * Uses ConcurrentHashMap for safe concurrent access.
+     * Eviction is handled manually to respect MAX_CACHE_ENTRIES.
+     */
+    private final ConcurrentHashMap<SimilarityCacheKey, CachedSearchResult> similarityCache =
+        new ConcurrentHashMap<>();
+
     /**
      * Constructor
      * @param server The MCP server
      */
     public FunctionToolProvider(McpSyncServer server) {
         super(server);
+    }
+
+    /**
+     * Clear cached similarity results when a program is closed.
+     */
+    @Override
+    public void programClosed(Program program) {
+        super.programClosed(program);
+
+        String programPath = program.getDomainFile().getPathname();
+        int removedCount = 0;
+
+        // Thread-safe removal using ConcurrentHashMap's keySet iteration
+        for (SimilarityCacheKey key : similarityCache.keySet()) {
+            if (key.programPath().equals(programPath)) {
+                if (similarityCache.remove(key) != null) {
+                    removedCount++;
+                }
+            }
+        }
+
+        if (removedCount > 0) {
+            logInfo("FunctionToolProvider: Cleared " + removedCount +
+                " cached similarity results for closed program: " + programPath);
+        }
     }
 
     @Override
@@ -259,52 +331,143 @@ public class FunctionToolProvider extends AbstractToolProvider {
             String searchString = getString(request, "searchString");
             PaginationParams pagination = getPaginationParams(request);
             boolean filterDefaultNames = getOptionalBoolean(request, "filterDefaultNames", true);
+            String programPath = program.getDomainFile().getPathname();
 
             if (searchString.trim().isEmpty()) {
                 return createErrorResult("Search string cannot be empty");
             }
 
-            // Get functions and collect them for similarity sorting
-            List<Map<String, Object>> similarFunctionData = new ArrayList<>();
+            logInfo("get-functions-by-similarity: Searching for '" + searchString + "' in " + program.getName());
 
-            // Iterate through all functions and collect them
-            FunctionIterator functions = program.getFunctionManager().getFunctions(true);
-            functions.forEach(function -> {
-                // Skip default Ghidra function names if filtering is enabled
-                if (filterDefaultNames && SymbolUtil.isDefaultSymbolName(function.getName())) {
-                    return;
+            // Check cache for existing results
+            SimilarityCacheKey cacheKey = new SimilarityCacheKey(programPath, searchString, filterDefaultNames);
+            long currentModNumber = program.getModificationNumber();
+            CachedSearchResult cached = similarityCache.get(cacheKey);
+
+            List<Map<String, Object>> sortedFunctions;
+            boolean wasCacheHit = false;
+            int originalTotalCount = 0;
+
+            if (cached != null && !cached.isExpired() && cached.programModificationNumber() == currentModNumber) {
+                // Cache hit - reuse sorted results
+                wasCacheHit = true;
+                sortedFunctions = cached.sortedFunctions();
+                originalTotalCount = cached.totalCount();
+            } else {
+                // Cache miss - compute results
+                long startTime = System.currentTimeMillis();
+
+                // Create timeout monitor
+                final TaskMonitor monitor = TimeoutTaskMonitor.timeoutIn(SIMILARITY_SEARCH_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+
+                // Pre-filter: collect functions that contain search string as substring first
+                // This dramatically reduces the number of functions to sort with expensive LCS
+                String searchLower = searchString.toLowerCase();
+                List<Map<String, Object>> substringMatches = new ArrayList<>();
+                List<Map<String, Object>> nonMatches = new ArrayList<>();
+
+                // Iterate through all functions
+                FunctionIterator functions = program.getFunctionManager().getFunctions(true);
+                int processed = 0;
+
+                while (functions.hasNext()) {
+                    // Check for timeout/cancellation periodically
+                    if (processed % 1000 == 0 && monitor.isCancelled()) {
+                        return createErrorResult("Similarity search timed out after processing " +
+                            processed + " functions. Try a more specific search string.");
+                    }
+
+                    Function function = functions.next();
+                    processed++;
+
+                    // Skip default Ghidra function names if filtering is enabled
+                    if (filterDefaultNames && SymbolUtil.isDefaultSymbolName(function.getName())) {
+                        continue;
+                    }
+
+                    // Collect function data
+                    Map<String, Object> functionInfo = createFunctionInfo(function);
+                    String nameLower = function.getName().toLowerCase();
+
+                    // Pre-filter: separate substring matches from non-matches
+                    if (nameLower.contains(searchLower)) {
+                        substringMatches.add(functionInfo);
+                    } else {
+                        nonMatches.add(functionInfo);
+                    }
                 }
 
-                // Collect function data
-                Map<String, Object> functionInfo = createFunctionInfo(function);
-                if (functionInfo != null) {
-                    similarFunctionData.add(functionInfo);
-                }
-            });
+                // Create comparator for LCS-based similarity sorting
+                SimilarityComparator<Map<String, Object>> comparator = new SimilarityComparator<>(searchString,
+                    new SimilarityComparator.StringExtractor<Map<String, Object>>() {
+                        @Override
+                        public String extract(Map<String, Object> item) {
+                            return (String) item.get("name");
+                        }
+                    });
 
-            // Sort functions by similarity to search string
-            Collections.sort(similarFunctionData, new SimilarityComparator<>(searchString, new SimilarityComparator.StringExtractor<Map<String, Object>>() {
-                @Override
-                public String extract(Map<String, Object> item) {
-                    return (String) item.get("name");
-                }
-            }));
+                // Sort substring matches first (best candidates, typically small list)
+                Collections.sort(substringMatches, comparator);
 
-            // Apply pagination to sorted results
-            List<Map<String, Object>> paginatedFunctionData = similarFunctionData.subList(
-                pagination.startIndex(),
-                Math.min(pagination.startIndex() + pagination.maxCount(), similarFunctionData.size())
-            );
+                // Only sort non-matches if substring matches are few (optimization)
+                if (substringMatches.size() < 1000 && !nonMatches.isEmpty()) {
+                    Collections.sort(nonMatches, comparator);
+                }
+
+                // Combine results: substring matches first, then non-matches
+                sortedFunctions = new ArrayList<>(substringMatches.size() + nonMatches.size());
+                sortedFunctions.addAll(substringMatches);
+                sortedFunctions.addAll(nonMatches);
+                originalTotalCount = sortedFunctions.size();
+
+                // Limit cached results to prevent memory bloat
+                List<Map<String, Object>> toCache = sortedFunctions.size() > MAX_CACHED_RESULTS_PER_SEARCH
+                    ? List.copyOf(sortedFunctions.subList(0, MAX_CACHED_RESULTS_PER_SEARCH))
+                    : List.copyOf(sortedFunctions);
+
+                // Evict expired cache entries and store new results
+                evictExpiredCacheEntries();
+                CachedSearchResult newCached = new CachedSearchResult(toCache, System.currentTimeMillis(),
+                    originalTotalCount, currentModNumber);
+                similarityCache.put(cacheKey, newCached);
+
+                // Log warning if search took a long time
+                long elapsed = System.currentTimeMillis() - startTime;
+                if (elapsed > SLOW_SEARCH_THRESHOLD_MS) {
+                    logInfo("get-functions-by-similarity: Search for '" + searchString +
+                        "' took " + (elapsed / 1000) + "s (" + originalTotalCount + " functions)");
+                }
+            }
+
+            // Apply pagination to sorted results (with bounds check)
+            int startIndex = pagination.startIndex();
+            int totalCount = sortedFunctions.size();
+
+            List<Map<String, Object>> paginatedFunctionData;
+            if (startIndex >= totalCount) {
+                paginatedFunctionData = Collections.emptyList();
+            } else {
+                int endIndex = Math.min(startIndex + pagination.maxCount(), totalCount);
+                paginatedFunctionData = sortedFunctions.subList(startIndex, endIndex);
+            }
 
             // Create pagination metadata
+            int reportedTotal = originalTotalCount > 0 ? originalTotalCount : totalCount;
+            boolean resultsTruncated = totalCount < reportedTotal;
+
             Map<String, Object> paginationInfo = new HashMap<>();
             paginationInfo.put("searchString", searchString);
-            paginationInfo.put("startIndex", pagination.startIndex());
+            paginationInfo.put("startIndex", startIndex);
             paginationInfo.put("requestedCount", pagination.maxCount());
             paginationInfo.put("actualCount", paginatedFunctionData.size());
-            paginationInfo.put("nextStartIndex", pagination.startIndex() + paginatedFunctionData.size());
-            paginationInfo.put("totalMatchingFunctions", similarFunctionData.size());
+            paginationInfo.put("nextStartIndex", startIndex + paginatedFunctionData.size());
+            paginationInfo.put("totalMatchingFunctions", reportedTotal);
             paginationInfo.put("filterDefaultNames", filterDefaultNames);
+            paginationInfo.put("cacheHit", wasCacheHit);
+            if (resultsTruncated) {
+                paginationInfo.put("resultsTruncated", true);
+                paginationInfo.put("maxCachedResults", MAX_CACHED_RESULTS_PER_SEARCH);
+            }
 
             // Create combined result
             List<Object> resultData = new ArrayList<>();
@@ -312,6 +475,34 @@ public class FunctionToolProvider extends AbstractToolProvider {
             resultData.addAll(paginatedFunctionData);
             return createMultiJsonResult(resultData);
         });
+    }
+
+    /**
+     * Evict expired cache entries and enforce size limit.
+     */
+    private void evictExpiredCacheEntries() {
+        long now = System.currentTimeMillis();
+
+        // Remove expired entries
+        similarityCache.entrySet().removeIf(entry ->
+            now - entry.getValue().timestamp() > CACHE_EXPIRATION_MS);
+
+        // Enforce size limit by removing oldest entries
+        while (similarityCache.size() > MAX_CACHE_ENTRIES) {
+            SimilarityCacheKey oldest = null;
+            long oldestTime = Long.MAX_VALUE;
+            for (var entry : similarityCache.entrySet()) {
+                if (entry.getValue().timestamp() < oldestTime) {
+                    oldestTime = entry.getValue().timestamp();
+                    oldest = entry.getKey();
+                }
+            }
+            if (oldest != null) {
+                similarityCache.remove(oldest);
+            } else {
+                break;
+            }
+        }
     }
 
     /**

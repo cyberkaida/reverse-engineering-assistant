@@ -157,6 +157,29 @@ Function createdFunc = program.getFunctionManager().getFunctionAt(address);
 
 **Memory protection**: Stops after `MAX_UNIQUE_CANDIDATES` (10,000) to prevent memory exhaustion.
 
+The `set-function-prototype` tool supports two modes:
+
+### Simple Rename
+Use `newName` for quick renames without changing the signature:
+```json
+{"programPath": "/prog", "location": "0x00401000", "newName": "ProcessGameState"}
+```
+
+### Full Prototype Change
+Use `signature` for complete prototype changes (return type, parameters, name):
+```json
+{"programPath": "/prog", "location": "0x00401000", "signature": "int ProcessGameState(GameContext* ctx)"}
+```
+
+**Note**: The `location` parameter accepts both addresses (e.g., `"0x00401000"`) and symbol names (e.g., `"FUN_00401000"`).
+
+**Important Notes**:
+- `newName` and `signature` are mutually exclusive
+- `newName` only works with existing functions; use `signature` with `createIfNotExists` to create new functions
+- Renaming to the same name is a no-op (succeeds without changes)
+- Renaming fails if the name already exists in the same namespace
+- Invalid function names will be rejected by Ghidra
+
 ### Signature Parsing
 **Use FunctionSignatureParser for prototype changes**:
 ```java

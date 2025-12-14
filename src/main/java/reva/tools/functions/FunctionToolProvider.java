@@ -192,6 +192,21 @@ public class FunctionToolProvider extends AbstractToolProvider {
     }
 
     /**
+     * Build a result map for rename operations.
+     */
+    private Map<String, Object> buildRenameResult(boolean renamed, String oldName, Function function, Address address, String programPath) {
+        Map<String, Object> result = new HashMap<>();
+        result.put("success", true);
+        result.put("renamed", renamed);
+        result.put("created", false);
+        result.put("oldName", oldName);
+        result.put("function", createFunctionInfo(function, null));
+        result.put("address", AddressUtil.formatAddress(address));
+        result.put("programPath", programPath);
+        return result;
+    }
+
+    /**
      * Clear cached results when a program is closed.
      */
     @Override
@@ -952,17 +967,21 @@ public class FunctionToolProvider extends AbstractToolProvider {
             "type", "string",
             "description", "Address or symbol name where the function is located"
         ));
+        properties.put("newName", Map.of(
+            "type", "string",
+            "description", "New name for the function (simple rename without changing signature). Mutually exclusive with 'signature'."
+        ));
         properties.put("signature", Map.of(
             "type", "string",
-            "description", "C-style function signature (e.g., 'int main(int argc, char** argv)')"
+            "description", "C-style function signature (e.g., 'int main(int argc, char** argv)'). Mutually exclusive with 'newName'."
         ));
         properties.put("createIfNotExists", Map.of(
             "type", "boolean",
-            "description", "Create function if it doesn't exist at the location",
+            "description", "When using 'signature', create the function if it doesn't exist. Ignored when using 'newName'.",
             "default", true
         ));
 
-        List<String> required = List.of("programPath", "location", "signature");
+        List<String> required = List.of("programPath", "location");
 
         // Create the tool
         McpSchema.Tool tool = McpSchema.Tool.builder()
@@ -978,11 +997,22 @@ public class FunctionToolProvider extends AbstractToolProvider {
                 // Get program and parameters using helper methods
                 Program program = getProgramFromArgs(request);
                 String location = getString(request, "location");
-                String signature = getString(request, "signature");
+                String newName = getOptionalString(request, "newName", null);
+                String signature = getOptionalString(request, "signature", null);
                 boolean createIfNotExists = getOptionalBoolean(request, "createIfNotExists", true);
 
-                // Normalize signature to handle whitespace issues
-                String normalizedSignature = normalizeFunctionSignature(signature);
+                // Check mutual exclusivity (trim once to avoid redundant calls)
+                String trimmedNewName = newName != null ? newName.trim() : null;
+                String trimmedSignature = signature != null ? signature.trim() : null;
+                boolean hasNewName = trimmedNewName != null && !trimmedNewName.isEmpty();
+                boolean hasSignature = trimmedSignature != null && !trimmedSignature.isEmpty();
+
+                if (hasNewName && hasSignature) {
+                    return createErrorResult("Cannot use both 'newName' and 'signature' - they are mutually exclusive");
+                }
+                if (!hasNewName && !hasSignature) {
+                    return createErrorResult("Either 'newName' or 'signature' must be provided");
+                }
 
                 // Resolve the address from location
                 Address address = getAddressFromArgs(request, program, "location");
@@ -992,6 +1022,46 @@ public class FunctionToolProvider extends AbstractToolProvider {
 
                 FunctionManager functionManager = program.getFunctionManager();
                 Function existingFunction = functionManager.getFunctionAt(address);
+
+                // Handle simple rename case
+                if (hasNewName) {
+                    if (existingFunction == null) {
+                        return createErrorResult("Function does not exist at " + AddressUtil.formatAddress(address) +
+                            ". Use 'signature' with 'createIfNotExists' to create a new function.");
+                    }
+
+                    // Capture actual old name before renaming
+                    String oldName = existingFunction.getName();
+                    String programPath = program.getDomainFile().getPathname();
+
+                    // Check if renaming to the same name (no-op)
+                    if (trimmedNewName.equals(oldName)) {
+                        return createJsonResult(buildRenameResult(false, oldName, existingFunction, address, programPath));
+                    }
+
+                    int txId = program.startTransaction("Rename function");
+                    try {
+                        existingFunction.setName(trimmedNewName, SourceType.USER_DEFINED);
+                        program.endTransaction(txId, true);
+
+                        // Invalidate function caches since name changed
+                        invalidateFunctionCaches(programPath);
+
+                        return createJsonResult(buildRenameResult(true, oldName, existingFunction, address, programPath));
+                    } catch (DuplicateNameException e) {
+                        program.endTransaction(txId, false);
+                        return createErrorResult("Function name '" + trimmedNewName + "' already exists in this namespace");
+                    } catch (InvalidInputException e) {
+                        program.endTransaction(txId, false);
+                        return createErrorResult("Invalid function name '" + trimmedNewName + "': " + e.getMessage());
+                    } catch (Exception e) {
+                        program.endTransaction(txId, false);
+                        return createErrorResult("Failed to rename function: " + e.getMessage());
+                    }
+                }
+
+                // Full signature change path - normalize to handle whitespace issues
+                String normalizedSignature = normalizeFunctionSignature(trimmedSignature);
 
                 // Parse the function signature using Ghidra's parser
                 FunctionSignatureParser parser = new FunctionSignatureParser(
@@ -1027,6 +1097,9 @@ public class FunctionToolProvider extends AbstractToolProvider {
                 } catch (CancelledException e) {
                     return createErrorResult("Function signature parsing was cancelled");
                 }
+
+                // Capture old name before any changes (for renamed tracking)
+                String oldName = existingFunction != null ? existingFunction.getName() : null;
 
                 int txId = program.startTransaction("Set Function Prototype");
                 try {
@@ -1112,18 +1185,36 @@ public class FunctionToolProvider extends AbstractToolProvider {
 
                     program.endTransaction(txId, true);
 
+                    // Invalidate function caches since prototype changed
+                    String programPath = program.getDomainFile().getPathname();
+                    invalidateFunctionCaches(programPath);
+
                     // Return updated function information
+                    boolean wasCreated = existingFunction == null;
+                    boolean wasRenamed = oldName != null && !oldName.equals(function.getName());
+
                     Map<String, Object> result = new HashMap<>();
                     result.put("success", true);
-                    result.put("created", existingFunction == null);
+                    result.put("created", wasCreated);
+                    result.put("renamed", wasRenamed);
+                    if (oldName != null) {
+                        result.put("oldName", oldName);
+                    }
                     result.put("function", createFunctionInfo(function, null));
                     result.put("address", AddressUtil.formatAddress(address));
+                    result.put("programPath", programPath);
                     result.put("parsedSignature", functionDef.toString());
                     result.put("customStorageEnabled", needsCustomStorage && !wasUsingCustomStorage);
                     result.put("usingCustomStorage", function.hasCustomVariableStorage());
 
                     return createJsonResult(result);
 
+                } catch (DuplicateNameException e) {
+                    program.endTransaction(txId, false);
+                    return createErrorResult("Function name '" + functionDef.getName() + "' already exists in this namespace");
+                } catch (InvalidInputException e) {
+                    program.endTransaction(txId, false);
+                    return createErrorResult("Invalid function prototype: " + e.getMessage());
                 } catch (Exception e) {
                     program.endTransaction(txId, false);
                     return createErrorResult("Failed to set function prototype: " + e.getMessage());

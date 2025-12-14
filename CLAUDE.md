@@ -242,7 +242,7 @@ When adding new tools to DecompilerToolProvider:
 ## External Dependencies
 
 ### Java
-- Ghidra: 11.4+ (source at `../ghidra`)
+- Ghidra: 12.0+ (source at `../ghidra`)
 - Java: 21+
 - MCP SDK: io.modelcontextprotocol.sdk v0.14.0 (BOM-managed)
 - Jackson: 2.19.2 (force-resolved for MCP SDK compatibility)
@@ -278,7 +278,7 @@ When adding new tools to DecompilerToolProvider:
 - **Port Strategy**: Random ports for CLI mode to avoid conflicts
 
 ### Development Constraints
-- **Java**: Target Java 21, minimum Ghidra 11.4+
+- **Java**: Target Java 21, minimum Ghidra 12.0+
 - **Python**: 3.10+, uv for dependency management
 - **Testing (Java)**: Integration tests require `java.awt.headless=false`, fork=1
 - **Testing (Python)**: pytest with markers (unit/integration/e2e/cli)

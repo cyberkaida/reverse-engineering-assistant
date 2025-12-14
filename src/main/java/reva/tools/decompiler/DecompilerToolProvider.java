@@ -621,6 +621,11 @@ public class DecompilerToolProvider extends AbstractToolProvider {
             "description", "Include list of functions this one calls (name, address, signature). Use for understanding function dependencies without bulk decompilation.",
             "default", false
         ));
+        properties.put("signatureOnly", Map.of(
+            "type", "boolean",
+            "description", "Return only signature/metadata without decompiled code. Saves output tokens.",
+            "default", false
+        ));
 
         List<String> required = List.of("programPath", "functionNameOrAddress");
 
@@ -645,6 +650,7 @@ public class DecompilerToolProvider extends AbstractToolProvider {
             boolean includeReferenceContext = getOptionalBoolean(request, "includeReferenceContext", true);
             boolean includeCallers = getOptionalBoolean(request, "includeCallers", false);
             boolean includeCallees = getOptionalBoolean(request, "includeCallees", false);
+            boolean signatureOnly = getOptionalBoolean(request, "signatureOnly", false);
 
             Map<String, Object> resultData = new HashMap<>();
             resultData.put("programName", program.getName());
@@ -777,6 +783,12 @@ public class DecompilerToolProvider extends AbstractToolProvider {
             resultData.put("startAddress", AddressUtil.formatAddress(function.getEntryPoint()));
             resultData.put("endAddress", AddressUtil.formatAddress(body.getMaxAddress()));
             resultData.put("sizeInBytes", body.getNumAddresses());
+
+            // If signatureOnly is true, return early without decompilation
+            if (signatureOnly) {
+                resultData.put("signatureOnly", true);
+                return createJsonResult(resultData);
+            }
 
             // Get decompilation using helper methods
             final String toolName = "get-decompilation";

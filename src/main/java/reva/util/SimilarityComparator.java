@@ -27,6 +27,16 @@ public class SimilarityComparator<T> implements java.util.Comparator<T> {
     }
 
     private int findLongestCommonSubstringLength(String str1, String str2) {
+        return lcsLength(str1, str2);
+    }
+
+    /**
+     * Calculate the longest common substring length between two strings.
+     * @param str1 First string
+     * @param str2 Second string
+     * @return Length of the longest common substring
+     */
+    private static int lcsLength(String str1, String str2) {
         int m = str1.length();
         int n = str2.length();
         int[][] dp = new int[m + 1][n + 1];
@@ -45,5 +55,23 @@ public class SimilarityComparator<T> implements java.util.Comparator<T> {
             }
         }
         return maxLength;
+    }
+
+    /**
+     * Calculate the LCS-based similarity score between two strings.
+     * Returns a value between 0.0 and 1.0, where 1.0 means the longest common
+     * substring equals the length of the shorter string (i.e., the shorter
+     * string appears as a contiguous substring in the longer string).
+     * @param str1 First string (should be lowercase for case-insensitive comparison)
+     * @param str2 Second string (should be lowercase for case-insensitive comparison)
+     * @return Similarity score between 0.0 and 1.0
+     */
+    public static double calculateLcsSimilarity(String str1, String str2) {
+        if (str1 == null || str2 == null || str1.isEmpty() || str2.isEmpty()) {
+            return 0.0;
+        }
+        int lcsLen = lcsLength(str1, str2);
+        int minLen = Math.min(str1.length(), str2.length());
+        return (double) lcsLen / minLen;
     }
 }

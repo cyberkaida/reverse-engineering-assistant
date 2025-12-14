@@ -419,6 +419,11 @@ public class FunctionToolProvider extends AbstractToolProvider {
             "description", "Only return functions with no tags (mutually exclusive with filterByTag)",
             "default", false
         ));
+        properties.put("verbose", Map.of(
+            "type", "boolean",
+            "description", "Return full function details. When false (default), returns compact results (name, address, sizeInBytes, tags, callerCount, calleeCount). Note: counts may be -1 if computation timed out.",
+            "default", false
+        ));
 
         properties.put("startIndex", Map.of(
             "type", "integer",
@@ -449,6 +454,7 @@ public class FunctionToolProvider extends AbstractToolProvider {
             boolean filterDefaultNames = getOptionalBoolean(request, "filterDefaultNames", true);
             String filterByTag = getOptionalString(request, "filterByTag", null);
             boolean untagged = getOptionalBoolean(request, "untagged", false);
+            boolean verbose = getOptionalBoolean(request, "verbose", false);
 
             // Check mutual exclusivity
             if (untagged && filterByTag != null && !filterByTag.isEmpty()) {
@@ -485,9 +491,29 @@ public class FunctionToolProvider extends AbstractToolProvider {
             // Apply pagination
             int startIndex = pagination.startIndex();
             int endIndex = Math.min(startIndex + pagination.maxCount(), totalCount);
-            List<Map<String, Object>> functionData = startIndex < totalCount
+            List<Map<String, Object>> paginatedData = startIndex < totalCount
                 ? filteredFunctions.subList(startIndex, endIndex)
                 : Collections.emptyList();
+
+            // Transform results based on verbose flag
+            List<Map<String, Object>> functionData;
+            if (verbose) {
+                // Full: return all function info as-is
+                functionData = paginatedData;
+            } else {
+                // Compact: name, address, sizeInBytes, tags, callerCount, calleeCount
+                functionData = new ArrayList<>(paginatedData.size());
+                for (Map<String, Object> funcInfo : paginatedData) {
+                    Map<String, Object> compactInfo = new HashMap<>();
+                    compactInfo.put("name", funcInfo.get("name"));
+                    compactInfo.put("address", funcInfo.get("address"));
+                    compactInfo.put("sizeInBytes", funcInfo.get("sizeInBytes"));
+                    compactInfo.put("tags", funcInfo.get("tags"));
+                    compactInfo.put("callerCount", funcInfo.get("callerCount"));
+                    compactInfo.put("calleeCount", funcInfo.get("calleeCount"));
+                    functionData.add(compactInfo);
+                }
+            }
 
             // Add metadata about the filtering
             Map<String, Object> metadataInfo = new HashMap<>();
@@ -497,6 +523,7 @@ public class FunctionToolProvider extends AbstractToolProvider {
             metadataInfo.put("nextStartIndex", startIndex + functionData.size());
             metadataInfo.put("totalCount", totalCount);
             metadataInfo.put("filterDefaultNames", filterDefaultNames);
+            metadataInfo.put("verbose", verbose);
             if (filterByTag != null && !filterByTag.isEmpty()) {
                 metadataInfo.put("filterByTag", filterByTag);
             }
@@ -544,6 +571,11 @@ public class FunctionToolProvider extends AbstractToolProvider {
             "description", "Maximum number of functions to return (recommended to use get-function-count first and request chunks of 100 at most)",
             "default", 100
         ));
+        properties.put("verbose", Map.of(
+            "type", "boolean",
+            "description", "Return full function details. When false (default), returns compact results (name, address, sizeInBytes, tags, callerCount, calleeCount, similarity). Note: counts may be -1 if computation timed out.",
+            "default", false
+        ));
 
         List<String> required = List.of("programPath", "searchString");
 
@@ -562,6 +594,7 @@ public class FunctionToolProvider extends AbstractToolProvider {
             String searchString = getString(request, "searchString");
             PaginationParams pagination = getPaginationParams(request);
             boolean filterDefaultNames = getOptionalBoolean(request, "filterDefaultNames", true);
+            boolean verbose = getOptionalBoolean(request, "verbose", false);
             String programPath = program.getDomainFile().getPathname();
 
             if (searchString.trim().isEmpty()) {
@@ -675,6 +708,32 @@ public class FunctionToolProvider extends AbstractToolProvider {
                 paginatedFunctionData = sortedFunctions.subList(startIndex, endIndex);
             }
 
+            // Transform results: add similarity score and optionally make compact
+            String searchLower = searchString.toLowerCase();
+            List<Map<String, Object>> transformedResults = new ArrayList<>(paginatedFunctionData.size());
+            for (Map<String, Object> funcInfo : paginatedFunctionData) {
+                String name = (String) funcInfo.get("name");
+                double similarity = SimilarityComparator.calculateLcsSimilarity(searchLower, name.toLowerCase());
+
+                if (verbose) {
+                    // Full: all function info + similarity
+                    Map<String, Object> fullInfo = new HashMap<>(funcInfo);
+                    fullInfo.put("similarity", Math.round(similarity * 100.0) / 100.0);
+                    transformedResults.add(fullInfo);
+                } else {
+                    // Compact: name, address, sizeInBytes, tags, callerCount, calleeCount, similarity
+                    Map<String, Object> compactInfo = new HashMap<>();
+                    compactInfo.put("name", name);
+                    compactInfo.put("address", funcInfo.get("address"));
+                    compactInfo.put("sizeInBytes", funcInfo.get("sizeInBytes"));
+                    compactInfo.put("tags", funcInfo.get("tags"));
+                    compactInfo.put("callerCount", funcInfo.get("callerCount"));
+                    compactInfo.put("calleeCount", funcInfo.get("calleeCount"));
+                    compactInfo.put("similarity", Math.round(similarity * 100.0) / 100.0); // Round to 2 decimals
+                    transformedResults.add(compactInfo);
+                }
+            }
+
             // Create pagination metadata
             int reportedTotal = originalTotalCount > 0 ? originalTotalCount : totalCount;
             boolean resultsTruncated = totalCount < reportedTotal;
@@ -683,10 +742,11 @@ public class FunctionToolProvider extends AbstractToolProvider {
             paginationInfo.put("searchString", searchString);
             paginationInfo.put("startIndex", startIndex);
             paginationInfo.put("requestedCount", pagination.maxCount());
-            paginationInfo.put("actualCount", paginatedFunctionData.size());
-            paginationInfo.put("nextStartIndex", startIndex + paginatedFunctionData.size());
+            paginationInfo.put("actualCount", transformedResults.size());
+            paginationInfo.put("nextStartIndex", startIndex + transformedResults.size());
             paginationInfo.put("totalMatchingFunctions", reportedTotal);
             paginationInfo.put("filterDefaultNames", filterDefaultNames);
+            paginationInfo.put("verbose", verbose);
             paginationInfo.put("cacheHit", wasCacheHit);
             if (resultsTruncated) {
                 paginationInfo.put("resultsTruncated", true);
@@ -696,7 +756,7 @@ public class FunctionToolProvider extends AbstractToolProvider {
             // Create combined result
             List<Object> resultData = new ArrayList<>();
             resultData.add(paginationInfo);
-            resultData.addAll(paginatedFunctionData);
+            resultData.addAll(transformedResults);
             return createMultiJsonResult(resultData);
         });
     }

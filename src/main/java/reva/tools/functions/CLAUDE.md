@@ -9,8 +9,8 @@ The `reva.tools.functions` package provides MCP tools for function analysis, lis
 ## Key Tools
 
 - `get-function-count` - Get total count of functions (use before listing for pagination)
-- `get-functions` - List functions with pagination and filtering (supports `filterByTag`, `untagged`)
-- `get-functions-by-similarity` - Find functions similar to a target function
+- `get-functions` - List functions with pagination and filtering (supports `filterByTag`, `untagged`, `verbose`)
+- `get-functions-by-similarity` - Find functions similar to a target function (compact by default, use `verbose: true` for full details)
 - `set-function-prototype` - Modify function signatures and prototypes
 - `function-tags` - Manage tags on functions (modes: get/set/add/remove/list)
 
@@ -178,31 +178,46 @@ try {
 }
 ```
 
+## Compact vs Verbose Mode
+
+Both `get-functions` and `get-functions-by-similarity` support a `verbose` parameter (default: `false`).
+
+### Compact Mode (Default)
+Compact mode returns minimal data for efficient scanning:
+```json
+// get-functions compact output
+{"name": "processAI", "address": "0x00401000", "sizeInBytes": 256, "tags": ["AI"], "callerCount": 5, "calleeCount": 3}
+
+// get-functions-by-similarity compact output (includes similarity)
+{"name": "processAI", "address": "0x00401000", "sizeInBytes": 256, "tags": ["AI"], "callerCount": 5, "calleeCount": 3, "similarity": 0.85}
+```
+
+**Note**: `callerCount`/`calleeCount` may be `-1` if computation timed out.
+
+### Verbose Mode
+Use `verbose: true` to get full function details (signature, parameters, returnType, isThunk, isExternal, etc.).
+
 ## Similarity Analysis
 
-### Function Comparison
-**Use SimilarityComparator for function similarity**:
+The `get-functions-by-similarity` tool uses LCS (Longest Common Substring) to rank functions by name similarity.
+
+### Similarity Score
+The `similarity` field (0.0-1.0) indicates how well the function name matches the search string.
+Higher scores appear first in results.
+
+### Function Comparison API
 ```java
 import reva.util.SimilarityComparator;
 
-// Compare functions based on various criteria
-double similarity = SimilarityComparator.calculateFunctionSimilarity(targetFunction, candidateFunction);
+// Calculate similarity between two strings (0.0 to 1.0)
+double score = SimilarityComparator.calculateLcsSimilarity("search", "functionName");
 
-// Sort by similarity (descending)
-Collections.sort(similarFunctions, (a, b) -> {
-    double scoreA = SimilarityComparator.calculateFunctionSimilarity(targetFunction, a.function);
-    double scoreB = SimilarityComparator.calculateFunctionSimilarity(targetFunction, b.function);
-    return Double.compare(scoreB, scoreA);
-});
-```
-
-### Similarity Response Format
-```java
-Map<String, Object> similarFunction = Map.of(
-    "function", functionData,
-    "similarity", similarity,
-    "reasons", SimilarityComparator.getSimilarityReasons(targetFunction, function)
+// Sort functions by name similarity using comparator
+SimilarityComparator<Map<String, Object>> comparator = new SimilarityComparator<>(
+    searchString,
+    funcInfo -> (String) funcInfo.get("name")
 );
+Collections.sort(functions, comparator);
 ```
 
 ## Function Filtering Patterns

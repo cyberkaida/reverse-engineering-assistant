@@ -850,7 +850,7 @@ public class ProjectToolProvider extends AbstractToolProvider {
                 TaskMonitor importMonitor = TimeoutTaskMonitor.timeoutIn(importTimeoutSeconds, TimeUnit.SECONDS);
 
                 // Create and run the import task synchronously (blocks until completion)
-                ImportBatchTask importTask = new ImportBatchTask(batchInfo, destFolder, null, true, false);
+                ImportBatchTask importTask = new ImportBatchTask(batchInfo, destFolder, null, true, false, false);
                 importTask.run(importMonitor);
 
                 // Check for timeout or cancellation

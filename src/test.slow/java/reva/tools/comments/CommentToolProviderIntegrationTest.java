@@ -26,7 +26,7 @@ import org.junit.Test;
 import com.fasterxml.jackson.databind.JsonNode;
 
 import ghidra.program.model.address.Address;
-import ghidra.program.model.listing.CodeUnit;
+import ghidra.program.model.listing.CommentType;
 import ghidra.program.model.listing.Listing;
 import io.modelcontextprotocol.spec.McpSchema.CallToolRequest;
 import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
@@ -84,7 +84,7 @@ public class CommentToolProviderIntegrationTest extends RevaIntegrationTestBase 
 
                 // Verify the comment was set in the program
                 Listing listing = program.getListing();
-                String actualComment = listing.getComment(CodeUnit.EOL_COMMENT, testAddress);
+                String actualComment = listing.getComment(CommentType.EOL, testAddress);
                 assertEquals("Comment should be set correctly", "Test comment", actualComment);
 
                 // Get the comment using the tool

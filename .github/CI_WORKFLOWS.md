@@ -11,7 +11,7 @@ This document describes the CI/CD workflows for the ReVa project.
 **What it does**:
 - Tests ReVa as a Ghidra extension (GUI mode)
 - Runs unit tests and integration tests
-- Tests on multiple Ghidra versions (11.4, 11.4.2, latest)
+- Tests on multiple Ghidra versions (12.0, latest)
 - Includes lint checks and CodeQL security analysis
 
 **Jobs**:
@@ -31,7 +31,7 @@ This document describes the CI/CD workflows for the ReVa project.
 - Tests ReVa in headless Ghidra mode via pyghidra
 - Runs Python-based headless server tests
 - Tests on multiple OS (Ubuntu, macOS, Windows)
-- Tests on multiple Ghidra versions (11.4.2, latest)
+- Tests on multiple Ghidra versions (12.0, latest)
 - Tests on multiple Python versions (3.9, 3.11, 3.12)
 
 **Jobs**:
@@ -73,9 +73,9 @@ This document describes the CI/CD workflows for the ReVa project.
 ```
 Matrix:
   OS: ubuntu-latest
-  Ghidra: [11.4, 11.4.2, latest]
+  Ghidra: [12.0, latest]
 
-Total: 3 jobs
+Total: 2 jobs
 ```
 
 ### Headless Mode Tests (`test-headless.yml`)
@@ -83,9 +83,9 @@ Total: 3 jobs
 ```
 Unix/Mac Matrix:
   OS: [ubuntu-latest, macos-latest]
-  Ghidra: [11.4.2, latest]
+  Ghidra: [12.0, latest]
   Python: [3.9, 3.11, 3.12]
-  Excludes: (11.4.2 + older Python versions)
+  Excludes: (12.0 + older Python versions)
 
   Total: 8 jobs (2 OS × 2 Ghidra × 2 Python combinations)
 
@@ -195,7 +195,7 @@ BindException: Address already in use
 
 | Workflow | Jobs | Avg Time/Job | Total Time (parallel) |
 |----------|------|--------------|----------------------|
-| test-ghidra.yml | 3 + lint + codeql | 12 min | ~15 min |
+| test-ghidra.yml | 2 + lint + codeql | 12 min | ~15 min |
 | test-headless.yml | 9 | 6 min | ~8 min |
 | publish-ghidra.yml | 1 | 5 min | ~5 min |
 

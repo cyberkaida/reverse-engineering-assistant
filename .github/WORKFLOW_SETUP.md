@@ -57,13 +57,13 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest]
-        ghidra-version: ["11.4.2", "latest"]
+        ghidra-version: ["12.0", "latest"]
         python-version: ["3.9", "3.11", "3.12"]
         exclude:
           # Reduce matrix size - test latest Python on all, others on latest Ghidra only
-          - ghidra-version: "11.4.2"
+          - ghidra-version: "12.0"
             python-version: "3.9"
-          - ghidra-version: "11.4.2"
+          - ghidra-version: "12.0"
             python-version: "3.11"
       fail-fast: false  # Continue other tests if one fails
 
@@ -256,7 +256,7 @@ Once added, you can verify the workflow is active:
 ## What the Workflow Tests
 
 - **9 test jobs** across Ubuntu, macOS, and Windows
-- **Multiple versions**: Ghidra 11.4.2 & latest, Python 3.9/3.11/3.12
+- **Multiple versions**: Ghidra 12.0 & latest, Python 3.9/3.11/3.12
 - **Test coverage**:
   - Server startup and shutdown
   - Custom port configuration

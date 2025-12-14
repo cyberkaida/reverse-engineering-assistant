@@ -23,8 +23,7 @@ jobs:
         # Build only on Linux since the extension is Java-only and platform-independent
         # This simplifies the build process and reduces CI time
         ghidra-version: [
-            "11.4.2",
-            "11.4",
+            "12.0",
             "latest",
         ]
     name: Build distribution 📦

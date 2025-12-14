@@ -9,9 +9,10 @@ The `reva.tools.functions` package provides MCP tools for function analysis, lis
 ## Key Tools
 
 - `get-function-count` - Get total count of functions (use before listing for pagination)
-- `get-functions` - List functions with pagination and filtering
+- `get-functions` - List functions with pagination and filtering (supports `filterByTag`, `untagged`)
 - `get-functions-by-similarity` - Find functions similar to a target function
 - `set-function-prototype` - Modify function signatures and prototypes
+- `function-tags` - Manage tags on functions (modes: get/set/add/remove/list)
 
 ## Core Patterns
 
@@ -55,6 +56,63 @@ Map<String, Object> functionData = Map.of(
     "hasVarArgs", function.hasVarArgs(),
     "callingConvention", function.getCallingConventionName()
 );
+```
+
+## Function Tags
+
+Function tags categorize functions (e.g., "AI", "rendering", "save/load"). Tags are included in all function info responses via the `tags` field (sorted alphabetically).
+
+### Tag Operations
+The `function-tags` tool uses a `mode` parameter:
+- `get` - Return current tags on a function
+- `set` - Replace all tags with provided list (empty list clears all)
+- `add` - Add to existing tags
+- `remove` - Remove specified tags
+- `list` - List all tags in the program with usage counts (no function required)
+
+**Note**: Empty or whitespace-only tag names are automatically filtered out.
+
+### Querying by Tag
+Use `get-functions` with `filterByTag` parameter to find all functions with a specific tag.
+Use `get-functions` with `untagged: true` to find functions that have no tags (useful for tracking progress).
+Note: `filterByTag` and `untagged` are mutually exclusive.
+
+### Response Format
+For get/set/add/remove modes, responses are lean (just identifiers + tags):
+```json
+{"success": true, "programPath": "/prog", "mode": "add", "function": "processAI", "address": "0x00401000", "tags": ["AI", "game-logic"]}
+```
+
+### Example Workflow
+```json
+// 1. Tag functions by category
+{"programPath": "/prog", "mode": "add", "function": "processAI", "tags": ["AI", "game-logic"]}
+// Returns: {"success": true, ..., "function": "processAI", "address": "0x...", "tags": ["AI", "game-logic"]}
+
+// 2. List all tags in program
+{"programPath": "/prog", "mode": "list"}
+// Returns: {"success": true, "tags": [{"name": "AI", "count": 5}, ...], "totalTags": 2}
+
+// 3. Find all AI functions via get-functions
+{"programPath": "/prog", "filterByTag": "AI"}
+// Returns paginated list of functions tagged "AI"
+
+// 4. Find untagged functions (what still needs categorization)
+{"programPath": "/prog", "untagged": true}
+// Returns paginated list of functions with no tags
+```
+
+### Ghidra API
+```java
+// Tags are accessed via Function interface
+function.addTag("AI");           // Creates tag if doesn't exist
+function.removeTag("rendering");
+Set<FunctionTag> tags = function.getTags();
+
+// Program-wide tag management
+FunctionTagManager tagManager = program.getFunctionManager().getFunctionTagManager();
+List<? extends FunctionTag> allTags = tagManager.getAllFunctionTags();
+int count = tagManager.getUseCount(tag);
 ```
 
 ## Function Prototype Management

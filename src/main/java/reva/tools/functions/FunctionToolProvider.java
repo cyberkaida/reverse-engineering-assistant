@@ -17,6 +17,7 @@ package reva.tools.functions;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -40,6 +41,8 @@ import ghidra.program.model.data.ParameterDefinitionImpl;
 import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.FunctionIterator;
 import ghidra.program.model.listing.FunctionManager;
+import ghidra.program.model.listing.FunctionTag;
+import ghidra.program.model.listing.FunctionTagManager;
 import ghidra.program.model.listing.Instruction;
 import ghidra.program.model.listing.Parameter;
 import ghidra.program.model.listing.ParameterImpl;
@@ -94,6 +97,9 @@ public class FunctionToolProvider extends AbstractToolProvider {
     private static final Set<String> EXCLUDED_BLOCK_PATTERNS = Set.of(
         ".plt", ".got", ".idata", ".edata", "extern", "external"
     );
+
+    /** Valid modes for the function-tags tool */
+    private static final Set<String> VALID_TAG_MODES = Set.of("get", "set", "add", "remove", "list");
 
     /**
      * Cache key for similarity search results.
@@ -173,6 +179,16 @@ public class FunctionToolProvider extends AbstractToolProvider {
      */
     public FunctionToolProvider(McpSyncServer server) {
         super(server);
+    }
+
+    /**
+     * Invalidate function caches for a specific program.
+     * Called after modifications that change function metadata (e.g., tags).
+     * Clears both functionInfoCache and similarityCache since both contain function data with tags.
+     */
+    private void invalidateFunctionCaches(String programPath) {
+        functionInfoCache.entrySet().removeIf(entry -> entry.getKey().programPath().equals(programPath));
+        similarityCache.entrySet().removeIf(entry -> entry.getKey().programPath().equals(programPath));
     }
 
     /**
@@ -312,6 +328,7 @@ public class FunctionToolProvider extends AbstractToolProvider {
         registerSetFunctionPrototypeTool();
         registerUndefinedFunctionCandidatesTool();
         registerCreateFunctionTool();
+        registerFunctionTagsTool();
     }
 
     /**
@@ -393,6 +410,15 @@ public class FunctionToolProvider extends AbstractToolProvider {
             "description", "Whether to filter out default Ghidra generated names like FUN_, DAT_, etc.",
             "default", true
         ));
+        properties.put("filterByTag", Map.of(
+            "type", "string",
+            "description", "Only return functions with this tag (applied after filterDefaultNames)"
+        ));
+        properties.put("untagged", Map.of(
+            "type", "boolean",
+            "description", "Only return functions with no tags (mutually exclusive with filterByTag)",
+            "default", false
+        ));
 
         properties.put("startIndex", Map.of(
             "type", "integer",
@@ -421,16 +447,46 @@ public class FunctionToolProvider extends AbstractToolProvider {
             Program program = getProgramFromArgs(request);
             PaginationParams pagination = getPaginationParams(request);
             boolean filterDefaultNames = getOptionalBoolean(request, "filterDefaultNames", true);
+            String filterByTag = getOptionalString(request, "filterByTag", null);
+            boolean untagged = getOptionalBoolean(request, "untagged", false);
+
+            // Check mutual exclusivity
+            if (untagged && filterByTag != null && !filterByTag.isEmpty()) {
+                return createErrorResult("Cannot use both 'untagged' and 'filterByTag' - they are mutually exclusive");
+            }
 
             // Get function info from shared cache (or build it)
             List<Map<String, Object>> allFunctions = getOrBuildFunctionInfoCache(program, filterDefaultNames);
-            int totalCount = allFunctions.size();
+
+            // Apply tag filter if specified
+            List<Map<String, Object>> filteredFunctions;
+            if (untagged) {
+                filteredFunctions = allFunctions.stream()
+                    .filter(f -> {
+                        @SuppressWarnings("unchecked")
+                        List<String> tags = (List<String>) f.get("tags");
+                        return tags == null || tags.isEmpty();
+                    })
+                    .toList();
+            } else if (filterByTag != null && !filterByTag.isEmpty()) {
+                filteredFunctions = allFunctions.stream()
+                    .filter(f -> {
+                        @SuppressWarnings("unchecked")
+                        List<String> tags = (List<String>) f.get("tags");
+                        return tags != null && tags.contains(filterByTag);
+                    })
+                    .toList();
+            } else {
+                filteredFunctions = allFunctions;
+            }
+
+            int totalCount = filteredFunctions.size();
 
             // Apply pagination
             int startIndex = pagination.startIndex();
             int endIndex = Math.min(startIndex + pagination.maxCount(), totalCount);
             List<Map<String, Object>> functionData = startIndex < totalCount
-                ? allFunctions.subList(startIndex, endIndex)
+                ? filteredFunctions.subList(startIndex, endIndex)
                 : Collections.emptyList();
 
             // Add metadata about the filtering
@@ -441,6 +497,12 @@ public class FunctionToolProvider extends AbstractToolProvider {
             metadataInfo.put("nextStartIndex", startIndex + functionData.size());
             metadataInfo.put("totalCount", totalCount);
             metadataInfo.put("filterDefaultNames", filterDefaultNames);
+            if (filterByTag != null && !filterByTag.isEmpty()) {
+                metadataInfo.put("filterByTag", filterByTag);
+            }
+            if (untagged) {
+                metadataInfo.put("untagged", true);
+            }
 
             // Create combined result
             List<Object> resultData = new ArrayList<>();
@@ -721,6 +783,14 @@ public class FunctionToolProvider extends AbstractToolProvider {
             ));
         }
         functionInfo.put("parameters", List.copyOf(parameters));
+
+        // Add function tags (sorted for consistent output)
+        Set<FunctionTag> tags = function.getTags();
+        List<String> tagNames = tags.stream()
+            .map(FunctionTag::getName)
+            .sorted()
+            .toList();
+        functionInfo.put("tags", tagNames);
 
         // Return immutable copy to prevent cache corruption
         return Collections.unmodifiableMap(functionInfo);
@@ -1333,4 +1403,175 @@ public class FunctionToolProvider extends AbstractToolProvider {
             }
         });
     }
+
+    /**
+     * Register a tool to manage function tags (get/set/add/remove/list).
+     */
+    private void registerFunctionTagsTool() {
+        Map<String, Object> properties = new HashMap<>();
+        properties.put("programPath", Map.of(
+            "type", "string",
+            "description", "Path in the Ghidra Project to the program"
+        ));
+        properties.put("function", Map.of(
+            "type", "string",
+            "description", "Function name or address (required for get/set/add/remove modes)"
+        ));
+        properties.put("mode", Map.of(
+            "type", "string",
+            "description", "Operation: 'get' (tags on function), 'set' (replace), 'add', 'remove', 'list' (all tags in program)",
+            "enum", List.of("get", "set", "add", "remove", "list")
+        ));
+        properties.put("tags", Map.of(
+            "type", "array",
+            "description", "Tag names (required for add; optional for set/remove). Empty/whitespace names are ignored.",
+            "items", Map.of("type", "string")
+        ));
+
+        List<String> required = List.of("programPath", "mode");
+
+        McpSchema.Tool tool = McpSchema.Tool.builder()
+            .name("function-tags")
+            .title("Function Tags")
+            .description("Manage function tags. Tags categorize functions (e.g., 'AI', 'rendering'). Use mode='list' for all tags in program.")
+            .inputSchema(createSchema(properties, required))
+            .build();
+
+        registerTool(tool, (exchange, request) -> {
+            Program program = getProgramFromArgs(request);
+            String mode = getString(request, "mode");
+            String programPath = program.getDomainFile().getPathname();
+
+            // Defensive validation - schema enum should catch this, but validates against direct API calls
+            if (!VALID_TAG_MODES.contains(mode)) {
+                return createErrorResult("Unknown mode: " + mode + ". Valid modes: " + VALID_TAG_MODES);
+            }
+
+            // Handle list mode (program-wide, no function needed)
+            if ("list".equals(mode)) {
+                FunctionTagManager tagManager = program.getFunctionManager().getFunctionTagManager();
+                List<? extends FunctionTag> allTags = tagManager.getAllFunctionTags();
+
+                List<Map<String, Object>> tagInfoList = new ArrayList<>();
+                for (FunctionTag tag : allTags) {
+                    Map<String, Object> tagInfo = new HashMap<>();
+                    tagInfo.put("name", tag.getName());
+                    tagInfo.put("count", tagManager.getUseCount(tag));
+                    String comment = tag.getComment();
+                    if (comment != null && !comment.isEmpty()) {
+                        tagInfo.put("comment", comment);
+                    }
+                    tagInfoList.add(tagInfo);
+                }
+
+                // Sort by name for consistent output
+                tagInfoList.sort(Comparator.comparing(m -> (String) m.get("name")));
+
+                Map<String, Object> result = new HashMap<>();
+                result.put("success", true);
+                result.put("programPath", programPath);
+                result.put("tags", tagInfoList);
+                result.put("totalTags", tagInfoList.size());
+
+                return createJsonResult(result);
+            }
+
+            // For all other modes, function is required
+            String functionRef = getOptionalString(request, "function", null);
+            if (functionRef == null || functionRef.isEmpty()) {
+                return createErrorResult("'function' parameter is required for mode: " + mode);
+            }
+
+            // Resolve function (throws IllegalArgumentException if not found, caught by registerTool wrapper)
+            Function function = getFunctionFromArgs(request.arguments(), program, "function");
+
+            // Handle get mode (no modification)
+            if ("get".equals(mode)) {
+                List<String> tagNames = function.getTags().stream()
+                    .map(FunctionTag::getName)
+                    .sorted()
+                    .toList();
+
+                Map<String, Object> result = new HashMap<>();
+                result.put("success", true);
+                result.put("programPath", programPath);
+                result.put("mode", mode);
+                result.put("function", function.getName());
+                result.put("address", AddressUtil.formatAddress(function.getEntryPoint()));
+                result.put("tags", tagNames);
+
+                return createJsonResult(result);
+            }
+
+            // For set/add/remove, tags parameter handling
+            List<String> tagList = getOptionalStringList(request.arguments(), "tags", null);
+            if (tagList == null || tagList.isEmpty()) {
+                if ("set".equals(mode) || "remove".equals(mode)) {
+                    // Empty set clears all tags; empty remove is a no-op
+                    tagList = List.of();
+                } else {
+                    // add mode requires at least one tag
+                    return createErrorResult("'tags' parameter is required for mode: " + mode);
+                }
+            }
+
+            // Modify tags within a transaction
+            int txId = program.startTransaction("Update function tags");
+            boolean committed = false;
+            try {
+                if ("set".equals(mode)) {
+                    // Copy to HashSet to avoid ConcurrentModificationException when removing
+                    Set<FunctionTag> existingTags = new HashSet<>(function.getTags());
+                    for (FunctionTag tag : existingTags) {
+                        function.removeTag(tag.getName());
+                    }
+                    for (String tagName : tagList) {
+                        if (tagName != null && !tagName.trim().isEmpty()) {
+                            function.addTag(tagName.trim());
+                        }
+                    }
+                } else if ("add".equals(mode)) {
+                    for (String tagName : tagList) {
+                        if (tagName != null && !tagName.trim().isEmpty()) {
+                            function.addTag(tagName.trim());
+                        }
+                    }
+                } else if ("remove".equals(mode)) {
+                    for (String tagName : tagList) {
+                        if (tagName != null && !tagName.trim().isEmpty()) {
+                            function.removeTag(tagName.trim());
+                        }
+                    }
+                }
+
+                program.endTransaction(txId, true);
+                committed = true;
+            } catch (Exception e) {
+                if (!committed) {
+                    program.endTransaction(txId, false);
+                }
+                return createErrorResult("Error updating function tags: " + e.getMessage());
+            }
+
+            // Invalidate caches since tags changed (outside try block for robustness)
+            invalidateFunctionCaches(programPath);
+
+            // Return lean response with just identifiers and updated tags
+            List<String> updatedTags = function.getTags().stream()
+                .map(FunctionTag::getName)
+                .sorted()
+                .toList();
+
+            Map<String, Object> result = new HashMap<>();
+            result.put("success", true);
+            result.put("programPath", programPath);
+            result.put("mode", mode);
+            result.put("function", function.getName());
+            result.put("address", AddressUtil.formatAddress(function.getEntryPoint()));
+            result.put("tags", updatedTags);
+
+            return createJsonResult(result);
+        });
+    }
+
 }

@@ -19,8 +19,11 @@ public class SimilarityComparator<T> implements java.util.Comparator<T> {
     public int compare(T o1, T o2) {
         String str1 = extractor.extract(o1);
         String str2 = extractor.extract(o2);
-        return findLongestCommonSubstringLength(str2.toLowerCase(), searchString) -
-               findLongestCommonSubstringLength(str1.toLowerCase(), searchString);
+        // Handle null values - treat as empty strings for comparison
+        str1 = str1 != null ? str1.toLowerCase() : "";
+        str2 = str2 != null ? str2.toLowerCase() : "";
+        return findLongestCommonSubstringLength(str2, searchString) -
+               findLongestCommonSubstringLength(str1, searchString);
     }
 
     private int findLongestCommonSubstringLength(String str1, String str2) {

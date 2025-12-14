@@ -524,8 +524,8 @@ public class FunctionToolProvider extends AbstractToolProvider {
                 originalTotalCount = cached.totalCount();
             } else {
                 // Cache miss - need to build similarity results
-                // IMPORTANT: Get function info FIRST (outside similarityCache lock) to avoid deadlock
-                // This ensures consistent lock ordering: functionInfoCache before similarityCache
+                // Get function info FIRST (outside similarityCache lock) to avoid holding
+                // the lock during expensive cache-building operations
                 List<Map<String, Object>> allFunctions = getOrBuildFunctionInfoCache(program, filterDefaultNames);
 
                 // Now synchronize on similarityCache to prevent duplicate similarity computation
@@ -1067,6 +1067,9 @@ public class FunctionToolProvider extends AbstractToolProvider {
             Map<Address, CandidateInfo> candidates = new HashMap<>();
             ReferenceIterator refIter = refMgr.getReferenceIterator(program.getMinAddress());
 
+            // Cache memory block exclusion status to avoid recalculating for every reference
+            Map<MemoryBlock, Boolean> blockExclusionCache = new HashMap<>();
+
             int refsScanned = 0;
             boolean earlyTermination = false;
 
@@ -1100,10 +1103,14 @@ public class FunctionToolProvider extends AbstractToolProvider {
                     continue;
                 }
 
-                // Skip PLT/GOT/import entries (common false positives)
-                String blockNameLower = block.getName().toLowerCase();
-                boolean isExcluded = EXCLUDED_BLOCK_PATTERNS.stream()
-                    .anyMatch(blockNameLower::contains);
+                // Skip PLT/GOT/import entries (common false positives) - use cached result
+                Boolean isExcluded = blockExclusionCache.get(block);
+                if (isExcluded == null) {
+                    String blockNameLower = block.getName().toLowerCase();
+                    isExcluded = EXCLUDED_BLOCK_PATTERNS.stream()
+                        .anyMatch(blockNameLower::contains);
+                    blockExclusionCache.put(block, isExcluded);
+                }
                 if (isExcluded) {
                     continue;
                 }

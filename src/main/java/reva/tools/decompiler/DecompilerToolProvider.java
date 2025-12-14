@@ -482,6 +482,7 @@ public class DecompilerToolProvider extends AbstractToolProvider {
         boolean timedOut = false;
 
         ReferenceManager refManager = program.getReferenceManager();
+        FunctionManager funcManager = program.getFunctionManager();
         Listing listing = program.getListing();
         AddressSetView functionBody = function.getBody();
 
@@ -506,7 +507,7 @@ public class DecompilerToolProvider extends AbstractToolProvider {
                     }
                     Reference ref = refsTo.next();
                     if (ref.getReferenceType().isCall()) {
-                        Function caller = program.getFunctionManager().getFunctionContaining(ref.getFromAddress());
+                        Function caller = funcManager.getFunctionContaining(ref.getFromAddress());
                         if (caller != null) {
                             callCounts.merge(caller.getEntryPoint(), 1, Integer::sum);
                         }
@@ -521,7 +522,15 @@ public class DecompilerToolProvider extends AbstractToolProvider {
                 Reference[] refsFrom = instr.getReferencesFrom();
                 for (Reference ref : refsFrom) {
                     if (ref.getReferenceType().isCall()) {
-                        callCounts.merge(ref.getToAddress(), 1, Integer::sum);
+                        // Resolve to function entry point (ref.getToAddress() may be inside function)
+                        Function callee = funcManager.getFunctionAt(ref.getToAddress());
+                        if (callee == null) {
+                            // Try to find containing function if not at entry point
+                            callee = funcManager.getFunctionContaining(ref.getToAddress());
+                        }
+                        if (callee != null) {
+                            callCounts.merge(callee.getEntryPoint(), 1, Integer::sum);
+                        }
                     }
                 }
             }
@@ -536,14 +545,12 @@ public class DecompilerToolProvider extends AbstractToolProvider {
      * @param functions The set of functions (callers or callees)
      * @param callCounts Map of entry point addresses to call counts
      * @param maxCount Maximum number to include
-     * @param isCallers true if building caller info, false for callee info
      * @return List of function info maps
      */
     private List<Map<String, Object>> buildCallListInfo(
             Set<Function> functions,
             Map<Address, Integer> callCounts,
-            int maxCount,
-            boolean isCallers) {
+            int maxCount) {
         List<Map<String, Object>> resultList = new ArrayList<>();
         int count = 0;
 
@@ -784,6 +791,59 @@ public class DecompilerToolProvider extends AbstractToolProvider {
             resultData.put("endAddress", AddressUtil.formatAddress(body.getMaxAddress()));
             resultData.put("sizeInBytes", body.getNumAddresses());
 
+            // Add caller/callee information if requested (works without decompilation)
+            if (includeCallers && !isUndefinedFunction) {
+                TaskMonitor callerMonitor = createTimeoutMonitor();
+                Set<Function> callers = function.getCallingFunctions(callerMonitor);
+
+                if (callerMonitor.isCancelled()) {
+                    resultData.put("callersError", "Operation timed out while getting callers");
+                } else {
+                    int totalCallers = callers.size();
+
+                    // Count calls using shared helper (separate timeout monitor)
+                    CallCountResult countResult = countCallsWithTimeout(program, function, true);
+                    List<Map<String, Object>> callersList = buildCallListInfo(
+                        callers, countResult.callCounts(), MAX_CALLERS_IN_DECOMPILATION);
+
+                    resultData.put("callers", callersList);
+                    resultData.put("callerCount", callersList.size());
+                    resultData.put("totalCallerCount", totalCallers);
+                    if (totalCallers > MAX_CALLERS_IN_DECOMPILATION) {
+                        resultData.put("callersLimited", true);
+                    }
+                    if (countResult.timedOut()) {
+                        resultData.put("callerCallCountsIncomplete", true);
+                    }
+                }
+            }
+
+            if (includeCallees && !isUndefinedFunction) {
+                TaskMonitor calleeMonitor = createTimeoutMonitor();
+                Set<Function> callees = function.getCalledFunctions(calleeMonitor);
+
+                if (calleeMonitor.isCancelled()) {
+                    resultData.put("calleesError", "Operation timed out while getting callees");
+                } else {
+                    int totalCallees = callees.size();
+
+                    // Count calls using shared helper (separate timeout monitor)
+                    CallCountResult countResult = countCallsWithTimeout(program, function, false);
+                    List<Map<String, Object>> calleesList = buildCallListInfo(
+                        callees, countResult.callCounts(), MAX_CALLEES_IN_DECOMPILATION);
+
+                    resultData.put("callees", calleesList);
+                    resultData.put("calleeCount", calleesList.size());
+                    resultData.put("totalCalleeCount", totalCallees);
+                    if (totalCallees > MAX_CALLEES_IN_DECOMPILATION) {
+                        resultData.put("calleesLimited", true);
+                    }
+                    if (countResult.timedOut()) {
+                        resultData.put("calleeCallCountsIncomplete", true);
+                    }
+                }
+            }
+
             // If signatureOnly is true, return early without decompilation
             if (signatureOnly) {
                 resultData.put("signatureOnly", true);
@@ -835,59 +895,6 @@ public class DecompilerToolProvider extends AbstractToolProvider {
                 resultData.put("decompilation", "");
             } finally {
                 decompiler.dispose();
-            }
-
-            // Add caller/callee information if requested (outside decompiler scope)
-            if (includeCallers && !isUndefinedFunction) {
-                TaskMonitor callerMonitor = createTimeoutMonitor();
-                Set<Function> callers = function.getCallingFunctions(callerMonitor);
-
-                if (callerMonitor.isCancelled()) {
-                    resultData.put("callersError", "Operation timed out while getting callers");
-                } else {
-                    int totalCallers = callers.size();
-
-                    // Count calls using shared helper (separate timeout monitor)
-                    CallCountResult countResult = countCallsWithTimeout(program, function, true);
-                    List<Map<String, Object>> callersList = buildCallListInfo(
-                        callers, countResult.callCounts(), MAX_CALLERS_IN_DECOMPILATION, true);
-
-                    resultData.put("callers", callersList);
-                    resultData.put("callerCount", callersList.size());
-                    resultData.put("totalCallerCount", totalCallers);
-                    if (totalCallers > MAX_CALLERS_IN_DECOMPILATION) {
-                        resultData.put("callersLimited", true);
-                    }
-                    if (countResult.timedOut()) {
-                        resultData.put("callerCallCountsIncomplete", true);
-                    }
-                }
-            }
-
-            if (includeCallees && !isUndefinedFunction) {
-                TaskMonitor calleeMonitor = createTimeoutMonitor();
-                Set<Function> callees = function.getCalledFunctions(calleeMonitor);
-
-                if (calleeMonitor.isCancelled()) {
-                    resultData.put("calleesError", "Operation timed out while getting callees");
-                } else {
-                    int totalCallees = callees.size();
-
-                    // Count calls using shared helper (separate timeout monitor)
-                    CallCountResult countResult = countCallsWithTimeout(program, function, false);
-                    List<Map<String, Object>> calleesList = buildCallListInfo(
-                        callees, countResult.callCounts(), MAX_CALLEES_IN_DECOMPILATION, false);
-
-                    resultData.put("callees", calleesList);
-                    resultData.put("calleeCount", calleesList.size());
-                    resultData.put("totalCalleeCount", totalCallees);
-                    if (totalCallees > MAX_CALLEES_IN_DECOMPILATION) {
-                        resultData.put("calleesLimited", true);
-                    }
-                    if (countResult.timedOut()) {
-                        resultData.put("calleeCallCountsIncomplete", true);
-                    }
-                }
             }
 
             return createJsonResult(resultData);

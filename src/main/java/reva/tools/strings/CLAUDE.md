@@ -18,10 +18,11 @@ The StringToolProvider implements four main tools:
 
 ### 2. get-strings
 - **Purpose**: Get paginated list of strings from a program
-- **Parameters**: 
+- **Parameters**:
   - `programPath` (required)
   - `startIndex` (optional, default: 0)
   - `maxCount` (optional, default: 100)
+  - `includeReferencingFunctions` (optional, default: false) - Include functions that reference each string
 - **Returns**: Array with pagination metadata followed by string objects
 - **Use Case**: Systematic enumeration of all strings
 
@@ -32,6 +33,7 @@ The StringToolProvider implements four main tools:
   - `searchString` (required)
   - `startIndex` (optional, default: 0)
   - `maxCount` (optional, default: 100)
+  - `includeReferencingFunctions` (optional, default: false) - Include functions that reference each string
 - **Returns**: Array with pagination metadata followed by similarity-sorted strings
 - **Use Case**: Finding related strings when you know a partial match
 
@@ -42,6 +44,7 @@ The StringToolProvider implements four main tools:
   - `regexPattern` (required)
   - `startIndex` (optional, default: 0)
   - `maxCount` (optional, default: 100)
+  - `includeReferencingFunctions` (optional, default: false) - Include functions that reference each string
 - **Returns**: Array with search metadata followed by matching strings
 - **Use Case**: Pattern-based string discovery when you know the format
 
@@ -66,29 +69,35 @@ if (pattern.matcher(stringValue).find()) {
 ## Memory Traversal for String Discovery
 
 ### Core Iteration Pattern
-All tools use consistent memory traversal:
+All tools use consistent memory traversal with enhanced for loop:
 ```java
 DataIterator dataIterator = program.getListing().getDefinedData(true);
-dataIterator.forEach(data -> {
+for (Data data : dataIterator) {
     if (data.getValue() instanceof String) {
         // Process string data
         Map<String, Object> stringInfo = getStringInfo(data);
     }
-});
+}
 ```
 
 ### Pagination Implementation
-Efficient pagination using atomic counters:
+Efficient pagination using enhanced for loop with early termination:
 ```java
-AtomicInteger currentIndex = new AtomicInteger(0);
-dataIterator.forEach(data -> {
-    if (data.getValue() instanceof String) {
-        int index = currentIndex.getAndIncrement();
-        if (index < pagination.startIndex()) return;
-        if (stringData.size() >= pagination.maxCount()) return;
-        // Collect string data
+int currentIndex = 0;
+
+for (Data data : dataIterator) {
+    if (!(data.getValue() instanceof String)) {
+        continue;
     }
-});
+
+    if (currentIndex++ < pagination.startIndex()) {
+        continue;
+    }
+    if (stringData.size() >= pagination.maxCount()) {
+        break; // Early termination for performance
+    }
+    // Collect string data
+}
 ```
 
 ## Encoding Handling (ASCII, Unicode, etc.)
@@ -194,6 +203,17 @@ Each string is returned as a JSON object with:
     "byteLength": 12,
     "dataType": "string",
     "representation": "\"Hello World\""
+}
+```
+
+When `includeReferencingFunctions` is true, each string object also includes:
+```json
+{
+    "referencingFunctions": [
+        {"name": "main", "address": "0x401000"},
+        {"name": "handleError", "address": "0x401200"}
+    ],
+    "referenceCount": 2
 }
 ```
 

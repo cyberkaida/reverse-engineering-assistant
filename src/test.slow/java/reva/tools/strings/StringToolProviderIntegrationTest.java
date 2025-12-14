@@ -352,17 +352,15 @@ public class StringToolProviderIntegrationTest extends RevaIntegrationTestBase {
             // Check metadata (first element)
             JsonNode metadata = json.get(0);
             assertTrue("Metadata should have regexPattern", metadata.has("regexPattern"));
-            assertTrue("Metadata should have totalStringsProcessed", metadata.has("totalStringsProcessed"));
-            assertTrue("Metadata should have totalMatches", metadata.has("totalMatches"));
+            assertTrue("Metadata should have searchComplete", metadata.has("searchComplete"));
             assertTrue("Metadata should have actualCount", metadata.has("actualCount"));
 
             assertEquals("Regex pattern should match", ".*String.*", metadata.get("regexPattern").asText());
 
-            int totalMatches = metadata.get("totalMatches").asInt();
             int actualCount = metadata.get("actualCount").asInt();
 
             // Should find at least 2 strings: "Test String" and "Another String"
-            assertTrue("Should find at least 2 matches", totalMatches >= 2);
+            assertTrue("Should find at least 2 matches", actualCount >= 2);
             assertEquals("Should have metadata + matching strings", 1 + actualCount, json.size());
 
             // Verify the matching strings contain "String"
@@ -393,11 +391,9 @@ public class StringToolProviderIntegrationTest extends RevaIntegrationTestBase {
             JsonNode json = parseJsonContent(content.text());
 
             JsonNode metadata = json.get(0);
-            int totalMatches = metadata.get("totalMatches").asInt();
             int actualCount = metadata.get("actualCount").asInt();
 
             // Should find exactly 1 match
-            assertEquals("Should find exactly 1 match", 1, totalMatches);
             assertEquals("Actual count should be 1", 1, actualCount);
 
             // Verify the match
@@ -427,7 +423,6 @@ public class StringToolProviderIntegrationTest extends RevaIntegrationTestBase {
             JsonNode json = parseJsonContent(content.text());
 
             JsonNode metadata = json.get(0);
-            assertEquals("Total matches should be 0", 0, metadata.get("totalMatches").asInt());
             assertEquals("Actual count should be 0", 0, metadata.get("actualCount").asInt());
             assertEquals("Result should only have metadata", 1, json.size());
         });
@@ -477,14 +472,14 @@ public class StringToolProviderIntegrationTest extends RevaIntegrationTestBase {
             JsonNode json = parseJsonContent(content.text());
 
             JsonNode metadata = json.get(0);
-            int totalMatches = metadata.get("totalMatches").asInt();
             int actualCount = metadata.get("actualCount").asInt();
+            boolean searchComplete = metadata.get("searchComplete").asBoolean();
 
             // Should return at most 1 match
             assertTrue("Should return at most 1 match", actualCount <= 1);
 
-            // If there are more matches, test second page
-            if (totalMatches > 1) {
+            // If search was not complete (more matches exist), test second page
+            if (!searchComplete) {
                 arguments.put("startIndex", 1);
                 CallToolResult secondResult = client.callTool(new CallToolRequest("search-strings-regex", arguments));
 

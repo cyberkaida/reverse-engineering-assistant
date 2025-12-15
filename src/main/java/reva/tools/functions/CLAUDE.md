@@ -9,24 +9,48 @@ The `reva.tools.functions` package provides MCP tools for function analysis, lis
 ## Key Tools
 
 - `get-function-count` - Get total count of functions (use before listing for pagination)
-- `get-functions` - List functions with pagination and filtering (supports `filterByTag`, `untagged`, `verbose`)
+- `get-functions` - List functions with pagination and filtering (supports `include`, `filterByTag`, `untagged`, `verbose`)
 - `get-functions-by-similarity` - Find functions similar to a target function (compact by default, use `verbose: true` for full details)
 - `set-function-prototype` - Modify function signatures and prototypes with C-style signatures
 - `get-undefined-function-candidates` - Find addresses that are referenced but not defined as functions
 - `create-function` - Create a function at an address with auto-detected signature
 - `function-tags` - Manage tags on functions (modes: get/set/add/remove/list)
 
+## Function Include Filter
+
+All three function listing tools (`get-function-count`, `get-functions`, `get-functions-by-similarity`) support the `include` parameter:
+
+| Value | Description |
+|-------|-------------|
+| `"all"` | Include all functions |
+| `"named"` | Only user-named functions (excludes FUN_*, DAT_*, etc.) - **DEFAULT** |
+| `"unnamed"` | Only default Ghidra names (FUN_*, DAT_*, etc.) |
+
+**Example usage:**
+```json
+// Count unnamed functions (what still needs analysis)
+{"programPath": "/prog", "include": "unnamed"}
+
+// List all functions including default names
+{"programPath": "/prog", "include": "all"}
+
+// Search for similar functions among unnamed ones
+{"programPath": "/prog", "searchString": "init", "include": "unnamed"}
+```
+
 ## Core Patterns
 
-### Function Enumeration with Filtering
-**Use SymbolUtil for default name filtering**:
+### Function Enumeration with Include Filter
+**Use IncludeFilterUtil for include-based filtering**:
 ```java
-import reva.util.SymbolUtil;
+import reva.util.IncludeFilterUtil;
+
+// Validate include parameter (defaults to "named")
+String include = IncludeFilterUtil.validate(getOptionalString(request, "include", null));
 
 FunctionIterator functions = program.getFunctionManager().getFunctions(true);
 functions.forEach(function -> {
-    // Skip default Ghidra function names if filtering is enabled
-    if (filterDefaultNames && SymbolUtil.isDefaultSymbolName(function.getName())) {
+    if (!IncludeFilterUtil.shouldInclude(function.getName(), include)) {
         return;
     }
     // Process function
@@ -336,15 +360,15 @@ Collections.sort(functions, comparator);
 
 ## Function Filtering Patterns
 
-### Default Name Filtering
-**Always provide option to filter default Ghidra names**:
+### Include Parameter Filtering
+**Use the include parameter for name-based filtering**:
 ```java
-boolean filterDefaultNames = getOptionalBoolean(request, "filterDefaultNames", true);
+String include = IncludeFilterUtil.validate(getOptionalString(request, "include", null));
 
-if (filterDefaultNames && SymbolUtil.isDefaultSymbolName(function.getName())) {
-    // Skip this function
-    continue;
-}
+// Filter using shouldIncludeFunctionInfo helper (for cached function info maps)
+List<Map<String, Object>> filtered = allFunctions.stream()
+    .filter(f -> shouldIncludeFunctionInfo(f, include))
+    .toList();
 ```
 
 ### Thunk Function Handling
@@ -400,8 +424,7 @@ Map<String, Object> result = Map.of(
 ```java
 Map<String, Object> countData = Map.of(
     "count", totalCount,
-    "programPath", program.getDomainFile().getPathname(),
-    "filtered", filterDefaultNames
+    "include", include  // "all", "named", or "unnamed"
 );
 ```
 
@@ -583,11 +606,12 @@ set-function-prototype → explicit signature control
 ## Important Notes
 
 - **Pagination**: Always provide pagination for function listing operations
-- **Filtering**: Default to filtering out Ghidra-generated names
+- **Include Parameter**: Use `include` parameter with values "all", "named", "unnamed" (default: "named")
 - **Transactions**: Required for all function modifications
 - **Similarity**: Use SimilarityComparator for consistent scoring
 - **Address Formatting**: Use AddressUtil.formatAddress() for addresses
 - **Error Context**: Provide specific error messages for function resolution failures
 - **Cache Invalidation**: Call `invalidateFunctionCaches()` after modifying function metadata (e.g., tags)
+- **Cache Strategy**: Function info is cached per-program (all functions), filtering applied at query time
 - **Thread Safety**: Both caches use ConcurrentHashMap and synchronized blocks for safe concurrent access
 - **Timeout Handling**: Caller/callee counts may be -1 if computation timed out (check before using)

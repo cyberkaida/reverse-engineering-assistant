@@ -16,11 +16,16 @@ The symbols tools package (`reva.tools.symbols`) provides MCP tools for interact
 
 ### Basic Symbol Access Patterns
 ```java
+import reva.util.IncludeFilterUtil;
+
 // Get symbol table from program
 SymbolTable symbolTable = program.getSymbolTable();
 
 // Iterate over all symbols
 SymbolIterator symbolIterator = symbolTable.getAllSymbols(true);
+
+// Validate include parameter (defaults to "named")
+String include = IncludeFilterUtil.validate(getOptionalString(request, "include", null));
 
 // Count symbols with filtering
 AtomicInteger count = new AtomicInteger(0);
@@ -28,8 +33,8 @@ symbolIterator.forEach(symbol -> {
     if (!includeExternal && symbol.isExternal()) {
         return; // Skip external symbols
     }
-    
-    if (!filterDefaultNames || !SymbolUtil.isDefaultSymbolName(symbol.getName())) {
+
+    if (IncludeFilterUtil.shouldInclude(symbol.getName(), include)) {
         count.incrementAndGet();
     }
 });
@@ -211,7 +216,7 @@ while (current != null && !current.isGlobal()) {
 {
   "count": 1250,
   "includeExternal": false,
-  "filterDefaultNames": true
+  "include": "named"
 }
 ```
 
@@ -225,7 +230,7 @@ while (current != null && !current.isGlobal()) {
     "nextStartIndex": 200,
     "totalProcessed": 1250,
     "includeExternal": false,
-    "filterDefaultNames": true
+    "include": "named"
   },
   {
     "name": "main",

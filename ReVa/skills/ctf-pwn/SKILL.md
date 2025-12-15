@@ -190,7 +190,7 @@ This is a **thinking framework**, not a rigid checklist. Adapt to the challenge:
 
 1. `get-current-program` or `list-project-files` → Identify target binary
 2. `get-memory-blocks` → Map sections, identify protections
-3. `get-functions` filterDefaultNames=false → Count functions (stripped vs. symbolic)
+3. `get-functions` include="all" → Count functions (stripped vs. symbolic)
 4. `search-strings-regex` pattern="flag" → Find flag-related strings
 5. `get-symbols` includeExternal=true → List imported functions
 

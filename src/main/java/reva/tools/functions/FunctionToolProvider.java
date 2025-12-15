@@ -61,6 +61,7 @@ import io.modelcontextprotocol.server.McpSyncServer;
 import io.modelcontextprotocol.spec.McpSchema;
 import reva.tools.AbstractToolProvider;
 import reva.util.AddressUtil;
+import reva.util.IncludeFilterUtil;
 import reva.util.SimilarityComparator;
 import reva.util.SymbolUtil;
 
@@ -104,7 +105,7 @@ public class FunctionToolProvider extends AbstractToolProvider {
     /**
      * Cache key for similarity search results.
      */
-    private record SimilarityCacheKey(String programPath, String searchString, boolean filterDefaultNames) {}
+    private record SimilarityCacheKey(String programPath, String searchString, String include) {}
 
     /**
      * Cached similarity search result with metadata.
@@ -130,8 +131,9 @@ public class FunctionToolProvider extends AbstractToolProvider {
 
     /**
      * Cache key for raw function info (shared between get-functions and get-functions-by-similarity).
+     * Caches ALL functions - filtering by include is done at query time.
      */
-    private record FunctionInfoCacheKey(String programPath, boolean filterDefaultNames) {}
+    private record FunctionInfoCacheKey(String programPath) {}
 
     /**
      * Cached function info list with metadata.
@@ -192,6 +194,18 @@ public class FunctionToolProvider extends AbstractToolProvider {
     }
 
     /**
+     * Filter a function info map based on the include parameter.
+     *
+     * @param funcInfo The function info map (must contain "name" key)
+     * @param include The include filter value ("all", "named", or "unnamed")
+     * @return true if the function should be included, false otherwise
+     */
+    private boolean shouldIncludeFunctionInfo(Map<String, Object> funcInfo, String include) {
+        String name = (String) funcInfo.get("name");
+        return IncludeFilterUtil.shouldInclude(name, include);
+    }
+
+    /**
      * Build a result map for rename operations.
      */
     private Map<String, Object> buildRenameResult(boolean renamed, String oldName, Function function, Address address, String programPath) {
@@ -235,14 +249,14 @@ public class FunctionToolProvider extends AbstractToolProvider {
     /**
      * Get function info list from cache or build it.
      * This is the shared cache used by both get-functions and get-functions-by-similarity.
+     * Caches ALL functions - filtering by include is done at query time.
      *
      * @param program The program to get function info from
-     * @param filterDefaultNames Whether to filter out default Ghidra names
-     * @return List of function info maps (never null, but may be empty if timeout)
+     * @return List of function info maps for ALL functions (never null, but may be empty if timeout)
      */
-    private List<Map<String, Object>> getOrBuildFunctionInfoCache(Program program, boolean filterDefaultNames) {
+    private List<Map<String, Object>> getOrBuildFunctionInfoCache(Program program) {
         String programPath = program.getDomainFile().getPathname();
-        FunctionInfoCacheKey cacheKey = new FunctionInfoCacheKey(programPath, filterDefaultNames);
+        FunctionInfoCacheKey cacheKey = new FunctionInfoCacheKey(programPath);
         long currentModNumber = program.getModificationNumber();
 
         // Check cache first (thread-safe read)
@@ -260,7 +274,7 @@ public class FunctionToolProvider extends AbstractToolProvider {
                 return cached.functions();
             }
 
-            // Build function info list with timeout support
+            // Build function info list with timeout support (cache ALL functions)
             logInfo("FunctionToolProvider: Building function info cache for " + programPath);
             long startTime = System.currentTimeMillis();
 
@@ -278,11 +292,6 @@ public class FunctionToolProvider extends AbstractToolProvider {
 
                 Function function = functions.next();
                 processed++;
-
-                // Skip default Ghidra function names if filtering is enabled
-                if (filterDefaultNames && SymbolUtil.isDefaultSymbolName(function.getName())) {
-                    continue;
-                }
 
                 functionList.add(createFunctionInfo(function, monitor));
             }
@@ -356,11 +365,7 @@ public class FunctionToolProvider extends AbstractToolProvider {
             "type", "string",
             "description", "Path in the Ghidra Project to the program to get functions from"
         ));
-        properties.put("filterDefaultNames", Map.of(
-            "type", "boolean",
-            "description", "Whether to filter out default Ghidra generated names like FUN_, DAT_, etc.",
-            "default", true
-        ));
+        properties.put("include", IncludeFilterUtil.getIncludePropertyDefinition());
 
         List<String> required = List.of("programPath");
 
@@ -376,23 +381,20 @@ public class FunctionToolProvider extends AbstractToolProvider {
         registerTool(tool, (exchange, request) -> {
             // Get program and parameters using helper methods
             Program program = getProgramFromArgs(request);
-            boolean filterDefaultNames = getOptionalBoolean(request, "filterDefaultNames", true);
+            String include = IncludeFilterUtil.validate(getOptionalString(request, "include", null));
 
             logInfo("get-function-count: Counting functions in " + program.getName() +
-                " (filterDefaultNames=" + filterDefaultNames + ")");
+                " (include=" + include + ")");
             long startTime = System.currentTimeMillis();
 
             AtomicInteger count = new AtomicInteger(0);
 
-            // Iterate through all functions
+            // Iterate through all functions using shared filter logic
             FunctionIterator functions = program.getFunctionManager().getFunctions(true);
             functions.forEach(function -> {
-                // Skip default Ghidra function names if filtering is enabled
-                if (filterDefaultNames && SymbolUtil.isDefaultSymbolName(function.getName())) {
-                    return;
+                if (IncludeFilterUtil.shouldInclude(function.getName(), include)) {
+                    count.incrementAndGet();
                 }
-
-                count.incrementAndGet();
             });
 
             // Log warning if operation took too long
@@ -405,6 +407,7 @@ public class FunctionToolProvider extends AbstractToolProvider {
             // Create result data
             Map<String, Object> countData = new HashMap<>();
             countData.put("count", count.get());
+            countData.put("include", include);
 
             return createJsonResult(countData);
         });
@@ -420,14 +423,10 @@ public class FunctionToolProvider extends AbstractToolProvider {
             "type", "string",
             "description", "Path in the Ghidra Project to the program to get functions from"
         ));
-        properties.put("filterDefaultNames", Map.of(
-            "type", "boolean",
-            "description", "Whether to filter out default Ghidra generated names like FUN_, DAT_, etc.",
-            "default", true
-        ));
+        properties.put("include", IncludeFilterUtil.getIncludePropertyDefinition());
         properties.put("filterByTag", Map.of(
             "type", "string",
-            "description", "Only return functions with this tag (applied after filterDefaultNames)"
+            "description", "Only return functions with this tag (applied after include filter)"
         ));
         properties.put("untagged", Map.of(
             "type", "boolean",
@@ -466,7 +465,7 @@ public class FunctionToolProvider extends AbstractToolProvider {
             // Get program and parameters using helper methods
             Program program = getProgramFromArgs(request);
             PaginationParams pagination = getPaginationParams(request);
-            boolean filterDefaultNames = getOptionalBoolean(request, "filterDefaultNames", true);
+            String include = IncludeFilterUtil.validate(getOptionalString(request, "include", null));
             String filterByTag = getOptionalString(request, "filterByTag", null);
             boolean untagged = getOptionalBoolean(request, "untagged", false);
             boolean verbose = getOptionalBoolean(request, "verbose", false);
@@ -476,30 +475,27 @@ public class FunctionToolProvider extends AbstractToolProvider {
                 return createErrorResult("Cannot use both 'untagged' and 'filterByTag' - they are mutually exclusive");
             }
 
-            // Get function info from shared cache (or build it)
-            List<Map<String, Object>> allFunctions = getOrBuildFunctionInfoCache(program, filterDefaultNames);
+            logInfo("get-functions: Listing functions in " + program.getName() + " (include=" + include + ")");
 
-            // Apply tag filter if specified
-            List<Map<String, Object>> filteredFunctions;
-            if (untagged) {
-                filteredFunctions = allFunctions.stream()
-                    .filter(f -> {
+            // Get ALL function info from shared cache
+            List<Map<String, Object>> allFunctions = getOrBuildFunctionInfoCache(program);
+
+            // Apply include filter first, then tag filter
+            List<Map<String, Object>> filteredFunctions = allFunctions.stream()
+                .filter(f -> shouldIncludeFunctionInfo(f, include))
+                .filter(f -> {
+                    if (untagged) {
                         @SuppressWarnings("unchecked")
                         List<String> tags = (List<String>) f.get("tags");
                         return tags == null || tags.isEmpty();
-                    })
-                    .toList();
-            } else if (filterByTag != null && !filterByTag.isEmpty()) {
-                filteredFunctions = allFunctions.stream()
-                    .filter(f -> {
+                    } else if (filterByTag != null && !filterByTag.isEmpty()) {
                         @SuppressWarnings("unchecked")
                         List<String> tags = (List<String>) f.get("tags");
                         return tags != null && tags.contains(filterByTag);
-                    })
-                    .toList();
-            } else {
-                filteredFunctions = allFunctions;
-            }
+                    }
+                    return true;
+                })
+                .toList();
 
             int totalCount = filteredFunctions.size();
 
@@ -537,7 +533,7 @@ public class FunctionToolProvider extends AbstractToolProvider {
             metadataInfo.put("actualCount", functionData.size());
             metadataInfo.put("nextStartIndex", startIndex + functionData.size());
             metadataInfo.put("totalCount", totalCount);
-            metadataInfo.put("filterDefaultNames", filterDefaultNames);
+            metadataInfo.put("include", include);
             metadataInfo.put("verbose", verbose);
             if (filterByTag != null && !filterByTag.isEmpty()) {
                 metadataInfo.put("filterByTag", filterByTag);
@@ -570,11 +566,7 @@ public class FunctionToolProvider extends AbstractToolProvider {
             "description", "Function name to compare against for similarity (scored by longest common substring length between the search string and each function name in the program)"
         ));
 
-        properties.put("filterDefaultNames", Map.of(
-            "type", "boolean",
-            "description", "Whether to filter out default Ghidra generated names like FUN_, DAT_, etc.",
-            "default", true
-        ));
+        properties.put("include", IncludeFilterUtil.getIncludePropertyDefinition());
 
         properties.put("startIndex", Map.of(
             "type", "integer",
@@ -608,7 +600,7 @@ public class FunctionToolProvider extends AbstractToolProvider {
             Program program = getProgramFromArgs(request);
             String searchString = getString(request, "searchString");
             PaginationParams pagination = getPaginationParams(request);
-            boolean filterDefaultNames = getOptionalBoolean(request, "filterDefaultNames", true);
+            String include = IncludeFilterUtil.validate(getOptionalString(request, "include", null));
             boolean verbose = getOptionalBoolean(request, "verbose", false);
             String programPath = program.getDomainFile().getPathname();
 
@@ -616,10 +608,10 @@ public class FunctionToolProvider extends AbstractToolProvider {
                 return createErrorResult("Search string cannot be empty");
             }
 
-            logInfo("get-functions-by-similarity: Searching for '" + searchString + "' in " + program.getName());
+            logInfo("get-functions-by-similarity: Searching for '" + searchString + "' in " + program.getName() + " (include=" + include + ")");
 
             // Check similarity cache for existing sorted results (thread-safe read)
-            SimilarityCacheKey cacheKey = new SimilarityCacheKey(programPath, searchString, filterDefaultNames);
+            SimilarityCacheKey cacheKey = new SimilarityCacheKey(programPath, searchString, include);
             long currentModNumber = program.getModificationNumber();
             CachedSearchResult cached = similarityCache.get(cacheKey);
 
@@ -634,9 +626,9 @@ public class FunctionToolProvider extends AbstractToolProvider {
                 originalTotalCount = cached.totalCount();
             } else {
                 // Cache miss - need to build similarity results
-                // Get function info FIRST (outside similarityCache lock) to avoid holding
+                // Get ALL function info FIRST (outside similarityCache lock) to avoid holding
                 // the lock during expensive cache-building operations
-                List<Map<String, Object>> allFunctions = getOrBuildFunctionInfoCache(program, filterDefaultNames);
+                List<Map<String, Object>> allFunctions = getOrBuildFunctionInfoCache(program);
 
                 // Now synchronize on similarityCache to prevent duplicate similarity computation
                 synchronized (similarityCache) {
@@ -649,13 +641,19 @@ public class FunctionToolProvider extends AbstractToolProvider {
                     } else {
                         long startTime = System.currentTimeMillis();
 
+                        // Apply include filter first
+                        final String includeFilter = include;
+                        List<Map<String, Object>> filteredFunctions = allFunctions.stream()
+                            .filter(f -> shouldIncludeFunctionInfo(f, includeFilter))
+                            .toList();
+
                         // Pre-filter: collect functions that contain search string as substring first
                         // This dramatically reduces the number of functions to sort with expensive LCS
                         String searchLower = searchString.toLowerCase();
                         List<Map<String, Object>> substringMatches = new ArrayList<>();
                         List<Map<String, Object>> nonMatches = new ArrayList<>();
 
-                        for (Map<String, Object> functionInfo : allFunctions) {
+                        for (Map<String, Object> functionInfo : filteredFunctions) {
                             String name = (String) functionInfo.get("name");
                             String nameLower = name.toLowerCase();
 
@@ -760,7 +758,7 @@ public class FunctionToolProvider extends AbstractToolProvider {
             paginationInfo.put("actualCount", transformedResults.size());
             paginationInfo.put("nextStartIndex", startIndex + transformedResults.size());
             paginationInfo.put("totalMatchingFunctions", reportedTotal);
-            paginationInfo.put("filterDefaultNames", filterDefaultNames);
+            paginationInfo.put("include", include);
             paginationInfo.put("verbose", verbose);
             paginationInfo.put("cacheHit", wasCacheHit);
             if (resultsTruncated) {
@@ -1537,6 +1535,9 @@ public class FunctionToolProvider extends AbstractToolProvider {
                 }
 
                 program.endTransaction(txId, true);
+
+                // Invalidate function caches since a new function was created
+                invalidateFunctionCaches(programPath);
 
                 // Build response
                 Map<String, Object> result = new HashMap<>();

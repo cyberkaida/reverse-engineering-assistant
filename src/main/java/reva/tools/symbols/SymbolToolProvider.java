@@ -29,7 +29,8 @@ import ghidra.program.model.symbol.SymbolType;
 import io.modelcontextprotocol.server.McpSyncServer;
 import io.modelcontextprotocol.spec.McpSchema;
 import reva.tools.AbstractToolProvider;
-import reva.util.SymbolUtil;
+import reva.util.AddressUtil;
+import reva.util.IncludeFilterUtil;
 
 /**
  * Tool provider for symbol-related operations.
@@ -50,25 +51,32 @@ public class SymbolToolProvider extends AbstractToolProvider {
     }
 
     /**
+     * Create the base properties schema
+     */
+    private Map<String, Object> createBasePropertiesSchema() {
+
+        // Define schema for the tool
+        Map<String, Object> properties = new HashMap<>();
+        properties.put("programPath", Map.of(
+                "type", "string",
+                "description", "Path in the Ghidra Project to the program to get symbols from"
+        ));
+        properties.put("includeExternal", Map.of(
+                "type", "boolean",
+                "description", "Whether to include external symbols",
+                "default", false
+        ));
+        properties.put("include", IncludeFilterUtil.getIncludePropertyDefinition());
+
+        return properties;
+    }
+
+    /**
      * Register a tool to get the count of symbols in a program
      */
     private void registerSymbolsCountTool() {
         // Define schema for the tool
-        Map<String, Object> properties = new HashMap<>();
-        properties.put("programPath", Map.of(
-            "type", "string",
-            "description", "Path in the Ghidra Project to the program to get symbol count from"
-        ));
-        properties.put("includeExternal", Map.of(
-            "type", "boolean",
-            "description", "Whether to include external symbols in the count",
-            "default", false
-        ));
-        properties.put("filterDefaultNames", Map.of(
-            "type", "boolean",
-            "description", "Whether to filter out default Ghidra generated names like FUN_, DAT_, etc.",
-            "default", true
-        ));
+        Map<String, Object> properties = this.createBasePropertiesSchema();
 
         List<String> required = List.of("programPath");
 
@@ -85,7 +93,9 @@ public class SymbolToolProvider extends AbstractToolProvider {
             // Get program and parameters using helper methods
             Program program = getProgramFromArgs(request);
             boolean includeExternal = getOptionalBoolean(request, "includeExternal", false);
-            boolean filterDefaultNames = getOptionalBoolean(request, "filterDefaultNames", true);
+            String include = IncludeFilterUtil.validate(getOptionalString(request, "include", null));
+
+            logInfo("get-symbols-count: Counting symbols in " + program.getName() + " (include=" + include + ")");
 
             // Count the symbols
             SymbolTable symbolTable = program.getSymbolTable();
@@ -98,7 +108,7 @@ public class SymbolToolProvider extends AbstractToolProvider {
                     return;
                 }
 
-                if (!filterDefaultNames || !SymbolUtil.isDefaultSymbolName(symbol.getName())) {
+                if (IncludeFilterUtil.shouldInclude(symbol.getName(), include)) {
                     count.incrementAndGet();
                 }
             });
@@ -107,7 +117,7 @@ public class SymbolToolProvider extends AbstractToolProvider {
             Map<String, Object> countData = new HashMap<>();
             countData.put("count", count.get());
             countData.put("includeExternal", includeExternal);
-            countData.put("filterDefaultNames", filterDefaultNames);
+            countData.put("include", include);
 
             return createJsonResult(countData);
         });
@@ -118,16 +128,8 @@ public class SymbolToolProvider extends AbstractToolProvider {
      */
     private void registerSymbolsTool() {
         // Define schema for the tool
-        Map<String, Object> properties = new HashMap<>();
-        properties.put("programPath", Map.of(
-            "type", "string",
-            "description", "Path in the Ghidra Project to the program to get symbols from"
-        ));
-        properties.put("includeExternal", Map.of(
-            "type", "boolean",
-            "description", "Whether to include external symbols in the result",
-            "default", false
-        ));
+        Map<String, Object> properties = this.createBasePropertiesSchema();
+
         properties.put("startIndex", Map.of(
             "type", "integer",
             "description", "Starting index for pagination (0-based)",
@@ -137,11 +139,6 @@ public class SymbolToolProvider extends AbstractToolProvider {
             "type", "integer",
             "description", "Maximum number of symbols to return (recommend using get-symbols-count first and using chunks of 200)",
             "default", 200
-        ));
-        properties.put("filterDefaultNames", Map.of(
-            "type", "boolean",
-            "description", "Whether to filter out default Ghidra generated names like FUN_, DAT_, etc.",
-            "default", true
         ));
 
         List<String> required = List.of("programPath");
@@ -160,7 +157,9 @@ public class SymbolToolProvider extends AbstractToolProvider {
             Program program = getProgramFromArgs(request);
             boolean includeExternal = getOptionalBoolean(request, "includeExternal", false);
             PaginationParams pagination = getPaginationParams(request, 200);
-            boolean filterDefaultNames = getOptionalBoolean(request, "filterDefaultNames", true);
+            String include = IncludeFilterUtil.validate(getOptionalString(request, "include", null));
+
+            logInfo("get-symbols: Listing symbols in " + program.getName() + " (include=" + include + ")");
 
             // Get the symbols with pagination
             List<Map<String, Object>> symbolData = new ArrayList<>();
@@ -175,8 +174,8 @@ public class SymbolToolProvider extends AbstractToolProvider {
                     return;
                 }
 
-                // Skip default names if filtering is enabled
-                if (filterDefaultNames && SymbolUtil.isDefaultSymbolName(symbol.getName())) {
+                // Skip symbols based on include filter
+                if (!IncludeFilterUtil.shouldInclude(symbol.getName(), include)) {
                     return;
                 }
 
@@ -204,7 +203,7 @@ public class SymbolToolProvider extends AbstractToolProvider {
             paginationInfo.put("nextStartIndex", pagination.startIndex() + symbolData.size());
             paginationInfo.put("totalProcessed", currentIndex.get());
             paginationInfo.put("includeExternal", includeExternal);
-            paginationInfo.put("filterDefaultNames", filterDefaultNames);
+            paginationInfo.put("include", include);
 
             // Create result with metadata and symbols
             List<Object> resultData = new ArrayList<>();
@@ -223,7 +222,7 @@ public class SymbolToolProvider extends AbstractToolProvider {
     private Map<String, Object> createSymbolInfo(Symbol symbol) {
         Map<String, Object> symbolInfo = new HashMap<>();
         symbolInfo.put("name", symbol.getName());
-        symbolInfo.put("address", "0x" + symbol.getAddress().toString());
+        symbolInfo.put("address", AddressUtil.formatAddress(symbol.getAddress()));
         symbolInfo.put("namespace", symbol.getParentNamespace().getName());
         symbolInfo.put("id", symbol.getID());
         symbolInfo.put("symbolType", symbol.getSymbolType().toString());

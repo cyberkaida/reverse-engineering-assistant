@@ -183,7 +183,7 @@ Find: Multiple functions with XOR and bitwise operations in loops
 
 3. Check for suspicious imports:
 ```
-get-symbols includeExternal=true filterDefaultNames=true startIndex=0 maxCount=200
+get-symbols includeExternal=true include="named" startIndex=0 maxCount=200
 ```
 
 Find: No obvious crypto library imports

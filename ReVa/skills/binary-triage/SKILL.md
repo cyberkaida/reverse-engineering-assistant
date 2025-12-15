@@ -45,7 +45,7 @@ Follow this systematic workflow using ReVa's MCP tools:
 
 ### 4. Survey Symbols and Imports
 - Use `get-symbols-count` with `includeExternal=true` to count imports
-- Use `get-symbols` with `includeExternal=true` and `filterDefaultNames=true`
+- Use `get-symbols` with `includeExternal=true` and `include="named"`
 - Focus on external symbols (imports from libraries)
 - Flag interesting/suspicious imports by category:
   - **Network APIs**: connect, send, recv, WSAStartup, getaddrinfo, curl_*, socket
@@ -58,10 +58,11 @@ Follow this systematic workflow using ReVa's MCP tools:
 - Note the ratio of imports to total symbols (heavy import usage may indicate reliance on libraries)
 
 ### 5. Survey Functions
-- Use `get-function-count` with `filterDefaultNames=true` to count named functions
-- Use `get-function-count` with `filterDefaultNames=false` to count all functions
+- Use `get-function-count` with `include="named"` to count named functions
+- Use `get-function-count` with `include="all"` to count all functions
+- Use `get-function-count` with `include="unnamed"` to count only default-named functions (FUN_*, etc.)
 - Calculate ratio of named vs unnamed functions (high unnamed ratio = stripped binary)
-- Use `get-functions` with `filterDefaultNames=true` to list named functions
+- Use `get-functions` with `include="named"` to list named functions
 - Identify key functions:
   - **Entry points**: `entry`, `start`, `_start`
   - **Main functions**: `main`, `WinMain`, `DllMain`, `_main`
@@ -129,8 +130,9 @@ Present triage findings to the user in this structured format:
 - **Suspicious APIs**: [Categorized list of concerning imports]
 
 ### Function Analysis
-- **Total Functions**: [Count with filterDefaultNames=false]
-- **Named Functions**: [Count with filterDefaultNames=true]
+- **Total Functions**: [Count with include="all"]
+- **Named Functions**: [Count with include="named"]
+- **Unnamed Functions**: [Count with include="unnamed"]
 - **Stripped Status**: [Yes/No based on ratio]
 - **Entry Point**: [Address and name]
 - **Main Function**: [Address and name]

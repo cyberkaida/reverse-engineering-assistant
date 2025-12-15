@@ -1,401 +1,353 @@
 # ReVa Headless Package
 
-This package provides the infrastructure for running ReVa MCP server in headless Ghidra mode, without requiring the GUI plugin system.
+This package provides infrastructure for running ReVa MCP server in headless Ghidra mode without the GUI plugin system.
 
 ## Overview
 
-The headless package enables ReVa to run in environments where a full Ghidra GUI is not available or not desired:
+The headless package enables ReVa to run in non-GUI environments:
 - **PyGhidra scripts** - Python-based automation and testing
-- **CI/CD pipelines** - Automated analysis and testing
-- **Server deployments** - Long-running analysis servers
-- **Docker containers** - Containerized reverse engineering workflows
+- **CI/CD pipelines** - Automated analysis workflows
+- **Claude CLI (stdio mode)** - Direct integration with Claude desktop
+- **Long-running servers** - Headless analysis services
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────┐
-│         Entry Points                         │
-├──────────────────┬──────────────────────────┤
-│  GUI Mode        │  Headless Mode           │
-│  (Existing)      │  (New)                   │
-│                  │                          │
-│  RevaApplication │  RevaHeadlessLauncher   │
-│  Plugin          │                          │
-└────────┬─────────┴───────────┬──────────────┘
-         │                     │
-         └──────────┬──────────┘
-                    │
-         ┌──────────▼──────────┐
-         │  McpServerManager   │
-         └──────────┬──────────┘
-                    │
-         ┌──────────▼──────────┐
-         │  ConfigManager      │
-         │  (Backend-based)    │
-         └─────────────────────┘
+┌────────────────────────────────────────────────────────┐
+│                  Entry Points                          │
+├─────────────────┬──────────────────┬───────────────────┤
+│   GUI Mode      │  Headless Mode   │  Claude CLI Mode  │
+│                 │                  │                   │
+│  RevaApp Plugin │  RevaHeadless    │  mcp-reva CLI     │
+│  (ToolOptions)  │  Launcher        │  (Python)         │
+└───────┬─────────┴────────┬─────────┴────────┬──────────┘
+        │                  │                  │
+        │                  └──────────┬───────┘
+        │                             │
+        └─────────────────────────────┼─────────────────┐
+                                      ▼                 │
+                           ┌──────────────────┐         │
+                           │ ConfigManager    │         │
+                           │ (File/InMemory)  │         │
+                           └──────────┬───────┘         │
+                                      ▼                 │
+                           ┌──────────────────┐         │
+                           │ McpServerManager │◄────────┘
+                           │ (Jetty HTTP)     │
+                           └──────────────────┘
 ```
 
 ## Key Components
 
 ### RevaHeadlessLauncher
 
-Main entry point for headless operation. Provides:
-- **Automatic Ghidra initialization** - Handles HeadlessGhidraApplicationConfiguration
-- **Configuration management** - Supports file-based or in-memory config
-- **Server lifecycle** - Start, stop, wait for ready
-- **Status monitoring** - Check if running and ready
+Main entry point for headless operation (`RevaHeadlessLauncher.java`):
+
+**Core Features:**
+- Automatic Ghidra initialization with `HeadlessGhidraApplicationConfiguration`
+- Flexible configuration: file-based (`.properties`), in-memory (defaults), or custom
+- Project lifecycle: Optional persistent project creation/management
+- Server lifecycle: Start, stop, ready-wait with timeout
+- Random port allocation: Useful for parallel instances and CLI mode
+
+**Configuration Backends:**
+- `InMemoryBackend` - Default values, no persistence (headless default)
+- `FileBackend` - Load from `.properties` file (custom configs)
+- `ToolOptionsBackend` - Ghidra ToolOptions (GUI mode only)
+
+**Project Support:**
+- Optional project creation: Pass `projectLocation` and `projectName` to constructor
+- Persistent projects: Created in specified directory, survive server restarts
+- Ephemeral projects: Python CLI creates temp projects (auto-cleanup on exit)
+- No project mode: Can run without a project (project-less tools only)
 
 ## Usage Patterns
 
-### 1. PyGhidra Script
+### 1. Basic PyGhidra Script
 
 ```python
-#!/usr/bin/env python3
-"""
-Start ReVa MCP server from pyghidra
-"""
 import pyghidra
+pyghidra.start()  # Initialize Ghidra BEFORE importing ReVa
 
-# pyghidra will initialize Ghidra
-pyghidra.start()
-
-# Import after pyghidra is initialized
 from reva.headless import RevaHeadlessLauncher
 
-# Create launcher with defaults
 launcher = RevaHeadlessLauncher()
+launcher.start()
 
-try:
-    # Start server
-    launcher.start()
+if launcher.waitForServer(30000):
+    print(f"Server ready on port {launcher.getPort()}")
+    # Use server...
 
-    # Wait for server to be ready (30 second timeout)
-    if launcher.waitForServer(30000):
-        print(f"✓ Server ready on port {launcher.getPort()}")
-
-        # Server is now running
-        # ... do work ...
-
-    else:
-        print("✗ Server failed to start")
-
-finally:
-    # Clean shutdown
-    launcher.stop()
+launcher.stop()
 ```
 
-### 2. PyGhidra with Configuration File
+### 2. With Persistent Project
 
 ```python
 from java.io import File
 from reva.headless import RevaHeadlessLauncher
 
-# Use custom configuration
-config_file = File("/path/to/reva.properties")
-launcher = RevaHeadlessLauncher(config_file)
+# Create launcher with project support
+project_dir = File("/path/to/projects")
+launcher = RevaHeadlessLauncher(
+    configFile=None,
+    useRandomPort=True,
+    projectLocation=project_dir,
+    projectName="my_analysis"
+)
 
 launcher.start()
+# Project created at /path/to/projects/my_analysis/
+# Project persists after launcher.stop()
+launcher.stop()
+```
+
+### 3. With Configuration File
+
+```python
+from java.io import File
+from reva.headless import RevaHeadlessLauncher
+
+config = File("reva.properties")
+launcher = RevaHeadlessLauncher(config)
+
+launcher.start()
+launcher.waitForServer(30000)
 # ... use server ...
 launcher.stop()
 ```
 
-### 3. Long-Running Server
+### 4. Python CLI Integration (Stdio Mode)
+
+**Handled by `src/reva_cli/launcher.py`:**
 
 ```python
-import signal
-import sys
+from reva_cli.launcher import ReVaLauncher
 
-launcher = RevaHeadlessLauncher()
+# CLI creates ephemeral temp projects (auto-cleanup)
+launcher = ReVaLauncher(use_random_port=True)
+port = launcher.start()  # Returns random port
 
-def signal_handler(sig, frame):
-    print("\nShutting down...")
-    launcher.stop()
-    sys.exit(0)
-
-# Register signal handler
-signal.signal(signal.SIGINT, signal_handler)
-signal.signal(signal.SIGTERM, signal_handler)
-
-# Start and wait
-launcher.start()
-if launcher.waitForServer(30000):
-    print("Server running. Press Ctrl+C to stop.")
-    while launcher.isRunning():
-        time.sleep(1)
+# Project created in tempfile.mkdtemp(prefix="reva_project_")
+# Cleaned up automatically on launcher.stop()
+launcher.stop()
 ```
 
-### 4. Standalone Java Execution
+### 5. Standalone Java Execution
 
 ```bash
-# With default configuration
+# With defaults (in-memory config, port 8080)
 java -cp ghidra.jar:reva.jar reva.headless.RevaHeadlessLauncher
 
-# With configuration file
-java -cp ghidra.jar:reva.jar reva.headless.RevaHeadlessLauncher /path/to/config.properties
+# With config file
+java -cp ghidra.jar:reva.jar reva.headless.RevaHeadlessLauncher reva.properties
 ```
 
 ## Configuration
 
-### In-Memory (Defaults)
+### Default Values (InMemoryBackend)
 
 ```java
-// Uses default values for all settings
 RevaHeadlessLauncher launcher = new RevaHeadlessLauncher();
+// Port: 8080
+// Host: 127.0.0.1
+// Server Enabled: true
+// API Key Auth: disabled
+// Debug Mode: false
+// Max Decompiler Search Functions: 1000
+// Decompiler Timeout: 10 seconds
+// Import Analysis Timeout: 600 seconds
 ```
 
-**Default Values:**
-- Port: 8080
-- Host: 127.0.0.1
-- Server Enabled: true
-- API Key Auth: disabled
-- Debug Mode: false
+### Random Port (CLI Mode)
+
+```java
+// Use random available port (avoids conflicts)
+RevaHeadlessLauncher launcher = new RevaHeadlessLauncher(null, true);
+launcher.start();
+int port = launcher.getPort();  // e.g., 52431
+```
 
 ### File-Based Configuration
 
-```java
-File configFile = new File("reva.properties");
-RevaHeadlessLauncher launcher = new RevaHeadlessLauncher(configFile);
-```
-
-**Configuration File Format (properties):**
+**reva.properties:**
 ```properties
-# ReVa Headless Configuration
+# Server settings
 reva.server.options.server.port=9090
-reva.server.options.server.host=0.0.0.0
+reva.server.options.server.host=127.0.0.1
 reva.server.options.server.enabled=true
-reva.server.options.api.key.authentication.enabled=true
-reva.server.options.api.key=ReVa-your-api-key-here
-reva.server.options.debug.mode=true
+
+# Security
+reva.server.options.api.key.authentication.enabled=false
+reva.server.options.api.key=
+
+# Performance
+reva.server.options.debug.mode=false
 reva.server.options.max.decompiler.search.functions=1000
 reva.server.options.decompiler.timeout.seconds=10
+reva.server.options.import.analysis.timeout.seconds=600
 ```
+
+**Usage:**
+```java
+File config = new File("reva.properties");
+RevaHeadlessLauncher launcher = new RevaHeadlessLauncher(config);
+```
+
+## Integration with PyGhidra
+
+### Python CLI Lifecycle (mcp-reva)
+
+**Flow:**
+1. `mcp-reva` CLI entry point (`src/reva_cli/__main__.py`)
+2. PyGhidra initialization (BEFORE asyncio)
+3. `ReVaLauncher.start()` creates Java `RevaHeadlessLauncher`
+4. Ephemeral project created in `tempfile.mkdtemp(prefix="reva_project_")`
+5. Server starts on random port
+6. `StdioBridge` proxies stdio ↔ HTTP MCP protocol
+7. On exit: project temp dir cleaned up automatically
+
+**Key Design Points:**
+- PyGhidra init is **blocking** (BEFORE `asyncio.run()`)
+- Projects are ephemeral temp directories (not `.reva/projects/`)
+- Random ports avoid conflicts with GUI/other instances
+- Clean project cleanup via `shutil.rmtree()` on stop
+
+### Project Management Modes
+
+**1. GUI Mode (RevaApplicationPlugin):**
+- Uses existing Ghidra project/tool system
+- No project creation needed
+- Programs managed by Ghidra's ProgramManager
+
+**2. Headless Mode (scripts):**
+- Optional persistent projects via constructor parameters
+- Projects survive server restarts
+- Useful for long-running analysis servers
+
+**3. CLI Mode (mcp-reva stdio):**
+- Ephemeral temp projects (session-scoped)
+- Auto-cleanup on exit keeps filesystem clean
+- One project per CLI session
 
 ## Testing
 
-### Unit Tests
+### Java Integration Tests
 
+**Base class:** `RevaHeadlessIntegrationTestBase.java`
 ```java
-@Test
-public void testHeadlessLauncherStartStop() throws Exception {
-    RevaHeadlessLauncher launcher = new RevaHeadlessLauncher();
-
-    launcher.start();
-    assertTrue("Server should be running", launcher.isRunning());
-    assertTrue("Server should be ready", launcher.waitForServer(10000));
-
-    int port = launcher.getPort();
-    assertTrue("Port should be valid", port > 0);
-
-    launcher.stop();
-    assertFalse("Server should be stopped", launcher.isRunning());
+public abstract class RevaHeadlessIntegrationTestBase
+    extends AbstractGhidraHeadlessIntegrationTest {
+    protected Program program;
+    // Creates default x86 test program
 }
 ```
 
-### End-to-End Tests with PyGhidra
+### Python Tests
 
-See `src/test/python/test_headless_e2e.py` for comprehensive E2E tests.
+**Location:** `/tests/`
 
-## Common Patterns
+**Test categories (pytest markers):**
+- `@pytest.mark.unit` - Fast tests with mocks
+- `@pytest.mark.integration` - Require PyGhidra initialization
+- `@pytest.mark.e2e` - End-to-end subprocess tests
 
-### Pattern 1: One-Shot Analysis
-
+**Example:**
 ```python
-def analyze_binary(binary_path):
-    """Quick analysis with headless server"""
-    launcher = RevaHeadlessLauncher()
-    try:
-        launcher.start()
-        launcher.waitForServer(30000)
-
-        # Create program
-        # Use MCP tools
-        # Get results
-
-    finally:
-        launcher.stop()
-```
-
-### Pattern 2: Test Fixture
-
-```python
-@pytest.fixture
-def reva_server():
-    """Pytest fixture for ReVa server"""
+def test_launcher_starts_and_stops(ghidra_initialized):
+    from reva.headless import RevaHeadlessLauncher
     launcher = RevaHeadlessLauncher()
     launcher.start()
-    launcher.waitForServer(30000)
-
-    yield launcher  # Tests run here
-
+    assert launcher.waitForServer(30000)
     launcher.stop()
-
-def test_with_server(reva_server):
-    """Test using the server fixture"""
-    assert reva_server.isRunning()
-    port = reva_server.getPort()
-    # ... test MCP operations ...
 ```
 
-### Pattern 3: Configuration Override
+## Constructor API Reference
 
-```python
-from reva.plugin.config import InMemoryBackend
-from reva.plugin import ConfigManager
+```java
+// 1. Default: in-memory config, auto-init Ghidra, default port, no project
+RevaHeadlessLauncher()
 
-# Create custom config
-backend = InMemoryBackend()
-backend.setInt("ReVa Server Options", "Server Port", 9999)
-backend.setBoolean("ReVa Server Options", "API Key Authentication Enabled", True)
+// 2. With config file
+RevaHeadlessLauncher(File configFile)
+RevaHeadlessLauncher(String configFilePath)  // PyGhidra convenience
 
-config = ConfigManager(backend)
+// 3. With random port
+RevaHeadlessLauncher(File configFile, boolean useRandomPort)
 
-# Create server with custom config
-from reva.server import McpServerManager
-server = McpServerManager(config)
-server.startServer()
+// 4. Full control (no project)
+RevaHeadlessLauncher(File configFile, boolean autoInitGhidra, boolean useRandomPort)
+
+// 5. With persistent project
+RevaHeadlessLauncher(File configFile, boolean useRandomPort,
+                     File projectLocation, String projectName)
+
+// 6. Full control with project
+RevaHeadlessLauncher(File configFile, boolean autoInitGhidra, boolean useRandomPort,
+                     File projectLocation, String projectName)
+```
+
+## API Methods
+
+```java
+// Lifecycle
+void start() throws IOException
+void stop()
+
+// Status
+boolean isRunning()
+boolean isServerReady()
+boolean waitForServer(long timeoutMs)
+
+// Configuration
+int getPort()
+ConfigManager getConfigManager()
+McpServerManager getServerManager()
 ```
 
 ## Troubleshooting
 
-### Issue: Ghidra not initialized
+### Ghidra Not Initialized
 
-**Error:**
-```
-IllegalStateException: Ghidra application is not initialized
-```
-
-**Solution:**
 ```python
+# ERROR: IllegalStateException: Ghidra application is not initialized
+# FIX: Initialize PyGhidra BEFORE importing ReVa
 import pyghidra
-pyghidra.start()  # Must be called before importing ReVa classes
+pyghidra.start()
+from reva.headless import RevaHeadlessLauncher  # Now safe
 ```
 
-### Issue: Port already in use
+### Port Already in Use
 
-**Error:**
-```
-java.net.BindException: Address already in use
-```
-
-**Solution:**
 ```python
-# Use custom port
-backend = InMemoryBackend()
-backend.setInt("ReVa Server Options", "Server Port", 8081)
-config = ConfigManager(backend)
-launcher = RevaHeadlessLauncher()
-launcher.start()
+# ERROR: java.net.BindException: Address already in use
+# FIX: Use random port
+launcher = RevaHeadlessLauncher(None, useRandomPort=True)
 ```
 
-### Issue: Server not ready
+### Server Not Ready (Timeout)
 
-**Symptom:**
-`waitForServer()` returns false
-
-**Solution:**
 ```python
-# Increase timeout
+# Increase timeout or check Msg.error logs
 if not launcher.waitForServer(60000):  # 60 seconds
-    # Check logs for errors
-    print("Server failed to start - check Msg.error logs")
+    print("Server failed - check Ghidra logs")
 ```
 
-## Performance Considerations
+## Performance Notes
 
-### Startup Time
+- **Startup time:** 4-7 seconds (Ghidra init + server start)
+- **Memory usage:** ~250-400 MB (base Ghidra + ReVa)
+- **Concurrent instances:** Use random ports or different configured ports
 
-- **Ghidra initialization**: 3-5 seconds
-- **Server startup**: 1-2 seconds
-- **Total**: 4-7 seconds typical
+## Security
 
-### Memory Usage
-
-- **Base Ghidra**: ~200-300 MB
-- **ReVa Server**: ~50-100 MB
-- **Total**: ~250-400 MB minimum
-
-### Concurrent Instances
-
-Multiple headless instances can run concurrently if using different ports:
-
-```python
-# Instance 1 on port 8080
-launcher1 = RevaHeadlessLauncher()
-
-# Instance 2 on port 8081
-from reva.plugin.config import InMemoryBackend
-backend2 = InMemoryBackend()
-backend2.setInt("ReVa Server Options", "Server Port", 8081)
-config2 = ConfigManager(backend2)
-from reva.server import McpServerManager
-server2 = McpServerManager(config2)
-```
-
-## Security Notes
-
-### Headless API Key Generation
-
-When using in-memory configuration, a random API key is generated but API key authentication is disabled by default. For production:
-
-```python
-backend = InMemoryBackend()
-backend.setBoolean("ReVa Server Options", "API Key Authentication Enabled", True)
-backend.setString("ReVa Server Options", "API Key", "your-secure-key")
-config = ConfigManager(backend)
-```
-
-### Network Binding
-
-Default binding is `127.0.0.1` (localhost only). To accept remote connections:
-
-```python
-backend.setString("ReVa Server Options", "Server Host", "0.0.0.0")
-```
-
-**Warning:** Only bind to `0.0.0.0` if you understand the security implications.
-
-## Integration with CI/CD
-
-### GitHub Actions Example
-
-```yaml
-- name: Setup PyGhidra
-  run: |
-    pip install pyghidra
-
-- name: Run headless tests
-  env:
-    GHIDRA_INSTALL_DIR: /opt/ghidra
-  run: |
-    python scripts/test_headless.py
-```
-
-### Docker Example
-
-```dockerfile
-FROM ghidra:latest
-
-# Install pyghidra
-RUN pip install pyghidra
-
-# Copy ReVa
-COPY reva.jar /opt/reva/
-
-# Run headless
-CMD ["python", "/scripts/start_reva_headless.py"]
-```
-
-## Future Enhancements
-
-- **Auto-restart** - Automatic server restart on failure
-- **Health checks** - Built-in health check endpoint
-- **Metrics** - Performance and usage metrics
-- **Process management** - Daemon mode with PID files
-- **Configuration hot-reload** - Update config without restart
+**Default:** `127.0.0.1:8080`, no API key authentication
+**Production:** Enable API keys, bind to specific interfaces
+**Remote access:** Use with caution (bind to `0.0.0.0` only if needed)
 
 ## Related Documentation
 
-- `HEADLESS_ARCHITECTURE.md` - Overall architecture design
-- `plugin/CLAUDE.md` - Plugin architecture
-- `server/CLAUDE.md` - Server implementation details
-- `../../../test/python/test_headless_e2e.py` - E2E test examples
+- `/src/main/java/reva/plugin/CLAUDE.md` - ConfigManager backends
+- `/src/main/java/reva/server/CLAUDE.md` - McpServerManager details
+- `/tests/` - Python integration tests
+- `/src/test/java/reva/` - Java integration test base classes

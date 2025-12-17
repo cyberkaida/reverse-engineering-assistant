@@ -73,12 +73,12 @@ public class ProjectToolProvider extends AbstractToolProvider {
 
     @Override
     public void registerTools() {
-        // get-current-program only makes sense in GUI mode where there's an active program
+        // GUI-only tools: require ToolManager which isn't available in headless mode
         if (!headlessMode) {
             registerGetCurrentProgramTool();
+            registerListOpenProgramsTool();
         }
         registerListProjectFilesTool();
-        registerListOpenProgramsTool();
         registerCheckinProgramTool();
         registerAnalyzeProgramTool();
         registerChangeProcessorTool();

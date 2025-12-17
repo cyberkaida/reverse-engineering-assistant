@@ -91,21 +91,33 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
     private volatile Program activeProgram;
     private volatile PluginTool activeTool;
 
+    // Mode tracking - headless mode has no GUI context
+    private final boolean headlessMode;
+
     /**
      * Constructor for GUI mode. Initializes the MCP server with all capabilities.
      * This constructor creates a ConfigManager from the PluginTool for backward compatibility.
      * @param pluginTool The plugin tool, used for configuration
      */
     public McpServerManager(PluginTool pluginTool) {
-        this(new ConfigManager(pluginTool));
+        this(new ConfigManager(pluginTool), false);
     }
 
     /**
-     * Constructor with ConfigManager. Initializes the MCP server with all capabilities.
-     * This is the primary constructor used by both GUI and headless modes.
+     * Constructor for headless mode. Initializes the MCP server with all capabilities.
      * @param configManager The configuration manager to use
      */
     public McpServerManager(ConfigManager configManager) {
+        this(configManager, true);
+    }
+
+    /**
+     * Primary constructor with ConfigManager and mode flag.
+     * @param configManager The configuration manager to use
+     * @param headlessMode True if running in headless mode (no GUI context)
+     */
+    private McpServerManager(ConfigManager configManager, boolean headlessMode) {
+        this.headlessMode = headlessMode;
         // Store configuration
         this.configManager = configManager;
         RevaInternalServiceRegistry.registerService(ConfigManager.class, configManager);
@@ -167,7 +179,7 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
         toolProviders.add(new DataToolProvider(server));
         toolProviders.add(new DecompilerToolProvider(server));
         toolProviders.add(new MemoryToolProvider(server));
-        toolProviders.add(new ProjectToolProvider(server));
+        toolProviders.add(new ProjectToolProvider(server, headlessMode));
         toolProviders.add(new CrossReferencesToolProvider(server));
         toolProviders.add(new DataTypeToolProvider(server));
         toolProviders.add(new StructureToolProvider(server));
@@ -350,6 +362,14 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
     @Override
     public boolean isServerRunning() {
         return httpServer != null && httpServer.isRunning() && serverReady;
+    }
+
+    /**
+     * Check if running in headless mode (no GUI context)
+     * @return true if running in headless mode
+     */
+    public boolean isHeadlessMode() {
+        return headlessMode;
     }
 
     @Override

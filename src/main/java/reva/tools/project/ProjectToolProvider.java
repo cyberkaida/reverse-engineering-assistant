@@ -59,17 +59,24 @@ import reva.util.RevaInternalServiceRegistry;
  */
 public class ProjectToolProvider extends AbstractToolProvider {
 
+    private final boolean headlessMode;
+
     /**
      * Constructor
      * @param server The MCP server
+     * @param headlessMode True if running in headless mode (no GUI context)
      */
-    public ProjectToolProvider(McpSyncServer server) {
+    public ProjectToolProvider(McpSyncServer server, boolean headlessMode) {
         super(server);
+        this.headlessMode = headlessMode;
     }
 
     @Override
     public void registerTools() {
-        registerGetCurrentProgramTool();
+        // get-current-program only makes sense in GUI mode where there's an active program
+        if (!headlessMode) {
+            registerGetCurrentProgramTool();
+        }
         registerListProjectFilesTool();
         registerListOpenProgramsTool();
         registerCheckinProgramTool();

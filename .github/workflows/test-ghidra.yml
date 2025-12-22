@@ -24,7 +24,7 @@ jobs:
     name: Test on Ghidra ${{ matrix.ghidra-version }}
     runs-on: ${{ matrix.os }}
     steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@v6
 
     - name: Set up Java 🍵
       uses: actions/setup-java@v5
@@ -86,7 +86,7 @@ jobs:
     name: Lint and Check 🔍
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@v6
 
     - name: Set up Java 🍵
       uses: actions/setup-java@v5
@@ -127,7 +127,7 @@ jobs:
       security-events: write
 
     steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@v6
 
     - name: Set up Java 🍵
       uses: actions/setup-java@v5

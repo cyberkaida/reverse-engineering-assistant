@@ -53,6 +53,7 @@ public class ConfigManager implements ConfigurationBackendListener {
     public static final String MAX_DECOMPILER_SEARCH_FUNCTIONS = "Max Decompiler Search Functions";
     public static final String DECOMPILER_TIMEOUT_SECONDS = "Decompiler Timeout Seconds";
     public static final String IMPORT_ANALYSIS_TIMEOUT_SECONDS = "Import Analysis Timeout Seconds";
+    public static final String WAIT_FOR_ANALYSIS_ON_IMPORT = "Wait For Analysis On Import";
 
     // Default values
     private static final int DEFAULT_PORT = 8080;
@@ -64,6 +65,7 @@ public class ConfigManager implements ConfigurationBackendListener {
     private static final int DEFAULT_MAX_DECOMPILER_SEARCH_FUNCTIONS = 1000;
     private static final int DEFAULT_DECOMPILER_TIMEOUT_SECONDS = 10;
     private static final int DEFAULT_IMPORT_ANALYSIS_TIMEOUT_SECONDS = 600;
+    private static final boolean DEFAULT_WAIT_FOR_ANALYSIS_ON_IMPORT = true;
 
     private final ConfigurationBackend backend;
     private final Map<String, Object> cachedOptions = new ConcurrentHashMap<>();
@@ -175,6 +177,8 @@ public class ConfigManager implements ConfigurationBackendListener {
             "Timeout in seconds for decompiler operations");
         toolOptions.registerOption(IMPORT_ANALYSIS_TIMEOUT_SECONDS, DEFAULT_IMPORT_ANALYSIS_TIMEOUT_SECONDS, help,
             "Timeout in seconds for analyzing each imported file (default: 10 minutes)");
+        toolOptions.registerOption(WAIT_FOR_ANALYSIS_ON_IMPORT, DEFAULT_WAIT_FOR_ANALYSIS_ON_IMPORT, help,
+            "Whether to run auto-analysis after file import and wait for it to complete (default: true)");
     }
 
     /**
@@ -202,6 +206,8 @@ public class ConfigManager implements ConfigurationBackendListener {
             backend.getInt(SERVER_OPTIONS, DECOMPILER_TIMEOUT_SECONDS, DEFAULT_DECOMPILER_TIMEOUT_SECONDS));
         cachedOptions.put(IMPORT_ANALYSIS_TIMEOUT_SECONDS,
             backend.getInt(SERVER_OPTIONS, IMPORT_ANALYSIS_TIMEOUT_SECONDS, DEFAULT_IMPORT_ANALYSIS_TIMEOUT_SECONDS));
+        cachedOptions.put(WAIT_FOR_ANALYSIS_ON_IMPORT,
+            backend.getBoolean(SERVER_OPTIONS, WAIT_FOR_ANALYSIS_ON_IMPORT, DEFAULT_WAIT_FOR_ANALYSIS_ON_IMPORT));
 
         Msg.debug(this, "Loaded ReVa configuration settings");
     }
@@ -437,6 +443,23 @@ public class ConfigManager implements ConfigurationBackendListener {
      */
     public void setImportAnalysisTimeoutSeconds(int timeoutSeconds) {
         backend.setInt(SERVER_OPTIONS, IMPORT_ANALYSIS_TIMEOUT_SECONDS, timeoutSeconds);
+        // onConfigurationChanged() will be called automatically
+    }
+
+    /**
+     * Check if analysis should run after import and wait for completion
+     * @return True if analysis should run and wait after import
+     */
+    public boolean isWaitForAnalysisOnImport() {
+        return (Boolean) cachedOptions.getOrDefault(WAIT_FOR_ANALYSIS_ON_IMPORT, DEFAULT_WAIT_FOR_ANALYSIS_ON_IMPORT);
+    }
+
+    /**
+     * Set whether analysis should run after import and wait for completion
+     * @param wait True to run analysis and wait after import
+     */
+    public void setWaitForAnalysisOnImport(boolean wait) {
+        backend.setBoolean(SERVER_OPTIONS, WAIT_FOR_ANALYSIS_ON_IMPORT, wait);
         // onConfigurationChanged() will be called automatically
     }
 

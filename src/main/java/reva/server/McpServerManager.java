@@ -543,4 +543,31 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
 
         Msg.info(this, "MCP server shutdown complete");
     }
+
+    /**
+     * Get the list of registered tool providers for debug/diagnostic purposes.
+     * @return List of tool providers, or empty list if none registered
+     */
+    public List<ToolProvider> getToolProviders() {
+        return new ArrayList<>(toolProviders);
+    }
+
+    /**
+     * Get the number of registered PluginTools for debug/diagnostic purposes.
+     * @return Number of registered tools
+     */
+    public int getRegisteredToolsCount() {
+        return registeredTools.size();
+    }
+
+    /**
+     * Get the server host binding for debug/diagnostic purposes.
+     * @return Server host string, or null if not configured
+     */
+    public String getServerHost() {
+        if (configManager != null) {
+            return configManager.getServerHost();
+        }
+        return null;
+    }
 }

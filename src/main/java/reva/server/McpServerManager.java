@@ -229,6 +229,10 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
             Msg.info(this, "API key authentication enabled for MCP server");
         }
 
+        // Add request logging filter for debugging (only logs when debug mode is enabled)
+        FilterHolder loggingFilter = new FilterHolder(new RequestLoggingFilter(configManager));
+        servletContextHandler.addFilter(loggingFilter, "/*", EnumSet.of(DispatcherType.REQUEST));
+
         ServletHolder servletHolder = new ServletHolder(currentTransportProvider);
         servletHolder.setAsyncSupported(true);
         servletContextHandler.addServlet(servletHolder, "/*");

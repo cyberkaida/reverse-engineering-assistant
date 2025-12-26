@@ -725,7 +725,7 @@ public class StructureToolProvider extends AbstractToolProvider {
     }
 
     /**
-     * Register tool to list structures
+     * Register tool to list structures with pagination
      */
     private void registerListStructuresTool() {
         Map<String, Object> properties = new HashMap<>();
@@ -733,14 +733,24 @@ public class StructureToolProvider extends AbstractToolProvider {
         properties.put("category", SchemaUtil.createOptionalStringProperty("Filter by category path"));
         properties.put("nameFilter", SchemaUtil.createOptionalStringProperty("Filter by name (substring match)"));
         properties.put("includeBuiltIn", SchemaUtil.createOptionalBooleanProperty("Include built-in types"));
-        
+        properties.put("startIndex", Map.of(
+            "type", "integer",
+            "description", "Starting index for pagination (0-based)",
+            "default", 0
+        ));
+        properties.put("maxCount", Map.of(
+            "type", "integer",
+            "description", "Maximum number of structures to return (default 100)",
+            "default", 100
+        ));
+
         List<String> required = new ArrayList<>();
         required.add("programPath");
 
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("list-structures")
             .title("List Structures")
-            .description("List all structures in a program")
+            .description("List structures/unions in a program with pagination. Use startIndex and maxCount for large programs.")
             .inputSchema(createSchema(properties, required))
             .build();
 
@@ -751,42 +761,61 @@ public class StructureToolProvider extends AbstractToolProvider {
                 String categoryFilter = getOptionalString(request, "category", null);
                 String nameFilter = getOptionalString(request, "nameFilter", null);
                 boolean includeBuiltIn = getOptionalBoolean(request, "includeBuiltIn", false);
+                int startIndex = getOptionalInt(request, "startIndex", 0);
+                int maxCount = getOptionalInt(request, "maxCount", 100);
 
                 DataTypeManager dtm = program.getDataTypeManager();
                 List<Map<String, Object>> structures = new ArrayList<>();
-                
-                // Get all data types
+
+                // Count matching structures and collect paginated results
+                int totalMatching = 0;
+                int currentIndex = 0;
+
                 Iterator<DataType> iter = dtm.getAllDataTypes();
                 while (iter.hasNext()) {
                     DataType dt = iter.next();
                     if (!(dt instanceof Composite)) {
                         continue;
                     }
-                    
+
                     // Apply filters
-                    if (!includeBuiltIn && dt.getSourceArchive().getName().equals("BuiltInTypes")) {
+                    if (!includeBuiltIn && dt.getSourceArchive() != null &&
+                        dt.getSourceArchive().getName().equals("BuiltInTypes")) {
                         continue;
                     }
-                    
-                    if (categoryFilter != null && 
+
+                    if (categoryFilter != null &&
                         !dt.getCategoryPath().getPath().startsWith(categoryFilter)) {
                         continue;
                     }
-                    
-                    if (nameFilter != null && 
+
+                    if (nameFilter != null &&
                         !dt.getName().toLowerCase().contains(nameFilter.toLowerCase())) {
                         continue;
                     }
-                    
-                    structures.add(createStructureInfo(dt));
+
+                    // This structure matches the filters
+                    totalMatching++;
+
+                    // Only collect if within pagination window
+                    if (currentIndex >= startIndex && structures.size() < maxCount) {
+                        structures.add(createStructureInfo(dt));
+                    }
+                    currentIndex++;
                 }
-                
+
                 Map<String, Object> result = new HashMap<>();
-                result.put("count", structures.size());
                 result.put("structures", structures);
-                
+                result.put("pagination", Map.of(
+                    "startIndex", startIndex,
+                    "requestedCount", maxCount,
+                    "actualCount", structures.size(),
+                    "nextStartIndex", startIndex + structures.size(),
+                    "totalCount", totalMatching
+                ));
+
                 return createJsonResult(result);
-                
+
             } catch (Exception e) {
                 return createErrorResult("Error: " + e.getMessage());
             }

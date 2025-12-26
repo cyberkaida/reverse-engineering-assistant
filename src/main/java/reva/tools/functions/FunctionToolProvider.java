@@ -274,26 +274,21 @@ public class FunctionToolProvider extends AbstractToolProvider {
                 return cached.functions();
             }
 
-            // Build function info list with timeout support (cache ALL functions)
+            // Build function info list (cache ALL functions)
+            // Use createFunctionInfoFast to skip expensive caller/callee count computation
             logInfo("FunctionToolProvider: Building function info cache for " + programPath);
             long startTime = System.currentTimeMillis();
 
-            TaskMonitor monitor = TimeoutTaskMonitor.timeoutIn(FUNCTION_INFO_CACHE_TIMEOUT_SECONDS, TimeUnit.SECONDS);
             List<Map<String, Object>> functionList = new ArrayList<>();
             FunctionIterator functions = program.getFunctionManager().getFunctions(true);
             int processed = 0;
 
             while (functions.hasNext()) {
-                // Check for timeout periodically
-                if (processed % 100 == 0 && monitor.isCancelled()) {
-                    logInfo("FunctionToolProvider: Cache build timed out after " + processed + " functions");
-                    break;
-                }
-
                 Function function = functions.next();
                 processed++;
 
-                functionList.add(createFunctionInfo(function, monitor));
+                // Use fast version - skips caller/callee count computation
+                functionList.add(createFunctionInfoFast(function));
             }
 
             // Enforce cache size limit before adding new entry
@@ -435,7 +430,7 @@ public class FunctionToolProvider extends AbstractToolProvider {
         ));
         properties.put("verbose", Map.of(
             "type", "boolean",
-            "description", "Return full function details. When false (default), returns compact results (name, address, sizeInBytes, tags, callerCount, calleeCount). Note: counts may be -1 if computation timed out.",
+            "description", "Return full function details (signature, parameters, etc.). When false (default), returns compact results (name, address, sizeInBytes, tags, callerCount, calleeCount).",
             "default", false
         ));
 
@@ -507,10 +502,12 @@ public class FunctionToolProvider extends AbstractToolProvider {
                 : Collections.emptyList();
 
             // Transform results based on verbose flag
+            // Note: callerCount/calleeCount are now computed fast during cache build
+            // using reference/instruction counting (catches indirect calls too)
             List<Map<String, Object>> functionData;
             if (verbose) {
-                // Full: return all function info as-is
-                functionData = paginatedData;
+                // Full: return all cached function info (includes fast caller/callee counts)
+                functionData = new ArrayList<>(paginatedData);
             } else {
                 // Compact: name, address, sizeInBytes, tags, callerCount, calleeCount
                 functionData = new ArrayList<>(paginatedData.size());
@@ -580,7 +577,7 @@ public class FunctionToolProvider extends AbstractToolProvider {
         ));
         properties.put("verbose", Map.of(
             "type", "boolean",
-            "description", "Return full function details. When false (default), returns compact results (name, address, sizeInBytes, tags, callerCount, calleeCount, similarity). Note: counts may be -1 if computation timed out.",
+            "description", "Return full function details (signature, parameters, etc.). When false (default), returns compact results (name, address, sizeInBytes, tags, callerCount, calleeCount, similarity).",
             "default", false
         ));
 
@@ -722,6 +719,7 @@ public class FunctionToolProvider extends AbstractToolProvider {
             }
 
             // Transform results: add similarity score and optionally make compact
+            // Note: callerCount/calleeCount are already in cache (computed fast during cache build)
             String searchLower = searchString.toLowerCase();
             List<Map<String, Object>> transformedResults = new ArrayList<>(paginatedFunctionData.size());
             for (Map<String, Object> funcInfo : paginatedFunctionData) {
@@ -729,7 +727,7 @@ public class FunctionToolProvider extends AbstractToolProvider {
                 double similarity = SimilarityComparator.calculateLcsSimilarity(searchLower, name.toLowerCase());
 
                 if (verbose) {
-                    // Full: all function info + similarity
+                    // Full: all cached function info + similarity
                     Map<String, Object> fullInfo = new HashMap<>(funcInfo);
                     fullInfo.put("similarity", Math.round(similarity * 100.0) / 100.0);
                     transformedResults.add(fullInfo);
@@ -742,7 +740,7 @@ public class FunctionToolProvider extends AbstractToolProvider {
                     compactInfo.put("tags", funcInfo.get("tags"));
                     compactInfo.put("callerCount", funcInfo.get("callerCount"));
                     compactInfo.put("calleeCount", funcInfo.get("calleeCount"));
-                    compactInfo.put("similarity", Math.round(similarity * 100.0) / 100.0); // Round to 2 decimals
+                    compactInfo.put("similarity", Math.round(similarity * 100.0) / 100.0);
                     transformedResults.add(compactInfo);
                 }
             }
@@ -803,12 +801,102 @@ public class FunctionToolProvider extends AbstractToolProvider {
     }
 
     /**
-     * Create a map of function information
+     * Create a map of function information (with caller/callee counts).
+     * Use createFunctionInfoFast for cache building to skip expensive caller/callee computation.
+     *
      * @param function The function to extract information from
      * @param monitor TaskMonitor for cancellation support (can be null for quick operations)
      * @return Immutable map containing function properties
      */
     private Map<String, Object> createFunctionInfo(Function function, TaskMonitor monitor) {
+        return createFunctionInfoInternal(function, monitor, true);
+    }
+
+    /**
+     * Create a map of function information with fast caller/callee counting.
+     * Uses reference counting instead of slow getCalledFunctions()/getCallingFunctions().
+     * Also catches indirect/virtual calls that the slow methods miss.
+     *
+     * @param function The function to extract information from
+     * @return Immutable map containing function properties with caller/callee counts
+     */
+    private Map<String, Object> createFunctionInfoFast(Function function) {
+        Map<String, Object> functionInfo = createFunctionInfoInternal(function, null, false);
+
+        // Add fast caller/callee counts using reference counting
+        // This is much faster than getCalledFunctions()/getCallingFunctions() AND
+        // catches indirect/virtual calls that those methods miss
+        Program program = function.getProgram();
+
+        // callerCount: count incoming call references to the function's entry point
+        int callerCount = countIncomingCallReferences(program, function.getEntryPoint());
+
+        // calleeCount: count CALL instructions in the function body (catches indirect calls)
+        int calleeCount = countCallInstructions(program, function);
+
+        // Create a mutable copy to add the counts (since createFunctionInfoInternal returns immutable)
+        Map<String, Object> result = new HashMap<>(functionInfo);
+        result.put("callerCount", callerCount);
+        result.put("calleeCount", calleeCount);
+
+        return Collections.unmodifiableMap(result);
+    }
+
+    /**
+     * Count incoming call references to an address.
+     * Much faster than getCallingFunctions() and gives accurate caller count.
+     *
+     * @param program The program
+     * @param address The address to count references to
+     * @return Number of incoming call references
+     */
+    private int countIncomingCallReferences(Program program, Address address) {
+        int count = 0;
+        ReferenceManager refMgr = program.getReferenceManager();
+        ReferenceIterator refIter = refMgr.getReferencesTo(address);
+        while (refIter.hasNext()) {
+            Reference ref = refIter.next();
+            if (ref.getReferenceType().isCall()) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    /**
+     * Count CALL instructions in a function's body.
+     * This catches ALL calls including indirect/virtual calls that getCalledFunctions() misses.
+     *
+     * @param program The program
+     * @param function The function to analyze
+     * @return Number of call instructions (call sites)
+     */
+    private int countCallInstructions(Program program, Function function) {
+        int count = 0;
+        AddressSetView body = function.getBody();
+        if (body == null) {
+            return 0;
+        }
+
+        var instructions = program.getListing().getInstructions(body, true);
+        while (instructions.hasNext()) {
+            Instruction instr = instructions.next();
+            if (instr.getFlowType().isCall()) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    /**
+     * Internal implementation for creating function info.
+     *
+     * @param function The function to extract information from
+     * @param monitor TaskMonitor for cancellation support (can be null)
+     * @param includeCallerCalleeCounts If true, compute caller/callee counts (expensive)
+     * @return Immutable map containing function properties
+     */
+    private Map<String, Object> createFunctionInfoInternal(Function function, TaskMonitor monitor, boolean includeCallerCalleeCounts) {
         Map<String, Object> functionInfo = new HashMap<>();
 
         // Basic information - use AddressUtil for consistent formatting
@@ -833,18 +921,21 @@ public class FunctionToolProvider extends AbstractToolProvider {
         // Analysis progress indicators (helps prioritize which functions to investigate)
         functionInfo.put("isDefaultName", SymbolUtil.isDefaultSymbolName(function.getName()));
 
-        // Use provided monitor for caller/callee counts (these can be slow for complex programs)
-        TaskMonitor countMonitor = (monitor != null) ? monitor : TaskMonitor.DUMMY;
-        int callerCount = function.getCallingFunctions(countMonitor).size();
-        // Check if operation was cancelled - use -1 to indicate incomplete data
-        if (countMonitor.isCancelled()) {
-            functionInfo.put("callerCount", -1);
-            functionInfo.put("calleeCount", -1);
-        } else {
-            functionInfo.put("callerCount", callerCount);
-            int calleeCount = function.getCalledFunctions(countMonitor).size();
-            functionInfo.put("calleeCount", countMonitor.isCancelled() ? -1 : calleeCount);
+        // Only compute caller/callee counts when requested (these are VERY slow for large programs)
+        if (includeCallerCalleeCounts) {
+            TaskMonitor countMonitor = (monitor != null) ? monitor : TaskMonitor.DUMMY;
+            int callerCount = function.getCallingFunctions(countMonitor).size();
+            // Check if operation was cancelled - use -1 to indicate incomplete data
+            if (countMonitor.isCancelled()) {
+                functionInfo.put("callerCount", -1);
+                functionInfo.put("calleeCount", -1);
+            } else {
+                functionInfo.put("callerCount", callerCount);
+                int calleeCount = function.getCalledFunctions(countMonitor).size();
+                functionInfo.put("calleeCount", countMonitor.isCancelled() ? -1 : calleeCount);
+            }
         }
+        // When not computing counts, callerCount/calleeCount are simply not included
 
         // Add parameters info (as immutable list of immutable maps)
         List<Map<String, String>> parameters = new ArrayList<>();

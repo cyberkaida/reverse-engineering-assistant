@@ -31,6 +31,7 @@ import ghidra.program.model.symbol.Symbol;
 import ghidra.program.model.symbol.SymbolTable;
 import ghidra.util.Msg;
 import reva.util.AddressUtil;
+import reva.util.RevaToolLogger;
 import io.modelcontextprotocol.server.McpServerFeatures.SyncToolSpecification;
 import io.modelcontextprotocol.spec.McpSchema.CallToolRequest;
 import reva.plugin.RevaProgramManager;
@@ -135,21 +136,53 @@ public abstract class AbstractToolProvider implements ToolProvider {
      * @param handler The handler function for the tool
      */
     protected void registerTool(Tool tool, java.util.function.BiFunction<io.modelcontextprotocol.server.McpSyncServerExchange, CallToolRequest, McpSchema.CallToolResult> handler) {
-        // Wrap the handler with safe execution
-        java.util.function.BiFunction<io.modelcontextprotocol.server.McpSyncServerExchange, CallToolRequest, McpSchema.CallToolResult> safeHandler = 
+        // Wrap the handler with safe execution and logging
+        java.util.function.BiFunction<io.modelcontextprotocol.server.McpSyncServerExchange, CallToolRequest, McpSchema.CallToolResult> safeHandler =
             (exchange, request) -> {
+                String requestId = RevaToolLogger.generateRequestId();
+                long startTime = System.currentTimeMillis();
+
+                // Log request
+                RevaToolLogger.logRequest(tool.name(), requestId, request.arguments());
+
+                // Log to Ghidra's application log for correlation
+                Msg.debug(AbstractToolProvider.class, String.format("[ReVa:%s] Tool call: %s",
+                    requestId, tool.name()));
+
                 try {
-                    return handler.apply(exchange, request);
+                    McpSchema.CallToolResult result = handler.apply(exchange, request);
+
+                    // Log response
+                    long durationMs = System.currentTimeMillis() - startTime;
+                    RevaToolLogger.logResponse(tool.name(), requestId, durationMs,
+                        result != null && result.isError(), result);
+
+                    // Log completion to Ghidra's application log
+                    Msg.debug(AbstractToolProvider.class, String.format("[ReVa:%s] Tool completed: %s (%dms)",
+                        requestId, tool.name(), durationMs));
+
+                    return result;
                 } catch (IllegalArgumentException e) {
+                    long durationMs = System.currentTimeMillis() - startTime;
+                    RevaToolLogger.logError(tool.name(), requestId, durationMs, e.getMessage());
+                    Msg.debug(AbstractToolProvider.class, String.format("[ReVa:%s] Tool error: %s - %s (%dms)",
+                        requestId, tool.name(), e.getMessage(), durationMs));
                     return createErrorResult(e.getMessage());
                 } catch (ProgramValidationException e) {
+                    long durationMs = System.currentTimeMillis() - startTime;
+                    RevaToolLogger.logError(tool.name(), requestId, durationMs, e.getMessage());
+                    Msg.debug(AbstractToolProvider.class, String.format("[ReVa:%s] Tool error: %s - %s (%dms)",
+                        requestId, tool.name(), e.getMessage(), durationMs));
                     return createErrorResult(e.getMessage());
                 } catch (Exception e) {
-                    logError("Unexpected error in tool execution", e);
+                    long durationMs = System.currentTimeMillis() - startTime;
+                    RevaToolLogger.logError(tool.name(), requestId, durationMs, e.getMessage());
+                    Msg.error(AbstractToolProvider.class, String.format("[ReVa:%s] Tool failed: %s (%dms)",
+                        requestId, tool.name(), durationMs), e);
                     return createErrorResult("Tool execution failed: " + e.getMessage());
                 }
             };
-        
+
         SyncToolSpecification toolSpec = SyncToolSpecification.builder()
             .tool(tool)
             .callHandler(safeHandler)

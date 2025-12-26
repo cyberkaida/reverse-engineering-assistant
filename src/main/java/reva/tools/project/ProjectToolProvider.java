@@ -57,6 +57,7 @@ import ghidra.plugins.importer.tasks.ImportBatchTask;
 import ghidra.app.util.bin.ByteProvider;
 import ghidra.framework.store.local.LocalFileSystem;
 import io.modelcontextprotocol.server.McpSyncServer;
+import io.modelcontextprotocol.server.McpSyncServerExchange;
 import io.modelcontextprotocol.spec.McpSchema;
 import reva.plugin.RevaProgramManager;
 import reva.plugin.ConfigManager;
@@ -777,10 +778,10 @@ public class ProjectToolProvider extends AbstractToolProvider {
         recursiveProperty.put("description", "Whether to recursively import from containers/archives (default: true)");
         properties.put("recursive", recursiveProperty);
 
-        // maxDepth parameter (optional) - Ghidra UI default is 2
+        // maxDepth parameter (optional) - controlled by 'Import Max Depth' config setting
         Map<String, Object> maxDepthProperty = new HashMap<>();
         maxDepthProperty.put("type", "integer");
-        maxDepthProperty.put("description", "Maximum container depth to recurse into (default: 2)");
+        maxDepthProperty.put("description", "Maximum container depth to recurse into (default: controlled by 'Import Max Depth' config setting, which defaults to 10)");
         properties.put("maxDepth", maxDepthProperty);
 
         // analyzeAfterImport parameter (optional)
@@ -832,11 +833,12 @@ public class ProjectToolProvider extends AbstractToolProvider {
                 // Get configuration for defaults
                 ConfigManager configManager = RevaInternalServiceRegistry.getService(ConfigManager.class);
                 boolean defaultAnalyze = configManager != null ? configManager.isWaitForAnalysisOnImport() : true;
+                int defaultMaxDepth = configManager != null ? configManager.getImportMaxDepth() : 10;
 
                 // Get optional parameters with defaults
                 String destinationFolder = getOptionalString(request, "destinationFolder", "/");
                 boolean recursive = getOptionalBoolean(request, "recursive", true);
-                int maxDepth = getOptionalInt(request, "maxDepth", 2); // Ghidra UI default is 2
+                int maxDepth = getOptionalInt(request, "maxDepth", defaultMaxDepth);
                 boolean analyzeAfterImport = getOptionalBoolean(request, "analyzeAfterImport", defaultAnalyze);
                 boolean enableVersionControl = getOptionalBoolean(request, "enableVersionControl", true);
                 boolean stripLeadingPath = getOptionalBoolean(request, "stripLeadingPath", true);
@@ -894,7 +896,19 @@ public class ProjectToolProvider extends AbstractToolProvider {
                 // Track imported files with accurate DomainFile references
                 List<DomainFile> importedDomainFiles = new ArrayList<>();
                 List<String> importedProgramPaths = new ArrayList<>();
-                List<String> importErrors = new ArrayList<>();
+                List<Map<String, Object>> detailedErrors = new ArrayList<>();
+
+                // Progress tracking
+                int totalFiles = batchInfo.getTotalCount();
+                int processedFiles = 0;
+                String progressToken = "import-" + System.currentTimeMillis();
+
+                // Send initial progress notification
+                if (exchange != null) {
+                    exchange.progressNotification(new McpSchema.ProgressNotification(
+                        progressToken, 0.0, (double) totalFiles,
+                        "Starting import of " + totalFiles + " file(s) from " + path + "..."));
+                }
 
                 // Custom import loop - replaces ImportBatchTask to capture actual imported files
                 int enabledGroups = 0;
@@ -910,7 +924,12 @@ public class ProjectToolProvider extends AbstractToolProvider {
 
                     BatchGroupLoadSpec selectedBatchGroupLoadSpec = group.getSelectedBatchGroupLoadSpec();
                     if (selectedBatchGroupLoadSpec == null) {
-                        importErrors.add("Enabled group has no selected load spec: " + group.getCriteria());
+                        detailedErrors.add(Map.of(
+                            "stage", "discovery",
+                            "error", "Enabled group has no selected load spec",
+                            "errorType", "ConfigurationError",
+                            "details", group.getCriteria().toString()
+                        ));
                         continue;
                     }
 
@@ -924,7 +943,14 @@ public class ProjectToolProvider extends AbstractToolProvider {
 
                             LoadSpec loadSpec = config.getLoadSpec(selectedBatchGroupLoadSpec);
                             if (loadSpec == null) {
-                                importErrors.add("No load spec for: " + config.getFSRL());
+                                detailedErrors.add(Map.of(
+                                    "stage", "import",
+                                    "sourceFSRL", config.getFSRL().toString(),
+                                    "preferredName", config.getPreferredFileName(),
+                                    "error", "No load spec matches selected batch group load spec",
+                                    "errorType", "LoadSpecError"
+                                ));
+                                processedFiles++;
                                 continue;
                             }
 
@@ -953,7 +979,14 @@ public class ProjectToolProvider extends AbstractToolProvider {
                             // Load and save - capture each DomainFile
                             try (LoadResults<?> loadResults = loadSpec.getLoader().load(settings)) {
                                 if (loadResults == null) {
-                                    importErrors.add("Loader returned null for: " + config.getFSRL());
+                                    detailedErrors.add(Map.of(
+                                        "stage", "import",
+                                        "sourceFSRL", config.getFSRL().toString(),
+                                        "preferredName", config.getPreferredFileName(),
+                                        "error", "Loader returned null results",
+                                        "errorType", "LoaderError"
+                                    ));
+                                    processedFiles++;
                                     continue;
                                 }
 
@@ -965,12 +998,28 @@ public class ProjectToolProvider extends AbstractToolProvider {
                                     Msg.info(this, "Imported: " + config.getFSRL() + " -> " + savedFile.getPathname());
                                 }
 
+                                // Track progress and send notification
+                                processedFiles++;
+                                if (exchange != null) {
+                                    String progressMsg = String.format("Imported %d/%d: %s",
+                                        processedFiles, totalFiles, config.getPreferredFileName());
+                                    exchange.progressNotification(new McpSchema.ProgressNotification(
+                                        progressToken, (double) processedFiles, (double) totalFiles, progressMsg));
+                                }
+
                                 if (log.hasMessages()) {
                                     Msg.info(this, "Import log for " + config.getFSRL() + ": " + log.toString());
                                 }
                             }
                         } catch (Exception e) {
-                            importErrors.add("Failed to import " + config.getFSRL() + ": " + e.getMessage());
+                            detailedErrors.add(Map.of(
+                                "stage", "import",
+                                "sourceFSRL", config.getFSRL().toString(),
+                                "preferredName", config.getPreferredFileName(),
+                                "error", e.getMessage(),
+                                "errorType", e.getClass().getSimpleName()
+                            ));
+                            processedFiles++;
                             Msg.error(this, "Import failed for " + config.getFSRL(), e);
                         }
                     }
@@ -984,16 +1033,19 @@ public class ProjectToolProvider extends AbstractToolProvider {
 
                 // Report if no groups were enabled for import
                 if (enabledGroups == 0 && importedDomainFiles.isEmpty()) {
-                    importErrors.add("No enabled batch groups found. " +
-                        "Files discovered: " + batchInfo.getTotalCount() +
-                        ", Groups: " + batchInfo.getGroups().size() +
-                        ", Skipped groups: " + skippedGroups);
+                    detailedErrors.add(Map.of(
+                        "stage", "discovery",
+                        "error", "No enabled batch groups found",
+                        "errorType", "NoImportableFiles",
+                        "filesDiscovered", batchInfo.getTotalCount(),
+                        "groupsCreated", batchInfo.getGroups().size(),
+                        "skippedGroups", skippedGroups
+                    ));
                 }
 
                 // Track version control and analysis results
                 List<String> versionedFiles = new ArrayList<>();
                 List<String> analyzedFiles = new ArrayList<>();
-                List<String> errors = new ArrayList<>(importErrors);
 
                 // Process imported files: analyze if requested, then add to version control
                 // Use the tracked importedDomainFiles list for accurate processing
@@ -1002,7 +1054,11 @@ public class ProjectToolProvider extends AbstractToolProvider {
 
                     for (DomainFile domainFile : importedDomainFiles) {
                         if (postMonitor.isCancelled()) {
-                            errors.add("Post-processing timed out");
+                            detailedErrors.add(Map.of(
+                                "stage", "postProcessing",
+                                "error", "Post-processing timed out",
+                                "errorType", "TimeoutError"
+                            ));
                             break;
                         }
 
@@ -1022,7 +1078,12 @@ public class ProjectToolProvider extends AbstractToolProvider {
                                                 program.save("Analysis completed via ReVa import", postMonitor);
                                                 analyzedFiles.add(domainFile.getPathname());
                                             } else {
-                                                errors.add("Analysis timed out for " + domainFile.getPathname());
+                                                detailedErrors.add(Map.of(
+                                                    "stage", "analysis",
+                                                    "programPath", domainFile.getPathname(),
+                                                    "error", "Analysis timed out",
+                                                    "errorType", "TimeoutError"
+                                                ));
                                             }
                                         }
                                     } finally {
@@ -1042,7 +1103,12 @@ public class ProjectToolProvider extends AbstractToolProvider {
                                 }
                             }
                         } catch (Exception e) {
-                            errors.add("Post-processing failed for " + domainFile.getPathname() + ": " + e.getMessage());
+                            detailedErrors.add(Map.of(
+                                "stage", "postProcessing",
+                                "programPath", domainFile.getPathname(),
+                                "error", e.getMessage(),
+                                "errorType", e.getClass().getSimpleName()
+                            ));
                         }
                     }
                 }
@@ -1076,10 +1142,29 @@ public class ProjectToolProvider extends AbstractToolProvider {
                     result.put("analyzedPrograms", analyzedFiles);
                 }
 
-                if (!errors.isEmpty()) {
-                    result.put("errors", errors);
+                // Include detailed error information
+                if (!detailedErrors.isEmpty()) {
+                    result.put("errors", detailedErrors);
+                    result.put("errorCount", detailedErrors.size());
+
+                    // Build error summary by stage
+                    Map<String, Long> errorsByStage = new HashMap<>();
+                    for (Map<String, Object> error : detailedErrors) {
+                        String stage = (String) error.getOrDefault("stage", "unknown");
+                        errorsByStage.merge(stage, 1L, Long::sum);
+                    }
+                    StringBuilder summary = new StringBuilder();
+                    summary.append(detailedErrors.size()).append(" error(s): ");
+                    boolean first = true;
+                    for (Map.Entry<String, Long> entry : errorsByStage.entrySet()) {
+                        if (!first) summary.append(", ");
+                        summary.append(entry.getValue()).append(" during ").append(entry.getKey());
+                        first = false;
+                    }
+                    result.put("errorSummary", summary.toString());
                 }
 
+                // Build completion message
                 String message = "Import completed. " + importedDomainFiles.size() + " of " +
                     batchInfo.getTotalCount() + " files imported";
                 if (analyzeAfterImport && analyzedFiles.size() > 0) {
@@ -1088,7 +1173,17 @@ public class ProjectToolProvider extends AbstractToolProvider {
                 if (enableVersionControl && versionedFiles.size() > 0) {
                     message += ", " + versionedFiles.size() + " added to version control";
                 }
+                if (!detailedErrors.isEmpty()) {
+                    message += " (" + detailedErrors.size() + " error(s))";
+                }
                 result.put("message", message + ".");
+
+                // Send final progress notification
+                if (exchange != null) {
+                    exchange.progressNotification(new McpSchema.ProgressNotification(
+                        progressToken, (double) totalFiles, (double) totalFiles,
+                        message + "."));
+                }
 
                 return createJsonResult(result);
 

@@ -54,6 +54,7 @@ public class ConfigManager implements ConfigurationBackendListener {
     public static final String DECOMPILER_TIMEOUT_SECONDS = "Decompiler Timeout Seconds";
     public static final String IMPORT_ANALYSIS_TIMEOUT_SECONDS = "Import Analysis Timeout Seconds";
     public static final String WAIT_FOR_ANALYSIS_ON_IMPORT = "Wait For Analysis On Import";
+    public static final String IMPORT_MAX_DEPTH = "Import Max Depth";
 
     // Default values
     private static final int DEFAULT_PORT = 8080;
@@ -66,6 +67,7 @@ public class ConfigManager implements ConfigurationBackendListener {
     private static final int DEFAULT_DECOMPILER_TIMEOUT_SECONDS = 10;
     private static final int DEFAULT_IMPORT_ANALYSIS_TIMEOUT_SECONDS = 600;
     private static final boolean DEFAULT_WAIT_FOR_ANALYSIS_ON_IMPORT = true;
+    private static final int DEFAULT_IMPORT_MAX_DEPTH = 10;
 
     private final ConfigurationBackend backend;
     private final Map<String, Object> cachedOptions = new ConcurrentHashMap<>();
@@ -179,6 +181,8 @@ public class ConfigManager implements ConfigurationBackendListener {
             "Timeout in seconds for analyzing each imported file (default: 10 minutes)");
         toolOptions.registerOption(WAIT_FOR_ANALYSIS_ON_IMPORT, DEFAULT_WAIT_FOR_ANALYSIS_ON_IMPORT, help,
             "Whether to run auto-analysis after file import and wait for it to complete (default: true)");
+        toolOptions.registerOption(IMPORT_MAX_DEPTH, DEFAULT_IMPORT_MAX_DEPTH, help,
+            "Maximum depth to recurse into containers/archives when importing (default: 10)");
     }
 
     /**
@@ -208,6 +212,8 @@ public class ConfigManager implements ConfigurationBackendListener {
             backend.getInt(SERVER_OPTIONS, IMPORT_ANALYSIS_TIMEOUT_SECONDS, DEFAULT_IMPORT_ANALYSIS_TIMEOUT_SECONDS));
         cachedOptions.put(WAIT_FOR_ANALYSIS_ON_IMPORT,
             backend.getBoolean(SERVER_OPTIONS, WAIT_FOR_ANALYSIS_ON_IMPORT, DEFAULT_WAIT_FOR_ANALYSIS_ON_IMPORT));
+        cachedOptions.put(IMPORT_MAX_DEPTH,
+            backend.getInt(SERVER_OPTIONS, IMPORT_MAX_DEPTH, DEFAULT_IMPORT_MAX_DEPTH));
 
         Msg.debug(this, "Loaded ReVa configuration settings");
     }
@@ -460,6 +466,23 @@ public class ConfigManager implements ConfigurationBackendListener {
      */
     public void setWaitForAnalysisOnImport(boolean wait) {
         backend.setBoolean(SERVER_OPTIONS, WAIT_FOR_ANALYSIS_ON_IMPORT, wait);
+        // onConfigurationChanged() will be called automatically
+    }
+
+    /**
+     * Get the maximum depth to recurse into containers/archives when importing
+     * @return The maximum import depth
+     */
+    public int getImportMaxDepth() {
+        return (Integer) cachedOptions.getOrDefault(IMPORT_MAX_DEPTH, DEFAULT_IMPORT_MAX_DEPTH);
+    }
+
+    /**
+     * Set the maximum depth to recurse into containers/archives when importing
+     * @param depth The maximum import depth
+     */
+    public void setImportMaxDepth(int depth) {
+        backend.setInt(SERVER_OPTIONS, IMPORT_MAX_DEPTH, depth);
         // onConfigurationChanged() will be called automatically
     }
 

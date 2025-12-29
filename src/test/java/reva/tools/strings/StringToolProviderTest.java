@@ -87,7 +87,7 @@ public class StringToolProviderTest {
         when(mockData.getValue()).thenReturn(testString);
         when(mockData.getAddress()).thenReturn(mockAddress);
         when(mockAddress.toString()).thenReturn("00401000");
-        when(mockAddress.toString("0x")).thenReturn("0x00401000");
+        when(mockAddress.toString("0x")).thenReturn("0x00401000");  // AddressUtil.formatAddress() calls toString("0x")
         when(mockData.getBytes()).thenReturn(testBytes);
         when(mockData.getDataType()).thenReturn(mockDataType);
         when(mockDataType.getName()).thenReturn("string");

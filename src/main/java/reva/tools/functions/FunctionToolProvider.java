@@ -1426,22 +1426,26 @@ public class FunctionToolProvider extends AbstractToolProvider {
     }
 
     /**
-     * Normalize a function signature to handle whitespace issues that can cause parsing failures.
+     * Normalize a function signature to handle whitespace issues and calling conventions
+     * that can cause parsing failures.
      *
-     * Common issues:
-     * - "char *funcname" fails parsing (space before * in return type)
-     * - "char* funcname" works correctly
-     *
-     * This method normalizes whitespace to ensure consistent parsing.
+     * <p>Common issues handled:</p>
+     * <ul>
+     *   <li>"char *funcname" fails parsing (space before * in return type) - converted to "char* funcname"</li>
+     *   <li>Calling conventions like __thiscall, __cdecl, etc. are not supported by Ghidra's
+     *       FunctionSignatureParser (see Ghidra Issue #8831) - stripped before parsing</li>
+     * </ul>
      *
      * @param signature The original C-style function signature
-     * @return Normalized signature with whitespace corrected
+     * @return Normalized signature with whitespace corrected and calling conventions stripped
+     * @see <a href="https://github.com/NationalSecurityAgency/ghidra/issues/8831">Ghidra Issue #8831</a>
      */
     private String normalizeFunctionSignature(String signature) {
         if (signature == null || signature.isEmpty()) {
             return signature;
         }
 
+        // Step 1: Handle pointer spacing
         // Pattern: Match "type *name(" where there's a space before the pointer
         // This handles cases like "char *fgets(" which fail parsing
         // Convert to "type* name(" which parses correctly
@@ -1452,6 +1456,22 @@ public class FunctionToolProvider extends AbstractToolProvider {
         //   (\w+)      - Capture word (function name)
         //   \(         - Literal opening parenthesis
         String normalized = signature.replaceAll("(\\w+)\\s+\\*(\\w+)\\(", "$1* $2(");
+
+        // Step 2: Strip calling conventions (workaround for Ghidra Issue #8831)
+        // FunctionSignatureParser doesn't recognize calling conventions in signatures
+        // See: https://github.com/NationalSecurityAgency/ghidra/issues/8831
+
+        // Match Microsoft conventions: __cdecl, __stdcall, __fastcall, __thiscall, __vectorcall, __regcall, __clrcall
+        // Pattern uses \b for word boundaries to avoid matching partial words
+        String conventionPattern = "\\b(__cdecl|__stdcall|__fastcall|__thiscall|__vectorcall|__regcall|__clrcall)\\b";
+        normalized = normalized.replaceAll(conventionPattern, "");
+
+        // Also match GCC attribute syntax: __attribute__((cdecl)) and similar
+        String gccPattern = "__attribute__\\s*\\(\\s*\\(\\s*(cdecl|stdcall|fastcall|thiscall)\\s*\\)\\s*\\)";
+        normalized = normalized.replaceAll(gccPattern, "");
+
+        // Clean up multiple consecutive spaces that result from stripping
+        normalized = normalized.replaceAll("\\s{2,}", " ").trim();
 
         return normalized;
     }

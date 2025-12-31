@@ -506,4 +506,93 @@ public class FunctionPrototypeToolProviderIntegrationTest extends RevaIntegratio
             }
         });
     }
+
+    @Test
+    public void testSignatureWithCallingConvention() throws Exception {
+        // Test that calling conventions are stripped and signature still parses
+        // This is a workaround for Ghidra Issue #8831
+        withMcpClient(createMcpTransport(), client -> {
+            try {
+                client.initialize();
+
+                Address funcAddr = program.getAddressFactory().getDefaultAddressSpace().getAddress(0x01007000);
+
+                // Test with __thiscall (common for C++ member functions on Windows)
+                CallToolResult result = client.callTool(new CallToolRequest(
+                    "set-function-prototype",
+                    Map.of(
+                        "programPath", programPath,
+                        "location", "0x01007000",
+                        "signature", "int __thiscall ProcessData(void* this, char* buffer, int size)",
+                        "createIfNotExists", true
+                    )
+                ));
+
+                assertFalse("Tool should not have errors with __thiscall", result.isError());
+
+                TextContent content = (TextContent) result.content().get(0);
+                JsonNode jsonResult = objectMapper.readTree(content.text());
+
+                // Verify function was created successfully
+                assertEquals("Tool should succeed", true, jsonResult.get("success").asBoolean());
+                assertEquals("Function should be created", true, jsonResult.get("created").asBoolean());
+
+                // Verify function info
+                JsonNode functionInfo = jsonResult.get("function");
+                assertEquals("Function name should be ProcessData", "ProcessData", functionInfo.get("name").asText());
+                assertEquals("Return type should be int", "int", functionInfo.get("returnType").asText());
+
+                // Verify function was actually created in program
+                FunctionManager fm = program.getFunctionManager();
+                Function createdFunc = fm.getFunctionAt(funcAddr);
+                assertNotNull("Function should exist in program", createdFunc);
+                assertEquals("Function name should match", "ProcessData", createdFunc.getName());
+
+            } catch (Exception e) {
+                fail("Test failed with exception: " + e.getMessage());
+            }
+        });
+    }
+
+    @Test
+    public void testMultipleCallingConventions() throws Exception {
+        // Test that various calling conventions are all stripped correctly
+        withMcpClient(createMcpTransport(), client -> {
+            try {
+                client.initialize();
+
+                // Test cases: different calling conventions
+                String[][] testCases = {
+                    {"0x01008000", "void __cdecl cdeclFunc(int x)"},
+                    {"0x01008100", "int __stdcall stdcallFunc(char* str)"},
+                    {"0x01008200", "void* __fastcall fastcallFunc(int a, int b)"},
+                    {"0x01008300", "long __vectorcall vectorFunc(float* vec)"}
+                };
+
+                for (String[] testCase : testCases) {
+                    String addrStr = testCase[0];
+                    String signature = testCase[1];
+
+                    CallToolResult result = client.callTool(new CallToolRequest(
+                        "set-function-prototype",
+                        Map.of(
+                            "programPath", programPath,
+                            "location", addrStr,
+                            "signature", signature,
+                            "createIfNotExists", true
+                        )
+                    ));
+
+                    assertFalse("Tool should not have errors for: " + signature, result.isError());
+
+                    TextContent content = (TextContent) result.content().get(0);
+                    JsonNode jsonResult = objectMapper.readTree(content.text());
+                    assertEquals("Tool should succeed for: " + signature, true, jsonResult.get("success").asBoolean());
+                }
+
+            } catch (Exception e) {
+                fail("Test failed with exception: " + e.getMessage());
+            }
+        });
+    }
 }

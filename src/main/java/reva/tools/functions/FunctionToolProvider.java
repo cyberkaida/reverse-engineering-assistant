@@ -509,6 +509,12 @@ public class FunctionToolProvider extends AbstractToolProvider {
             "default", false
         ));
 
+        // Structure usage filter
+        properties.put("usesStructure", Map.of(
+            "type", "string",
+            "description", "Only return functions that use this structure (in return type, parameters, or local variables)"
+        ));
+
         // Pagination
         properties.put("startIndex", Map.of(
             "type", "integer",
@@ -581,6 +587,18 @@ public class FunctionToolProvider extends AbstractToolProvider {
             boolean verbose = getOptionalBoolean(request, "verbose", false);
             boolean includeCallees = getOptionalBoolean(request, "includeCallees", false);
 
+            // Structure usage filter
+            String usesStructureName = getOptionalString(request, "usesStructure", null);
+            ghidra.program.model.data.DataType usesStructureType = null;
+            if (usesStructureName != null && !usesStructureName.isEmpty()) {
+                usesStructureType = findDataTypeByName(program.getDataTypeManager(), usesStructureName);
+                if (usesStructureType == null) {
+                    return createErrorResult("Structure not found: " + usesStructureName +
+                        ". Use list-structures to see available structures.");
+                }
+            }
+            final ghidra.program.model.data.DataType finalUsesStructureType = usesStructureType;
+
             // Validate mutual exclusivity
             boolean hasFilterByTags = filterByTags != null && !filterByTags.isEmpty();
             if (untagged && hasFilterByTags) {
@@ -616,11 +634,16 @@ public class FunctionToolProvider extends AbstractToolProvider {
                 .filter(f -> matchesTagFilters(f, finalFilterByTags, finalExcludeTags, untagged))
                 // Stage 4: Count range filters (cheap - integer comparison)
                 .filter(f -> matchesCountFilters(f, minCalleeCount, maxCalleeCount, minCallerCount, maxCallerCount))
-                // Stage 5: Dependency filter (expensive - do last)
+                // Stage 5: Dependency filter (expensive)
                 .filter(f -> {
                     if (!hasDependencyFilter) return true;
                     return matchesDependencyFilter(program, f, requireCalleesTagged,
                         allowExternalCallees, allowUntaggedCallees, finalTagLookup);
+                })
+                // Stage 6: Structure usage filter (expensive - check return type, params, variables)
+                .filter(f -> {
+                    if (finalUsesStructureType == null) return true;
+                    return matchesStructureUsageFilter(program, f, finalUsesStructureType);
                 })
                 .toList();
 
@@ -2249,6 +2272,67 @@ public class FunctionToolProvider extends AbstractToolProvider {
 
             return createJsonResult(result);
         });
+    }
+
+    /**
+     * Find a data type by name in all categories of the DataTypeManager.
+     */
+    private ghidra.program.model.data.DataType findDataTypeByName(
+            ghidra.program.model.data.DataTypeManager dtm, String name) {
+        // Direct lookup first
+        ghidra.program.model.data.DataType dt = dtm.getDataType(name);
+        if (dt != null) {
+            return dt;
+        }
+
+        // Search all categories
+        java.util.Iterator<ghidra.program.model.data.DataType> iter = dtm.getAllDataTypes();
+        while (iter.hasNext()) {
+            ghidra.program.model.data.DataType dataType = iter.next();
+            if (dataType.getName().equals(name)) {
+                return dataType;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Check if a function uses a specific structure in its return type, parameters, or local variables.
+     */
+    private boolean matchesStructureUsageFilter(Program program, Map<String, Object> funcInfo,
+            ghidra.program.model.data.DataType structure) {
+        String addressStr = (String) funcInfo.get("address");
+        ghidra.program.model.address.Address funcAddr = program.getAddressFactory().getAddress(addressStr);
+        if (funcAddr == null) {
+            return false;
+        }
+
+        ghidra.program.model.listing.Function function = program.getFunctionManager().getFunctionAt(funcAddr);
+        if (function == null) {
+            return false;
+        }
+
+        // Check return type
+        if (function.getReturnType().isEquivalent(structure)) {
+            return true;
+        }
+
+        // Check parameters
+        for (ghidra.program.model.listing.Parameter param : function.getParameters()) {
+            if (param.getDataType().isEquivalent(structure)) {
+                return true;
+            }
+        }
+
+        // Check local variables
+        for (ghidra.program.model.listing.Variable var : function.getAllVariables()) {
+            if (var.getDataType().isEquivalent(structure)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
 }

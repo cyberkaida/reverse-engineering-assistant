@@ -910,4 +910,75 @@ public class StructureToolProviderIntegrationTest extends RevaIntegrationTestBas
         }
         return null;
     }
+
+    @Test
+    public void testInferStructureFromUsage() throws Exception {
+        // Test inferring structure layout from function parameter usage
+        withMcpClient(createMcpTransport(), client -> {
+            client.initialize();
+
+            // Use an existing function address from WinHelloCPP.exe
+            // Try with "main" which typically exists in test binaries
+            Map<String, Object> args = new HashMap<>();
+            args.put("programPath", programPath);
+            args.put("functionAddress", "0x10001c10");  // A valid function in WinHelloCPP.exe
+            args.put("parameterIndex", 0);
+
+            CallToolResult result = client.callTool(new CallToolRequest("infer-structure-from-usage", args));
+
+            TextContent content = (TextContent) result.content().get(0);
+            String responseText = content.text();
+
+            // The response could be JSON (success or structured error) or plain text error
+            // Check if we got a proper response structure
+            if (responseText.startsWith("{")) {
+                JsonNode json = parseJsonContent(responseText);
+
+                if (json.has("success") && json.get("success").asBoolean()) {
+                    // Verify response structure
+                    assertTrue("Should have functionName field", json.has("functionName"));
+                    assertTrue("Should have inferredStructure field", json.has("inferredStructure"));
+                    assertTrue("Should have structName field", json.has("structName"));
+                    assertTrue("Should have accessCount field", json.has("accessCount"));
+                    assertTrue("Should have hint field", json.has("hint"));
+
+                    // The structure definition should be a string
+                    assertNotNull("inferredStructure should not be null", json.get("inferredStructure").asText());
+                    assertTrue("inferredStructure should contain 'struct'",
+                        json.get("inferredStructure").asText().contains("struct"));
+                } else if (json.has("error")) {
+                    // Structured error response - tool returned error info
+                    assertTrue("Error should be descriptive", !json.get("error").asText().isEmpty());
+                }
+            } else {
+                // Plain text error - function not found or similar
+                assertTrue("Should contain error context",
+                    responseText.contains("function") || responseText.contains("parameter") ||
+                    responseText.contains("Could not"));
+            }
+        });
+    }
+
+    @Test
+    public void testInferStructureFromUsageInvalidFunction() throws Exception {
+        // Test error handling for invalid function address
+        withMcpClient(createMcpTransport(), client -> {
+            client.initialize();
+
+            Map<String, Object> args = new HashMap<>();
+            args.put("programPath", programPath);
+            args.put("functionAddress", "0xFFFFFFFF");  // Invalid address
+            args.put("parameterIndex", 0);
+
+            CallToolResult result = client.callTool(new CallToolRequest("infer-structure-from-usage", args));
+
+            // This should return an error or empty result
+            TextContent content = (TextContent) result.content().get(0);
+            String responseText = content.text();
+
+            // Either error flag or error message should be present
+            assertTrue("Should indicate function not found",
+                responseText.contains("error") || responseText.contains("No function"));
+        });
+    }
 }

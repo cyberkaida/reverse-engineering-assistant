@@ -21,22 +21,29 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
+import ghidra.app.decompiler.DecompInterface;
+import ghidra.app.decompiler.DecompileResults;
 import ghidra.app.util.cparser.C.CParser;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.data.*;
 import ghidra.program.model.listing.Data;
+import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.Listing;
 import ghidra.program.model.listing.Program;
 import ghidra.program.model.mem.Memory;
+import ghidra.program.model.pcode.HighFunction;
+import ghidra.program.model.pcode.HighVariable;
 import ghidra.util.Msg;
 import ghidra.util.data.DataTypeParser;
 import ghidra.util.data.DataTypeParser.AllowedDataTypes;
+import ghidra.util.task.TaskMonitor;
 import io.modelcontextprotocol.server.McpSyncServer;
 import io.modelcontextprotocol.spec.McpSchema;
 import reva.tools.AbstractToolProvider;
 import reva.util.AddressUtil;
 import reva.util.DataTypeParserUtil;
 import reva.util.SchemaUtil;
+import reva.util.StructureUsageAnalyzer;
 
 /**
  * Tool provider for structure definition and manipulation operations.
@@ -65,6 +72,7 @@ public class StructureToolProvider extends AbstractToolProvider {
         registerDeleteStructureTool();
         registerParseCHeaderTool();
         registerFindStructureUsagesTool();
+        registerInferStructureFromUsageTool();
     }
 
     /**
@@ -1525,6 +1533,174 @@ public class StructureToolProvider extends AbstractToolProvider {
             result.put("programPath", program.getDomainFile().getPathname());
 
             return createJsonResult(result);
+        });
+    }
+
+    /**
+     * Register a tool to infer structure layout from variable usage patterns.
+     * Analyzes how a function parameter or variable is accessed to infer field offsets.
+     */
+    private void registerInferStructureFromUsageTool() {
+        Map<String, Object> properties = new HashMap<>();
+        properties.put("programPath", SchemaUtil.createStringProperty("Path to the program"));
+        properties.put("functionAddress", SchemaUtil.createStringProperty(
+            "Address or name of the function to analyze"));
+        properties.put("parameterIndex", Map.of(
+            "type", "integer",
+            "description", "0-based parameter index to analyze (default: 0 for first parameter)",
+            "default", 0
+        ));
+        properties.put("variableName", SchemaUtil.createOptionalStringProperty(
+            "Name of local variable to analyze instead of a parameter"));
+        properties.put("structName", SchemaUtil.createOptionalStringProperty(
+            "Name for the inferred structure (default: Inferred_<function>_param<N>)"));
+
+        List<String> required = new ArrayList<>();
+        required.add("programPath");
+        required.add("functionAddress");
+
+        McpSchema.Tool tool = McpSchema.Tool.builder()
+            .name("infer-structure-from-usage")
+            .title("Infer Structure from Usage")
+            .description("Analyze how a function parameter or variable is used to infer its structure layout. " +
+                "Examines pcode operations to find field offset accesses and infers types from access sizes. " +
+                "Returns a C structure definition that can be used with parse-c-structure to create the type.")
+            .inputSchema(createSchema(properties, required))
+            .build();
+
+        registerTool(tool, (exchange, request) -> {
+            try {
+                Program program = getProgramFromArgs(request);
+                String programPath = program.getDomainFile().getPathname();
+                String functionLocation = getString(request, "functionAddress");
+                int parameterIndex = getOptionalInt(request, "parameterIndex", 0);
+                String variableName = getOptionalString(request, "variableName", null);
+                String structName = getOptionalString(request, "structName", null);
+
+                // Resolve function
+                Address funcAddr = getAddressFromArgs(request, program, "functionAddress");
+                if (funcAddr == null) {
+                    return createErrorResult("Invalid function address or name: " + functionLocation);
+                }
+
+                Function function = program.getFunctionManager().getFunctionAt(funcAddr);
+                if (function == null) {
+                    function = program.getFunctionManager().getFunctionContaining(funcAddr);
+                }
+                if (function == null) {
+                    return createErrorResult("No function found at " + AddressUtil.formatAddress(funcAddr));
+                }
+
+                // Generate default struct name if not provided
+                if (structName == null || structName.isEmpty()) {
+                    if (variableName != null) {
+                        structName = "Inferred_" + function.getName() + "_" + variableName;
+                    } else {
+                        structName = "Inferred_" + function.getName() + "_param" + parameterIndex;
+                    }
+                }
+
+                // Decompile the function
+                DecompInterface decompiler = new DecompInterface();
+                try {
+                    decompiler.toggleCCode(true);
+                    decompiler.toggleSyntaxTree(true);
+                    decompiler.setSimplificationStyle("decompile");
+
+                    if (!decompiler.openProgram(program)) {
+                        return createErrorResult("Failed to initialize decompiler");
+                    }
+
+                    DecompileResults results = decompiler.decompileFunction(function, 30, TaskMonitor.DUMMY);
+                    if (!results.decompileCompleted()) {
+                        return createErrorResult("Decompilation failed: " + results.getErrorMessage());
+                    }
+
+                    HighFunction hf = results.getHighFunction();
+                    if (hf == null) {
+                        return createErrorResult("Failed to get high-level function representation");
+                    }
+
+                    // Find the target variable
+                    HighVariable targetVar = null;
+                    String targetDescription = null;
+
+                    if (variableName != null && !variableName.isEmpty()) {
+                        // Find by variable name
+                        targetVar = StructureUsageAnalyzer.findVariableByName(hf, variableName);
+                        targetDescription = "variable '" + variableName + "'";
+                    } else {
+                        // Find by parameter index
+                        targetVar = StructureUsageAnalyzer.findParameterByIndex(hf, parameterIndex);
+                        targetDescription = "parameter " + parameterIndex;
+                    }
+
+                    if (targetVar == null) {
+                        return createErrorResult("Could not find " + targetDescription + " in function " +
+                            function.getName());
+                    }
+
+                    // Analyze memory accesses
+                    List<StructureUsageAnalyzer.MemoryAccess> accesses =
+                        StructureUsageAnalyzer.analyzeMemoryAccesses(hf, targetVar);
+
+                    // Build response
+                    Map<String, Object> result = new HashMap<>();
+                    result.put("success", true);
+                    result.put("functionName", function.getName());
+                    result.put("functionAddress", AddressUtil.formatAddress(function.getEntryPoint()));
+                    result.put("analyzedTarget", targetDescription);
+                    result.put("structName", structName);
+                    result.put("programPath", programPath);
+
+                    // Generate structure definition
+                    String structDef = StructureUsageAnalyzer.generateStructureDefinition(accesses, structName);
+                    result.put("inferredStructure", structDef);
+
+                    // Aggregate accesses for summary
+                    Map<Long, Map<String, Object>> aggregated =
+                        StructureUsageAnalyzer.aggregateAccessesByOffset(accesses);
+                    result.put("accessCount", accesses.size());
+                    result.put("uniqueOffsets", aggregated.size());
+
+                    // Calculate inferred size
+                    long maxOffset = 0;
+                    int maxSize = 0;
+                    for (StructureUsageAnalyzer.MemoryAccess access : accesses) {
+                        if (access.offset + access.size > maxOffset + maxSize) {
+                            maxOffset = access.offset;
+                            maxSize = access.size;
+                        }
+                    }
+                    result.put("inferredSize", maxOffset + maxSize);
+
+                    // Include detailed field info
+                    List<Map<String, Object>> fields = new ArrayList<>();
+                    for (Map.Entry<Long, Map<String, Object>> entry : aggregated.entrySet()) {
+                        fields.add(entry.getValue());
+                    }
+                    // Sort by offset
+                    fields.sort((a, b) -> {
+                        long offA = (Long) a.get("offsetDecimal");
+                        long offB = (Long) b.get("offsetDecimal");
+                        return Long.compare(offA, offB);
+                    });
+                    result.put("fields", fields);
+
+                    // Add usage hint
+                    result.put("hint", "Use parse-c-structure with the inferredStructure value to create this type");
+
+                    return createJsonResult(result);
+
+                } finally {
+                    decompiler.dispose();
+                }
+
+            } catch (IllegalArgumentException e) {
+                return createErrorResult(e.getMessage());
+            } catch (Exception e) {
+                return createErrorResult("Unexpected error: " + e.getMessage());
+            }
         });
     }
 

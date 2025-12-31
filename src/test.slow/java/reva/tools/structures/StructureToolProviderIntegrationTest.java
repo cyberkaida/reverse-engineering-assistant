@@ -805,6 +805,98 @@ public class StructureToolProviderIntegrationTest extends RevaIntegrationTestBas
         });
     }
 
+    @Test
+    public void testModifyFieldSizeChangeWarning() throws Exception {
+        withMcpClient(createMcpTransport(), client -> {
+            client.initialize();
+
+            // Create a structure with multiple fields
+            Map<String, Object> createArgs = new HashMap<>();
+            createArgs.put("programPath", programPath);
+            createArgs.put("cDefinition", "struct SizeChangeTest { int field1; int field2; int field3; };");
+
+            CallToolResult createResult = client.callTool(new CallToolRequest("parse-c-structure", createArgs));
+            assertMcpResultNotError(createResult, "Structure creation should succeed");
+
+            // Try to modify the first field to a larger type WITHOUT allowSizeChange
+            // Use newLength to explicitly force a size change that will trigger the warning
+            Map<String, Object> modifyArgs = new HashMap<>();
+            modifyArgs.put("programPath", programPath);
+            modifyArgs.put("structureName", "SizeChangeTest");
+            modifyArgs.put("fieldName", "field1");
+            modifyArgs.put("newLength", 8);  // Explicitly set larger length
+            // NOT setting allowSizeChange = should default to false
+
+            CallToolResult modifyResult = client.callTool(new CallToolRequest("modify-structure-field", modifyArgs));
+
+            // Should NOT be an error (it's a warning, not an error)
+            assertFalse("Should not be an error (it's a warning)", modifyResult.isError());
+
+            TextContent content = (TextContent) modifyResult.content().get(0);
+            JsonNode json = parseJsonContent(content.text());
+
+            // Debug: print what we got back if test fails
+            String jsonStr = content.text();
+
+            // Verify warning was returned
+            assertTrue("Should have canModify field. Got: " + jsonStr, json.has("canModify"));
+            assertFalse("canModify should be false", json.get("canModify").asBoolean());
+            assertFalse("modified should be false", json.get("modified").asBoolean());
+            assertTrue("Should have warning message", json.has("warning"));
+            assertTrue("Should have impact details", json.has("impact"));
+
+            // Verify impact details
+            JsonNode impact = json.get("impact");
+            assertTrue("Should have affectedFieldCount", impact.has("affectedFieldCount"));
+            assertEquals("Should affect 2 fields (field2 and field3)", 2, impact.get("affectedFieldCount").asInt());
+
+            // Verify structure was NOT modified
+            DataTypeManager dtm = program.getDataTypeManager();
+            DataType dt = findDataTypeByName(dtm, "SizeChangeTest");
+            Structure struct = (Structure) dt;
+            assertEquals("Structure should still have original size", 12, struct.getLength());
+        });
+    }
+
+    @Test
+    public void testModifyFieldSizeChangeAllowed() throws Exception {
+        withMcpClient(createMcpTransport(), client -> {
+            client.initialize();
+
+            // Create a structure with multiple fields
+            Map<String, Object> createArgs = new HashMap<>();
+            createArgs.put("programPath", programPath);
+            createArgs.put("cDefinition", "struct SizeChangeAllowedTest { int field1; int field2; };");
+
+            CallToolResult createResult = client.callTool(new CallToolRequest("parse-c-structure", createArgs));
+            assertMcpResultNotError(createResult, "Structure creation should succeed");
+
+            // Modify with allowSizeChange = true
+            Map<String, Object> modifyArgs = new HashMap<>();
+            modifyArgs.put("programPath", programPath);
+            modifyArgs.put("structureName", "SizeChangeAllowedTest");
+            modifyArgs.put("fieldName", "field1");
+            modifyArgs.put("newLength", 8);  // Explicitly set larger length
+            modifyArgs.put("allowSizeChange", true);  // Explicitly allow
+
+            CallToolResult modifyResult = client.callTool(new CallToolRequest("modify-structure-field", modifyArgs));
+            assertMcpResultNotError(modifyResult, "Modification should succeed with allowSizeChange=true");
+
+            TextContent content = (TextContent) modifyResult.content().get(0);
+            JsonNode json = parseJsonContent(content.text());
+
+            // Verify modification was applied
+            assertTrue("Should have success message", json.has("message"));
+
+            // Verify structure was modified
+            DataTypeManager dtm = program.getDataTypeManager();
+            DataType dt = findDataTypeByName(dtm, "SizeChangeAllowedTest");
+            Structure struct = (Structure) dt;
+            // New size should be 8 + 4 (int) = 12 or larger
+            assertTrue("Structure size should have increased", struct.getLength() >= 12);
+        });
+    }
+
     /**
      * Helper method to find a data type by name in all categories
      */

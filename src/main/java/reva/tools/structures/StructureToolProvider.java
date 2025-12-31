@@ -417,6 +417,9 @@ public class StructureToolProvider extends AbstractToolProvider {
         properties.put("newFieldName", SchemaUtil.createOptionalStringProperty("New name for the field"));
         properties.put("newComment", SchemaUtil.createOptionalStringProperty("New comment for the field"));
         properties.put("newLength", SchemaUtil.createOptionalNumberProperty("New length for the field (advanced)"));
+        properties.put("allowSizeChange", SchemaUtil.createOptionalBooleanProperty(
+            "Allow modifications that change field size and shift subsequent field offsets (default: false). " +
+            "If false and the modification would change size, a warning is returned instead of making the change."));
 
         List<String> required = new ArrayList<>();
         required.add("programPath");
@@ -441,6 +444,7 @@ public class StructureToolProvider extends AbstractToolProvider {
                 String newFieldName = getOptionalString(request, "newFieldName", null);
                 String newComment = getOptionalString(request, "newComment", null);
                 Integer newLength = getOptionalInteger(request.arguments(), "newLength", null);
+                boolean allowSizeChange = getOptionalBoolean(request, "allowSizeChange", false);
 
                 // Validate: must have either fieldName or offset
                 if (fieldName == null && offset == null) {
@@ -536,6 +540,43 @@ public class StructureToolProvider extends AbstractToolProvider {
                 // Apply new length if provided
                 if (newLength != null) {
                     replacementLength = newLength;
+                }
+
+                // Check if size will change and warn if not allowed
+                int oldLength = targetComponent.getLength();
+                int sizeDelta = replacementLength - oldLength;
+                boolean willShiftOffsets = sizeDelta != 0 && targetOrdinal < (struct.getNumComponents() - 1);
+
+                if (willShiftOffsets && !allowSizeChange) {
+                    // Count affected fields (fields after this one)
+                    int affectedFieldCount = struct.getNumComponents() - targetOrdinal - 1;
+                    int oldStructSize = struct.getLength();
+                    int newStructSize = oldStructSize + sizeDelta;
+
+                    // Return warning with impact details
+                    Map<String, Object> warning = new HashMap<>();
+                    warning.put("canModify", false);
+                    warning.put("modified", false);
+                    warning.put("warning", String.format(
+                        "This change shifts offsets of %d field(s). Structure size changes from %d to %d bytes. " +
+                        "Use allowSizeChange=true to proceed.",
+                        affectedFieldCount, oldStructSize, newStructSize));
+
+                    Map<String, Object> impact = new HashMap<>();
+                    impact.put("oldFieldSize", oldLength);
+                    impact.put("newFieldSize", replacementLength);
+                    impact.put("sizeDelta", sizeDelta);
+                    impact.put("affectedFieldCount", affectedFieldCount);
+                    impact.put("oldStructureSize", oldStructSize);
+                    impact.put("newStructureSize", newStructSize);
+                    warning.put("impact", impact);
+
+                    warning.put("structureName", structureName);
+                    warning.put("fieldName", targetComponent.getFieldName());
+                    warning.put("fieldOffset", targetComponent.getOffset());
+                    warning.put("programPath", program.getDomainFile().getPathname());
+
+                    return createJsonResult(warning);
                 }
 
                 int txId = program.startTransaction("Modify Structure Field");

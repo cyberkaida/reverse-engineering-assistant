@@ -17,9 +17,11 @@ package reva.tools.structures;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import ghidra.app.decompiler.DecompInterface;
 import ghidra.app.decompiler.DecompileResults;
@@ -73,6 +75,7 @@ public class StructureToolProvider extends AbstractToolProvider {
         registerParseCHeaderTool();
         registerFindStructureUsagesTool();
         registerInferStructureFromUsageTool();
+        registerValidateStructureAgainstUsageTool();
     }
 
     /**
@@ -1695,6 +1698,268 @@ public class StructureToolProvider extends AbstractToolProvider {
                 } finally {
                     decompiler.dispose();
                 }
+
+            } catch (IllegalArgumentException e) {
+                return createErrorResult(e.getMessage());
+            } catch (Exception e) {
+                return createErrorResult("Unexpected error: " + e.getMessage());
+            }
+        });
+    }
+
+    /**
+     * Register a tool to validate a structure definition against actual code usage.
+     * Compares the structure fields with observed memory access patterns.
+     */
+    private void registerValidateStructureAgainstUsageTool() {
+        Map<String, Object> properties = new HashMap<>();
+        properties.put("programPath", SchemaUtil.createStringProperty("Path to the program"));
+        properties.put("structureName", SchemaUtil.createStringProperty("Name of the structure to validate"));
+        properties.put("functionAddress", SchemaUtil.createOptionalStringProperty(
+            "Address or name of a specific function to analyze (optional, analyzes all users if omitted)"));
+        properties.put("maxFunctions", Map.of(
+            "type", "integer",
+            "description", "Maximum number of functions to analyze (default: 20)",
+            "default", 20
+        ));
+
+        List<String> required = new ArrayList<>();
+        required.add("programPath");
+        required.add("structureName");
+
+        McpSchema.Tool tool = McpSchema.Tool.builder()
+            .name("validate-structure-against-usage")
+            .title("Validate Structure Against Usage")
+            .description("Validate a structure definition by comparing it against how the structure is actually used in code. " +
+                "Reports potential issues like accesses beyond structure size, type mismatches, and unused fields.")
+            .inputSchema(createSchema(properties, required))
+            .build();
+
+        registerTool(tool, (exchange, request) -> {
+            try {
+                Program program = getProgramFromArgs(request);
+                String programPath = program.getDomainFile().getPathname();
+                String structureName = getString(request, "structureName");
+                String functionLocation = getOptionalString(request, "functionAddress", null);
+                int maxFunctions = getOptionalInt(request, "maxFunctions", 20);
+
+                // Find the structure
+                DataType dt = findDataTypeByName(program.getDataTypeManager(), structureName);
+                if (dt == null) {
+                    return createErrorResult("Structure not found: " + structureName);
+                }
+                if (!(dt instanceof Structure)) {
+                    return createErrorResult(structureName + " is not a structure (it's a " + dt.getClass().getSimpleName() + ")");
+                }
+
+                Structure structure = (Structure) dt;
+
+                // Build a map of valid offsets from the structure
+                Map<Long, DataTypeComponent> fieldsByOffset = new HashMap<>();
+                for (DataTypeComponent comp : structure.getComponents()) {
+                    fieldsByOffset.put((long) comp.getOffset(), comp);
+                }
+
+                // Find functions to analyze
+                List<Function> functionsToAnalyze = new ArrayList<>();
+
+                if (functionLocation != null && !functionLocation.isEmpty()) {
+                    // Analyze specific function
+                    Address funcAddr = getAddressFromArgs(request, program, "functionAddress");
+                    if (funcAddr == null) {
+                        return createErrorResult("Invalid function address: " + functionLocation);
+                    }
+                    Function func = program.getFunctionManager().getFunctionAt(funcAddr);
+                    if (func == null) {
+                        func = program.getFunctionManager().getFunctionContaining(funcAddr);
+                    }
+                    if (func != null) {
+                        functionsToAnalyze.add(func);
+                    }
+                } else {
+                    // Find all functions that use this structure
+                    List<Function> referencingFunctions = StructureUsageAnalyzer.findReferencingFunctions(program, structure);
+                    functionsToAnalyze.addAll(referencingFunctions.subList(0,
+                        Math.min(maxFunctions, referencingFunctions.size())));
+                }
+
+                if (functionsToAnalyze.isEmpty()) {
+                    Map<String, Object> result = new HashMap<>();
+                    result.put("structureName", structureName);
+                    result.put("structureSize", structure.getLength());
+                    result.put("fieldCount", structure.getNumComponents());
+                    result.put("functionsAnalyzed", 0);
+                    result.put("issues", new ArrayList<>());
+                    result.put("note", "No functions found using this structure");
+                    result.put("programPath", programPath);
+                    return createJsonResult(result);
+                }
+
+                // Analyze each function
+                List<Map<String, Object>> issues = new ArrayList<>();
+                Set<Long> accessedOffsets = new HashSet<>();
+                int functionsAnalyzed = 0;
+
+                DecompInterface decompiler = new DecompInterface();
+                try {
+                    decompiler.toggleCCode(true);
+                    decompiler.toggleSyntaxTree(true);
+                    decompiler.setSimplificationStyle("decompile");
+
+                    if (!decompiler.openProgram(program)) {
+                        return createErrorResult("Failed to initialize decompiler");
+                    }
+
+                    for (Function func : functionsToAnalyze) {
+                        DecompileResults results = decompiler.decompileFunction(func, 30, TaskMonitor.DUMMY);
+                        if (!results.decompileCompleted() || results.getHighFunction() == null) {
+                            continue;
+                        }
+
+                        HighFunction hf = results.getHighFunction();
+                        functionsAnalyzed++;
+
+                        // Find variables typed with this structure
+                        ghidra.program.model.pcode.LocalSymbolMap localSymbols = hf.getLocalSymbolMap();
+                        Iterator<ghidra.program.model.pcode.HighSymbol> symbols = localSymbols.getSymbols();
+
+                        while (symbols.hasNext()) {
+                            ghidra.program.model.pcode.HighSymbol symbol = symbols.next();
+                            HighVariable hv = symbol.getHighVariable();
+                            if (hv == null) continue;
+
+                            DataType varType = hv.getDataType();
+                            boolean usesStructure = false;
+
+                            if (varType != null) {
+                                if (varType.isEquivalent(structure)) {
+                                    usesStructure = true;
+                                } else if (varType instanceof Pointer) {
+                                    DataType pointedTo = ((Pointer) varType).getDataType();
+                                    if (pointedTo != null && pointedTo.isEquivalent(structure)) {
+                                        usesStructure = true;
+                                    }
+                                }
+                            }
+
+                            if (!usesStructure) continue;
+
+                            // Analyze accesses for this variable
+                            List<StructureUsageAnalyzer.MemoryAccess> accesses =
+                                StructureUsageAnalyzer.analyzeMemoryAccesses(hf, hv);
+
+                            for (StructureUsageAnalyzer.MemoryAccess access : accesses) {
+                                accessedOffsets.add(access.offset);
+
+                                // Check for issues
+                                if (access.offset >= structure.getLength()) {
+                                    // Access beyond structure size
+                                    Map<String, Object> issue = new HashMap<>();
+                                    issue.put("type", "out_of_bounds");
+                                    issue.put("severity", "high");
+                                    issue.put("offset", String.format("0x%02X", access.offset));
+                                    issue.put("structureSize", structure.getLength());
+                                    issue.put("function", func.getName());
+                                    issue.put("message", String.format(
+                                        "Access at offset 0x%02X exceeds structure size (%d bytes)",
+                                        access.offset, structure.getLength()));
+                                    issues.add(issue);
+                                } else if (!fieldsByOffset.containsKey(access.offset)) {
+                                    // Access at undefined offset
+                                    Map<String, Object> issue = new HashMap<>();
+                                    issue.put("type", "undefined_offset");
+                                    issue.put("severity", "medium");
+                                    issue.put("offset", String.format("0x%02X", access.offset));
+                                    issue.put("function", func.getName());
+                                    issue.put("accessSize", access.size);
+                                    issue.put("message", String.format(
+                                        "Access at offset 0x%02X does not match any field start",
+                                        access.offset));
+                                    issues.add(issue);
+                                } else {
+                                    // Check for size mismatch
+                                    DataTypeComponent field = fieldsByOffset.get(access.offset);
+                                    if (access.size != 0 && access.size != field.getLength()) {
+                                        Map<String, Object> issue = new HashMap<>();
+                                        issue.put("type", "size_mismatch");
+                                        issue.put("severity", "low");
+                                        issue.put("offset", String.format("0x%02X", access.offset));
+                                        issue.put("fieldName", field.getFieldName() != null ?
+                                            field.getFieldName() : "field_" + field.getOrdinal());
+                                        issue.put("expectedSize", field.getLength());
+                                        issue.put("accessSize", access.size);
+                                        issue.put("function", func.getName());
+                                        issue.put("message", String.format(
+                                            "Field accessed with size %d but defined as size %d",
+                                            access.size, field.getLength()));
+                                        issues.add(issue);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } finally {
+                    decompiler.dispose();
+                }
+
+                // Check for unused fields
+                for (DataTypeComponent comp : structure.getComponents()) {
+                    if (!accessedOffsets.contains((long) comp.getOffset())) {
+                        Map<String, Object> issue = new HashMap<>();
+                        issue.put("type", "unused_field");
+                        issue.put("severity", "info");
+                        issue.put("offset", String.format("0x%02X", comp.getOffset()));
+                        issue.put("fieldName", comp.getFieldName() != null ?
+                            comp.getFieldName() : "field_" + comp.getOrdinal());
+                        issue.put("message", "Field never accessed in analyzed functions (may be padding)");
+                        issues.add(issue);
+                    }
+                }
+
+                // Build result
+                Map<String, Object> result = new HashMap<>();
+                result.put("structureName", structureName);
+                result.put("structureSize", structure.getLength());
+                result.put("fieldCount", structure.getNumComponents());
+                result.put("functionsAnalyzed", functionsAnalyzed);
+                result.put("totalFunctionsFound", functionsToAnalyze.size());
+
+                // Summarize issues
+                Map<String, Object> summary = new HashMap<>();
+                long outOfBoundsCount = issues.stream()
+                    .filter(i -> "out_of_bounds".equals(i.get("type"))).count();
+                long undefinedOffsetCount = issues.stream()
+                    .filter(i -> "undefined_offset".equals(i.get("type"))).count();
+                long sizeMismatchCount = issues.stream()
+                    .filter(i -> "size_mismatch".equals(i.get("type"))).count();
+                long unusedFieldCount = issues.stream()
+                    .filter(i -> "unused_field".equals(i.get("type"))).count();
+
+                summary.put("outOfBounds", outOfBoundsCount);
+                summary.put("undefinedOffsets", undefinedOffsetCount);
+                summary.put("sizeMismatches", sizeMismatchCount);
+                summary.put("unusedFields", unusedFieldCount);
+                summary.put("totalIssues", issues.size());
+
+                result.put("summary", summary);
+                result.put("issues", issues);
+                result.put("programPath", programPath);
+
+                // Add validation status
+                if (outOfBoundsCount > 0) {
+                    result.put("validationStatus", "INVALID");
+                    result.put("recommendation", "Structure size appears incorrect. Consider increasing size.");
+                } else if (undefinedOffsetCount > 0) {
+                    result.put("validationStatus", "POSSIBLE_ISSUES");
+                    result.put("recommendation", "Some accesses don't align with field definitions. Consider adding missing fields.");
+                } else if (unusedFieldCount > 0) {
+                    result.put("validationStatus", "OK_WITH_NOTES");
+                    result.put("recommendation", "Some fields may be padding or unused in analyzed functions.");
+                } else {
+                    result.put("validationStatus", "OK");
+                }
+
+                return createJsonResult(result);
 
             } catch (IllegalArgumentException e) {
                 return createErrorResult(e.getMessage());

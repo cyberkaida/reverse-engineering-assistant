@@ -26,8 +26,11 @@ import org.junit.Test;
 import com.fasterxml.jackson.databind.JsonNode;
 
 import ghidra.program.model.data.DataType;
+import ghidra.program.model.data.DataTypeConflictHandler;
 import ghidra.program.model.data.DataTypeManager;
+import ghidra.program.model.data.IntegerDataType;
 import ghidra.program.model.data.Structure;
+import ghidra.program.model.data.StructureDataType;
 import io.modelcontextprotocol.spec.McpSchema.CallToolRequest;
 import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
 import io.modelcontextprotocol.spec.McpSchema.ListToolsResult;
@@ -979,6 +982,81 @@ public class StructureToolProviderIntegrationTest extends RevaIntegrationTestBas
             // Either error flag or error message should be present
             assertTrue("Should indicate function not found",
                 responseText.contains("error") || responseText.contains("No function"));
+        });
+    }
+
+    @Test
+    public void testValidateStructureAgainstUsage() throws Exception {
+        // Test validating structure against usage
+        withMcpClient(createMcpTransport(), client -> {
+            client.initialize();
+
+            // First create a simple structure programmatically
+            int txId = program.startTransaction("Create test structure for validation");
+            try {
+                DataTypeManager dtm = program.getDataTypeManager();
+                Structure testStruct = new StructureDataType("ValidateTestStruct", 0);
+                testStruct.add(IntegerDataType.dataType, 4, "field1", "First field");
+                testStruct.add(IntegerDataType.dataType, 4, "field2", "Second field");
+                dtm.addDataType(testStruct, DataTypeConflictHandler.REPLACE_HANDLER);
+                program.endTransaction(txId, true);
+            } catch (Exception e) {
+                program.endTransaction(txId, false);
+                throw e;
+            }
+
+            // Now validate it
+            Map<String, Object> args = new HashMap<>();
+            args.put("programPath", programPath);
+            args.put("structureName", "ValidateTestStruct");
+            args.put("maxFunctions", 5);
+
+            CallToolResult result = client.callTool(new CallToolRequest("validate-structure-against-usage", args));
+            assertMcpResultNotError(result, "validate-structure-against-usage should not fail");
+
+            TextContent content = (TextContent) result.content().get(0);
+            JsonNode json = parseJsonContent(content.text());
+
+            // Verify basic response structure
+            assertTrue("Should have structureName field", json.has("structureName"));
+            assertTrue("Should have structureSize field", json.has("structureSize"));
+            assertTrue("Should have fieldCount field", json.has("fieldCount"));
+            assertTrue("Should have issues field", json.has("issues"));
+
+            assertEquals("ValidateTestStruct", json.get("structureName").asText());
+
+            // Response can either have summary (functions analyzed) or note (no functions found)
+            if (json.has("summary")) {
+                JsonNode summary = json.get("summary");
+                assertTrue("Summary should have totalIssues", summary.has("totalIssues"));
+            } else if (json.has("note")) {
+                assertTrue("Note should indicate no functions found",
+                    json.get("note").asText().contains("No functions"));
+            }
+
+            // In either case, issues should be an array
+            assertTrue("Issues should be an array", json.get("issues").isArray());
+        });
+    }
+
+    @Test
+    public void testValidateStructureNotFound() throws Exception {
+        // Test error handling for non-existent structure
+        withMcpClient(createMcpTransport(), client -> {
+            client.initialize();
+
+            Map<String, Object> args = new HashMap<>();
+            args.put("programPath", programPath);
+            args.put("structureName", "NonExistentStructure12345");
+
+            CallToolResult result = client.callTool(new CallToolRequest("validate-structure-against-usage", args));
+
+            TextContent content = (TextContent) result.content().get(0);
+            String responseText = content.text();
+
+            // Should indicate structure not found
+            assertTrue("Should indicate structure not found",
+                responseText.contains("not found") || responseText.contains("error"));
         });
     }
 }

@@ -595,4 +595,98 @@ public class FunctionPrototypeToolProviderIntegrationTest extends RevaIntegratio
             }
         });
     }
+
+    @Test
+    public void testSetPrototypeWithDecompilationPreview() throws Exception {
+        // Test that decompilation preview is included when requested
+        withMcpClient(createMcpTransport(), client -> {
+            try {
+                client.initialize();
+
+                // Use an existing function from WinHelloCPP.exe (entry point)
+                String entryAddress = "0x1000194b"; // A function that exists in test binary
+
+                // First, rename it to reset state, then update with preview enabled
+                CallToolResult result = client.callTool(new CallToolRequest(
+                    "set-function-prototype",
+                    Map.of(
+                        "programPath", programPath,
+                        "location", entryAddress,
+                        "signature", "int PreviewTestFunc(int arg1, char* arg2)",
+                        "includeDecompilationPreview", true,
+                        "previewLines", 10
+                    )
+                ));
+
+                assertFalse("Tool should not have errors", result.isError());
+
+                TextContent content = (TextContent) result.content().get(0);
+                JsonNode jsonResult = objectMapper.readTree(content.text());
+
+                // Verify success
+                assertEquals("Tool should succeed", true, jsonResult.get("success").asBoolean());
+
+                // Verify decompilation preview is present
+                assertTrue("Should have decompilationPreview field",
+                    jsonResult.has("decompilationPreview") || jsonResult.has("decompilationPreviewError"));
+
+                if (jsonResult.has("decompilationPreview")) {
+                    String preview = jsonResult.get("decompilationPreview").asText();
+                    assertNotNull("Preview should not be null", preview);
+                    assertFalse("Preview should not be empty", preview.isEmpty());
+
+                    // Preview should contain the function name
+                    assertTrue("Preview should contain function name",
+                        preview.contains("PreviewTestFunc"));
+
+                    // Count lines - should be limited
+                    String[] lines = preview.split("\n");
+                    assertTrue("Preview should be line-limited", lines.length <= 12); // 10 + possible truncation note
+                }
+
+            } catch (Exception e) {
+                fail("Test failed with exception: " + e.getMessage());
+            }
+        });
+    }
+
+    @Test
+    public void testSetPrototypeWithoutDecompilationPreview() throws Exception {
+        // Test that decompilation preview is NOT included when not requested (default)
+        withMcpClient(createMcpTransport(), client -> {
+            try {
+                client.initialize();
+
+                Address funcAddr = program.getAddressFactory().getDefaultAddressSpace().getAddress(0x01009000);
+
+                CallToolResult result = client.callTool(new CallToolRequest(
+                    "set-function-prototype",
+                    Map.of(
+                        "programPath", programPath,
+                        "location", "0x01009000",
+                        "signature", "void NoPreviewFunc(void)",
+                        "createIfNotExists", true
+                        // Note: includeDecompilationPreview not specified, defaults to false
+                    )
+                ));
+
+                assertFalse("Tool should not have errors", result.isError());
+
+                TextContent content = (TextContent) result.content().get(0);
+                JsonNode jsonResult = objectMapper.readTree(content.text());
+
+                // Verify success
+                assertEquals("Tool should succeed", true, jsonResult.get("success").asBoolean());
+
+                // Verify decompilation preview is NOT present
+                assertFalse("Should NOT have decompilationPreview field by default",
+                    jsonResult.has("decompilationPreview"));
+                assertFalse("Should NOT have decompilationPreviewError field by default",
+                    jsonResult.has("decompilationPreviewError"));
+
+            } catch (Exception e) {
+                fail("Test failed with exception: " + e.getMessage());
+            }
+        });
+    }
 }

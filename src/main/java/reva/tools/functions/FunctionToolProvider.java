@@ -30,6 +30,8 @@ import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 
 import ghidra.app.cmd.function.CreateFunctionCmd;
+import ghidra.app.decompiler.DecompInterface;
+import ghidra.app.decompiler.DecompileResults;
 import ghidra.app.util.cparser.C.ParseException;
 import ghidra.util.task.TaskMonitor;
 import ghidra.util.task.TimeoutTaskMonitor;
@@ -1526,6 +1528,16 @@ public class FunctionToolProvider extends AbstractToolProvider {
             "description", "When using 'signature', create the function if it doesn't exist. Ignored when using 'newName'.",
             "default", true
         ));
+        properties.put("includeDecompilationPreview", Map.of(
+            "type", "boolean",
+            "description", "Include a decompilation preview after the prototype change. Useful to see the impact of the change immediately.",
+            "default", false
+        ));
+        properties.put("previewLines", Map.of(
+            "type", "integer",
+            "description", "Number of lines to include in decompilation preview (default: 20). Only used when includeDecompilationPreview is true.",
+            "default", 20
+        ));
 
         List<String> required = List.of("programPath", "location");
 
@@ -1546,6 +1558,8 @@ public class FunctionToolProvider extends AbstractToolProvider {
                 String newName = getOptionalString(request, "newName", null);
                 String signature = getOptionalString(request, "signature", null);
                 boolean createIfNotExists = getOptionalBoolean(request, "createIfNotExists", true);
+                boolean includeDecompilationPreview = getOptionalBoolean(request, "includeDecompilationPreview", false);
+                int previewLines = getOptionalInt(request, "previewLines", 20);
 
                 // Check mutual exclusivity (trim once to avoid redundant calls)
                 String trimmedNewName = newName != null ? newName.trim() : null;
@@ -1752,6 +1766,38 @@ public class FunctionToolProvider extends AbstractToolProvider {
                     result.put("parsedSignature", functionDef.toString());
                     result.put("customStorageEnabled", needsCustomStorage && !wasUsingCustomStorage);
                     result.put("usingCustomStorage", function.hasCustomVariableStorage());
+
+                    // Add decompilation preview if requested
+                    // CRITICAL: Must create NEW decompiler AFTER transaction commits
+                    if (includeDecompilationPreview) {
+                        DecompInterface decompiler = new DecompInterface();
+                        try {
+                            decompiler.toggleCCode(true);
+                            decompiler.toggleSyntaxTree(false); // We only need C code
+                            decompiler.setSimplificationStyle("decompile");
+
+                            if (decompiler.openProgram(program)) {
+                                DecompileResults decompResults = decompiler.decompileFunction(
+                                    function, 30, TaskMonitor.DUMMY);
+
+                                if (decompResults.decompileCompleted() &&
+                                    decompResults.getDecompiledFunction() != null) {
+                                    String fullDecomp = decompResults.getDecompiledFunction().getC();
+                                    // Apply line limit if specified
+                                    String preview = applyLineLimit(fullDecomp, previewLines);
+                                    result.put("decompilationPreview", preview);
+                                } else {
+                                    result.put("decompilationPreviewError",
+                                        "Decompilation failed: " + decompResults.getErrorMessage());
+                                }
+                            } else {
+                                result.put("decompilationPreviewError",
+                                    "Failed to initialize decompiler");
+                            }
+                        } finally {
+                            decompiler.dispose();
+                        }
+                    }
 
                     return createJsonResult(result);
 
@@ -2333,6 +2379,34 @@ public class FunctionToolProvider extends AbstractToolProvider {
         }
 
         return false;
+    }
+
+    /**
+     * Apply a line limit to decompilation output.
+     *
+     * @param code The full decompilation code
+     * @param maxLines Maximum number of lines to return
+     * @return The code limited to maxLines, with a note if truncated
+     */
+    private String applyLineLimit(String code, int maxLines) {
+        if (code == null || maxLines <= 0) {
+            return code;
+        }
+
+        String[] lines = code.split("\n", -1);
+        if (lines.length <= maxLines) {
+            return code;
+        }
+
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < maxLines; i++) {
+            sb.append(lines[i]);
+            if (i < maxLines - 1) {
+                sb.append("\n");
+            }
+        }
+        sb.append("\n// ... (").append(lines.length - maxLines).append(" more lines)");
+        return sb.toString();
     }
 
 }

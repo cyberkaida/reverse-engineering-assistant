@@ -64,6 +64,7 @@ public class StructureToolProvider extends AbstractToolProvider {
         registerApplyStructureTool();
         registerDeleteStructureTool();
         registerParseCHeaderTool();
+        registerFindStructureUsagesTool();
     }
 
     /**
@@ -1351,6 +1352,139 @@ public class StructureToolProvider extends AbstractToolProvider {
 
         sb.append("};");
         return sb.toString();
+    }
+
+    /**
+     * Register tool to find all usages of a structure in the program.
+     * Checks function return types, parameters, local variables, and memory instances.
+     */
+    private void registerFindStructureUsagesTool() {
+        Map<String, Object> properties = new HashMap<>();
+        properties.put("programPath", SchemaUtil.createStringProperty("Path of the program"));
+        properties.put("structureName", SchemaUtil.createStringProperty("Name of the structure to find usages of"));
+
+        List<String> required = List.of("programPath", "structureName");
+
+        McpSchema.Tool tool = McpSchema.Tool.builder()
+            .name("find-structure-usages")
+            .title("Find Structure Usages")
+            .description("Find all places where a structure is used in the program. Returns functions using the structure as return type, parameter, or local variable, plus memory locations where the structure is applied.")
+            .inputSchema(createSchema(properties, required))
+            .build();
+
+        registerTool(tool, (exchange, request) -> {
+            Program program = getProgramFromArgs(request);
+            String structureName = getString(request, "structureName");
+
+            DataTypeManager dtm = program.getDataTypeManager();
+            DataType dt = findDataTypeByName(dtm, structureName);
+
+            if (dt == null) {
+                return createErrorResult("Structure not found: " + structureName +
+                    ". Use list-structures to see available structures.");
+            }
+
+            // Collect detailed usage information
+            List<Map<String, Object>> functionUsages = new ArrayList<>();
+            List<Map<String, Object>> memoryUsages = new ArrayList<>();
+
+            // Check function parameters, return types, and local variables
+            ghidra.program.model.listing.FunctionIterator functions = program.getFunctionManager().getFunctions(true);
+            while (functions.hasNext()) {
+                ghidra.program.model.listing.Function func = functions.next();
+                String funcName = func.getName();
+                String funcAddress = AddressUtil.formatAddress(func.getEntryPoint());
+
+                // Check return type
+                if (func.getReturnType().isEquivalent(dt)) {
+                    Map<String, Object> usage = new HashMap<>();
+                    usage.put("functionName", funcName);
+                    usage.put("functionAddress", funcAddress);
+                    usage.put("usageType", "return_type");
+                    usage.put("dataType", func.getReturnType().getDisplayName());
+                    functionUsages.add(usage);
+                }
+
+                // Check parameters
+                for (ghidra.program.model.listing.Parameter param : func.getParameters()) {
+                    if (param.getDataType().isEquivalent(dt)) {
+                        Map<String, Object> usage = new HashMap<>();
+                        usage.put("functionName", funcName);
+                        usage.put("functionAddress", funcAddress);
+                        usage.put("usageType", "parameter");
+                        usage.put("parameterName", param.getName());
+                        usage.put("parameterIndex", param.getOrdinal());
+                        usage.put("dataType", param.getDataType().getDisplayName());
+                        functionUsages.add(usage);
+                    }
+                }
+
+                // Check local variables
+                for (ghidra.program.model.listing.Variable var : func.getAllVariables()) {
+                    // Skip parameters (already checked above)
+                    if (var instanceof ghidra.program.model.listing.Parameter) {
+                        continue;
+                    }
+                    if (var.getDataType().isEquivalent(dt)) {
+                        Map<String, Object> usage = new HashMap<>();
+                        usage.put("functionName", funcName);
+                        usage.put("functionAddress", funcAddress);
+                        usage.put("usageType", "local_variable");
+                        usage.put("variableName", var.getName());
+                        usage.put("dataType", var.getDataType().getDisplayName());
+                        functionUsages.add(usage);
+                    }
+                }
+            }
+
+            // Check memory for applied instances
+            Listing listing = program.getListing();
+            ghidra.program.model.listing.DataIterator dataIter = listing.getDefinedData(true);
+            while (dataIter.hasNext()) {
+                Data data = dataIter.next();
+                if (data.getDataType().isEquivalent(dt)) {
+                    Map<String, Object> usage = new HashMap<>();
+                    usage.put("address", AddressUtil.formatAddress(data.getAddress()));
+                    usage.put("dataType", data.getDataType().getDisplayName());
+
+                    // Try to get symbol name if available
+                    ghidra.program.model.symbol.Symbol symbol = program.getSymbolTable().getPrimarySymbol(data.getAddress());
+                    if (symbol != null) {
+                        usage.put("symbolName", symbol.getName());
+                    }
+
+                    usage.put("size", data.getLength());
+                    memoryUsages.add(usage);
+                }
+            }
+
+            // Build result with categorized usages
+            Map<String, Object> result = new HashMap<>();
+            result.put("structureName", structureName);
+            result.put("structureSize", dt.getLength());
+            result.put("totalUsages", functionUsages.size() + memoryUsages.size());
+
+            // Summary breakdown
+            Map<String, Object> summary = new HashMap<>();
+            long returnTypeCount = functionUsages.stream()
+                .filter(u -> "return_type".equals(u.get("usageType"))).count();
+            long parameterCount = functionUsages.stream()
+                .filter(u -> "parameter".equals(u.get("usageType"))).count();
+            long variableCount = functionUsages.stream()
+                .filter(u -> "local_variable".equals(u.get("usageType"))).count();
+
+            summary.put("returnTypes", returnTypeCount);
+            summary.put("parameters", parameterCount);
+            summary.put("localVariables", variableCount);
+            summary.put("memoryInstances", memoryUsages.size());
+            result.put("summary", summary);
+
+            result.put("functionUsages", functionUsages);
+            result.put("memoryUsages", memoryUsages);
+            result.put("programPath", program.getDomainFile().getPathname());
+
+            return createJsonResult(result);
+        });
     }
 
 }

@@ -740,6 +740,71 @@ public class StructureToolProviderIntegrationTest extends RevaIntegrationTestBas
         });
     }
 
+    @Test
+    public void testFindStructureUsages() throws Exception {
+        withMcpClient(createMcpTransport(), client -> {
+            client.initialize();
+
+            // Create a structure first
+            Map<String, Object> createArgs = new HashMap<>();
+            createArgs.put("programPath", programPath);
+            createArgs.put("cDefinition", "struct UsageTestStruct { int field1; char* field2; };");
+
+            CallToolResult createResult = client.callTool(new CallToolRequest("parse-c-structure", createArgs));
+            assertMcpResultNotError(createResult, "Structure creation should succeed");
+
+            // Find usages of the structure (should be 0 for a freshly created structure)
+            Map<String, Object> findArgs = new HashMap<>();
+            findArgs.put("programPath", programPath);
+            findArgs.put("structureName", "UsageTestStruct");
+
+            CallToolResult findResult = client.callTool(new CallToolRequest("find-structure-usages", findArgs));
+            assertMcpResultNotError(findResult, "Find usages should succeed");
+
+            TextContent content = (TextContent) findResult.content().get(0);
+            JsonNode json = parseJsonContent(content.text());
+
+            // Verify response structure
+            assertEquals("UsageTestStruct", json.get("structureName").asText());
+            assertTrue("Should have structureSize", json.has("structureSize"));
+            assertTrue("Should have totalUsages", json.has("totalUsages"));
+            assertTrue("Should have summary", json.has("summary"));
+            assertTrue("Should have functionUsages", json.has("functionUsages"));
+            assertTrue("Should have memoryUsages", json.has("memoryUsages"));
+
+            // Verify summary breakdown
+            JsonNode summary = json.get("summary");
+            assertTrue("Summary should have returnTypes", summary.has("returnTypes"));
+            assertTrue("Summary should have parameters", summary.has("parameters"));
+            assertTrue("Summary should have localVariables", summary.has("localVariables"));
+            assertTrue("Summary should have memoryInstances", summary.has("memoryInstances"));
+
+            // For a new structure with no usages, counts should be 0
+            assertEquals(0, json.get("totalUsages").asInt());
+        });
+    }
+
+    @Test
+    public void testFindStructureUsagesNotFound() throws Exception {
+        withMcpClient(createMcpTransport(), client -> {
+            client.initialize();
+
+            // Try to find usages of a non-existent structure
+            Map<String, Object> findArgs = new HashMap<>();
+            findArgs.put("programPath", programPath);
+            findArgs.put("structureName", "NonExistentStruct");
+
+            CallToolResult findResult = client.callTool(new CallToolRequest("find-structure-usages", findArgs));
+
+            // Should return an error
+            assertTrue("Should return error for non-existent structure", findResult.isError());
+
+            TextContent content = (TextContent) findResult.content().get(0);
+            assertTrue("Error should mention structure not found",
+                content.text().contains("Structure not found"));
+        });
+    }
+
     /**
      * Helper method to find a data type by name in all categories
      */

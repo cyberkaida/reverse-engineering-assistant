@@ -9,12 +9,71 @@ The `reva.tools.functions` package provides MCP tools for function analysis, lis
 ## Key Tools
 
 - `get-function-count` - Get total count of functions (use before listing for pagination)
-- `get-functions` - List functions with pagination and filtering (supports `include`, `filterByTag`, `untagged`, `verbose`)
+- `get-functions` - List functions with advanced filtering, sorting, and dependency analysis
 - `get-functions-by-similarity` - Find functions similar to a target function (compact by default, use `verbose: true` for full details)
 - `set-function-prototype` - Modify function signatures and prototypes with C-style signatures
 - `get-undefined-function-candidates` - Find addresses that are referenced but not defined as functions
 - `create-function` - Create a function at an address with auto-detected signature
 - `function-tags` - Manage tags on functions (modes: get/set/add/remove/list)
+
+## get-functions Parameters
+
+The `get-functions` tool supports extensive filtering, sorting, and dependency analysis:
+
+### Basic Filtering
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `include` | string | `"all"`, `"named"` (default), or `"unnamed"` |
+| `filterByTags` | string[] | Functions must have ANY of these tags (OR logic) |
+| `excludeTags` | string[] | Functions must NOT have ANY of these tags |
+| `untagged` | boolean | Only functions with no tags (mutually exclusive with filterByTags) |
+
+### Count Range Filtering
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `minCalleeCount` | integer | Minimum callees (functions this function calls) |
+| `maxCalleeCount` | integer | Maximum callees |
+| `minCallerCount` | integer | Minimum callers (functions that call this function) |
+| `maxCallerCount` | integer | Maximum callers |
+
+### Sorting
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `sortBy` | string | `"address"`, `"name"`, `"calleeCount"`, `"callerCount"`, `"sizeInBytes"` |
+| `sortOrder` | string | `"ascending"` (default) or `"descending"` |
+
+### Dependency Filtering (Bottom-Up Porting Workflow)
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `requireCalleesTagged` | string[] | All callees must have ALL of these tags (or be external/thunks) |
+| `allowExternalCallees` | boolean | External/thunk callees exempt from tag requirement (default: true) |
+| `allowUntaggedCallees` | boolean | Untagged callees exempt from tag requirement (default: false) |
+
+### Output Options
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `verbose` | boolean | Full function details (default: false) |
+| `includeCallees` | boolean | Include callee details in response (default: false) |
+| `startIndex` | integer | Pagination start (default: 0) |
+| `maxCount` | integer | Max results per page (default: 100) |
+
+### Example: Find Functions Ready to Port
+```json
+{
+  "programPath": "/trafficgiant.exe",
+  "requireCalleesTagged": ["ported"],
+  "excludeTags": ["ported"],
+  "maxCalleeCount": 5,
+  "sortBy": "calleeCount",
+  "sortOrder": "ascending",
+  "includeCallees": true
+}
+```
+Returns functions where:
+- Function is NOT tagged "ported"
+- ALL callees ARE tagged "ported" (or are external/thunks)
+- Has ≤5 callees (simpler functions first)
+- Includes callee details showing what each function depends on
 
 ## Function Include Filter
 
@@ -106,9 +165,10 @@ The `function-tags` tool uses a `mode` parameter:
 **Note**: Empty or whitespace-only tag names are automatically filtered out.
 
 ### Querying by Tag
-Use `get-functions` with `filterByTag` parameter to find all functions with a specific tag.
+Use `get-functions` with `filterByTags` parameter (array) to find all functions with any of the specified tags.
+Use `get-functions` with `excludeTags` parameter to exclude functions with certain tags.
 Use `get-functions` with `untagged: true` to find functions that have no tags (useful for tracking progress).
-Note: `filterByTag` and `untagged` are mutually exclusive.
+Note: `filterByTags` and `untagged` are mutually exclusive.
 
 ### Response Format
 For get/set/add/remove modes, responses are lean (just identifiers + tags):
@@ -126,13 +186,17 @@ For get/set/add/remove modes, responses are lean (just identifiers + tags):
 {"programPath": "/prog", "mode": "list"}
 // Returns: {"success": true, "tags": [{"name": "AI", "count": 5}, ...], "totalTags": 2}
 
-// 3. Find all AI functions via get-functions
-{"programPath": "/prog", "filterByTag": "AI"}
-// Returns paginated list of functions tagged "AI"
+// 3. Find all AI or rendering functions via get-functions
+{"programPath": "/prog", "filterByTags": ["AI", "rendering"]}
+// Returns paginated list of functions tagged with either "AI" or "rendering"
 
 // 4. Find untagged functions (what still needs categorization)
 {"programPath": "/prog", "untagged": true}
 // Returns paginated list of functions with no tags
+
+// 5. Find functions tagged "AI" but not "ported"
+{"programPath": "/prog", "filterByTags": ["AI"], "excludeTags": ["ported"]}
+// Returns AI functions that haven't been ported yet
 ```
 
 ### Ghidra API

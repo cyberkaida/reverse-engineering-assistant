@@ -26,6 +26,8 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.regex.Pattern;
+import java.util.regex.PatternSyntaxException;
 
 import ghidra.app.cmd.function.CreateFunctionCmd;
 import ghidra.app.util.cparser.C.ParseException;
@@ -419,21 +421,95 @@ public class FunctionToolProvider extends AbstractToolProvider {
             "description", "Path in the Ghidra Project to the program to get functions from"
         ));
         properties.put("include", IncludeFilterUtil.getIncludePropertyDefinition());
-        properties.put("filterByTag", Map.of(
+
+        // Name filtering
+        properties.put("nameRegex", Map.of(
             "type", "string",
-            "description", "Only return functions with this tag (applied after include filter)"
+            "description", "Only return functions whose names match this regex pattern (e.g., '^(TG_|Map_|Vehicle_)' or '.*Handler$')"
+        ));
+        properties.put("excludeNameRegex", Map.of(
+            "type", "string",
+            "description", "Exclude functions whose names match this regex pattern (e.g., '^(CDC_|CWnd_|CString_)' to filter out MFC classes)"
+        ));
+
+        // Tag filtering
+        properties.put("filterByTags", Map.of(
+            "type", "array",
+            "description", "Only return functions with ANY of these tags (OR logic)",
+            "items", Map.of("type", "string")
+        ));
+        properties.put("excludeTags", Map.of(
+            "type", "array",
+            "description", "Exclude functions with ANY of these tags",
+            "items", Map.of("type", "string")
         ));
         properties.put("untagged", Map.of(
             "type", "boolean",
-            "description", "Only return functions with no tags (mutually exclusive with filterByTag)",
-            "default", false
-        ));
-        properties.put("verbose", Map.of(
-            "type", "boolean",
-            "description", "Return full function details (signature, parameters, etc.). When false (default), returns compact results (name, address, sizeInBytes, tags, callerCount, calleeCount).",
+            "description", "Only return functions with no tags (mutually exclusive with filterByTags)",
             "default", false
         ));
 
+        // Count range filtering
+        properties.put("minCalleeCount", Map.of(
+            "type", "integer",
+            "description", "Minimum number of callees (functions this function calls)"
+        ));
+        properties.put("maxCalleeCount", Map.of(
+            "type", "integer",
+            "description", "Maximum number of callees (functions this function calls)"
+        ));
+        properties.put("minCallerCount", Map.of(
+            "type", "integer",
+            "description", "Minimum number of callers (functions that call this function)"
+        ));
+        properties.put("maxCallerCount", Map.of(
+            "type", "integer",
+            "description", "Maximum number of callers (functions that call this function)"
+        ));
+
+        // Sorting
+        properties.put("sortBy", Map.of(
+            "type", "string",
+            "description", "Sort results by this field",
+            "enum", List.of("address", "name", "calleeCount", "callerCount", "sizeInBytes")
+        ));
+        properties.put("sortOrder", Map.of(
+            "type", "string",
+            "description", "Sort order (default: ascending)",
+            "enum", List.of("ascending", "descending"),
+            "default", "ascending"
+        ));
+
+        // Dependency filtering (for bottom-up porting workflows)
+        properties.put("requireCalleesTagged", Map.of(
+            "type", "array",
+            "description", "Only return functions where ALL callees have ALL of these tags (or are external/thunks). Useful for finding functions ready to port.",
+            "items", Map.of("type", "string")
+        ));
+        properties.put("allowExternalCallees", Map.of(
+            "type", "boolean",
+            "description", "When using requireCalleesTagged, treat external/thunk callees as satisfying the tag requirement (default: true)",
+            "default", true
+        ));
+        properties.put("allowUntaggedCallees", Map.of(
+            "type", "boolean",
+            "description", "When using requireCalleesTagged, allow callees with no tags (default: false)",
+            "default", false
+        ));
+
+        // Output options
+        properties.put("verbose", Map.of(
+            "type", "boolean",
+            "description", "Return full function details (signature, parameters, etc.). When false (default), returns compact results.",
+            "default", false
+        ));
+        properties.put("includeCallees", Map.of(
+            "type", "boolean",
+            "description", "Include callee details in response (address, name, tags, isExternal). Useful with requireCalleesTagged.",
+            "default", false
+        ));
+
+        // Pagination
         properties.put("startIndex", Map.of(
             "type", "integer",
             "description", "Starting index for pagination (0-based)",
@@ -451,7 +527,7 @@ public class FunctionToolProvider extends AbstractToolProvider {
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("get-functions")
             .title("Get Functions")
-            .description("Get functions from the selected program (use get-function-count to determine the total count)")
+            .description("Get functions from the selected program with filtering, sorting, and dependency analysis. Supports tag filtering, caller/callee count ranges, and finding functions where all callees meet tag requirements (useful for bottom-up porting workflows).")
             .inputSchema(createSchema(properties, required))
             .build();
 
@@ -459,15 +535,56 @@ public class FunctionToolProvider extends AbstractToolProvider {
         registerTool(tool, (exchange, request) -> {
             // Get program and parameters using helper methods
             Program program = getProgramFromArgs(request);
+            String programPath = program.getDomainFile().getPathname();
             PaginationParams pagination = getPaginationParams(request);
             String include = IncludeFilterUtil.validate(getOptionalString(request, "include", null));
-            String filterByTag = getOptionalString(request, "filterByTag", null);
-            boolean untagged = getOptionalBoolean(request, "untagged", false);
-            boolean verbose = getOptionalBoolean(request, "verbose", false);
 
-            // Check mutual exclusivity
-            if (untagged && filterByTag != null && !filterByTag.isEmpty()) {
-                return createErrorResult("Cannot use both 'untagged' and 'filterByTag' - they are mutually exclusive");
+            // Name regex filtering parameters
+            String nameRegexStr = getOptionalString(request, "nameRegex", null);
+            String excludeNameRegexStr = getOptionalString(request, "excludeNameRegex", null);
+
+            // Compile regex patterns (with validation)
+            Pattern namePattern = null;
+            Pattern excludeNamePattern = null;
+            try {
+                if (nameRegexStr != null && !nameRegexStr.isEmpty()) {
+                    namePattern = Pattern.compile(nameRegexStr);
+                }
+                if (excludeNameRegexStr != null && !excludeNameRegexStr.isEmpty()) {
+                    excludeNamePattern = Pattern.compile(excludeNameRegexStr);
+                }
+            } catch (PatternSyntaxException e) {
+                return createErrorResult("Invalid regex pattern: " + e.getMessage());
+            }
+
+            // Tag filtering parameters
+            List<String> filterByTags = getOptionalStringList(request.arguments(), "filterByTags", null);
+            List<String> excludeTags = getOptionalStringList(request.arguments(), "excludeTags", null);
+            boolean untagged = getOptionalBoolean(request, "untagged", false);
+
+            // Count range filtering parameters
+            Integer minCalleeCount = getOptionalInteger(request.arguments(), "minCalleeCount", null);
+            Integer maxCalleeCount = getOptionalInteger(request.arguments(), "maxCalleeCount", null);
+            Integer minCallerCount = getOptionalInteger(request.arguments(), "minCallerCount", null);
+            Integer maxCallerCount = getOptionalInteger(request.arguments(), "maxCallerCount", null);
+
+            // Sorting parameters
+            String sortBy = getOptionalString(request, "sortBy", null);
+            String sortOrder = getOptionalString(request, "sortOrder", "ascending");
+
+            // Dependency filtering parameters
+            List<String> requireCalleesTagged = getOptionalStringList(request.arguments(), "requireCalleesTagged", null);
+            boolean allowExternalCallees = getOptionalBoolean(request, "allowExternalCallees", true);
+            boolean allowUntaggedCallees = getOptionalBoolean(request, "allowUntaggedCallees", false);
+
+            // Output options
+            boolean verbose = getOptionalBoolean(request, "verbose", false);
+            boolean includeCallees = getOptionalBoolean(request, "includeCallees", false);
+
+            // Validate mutual exclusivity
+            boolean hasFilterByTags = filterByTags != null && !filterByTags.isEmpty();
+            if (untagged && hasFilterByTags) {
+                return createErrorResult("Cannot use both 'untagged' and 'filterByTags' - they are mutually exclusive");
             }
 
             logInfo("get-functions: Listing functions in " + program.getName() + " (include=" + include + ")");
@@ -475,22 +592,42 @@ public class FunctionToolProvider extends AbstractToolProvider {
             // Get ALL function info from shared cache
             List<Map<String, Object>> allFunctions = getOrBuildFunctionInfoCache(program);
 
-            // Apply include filter first, then tag filter
+            // Build function tag lookup for dependency filtering (only if needed)
+            Map<Address, Set<String>> functionTagLookup = null;
+            boolean hasDependencyFilter = requireCalleesTagged != null && !requireCalleesTagged.isEmpty();
+            if (hasDependencyFilter) {
+                functionTagLookup = buildFunctionTagLookup(program);
+            }
+
+            // Apply filters in order of cost (cheap to expensive)
+            final String includeFilter = include;
+            final Pattern finalNamePattern = namePattern;
+            final Pattern finalExcludeNamePattern = excludeNamePattern;
+            final List<String> finalFilterByTags = filterByTags;
+            final List<String> finalExcludeTags = excludeTags;
+            final Map<Address, Set<String>> finalTagLookup = functionTagLookup;
+
             List<Map<String, Object>> filteredFunctions = allFunctions.stream()
-                .filter(f -> shouldIncludeFunctionInfo(f, include))
+                // Stage 1: Include filter (cheap - string check)
+                .filter(f -> shouldIncludeFunctionInfo(f, includeFilter))
+                // Stage 2: Name regex filters (cheap - regex match)
+                .filter(f -> matchesNameRegex(f, finalNamePattern, finalExcludeNamePattern))
+                // Stage 3: Tag filters (cheap - list check)
+                .filter(f -> matchesTagFilters(f, finalFilterByTags, finalExcludeTags, untagged))
+                // Stage 4: Count range filters (cheap - integer comparison)
+                .filter(f -> matchesCountFilters(f, minCalleeCount, maxCalleeCount, minCallerCount, maxCallerCount))
+                // Stage 5: Dependency filter (expensive - do last)
                 .filter(f -> {
-                    if (untagged) {
-                        @SuppressWarnings("unchecked")
-                        List<String> tags = (List<String>) f.get("tags");
-                        return tags == null || tags.isEmpty();
-                    } else if (filterByTag != null && !filterByTag.isEmpty()) {
-                        @SuppressWarnings("unchecked")
-                        List<String> tags = (List<String>) f.get("tags");
-                        return tags != null && tags.contains(filterByTag);
-                    }
-                    return true;
+                    if (!hasDependencyFilter) return true;
+                    return matchesDependencyFilter(program, f, requireCalleesTagged,
+                        allowExternalCallees, allowUntaggedCallees, finalTagLookup);
                 })
                 .toList();
+
+            // Apply sorting if requested
+            if (sortBy != null && !sortBy.isEmpty()) {
+                filteredFunctions = sortFunctions(filteredFunctions, sortBy, sortOrder);
+            }
 
             int totalCount = filteredFunctions.size();
 
@@ -501,29 +638,41 @@ public class FunctionToolProvider extends AbstractToolProvider {
                 ? filteredFunctions.subList(startIndex, endIndex)
                 : Collections.emptyList();
 
-            // Transform results based on verbose flag
-            // Note: callerCount/calleeCount are now computed fast during cache build
-            // using reference/instruction counting (catches indirect calls too)
-            List<Map<String, Object>> functionData;
-            if (verbose) {
-                // Full: return all cached function info (includes fast caller/callee counts)
-                functionData = new ArrayList<>(paginatedData);
-            } else {
-                // Compact: name, address, sizeInBytes, tags, callerCount, calleeCount
-                functionData = new ArrayList<>(paginatedData.size());
-                for (Map<String, Object> funcInfo : paginatedData) {
-                    Map<String, Object> compactInfo = new HashMap<>();
-                    compactInfo.put("name", funcInfo.get("name"));
-                    compactInfo.put("address", funcInfo.get("address"));
-                    compactInfo.put("sizeInBytes", funcInfo.get("sizeInBytes"));
-                    compactInfo.put("tags", funcInfo.get("tags"));
-                    compactInfo.put("callerCount", funcInfo.get("callerCount"));
-                    compactInfo.put("calleeCount", funcInfo.get("calleeCount"));
-                    functionData.add(compactInfo);
+            // Transform results based on verbose and includeCallees flags
+            List<Map<String, Object>> functionData = new ArrayList<>(paginatedData.size());
+            for (Map<String, Object> funcInfo : paginatedData) {
+                Map<String, Object> outputInfo;
+
+                if (verbose) {
+                    // Full: return all cached function info
+                    outputInfo = new HashMap<>(funcInfo);
+                } else {
+                    // Compact: name, address, sizeInBytes, tags, callerCount, calleeCount
+                    outputInfo = new HashMap<>();
+                    outputInfo.put("name", funcInfo.get("name"));
+                    outputInfo.put("address", funcInfo.get("address"));
+                    outputInfo.put("sizeInBytes", funcInfo.get("sizeInBytes"));
+                    outputInfo.put("tags", funcInfo.get("tags"));
+                    outputInfo.put("callerCount", funcInfo.get("callerCount"));
+                    outputInfo.put("calleeCount", funcInfo.get("calleeCount"));
                 }
+
+                // Add callee details if requested
+                if (includeCallees) {
+                    String addressStr = (String) funcInfo.get("address");
+                    Address funcAddr = program.getAddressFactory().getAddress(addressStr);
+                    if (funcAddr != null) {
+                        Function function = program.getFunctionManager().getFunctionAt(funcAddr);
+                        if (function != null) {
+                            outputInfo.put("callees", getCalleeDetails(program, function));
+                        }
+                    }
+                }
+
+                functionData.add(outputInfo);
             }
 
-            // Add metadata about the filtering
+            // Build metadata
             Map<String, Object> metadataInfo = new HashMap<>();
             metadataInfo.put("startIndex", startIndex);
             metadataInfo.put("requestedCount", pagination.maxCount());
@@ -532,11 +681,38 @@ public class FunctionToolProvider extends AbstractToolProvider {
             metadataInfo.put("totalCount", totalCount);
             metadataInfo.put("include", include);
             metadataInfo.put("verbose", verbose);
-            if (filterByTag != null && !filterByTag.isEmpty()) {
-                metadataInfo.put("filterByTag", filterByTag);
+
+            // Add filter metadata
+            if (nameRegexStr != null && !nameRegexStr.isEmpty()) {
+                metadataInfo.put("nameRegex", nameRegexStr);
+            }
+            if (excludeNameRegexStr != null && !excludeNameRegexStr.isEmpty()) {
+                metadataInfo.put("excludeNameRegex", excludeNameRegexStr);
+            }
+            if (hasFilterByTags) {
+                metadataInfo.put("filterByTags", filterByTags);
+            }
+            if (excludeTags != null && !excludeTags.isEmpty()) {
+                metadataInfo.put("excludeTags", excludeTags);
             }
             if (untagged) {
                 metadataInfo.put("untagged", true);
+            }
+            if (minCalleeCount != null) metadataInfo.put("minCalleeCount", minCalleeCount);
+            if (maxCalleeCount != null) metadataInfo.put("maxCalleeCount", maxCalleeCount);
+            if (minCallerCount != null) metadataInfo.put("minCallerCount", minCallerCount);
+            if (maxCallerCount != null) metadataInfo.put("maxCallerCount", maxCallerCount);
+            if (sortBy != null && !sortBy.isEmpty()) {
+                metadataInfo.put("sortBy", sortBy);
+                metadataInfo.put("sortOrder", sortOrder);
+            }
+            if (hasDependencyFilter) {
+                metadataInfo.put("requireCalleesTagged", requireCalleesTagged);
+                metadataInfo.put("allowExternalCallees", allowExternalCallees);
+                metadataInfo.put("allowUntaggedCallees", allowUntaggedCallees);
+            }
+            if (includeCallees) {
+                metadataInfo.put("includeCallees", true);
             }
 
             // Create combined result
@@ -545,6 +721,244 @@ public class FunctionToolProvider extends AbstractToolProvider {
             resultData.addAll(functionData);
             return createMultiJsonResult(resultData);
         });
+    }
+
+    /**
+     * Check if a function name matches the regex filters.
+     */
+    private boolean matchesNameRegex(Map<String, Object> funcInfo,
+            Pattern namePattern, Pattern excludeNamePattern) {
+        String name = (String) funcInfo.get("name");
+
+        // If namePattern is specified, name must match
+        if (namePattern != null && !namePattern.matcher(name).find()) {
+            return false;
+        }
+
+        // If excludeNamePattern is specified, name must NOT match
+        if (excludeNamePattern != null && excludeNamePattern.matcher(name).find()) {
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * Check if a function matches tag filter criteria.
+     */
+    private boolean matchesTagFilters(Map<String, Object> funcInfo,
+            List<String> filterByTags, List<String> excludeTags, boolean untagged) {
+        @SuppressWarnings("unchecked")
+        List<String> tags = (List<String>) funcInfo.get("tags");
+        boolean hasTags = tags != null && !tags.isEmpty();
+
+        // Untagged filter: must have no tags
+        if (untagged) {
+            return !hasTags;
+        }
+
+        // filterByTags: must have ANY of the specified tags (OR logic)
+        if (filterByTags != null && !filterByTags.isEmpty()) {
+            if (!hasTags) return false;
+            boolean hasAny = filterByTags.stream().anyMatch(tags::contains);
+            if (!hasAny) return false;
+        }
+
+        // excludeTags: must NOT have ANY of the specified tags
+        if (excludeTags != null && !excludeTags.isEmpty()) {
+            if (hasTags) {
+                boolean hasExcluded = excludeTags.stream().anyMatch(tags::contains);
+                if (hasExcluded) return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * Check if a function matches count range filter criteria.
+     */
+    private boolean matchesCountFilters(Map<String, Object> funcInfo,
+            Integer minCalleeCount, Integer maxCalleeCount,
+            Integer minCallerCount, Integer maxCallerCount) {
+        int calleeCount = (int) funcInfo.get("calleeCount");
+        int callerCount = (int) funcInfo.get("callerCount");
+
+        if (minCalleeCount != null && calleeCount < minCalleeCount) return false;
+        if (maxCalleeCount != null && calleeCount > maxCalleeCount) return false;
+        if (minCallerCount != null && callerCount < minCallerCount) return false;
+        if (maxCallerCount != null && callerCount > maxCallerCount) return false;
+
+        return true;
+    }
+
+    /**
+     * Check if a function's callees all meet the tag requirements.
+     */
+    private boolean matchesDependencyFilter(Program program, Map<String, Object> funcInfo,
+            List<String> requireCalleesTagged, boolean allowExternalCallees,
+            boolean allowUntaggedCallees, Map<Address, Set<String>> tagLookup) {
+
+        String addressStr = (String) funcInfo.get("address");
+        Address funcAddr = program.getAddressFactory().getAddress(addressStr);
+        if (funcAddr == null) return false;
+
+        Function function = program.getFunctionManager().getFunctionAt(funcAddr);
+        if (function == null) return false;
+
+        Set<Address> calleeAddresses = getCalleeAddresses(program, function);
+
+        // If no callees, the function trivially passes (all zero callees have the required tags)
+        if (calleeAddresses.isEmpty()) {
+            return true;
+        }
+
+        FunctionManager funcMgr = program.getFunctionManager();
+
+        for (Address calleeAddr : calleeAddresses) {
+            Function callee = funcMgr.getFunctionAt(calleeAddr);
+
+            // Handle external/thunk callees
+            if (callee != null && (callee.isExternal() || callee.isThunk())) {
+                if (!allowExternalCallees) {
+                    return false;
+                }
+                continue; // External/thunk are exempt from tag requirement
+            }
+
+            // Get callee's tags
+            Set<String> calleeTags = tagLookup.getOrDefault(calleeAddr, Set.of());
+
+            // Handle untagged callees
+            if (calleeTags.isEmpty()) {
+                if (allowUntaggedCallees) {
+                    continue; // Untagged callees exempt
+                }
+                return false; // Callee has no tags and allowUntaggedCallees is false
+            }
+
+            // Check if callee has ALL required tags
+            if (!calleeTags.containsAll(requireCalleesTagged)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * Sort functions by the specified field.
+     */
+    private List<Map<String, Object>> sortFunctions(List<Map<String, Object>> functions,
+            String sortBy, String sortOrder) {
+        Comparator<Map<String, Object>> comparator = switch (sortBy) {
+            case "calleeCount" -> Comparator.comparingInt(f -> (int) f.get("calleeCount"));
+            case "callerCount" -> Comparator.comparingInt(f -> (int) f.get("callerCount"));
+            case "sizeInBytes" -> Comparator.comparingLong(f -> ((Number) f.get("sizeInBytes")).longValue());
+            case "name" -> Comparator.comparing(f -> (String) f.get("name"), String.CASE_INSENSITIVE_ORDER);
+            case "address" -> Comparator.comparing(f -> (String) f.get("address"));
+            default -> null;
+        };
+
+        if (comparator == null) {
+            return functions; // Unknown sort field, return unchanged
+        }
+
+        if ("descending".equalsIgnoreCase(sortOrder)) {
+            comparator = comparator.reversed();
+        }
+
+        return functions.stream().sorted(comparator).toList();
+    }
+
+    /**
+     * Build a lookup map of function address -> tag names for efficient dependency checking.
+     */
+    private Map<Address, Set<String>> buildFunctionTagLookup(Program program) {
+        Map<Address, Set<String>> lookup = new HashMap<>();
+        FunctionIterator functions = program.getFunctionManager().getFunctions(true);
+
+        while (functions.hasNext()) {
+            Function func = functions.next();
+            Set<FunctionTag> tags = func.getTags();
+            if (!tags.isEmpty()) {
+                Set<String> tagNames = new HashSet<>();
+                for (FunctionTag tag : tags) {
+                    tagNames.add(tag.getName());
+                }
+                lookup.put(func.getEntryPoint(), tagNames);
+            }
+        }
+
+        return lookup;
+    }
+
+    /**
+     * Get the addresses of all functions called by this function.
+     * Uses instruction scanning to catch indirect calls.
+     */
+    private Set<Address> getCalleeAddresses(Program program, Function function) {
+        Set<Address> callees = new HashSet<>();
+        AddressSetView body = function.getBody();
+        if (body == null) {
+            return callees;
+        }
+
+        var instructions = program.getListing().getInstructions(body, true);
+        while (instructions.hasNext()) {
+            Instruction instr = instructions.next();
+            if (instr.getFlowType().isCall()) {
+                Address[] flows = instr.getFlows();
+                for (Address target : flows) {
+                    if (target != null) {
+                        callees.add(target);
+                    }
+                }
+            }
+        }
+
+        return callees;
+    }
+
+    /**
+     * Get detailed information about a function's callees.
+     */
+    private List<Map<String, Object>> getCalleeDetails(Program program, Function function) {
+        List<Map<String, Object>> calleeList = new ArrayList<>();
+        Set<Address> calleeAddresses = getCalleeAddresses(program, function);
+        FunctionManager funcMgr = program.getFunctionManager();
+
+        for (Address calleeAddr : calleeAddresses) {
+            Map<String, Object> calleeInfo = new HashMap<>();
+            calleeInfo.put("address", AddressUtil.formatAddress(calleeAddr));
+
+            Function callee = funcMgr.getFunctionAt(calleeAddr);
+            if (callee != null) {
+                calleeInfo.put("name", callee.getName());
+                calleeInfo.put("isExternal", callee.isExternal());
+                calleeInfo.put("isThunk", callee.isThunk());
+
+                // Include tags
+                Set<FunctionTag> tags = callee.getTags();
+                List<String> tagNames = tags.stream()
+                    .map(FunctionTag::getName)
+                    .sorted()
+                    .toList();
+                calleeInfo.put("tags", tagNames);
+            } else {
+                calleeInfo.put("name", null);
+                calleeInfo.put("isExternal", false);
+                calleeInfo.put("isThunk", false);
+                calleeInfo.put("tags", List.of());
+            }
+
+            calleeList.add(calleeInfo);
+        }
+
+        // Sort by address for consistent output
+        calleeList.sort(Comparator.comparing(c -> (String) c.get("address")));
+
+        return calleeList;
     }
 
     /**

@@ -142,20 +142,63 @@ public class StructureUsageAnalyzer {
         }
 
         Set<Long> seenOffsets = new HashSet<>();
+        Set<Varnode> visitedVarnodes = new HashSet<>();
 
         for (Varnode instance : instances) {
-            // Look at uses of this varnode
-            Iterator<PcodeOp> descendants = instance.getDescendants();
-            while (descendants.hasNext()) {
-                PcodeOp op = descendants.next();
-                Optional<MemoryAccess> access = analyzeOperation(op, instance, functionName, seenOffsets);
-                if (access.isPresent()) {
-                    accesses.add(access.get());
-                }
-            }
+            // Recursively follow varnode through operations
+            analyzeVarnodeRecursively(instance, functionName, seenOffsets, visitedVarnodes, accesses);
         }
 
         return accesses;
+    }
+
+    /**
+     * Recursively analyze a varnode and follow through CAST/COPY operations.
+     */
+    private static void analyzeVarnodeRecursively(Varnode varnode, String functionName,
+            Set<Long> seenOffsets, Set<Varnode> visitedVarnodes, List<MemoryAccess> accesses) {
+        if (varnode == null || visitedVarnodes.contains(varnode)) {
+            return;
+        }
+        visitedVarnodes.add(varnode);
+
+        Iterator<PcodeOp> descendants = varnode.getDescendants();
+        while (descendants.hasNext()) {
+            PcodeOp op = descendants.next();
+            if (op == null) continue;
+
+            int opcode = op.getOpcode();
+
+            // For CAST, INT_ZEXT, INT_SEXT, COPY - follow the output
+            if (opcode == PcodeOp.CAST || opcode == PcodeOp.INT_ZEXT ||
+                opcode == PcodeOp.INT_SEXT || opcode == PcodeOp.COPY) {
+                Varnode output = op.getOutput();
+                if (output != null) {
+                    analyzeVarnodeRecursively(output, functionName, seenOffsets, visitedVarnodes, accesses);
+                }
+                continue;
+            }
+
+            // For INT_ADD - check for constant offset AND follow the output
+            if (opcode == PcodeOp.INT_ADD) {
+                Optional<MemoryAccess> access = analyzeIntAdd(op, functionName, seenOffsets);
+                if (access.isPresent()) {
+                    accesses.add(access.get());
+                }
+                // Also follow the output of INT_ADD (for chained operations like LOAD after ADD)
+                Varnode output = op.getOutput();
+                if (output != null) {
+                    analyzeVarnodeRecursively(output, functionName, seenOffsets, visitedVarnodes, accesses);
+                }
+                continue;
+            }
+
+            // Analyze the operation for direct access patterns
+            Optional<MemoryAccess> access = analyzeOperation(op, varnode, functionName, seenOffsets);
+            if (access.isPresent()) {
+                accesses.add(access.get());
+            }
+        }
     }
 
     /**
@@ -266,8 +309,14 @@ public class StructureUsageAnalyzer {
             if (input.isConstant()) {
                 long offset = input.getOffset();
 
-                // Filter out obviously non-offset values
-                if (offset < 0 || offset > 0x10000) {
+                // Filter out obviously non-offset values (negative or very large)
+                // Structures can be large, so allow up to 1MB
+                if (offset < 0 || offset > 0x100000) {
+                    continue;
+                }
+
+                // Skip zero offset - not interesting
+                if (offset == 0) {
                     continue;
                 }
 
@@ -276,11 +325,38 @@ public class StructureUsageAnalyzer {
                 }
                 seenOffsets.add(offset);
 
-                InferredType type = new InferredType("undefined", 1, 0.2, "INT_ADD offset");
+                // Try to infer size from following LOAD/STORE operation
+                int size = 4; // Default to 4 bytes (common for int/pointer)
+                AccessType accessType = AccessType.READ;
+                Varnode output = op.getOutput();
+
+                if (output != null) {
+                    Iterator<PcodeOp> uses = output.getDescendants();
+                    while (uses.hasNext()) {
+                        PcodeOp use = uses.next();
+                        if (use.getOpcode() == PcodeOp.LOAD) {
+                            Varnode loadOutput = use.getOutput();
+                            if (loadOutput != null) {
+                                size = loadOutput.getSize();
+                            }
+                            accessType = AccessType.READ;
+                            break;
+                        } else if (use.getOpcode() == PcodeOp.STORE) {
+                            Varnode[] storeInputs = use.getInputs();
+                            if (storeInputs.length >= 3) {
+                                size = storeInputs[2].getSize();
+                            }
+                            accessType = AccessType.WRITE;
+                            break;
+                        }
+                    }
+                }
+
+                InferredType type = inferTypeFromSize(size, "INT_ADD offset + " + accessType);
                 Address loc = op.getSeqnum() != null ? op.getSeqnum().getTarget() : null;
 
-                return Optional.of(new MemoryAccess(offset, AccessType.READ, type, loc,
-                        functionName, 1));
+                return Optional.of(new MemoryAccess(offset, accessType, type, loc,
+                        functionName, size));
             }
         }
 
@@ -389,7 +465,7 @@ public class StructureUsageAnalyzer {
             for (Varnode input : inputs) {
                 if (input.isConstant()) {
                     long offset = input.getOffset();
-                    if (offset >= 0 && offset <= 0x10000) {
+                    if (offset >= 0 && offset <= 0x100000) {
                         return Optional.of(offset);
                     }
                 }
@@ -448,6 +524,7 @@ public class StructureUsageAnalyzer {
 
     /**
      * Check if a function uses a specific data type.
+     * Checks return type, parameters, local variables, and referenced data.
      */
     public static boolean functionUsesType(Function func, DataType dataType) {
         if (func == null || dataType == null) {
@@ -470,6 +547,33 @@ public class StructureUsageAnalyzer {
         for (Variable var : func.getAllVariables()) {
             if (isTypeOrPointerToType(var.getDataType(), dataType)) {
                 return true;
+            }
+        }
+
+        // Check data references from this function
+        Program program = func.getProgram();
+        if (program != null) {
+            ghidra.program.model.listing.Listing listing = program.getListing();
+            ghidra.program.model.address.AddressSetView body = func.getBody();
+
+            // Iterate through instructions in function body
+            ghidra.program.model.listing.InstructionIterator instIter = listing.getInstructions(body, true);
+            while (instIter.hasNext()) {
+                ghidra.program.model.listing.Instruction inst = instIter.next();
+
+                // Check data references from this instruction
+                for (ghidra.program.model.symbol.Reference ref : inst.getReferencesFrom()) {
+                    if (ref.isMemoryReference()) {
+                        Address toAddr = ref.getToAddress();
+                        ghidra.program.model.listing.Data data = listing.getDataAt(toAddr);
+                        if (data != null) {
+                            DataType refType = data.getDataType();
+                            if (isTypeOrPointerToType(refType, dataType)) {
+                                return true;
+                            }
+                        }
+                    }
+                }
             }
         }
 

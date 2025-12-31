@@ -633,6 +633,11 @@ public class DecompilerToolProvider extends AbstractToolProvider {
             "description", "Return only signature/metadata without decompiled code. Saves output tokens.",
             "default", false
         ));
+        properties.put("compact", Map.of(
+            "type", "boolean",
+            "description", "Return minimal response (functionName, address, decompilation, programPath only). Performs full decompilation but omits metadata, parameters, callers/callees. Use when you only need the decompiled code for rapid iteration.",
+            "default", false
+        ));
 
         List<String> required = List.of("programPath", "functionNameOrAddress");
 
@@ -658,6 +663,7 @@ public class DecompilerToolProvider extends AbstractToolProvider {
             boolean includeCallers = getOptionalBoolean(request, "includeCallers", false);
             boolean includeCallees = getOptionalBoolean(request, "includeCallees", false);
             boolean signatureOnly = getOptionalBoolean(request, "signatureOnly", false);
+            boolean compact = getOptionalBoolean(request, "compact", false);
 
             Map<String, Object> resultData = new HashMap<>();
             resultData.put("programName", program.getName());
@@ -888,6 +894,16 @@ public class DecompilerToolProvider extends AbstractToolProvider {
                 readDecompilationTracker.put(functionKey, System.currentTimeMillis());
 
                 logInfo(toolName + ": Successfully decompiled " + function.getName());
+
+                // If compact mode, return minimal response with only essential fields
+                if (compact) {
+                    Map<String, Object> compactResult = new HashMap<>();
+                    compactResult.put("functionName", function.getName());
+                    compactResult.put("address", AddressUtil.formatAddress(function.getEntryPoint()));
+                    compactResult.put("decompilation", resultData.get("decompilation"));
+                    compactResult.put("programPath", programPath);
+                    return createJsonResult(compactResult);
+                }
 
             } catch (Exception e) {
                 logError(toolName + ": Exception during decompilation of " + function.getName(), e);

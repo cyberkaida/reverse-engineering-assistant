@@ -800,5 +800,101 @@ public class DecompilerToolProviderIntegrationTest extends RevaIntegrationTestBa
         });
     }
 
+    @Test
+    public void testGetDecompilationCompactMode() throws Exception {
+        withMcpClient(createMcpTransport(), client -> {
+            client.initialize();
+
+            // Test the get-decompilation tool with compact=true
+            Map<String, Object> args = new HashMap<>();
+            args.put("programPath", programPath);
+            args.put("functionNameOrAddress", "testFunction");
+            args.put("compact", true);
+
+            CallToolResult result = client.callTool(new CallToolRequest("get-decompilation", args));
+
+            assertNotNull("Result should not be null", result);
+            assertMcpResultNotError(result, "Result should not be an error");
+
+            TextContent content = (TextContent) result.content().get(0);
+            JsonNode json = parseJsonContent(content.text());
+
+            // Verify compact response has only essential fields
+            assertTrue("Should have functionName", json.has("functionName"));
+            assertTrue("Should have address", json.has("address"));
+            assertTrue("Should have decompilation", json.has("decompilation"));
+            assertTrue("Should have programPath", json.has("programPath"));
+
+            // Verify metadata fields are NOT present in compact mode
+            assertFalse("Should NOT have metadata in compact mode", json.has("metadata"));
+            assertFalse("Should NOT have parameters in compact mode", json.has("parameters"));
+            assertFalse("Should NOT have programName in compact mode", json.has("programName"));
+            assertFalse("Should NOT have startAddress in compact mode", json.has("startAddress"));
+            assertFalse("Should NOT have endAddress in compact mode", json.has("endAddress"));
+            assertFalse("Should NOT have sizeInBytes in compact mode", json.has("sizeInBytes"));
+
+            // Verify decompilation actually ran and returned content
+            String decompilation = json.get("decompilation").asText();
+            assertNotNull("Decompilation should not be null", decompilation);
+            assertFalse("Decompilation should not be empty", decompilation.trim().isEmpty());
+
+            // Verify values are correct
+            assertEquals("Function name should match", "testFunction", json.get("functionName").asText());
+            assertEquals("Program path should match", programPath, json.get("programPath").asText());
+        });
+    }
+
+    @Test
+    public void testCompactModeVsNormalMode() throws Exception {
+        withMcpClient(createMcpTransport(), client -> {
+            client.initialize();
+
+            // Get normal response first
+            Map<String, Object> normalArgs = new HashMap<>();
+            normalArgs.put("programPath", programPath);
+            normalArgs.put("functionNameOrAddress", "testFunction");
+            normalArgs.put("compact", false);
+
+            CallToolResult normalResult = client.callTool(new CallToolRequest("get-decompilation", normalArgs));
+            assertMcpResultNotError(normalResult, "Normal result should not be an error");
+            TextContent normalContent = (TextContent) normalResult.content().get(0);
+            JsonNode normalJson = parseJsonContent(normalContent.text());
+
+            // Get compact response
+            Map<String, Object> compactArgs = new HashMap<>();
+            compactArgs.put("programPath", programPath);
+            compactArgs.put("functionNameOrAddress", "testFunction");
+            compactArgs.put("compact", true);
+
+            CallToolResult compactResult = client.callTool(new CallToolRequest("get-decompilation", compactArgs));
+            assertMcpResultNotError(compactResult, "Compact result should not be an error");
+            TextContent compactContent = (TextContent) compactResult.content().get(0);
+            JsonNode compactJson = parseJsonContent(compactContent.text());
+
+            // Compact response should be smaller (fewer fields)
+            int normalFieldCount = 0;
+            var normalFields = normalJson.fieldNames();
+            while (normalFields.hasNext()) {
+                normalFields.next();
+                normalFieldCount++;
+            }
+
+            int compactFieldCount = 0;
+            var compactFields = compactJson.fieldNames();
+            while (compactFields.hasNext()) {
+                compactFields.next();
+                compactFieldCount++;
+            }
+
+            assertTrue("Compact mode should have fewer fields than normal mode",
+                compactFieldCount < normalFieldCount);
+
+            // But the decompilation content should be the same
+            String normalDecomp = normalJson.get("decompilation").asText();
+            String compactDecomp = compactJson.get("decompilation").asText();
+            assertEquals("Decompilation content should be identical", normalDecomp, compactDecomp);
+        });
+    }
+
 
 }

@@ -349,6 +349,7 @@ public class FunctionToolProvider extends AbstractToolProvider {
         registerFunctionsTool();
         registerFunctionsBySimilarityTool();
         registerSetFunctionPrototypeTool();
+        registerBatchSetFunctionPrototypeTool();
         registerUndefinedFunctionCandidatesTool();
         registerCreateFunctionTool();
         registerFunctionTagsTool();
@@ -1811,6 +1812,238 @@ public class FunctionToolProvider extends AbstractToolProvider {
                     program.endTransaction(txId, false);
                     return createErrorResult("Failed to set function prototype: " + e.getMessage());
                 }
+
+            } catch (IllegalArgumentException e) {
+                return createErrorResult(e.getMessage());
+            } catch (Exception e) {
+                return createErrorResult("Unexpected error: " + e.getMessage());
+            }
+        });
+    }
+
+    /**
+     * Register a tool to batch update function parameter types matching a pattern.
+     * Useful for applying common pattern corrections like "char*" -> "MyStruct*".
+     */
+    private void registerBatchSetFunctionPrototypeTool() {
+        Map<String, Object> properties = new HashMap<>();
+        properties.put("programPath", Map.of(
+            "type", "string",
+            "description", "Path in the Ghidra Project to the program"
+        ));
+        properties.put("nameRegex", Map.of(
+            "type", "string",
+            "description", "Regular expression pattern to match function names (e.g., 'process.*' or '.*Handler$')"
+        ));
+        properties.put("parameterIndex", Map.of(
+            "type", "integer",
+            "description", "0-based parameter index to update. Use -1 for return type."
+        ));
+        properties.put("oldType", Map.of(
+            "type", "string",
+            "description", "Only update functions where the parameter currently has this type (e.g., 'void*', 'char*'). If not specified, updates all matching functions."
+        ));
+        properties.put("newType", Map.of(
+            "type", "string",
+            "description", "The new type to set (e.g., 'MyStruct*', 'int')"
+        ));
+        properties.put("dryRun", Map.of(
+            "type", "boolean",
+            "description", "Preview changes without applying them (default: false)",
+            "default", false
+        ));
+        properties.put("maxUpdates", Map.of(
+            "type", "integer",
+            "description", "Maximum number of functions to update as a safety limit (default: 50)",
+            "default", 50
+        ));
+
+        List<String> required = List.of("programPath", "nameRegex", "parameterIndex", "newType");
+
+        McpSchema.Tool tool = McpSchema.Tool.builder()
+            .name("batch-set-function-prototype")
+            .title("Batch Set Function Prototype")
+            .description("Update parameter types for multiple functions matching a pattern. " +
+                "Useful for applying common corrections like changing 'void*' to a specific struct type. " +
+                "Use dryRun=true to preview changes before applying them.")
+            .inputSchema(createSchema(properties, required))
+            .build();
+
+        registerTool(tool, (exchange, request) -> {
+            try {
+                Program program = getProgramFromArgs(request);
+                String programPath = program.getDomainFile().getPathname();
+                String nameRegex = getString(request, "nameRegex");
+                int parameterIndex = getInt(request, "parameterIndex");
+                String oldType = getOptionalString(request, "oldType", null);
+                String newType = getString(request, "newType");
+                boolean dryRun = getOptionalBoolean(request, "dryRun", false);
+                int maxUpdates = getOptionalInt(request, "maxUpdates", 50);
+
+                // Compile regex pattern
+                Pattern pattern;
+                try {
+                    pattern = Pattern.compile(nameRegex);
+                } catch (PatternSyntaxException e) {
+                    return createErrorResult("Invalid regex pattern: " + e.getMessage());
+                }
+
+                // Parse new data type
+                ghidra.program.model.data.DataType newDataType;
+                try {
+                    newDataType = reva.util.DataTypeParserUtil.parseDataTypeObjectFromString(newType, "");
+                    if (newDataType == null) {
+                        return createErrorResult("Could not find data type: " + newType);
+                    }
+                } catch (Exception e) {
+                    return createErrorResult("Failed to parse newType '" + newType + "': " + e.getMessage());
+                }
+
+                // Parse old data type if specified
+                ghidra.program.model.data.DataType oldDataType = null;
+                if (oldType != null && !oldType.isEmpty()) {
+                    try {
+                        oldDataType = reva.util.DataTypeParserUtil.parseDataTypeObjectFromString(oldType, "");
+                        if (oldDataType == null) {
+                            return createErrorResult("Could not find data type: " + oldType);
+                        }
+                    } catch (Exception e) {
+                        return createErrorResult("Failed to parse oldType '" + oldType + "': " + e.getMessage());
+                    }
+                }
+
+                // Find matching functions
+                FunctionManager fm = program.getFunctionManager();
+                List<Function> matchingFunctions = new ArrayList<>();
+                final ghidra.program.model.data.DataType finalOldDataType = oldDataType;
+
+                for (Function func : fm.getFunctions(true)) {
+                    if (!pattern.matcher(func.getName()).matches()) {
+                        continue;
+                    }
+
+                    // Check parameter exists and type matches
+                    if (parameterIndex == -1) {
+                        // Return type
+                        if (finalOldDataType != null && !func.getReturnType().isEquivalent(finalOldDataType)) {
+                            continue;
+                        }
+                    } else {
+                        Parameter[] params = func.getParameters();
+                        if (parameterIndex >= params.length) {
+                            continue;
+                        }
+                        if (finalOldDataType != null && !params[parameterIndex].getDataType().isEquivalent(finalOldDataType)) {
+                            continue;
+                        }
+                    }
+
+                    matchingFunctions.add(func);
+                    if (matchingFunctions.size() >= maxUpdates * 2) {
+                        // Collect some extras to show total, but don't go too far
+                        break;
+                    }
+                }
+
+                int totalMatched = matchingFunctions.size();
+
+                // Limit to maxUpdates
+                List<Function> functionsToUpdate = matchingFunctions.subList(0,
+                    Math.min(maxUpdates, matchingFunctions.size()));
+
+                List<Map<String, Object>> updates = new ArrayList<>();
+                List<Map<String, Object>> errors = new ArrayList<>();
+
+                if (dryRun) {
+                    // Preview mode - just report what would be updated
+                    for (Function func : functionsToUpdate) {
+                        Map<String, Object> updateInfo = new HashMap<>();
+                        updateInfo.put("name", func.getName());
+                        updateInfo.put("address", AddressUtil.formatAddress(func.getEntryPoint()));
+
+                        if (parameterIndex == -1) {
+                            updateInfo.put("currentType", func.getReturnType().getDisplayName());
+                            updateInfo.put("field", "returnType");
+                        } else {
+                            Parameter param = func.getParameters()[parameterIndex];
+                            updateInfo.put("currentType", param.getDataType().getDisplayName());
+                            updateInfo.put("field", "parameter[" + parameterIndex + "] (" + param.getName() + ")");
+                        }
+                        updateInfo.put("newType", newDataType.getDisplayName());
+                        updateInfo.put("wouldUpdate", true);
+                        updates.add(updateInfo);
+                    }
+                } else {
+                    // Execute mode - apply changes in a single transaction
+                    int txId = program.startTransaction("Batch update function prototypes");
+                    try {
+                        for (Function func : functionsToUpdate) {
+                            try {
+                                Map<String, Object> updateInfo = new HashMap<>();
+                                updateInfo.put("name", func.getName());
+                                updateInfo.put("address", AddressUtil.formatAddress(func.getEntryPoint()));
+
+                                if (parameterIndex == -1) {
+                                    // Update return type
+                                    String oldTypeName = func.getReturnType().getDisplayName();
+                                    func.setReturnType(newDataType, SourceType.USER_DEFINED);
+                                    updateInfo.put("oldType", oldTypeName);
+                                    updateInfo.put("field", "returnType");
+                                } else {
+                                    // Update parameter type
+                                    Parameter param = func.getParameters()[parameterIndex];
+                                    String oldTypeName = param.getDataType().getDisplayName();
+                                    param.setDataType(newDataType, SourceType.USER_DEFINED);
+                                    updateInfo.put("oldType", oldTypeName);
+                                    updateInfo.put("field", "parameter[" + parameterIndex + "] (" + param.getName() + ")");
+                                }
+                                updateInfo.put("newType", newDataType.getDisplayName());
+                                updateInfo.put("success", true);
+                                updates.add(updateInfo);
+
+                            } catch (Exception e) {
+                                Map<String, Object> errorInfo = new HashMap<>();
+                                errorInfo.put("name", func.getName());
+                                errorInfo.put("address", AddressUtil.formatAddress(func.getEntryPoint()));
+                                errorInfo.put("reason", e.getMessage());
+                                errors.add(errorInfo);
+                            }
+                        }
+                        program.endTransaction(txId, true);
+
+                        // Invalidate caches
+                        invalidateFunctionCaches(programPath);
+
+                    } catch (Exception e) {
+                        program.endTransaction(txId, false);
+                        return createErrorResult("Batch update failed: " + e.getMessage());
+                    }
+                }
+
+                Map<String, Object> result = new HashMap<>();
+                result.put("success", true);
+                result.put("dryRun", dryRun);
+                result.put("programPath", programPath);
+                result.put("pattern", nameRegex);
+                result.put("parameterIndex", parameterIndex);
+                result.put("newType", newDataType.getDisplayName());
+                if (oldType != null) {
+                    result.put("oldTypeFilter", oldType);
+                }
+                result.put("totalMatched", totalMatched);
+                result.put("processed", updates.size());
+                result.put("errorCount", errors.size());
+                if (totalMatched > maxUpdates) {
+                    result.put("limitReached", true);
+                    result.put("note", String.format("Found %d matches but limited to %d by maxUpdates parameter",
+                        totalMatched, maxUpdates));
+                }
+                result.put("updates", updates);
+                if (!errors.isEmpty()) {
+                    result.put("errors", errors);
+                }
+
+                return createJsonResult(result);
 
             } catch (IllegalArgumentException e) {
                 return createErrorResult(e.getMessage());

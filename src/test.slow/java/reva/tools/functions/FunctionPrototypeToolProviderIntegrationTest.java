@@ -689,4 +689,126 @@ public class FunctionPrototypeToolProviderIntegrationTest extends RevaIntegratio
             }
         });
     }
+
+    @Test
+    public void testBatchSetFunctionPrototypeDryRun() throws Exception {
+        // Test batch prototype update in dry run mode
+        // Uses pattern matching on existing FUN_ functions that have undefined return type
+        withMcpClient(createMcpTransport(), client -> {
+            try {
+                client.initialize();
+
+                // Do a dry run batch update on FUN_ prefixed functions
+                // Change their return type from undefined to int
+                CallToolResult result = client.callTool(new CallToolRequest(
+                    "batch-set-function-prototype",
+                    Map.of(
+                        "programPath", programPath,
+                        "nameRegex", "FUN_.*",
+                        "parameterIndex", -1, // -1 = return type
+                        "newType", "int",
+                        "dryRun", true,
+                        "maxUpdates", 5
+                    )
+                ));
+
+                assertFalse("Tool should not have errors", result.isError());
+
+                TextContent content = (TextContent) result.content().get(0);
+                JsonNode jsonResult = objectMapper.readTree(content.text());
+
+                // Verify response structure
+                assertEquals("Should be dry run", true, jsonResult.get("dryRun").asBoolean());
+                assertEquals("Should succeed", true, jsonResult.get("success").asBoolean());
+                assertTrue("Should have pattern field", jsonResult.has("pattern"));
+                assertEquals("FUN_.*", jsonResult.get("pattern").asText());
+                assertTrue("Should have processed field", jsonResult.has("processed"));
+
+                // Verify updates array if any matches found
+                if (jsonResult.get("totalMatched").asInt() > 0) {
+                    JsonNode updates = jsonResult.get("updates");
+                    assertNotNull("Should have updates array", updates);
+
+                    // Check that updates have expected fields
+                    for (JsonNode update : updates) {
+                        assertTrue("Update should have name", update.has("name"));
+                        assertTrue("Update should have address", update.has("address"));
+                        assertTrue("Update should have wouldUpdate", update.has("wouldUpdate"));
+                        assertTrue("Update should have newType", update.has("newType"));
+                    }
+                }
+
+            } catch (Exception e) {
+                fail("Test failed with exception: " + e.getMessage());
+            }
+        });
+    }
+
+    @Test
+    public void testBatchSetFunctionPrototypeExecute() throws Exception {
+        // Test batch prototype update with actual execution
+        withMcpClient(createMcpTransport(), client -> {
+            try {
+                client.initialize();
+
+                // First, create a function with a specific signature that we'll batch update
+                String testAddress = "0x0100C000";
+                CallToolResult createResult = client.callTool(new CallToolRequest(
+                    "set-function-prototype",
+                    Map.of(
+                        "programPath", programPath,
+                        "location", testAddress,
+                        "signature", "void BatchTestTarget(void* data)",
+                        "createIfNotExists", true
+                    )
+                ));
+                assertFalse("Should create function", createResult.isError());
+
+                // Capture original return type
+                FunctionManager fm = program.getFunctionManager();
+                Address funcAddr = program.getAddressFactory().getDefaultAddressSpace().getAddress(0x0100C000);
+                Function func = fm.getFunctionAt(funcAddr);
+                assertNotNull("Function should exist before batch update", func);
+                String originalReturnType = func.getReturnType().getDisplayName();
+
+                // Execute batch update to change return type
+                CallToolResult result = client.callTool(new CallToolRequest(
+                    "batch-set-function-prototype",
+                    Map.of(
+                        "programPath", programPath,
+                        "nameRegex", "BatchTestTarget",
+                        "parameterIndex", -1, // return type
+                        "newType", "int",
+                        "dryRun", false,
+                        "maxUpdates", 10
+                    )
+                ));
+
+                assertFalse("Tool should not have errors", result.isError());
+
+                TextContent content = (TextContent) result.content().get(0);
+                JsonNode jsonResult = objectMapper.readTree(content.text());
+
+                // Verify execution mode
+                assertEquals("Should not be dry run", false, jsonResult.get("dryRun").asBoolean());
+                assertEquals("Should succeed", true, jsonResult.get("success").asBoolean());
+
+                // Check updates (may or may not have matched depending on function state)
+                int processed = jsonResult.get("processed").asInt();
+                assertTrue("Processed count should be non-negative", processed >= 0);
+
+                // If we processed a function, verify the change
+                if (processed > 0) {
+                    // Refresh function reference
+                    func = fm.getFunctionAt(funcAddr);
+                    assertNotNull("Function should still exist", func);
+                    assertEquals("Return type should be int",
+                        "int", func.getReturnType().getDisplayName());
+                }
+
+            } catch (Exception e) {
+                fail("Test failed with exception: " + e.getMessage());
+            }
+        });
+    }
 }

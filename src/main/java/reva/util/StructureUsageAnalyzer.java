@@ -582,8 +582,10 @@ public class StructureUsageAnalyzer {
 
     /**
      * Check if a type is equivalent to or a pointer to another type.
+     * This is useful for finding structure usages where parameters may be
+     * typed as pointers to the structure (e.g., Graphics_Engine * vs Graphics_Engine).
      */
-    private static boolean isTypeOrPointerToType(DataType check, DataType target) {
+    public static boolean isTypeOrPointerToType(DataType check, DataType target) {
         if (check == null || target == null) {
             return false;
         }
@@ -711,6 +713,7 @@ public class StructureUsageAnalyzer {
             Map<String, Object> offsetInfo = result.computeIfAbsent(access.offset, k -> {
                 Map<String, Object> info = new HashMap<>();
                 info.put("offset", String.format("0x%02X", k));
+                info.put("offsetDecimal", k);  // Long value for sorting
                 info.put("readCount", 0);
                 info.put("writeCount", 0);
                 info.put("size", access.size);

@@ -67,6 +67,7 @@ import reva.tools.AbstractToolProvider;
 import reva.util.AddressUtil;
 import reva.util.IncludeFilterUtil;
 import reva.util.SimilarityComparator;
+import reva.util.StructureUsageAnalyzer;
 import reva.util.SymbolUtil;
 
 /**
@@ -2592,21 +2593,21 @@ public class FunctionToolProvider extends AbstractToolProvider {
             return false;
         }
 
-        // Check return type
-        if (function.getReturnType().isEquivalent(structure)) {
+        // Check return type (match structure directly or pointer to structure)
+        if (StructureUsageAnalyzer.isTypeOrPointerToType(function.getReturnType(), structure)) {
             return true;
         }
 
-        // Check parameters
+        // Check parameters (match structure directly or pointer to structure)
         for (ghidra.program.model.listing.Parameter param : function.getParameters()) {
-            if (param.getDataType().isEquivalent(structure)) {
+            if (StructureUsageAnalyzer.isTypeOrPointerToType(param.getDataType(), structure)) {
                 return true;
             }
         }
 
-        // Check local variables
+        // Check local variables (match structure directly or pointer to structure)
         for (ghidra.program.model.listing.Variable var : function.getAllVariables()) {
-            if (var.getDataType().isEquivalent(structure)) {
+            if (StructureUsageAnalyzer.isTypeOrPointerToType(var.getDataType(), structure)) {
                 return true;
             }
         }

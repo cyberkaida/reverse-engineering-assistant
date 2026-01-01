@@ -1447,8 +1447,8 @@ public class StructureToolProvider extends AbstractToolProvider {
                 String funcName = func.getName();
                 String funcAddress = AddressUtil.formatAddress(func.getEntryPoint());
 
-                // Check return type
-                if (func.getReturnType().isEquivalent(dt)) {
+                // Check return type (match structure directly or pointer to structure)
+                if (StructureUsageAnalyzer.isTypeOrPointerToType(func.getReturnType(), dt)) {
                     Map<String, Object> usage = new HashMap<>();
                     usage.put("functionName", funcName);
                     usage.put("functionAddress", funcAddress);
@@ -1457,9 +1457,9 @@ public class StructureToolProvider extends AbstractToolProvider {
                     functionUsages.add(usage);
                 }
 
-                // Check parameters
+                // Check parameters (match structure directly or pointer to structure)
                 for (ghidra.program.model.listing.Parameter param : func.getParameters()) {
-                    if (param.getDataType().isEquivalent(dt)) {
+                    if (StructureUsageAnalyzer.isTypeOrPointerToType(param.getDataType(), dt)) {
                         Map<String, Object> usage = new HashMap<>();
                         usage.put("functionName", funcName);
                         usage.put("functionAddress", funcAddress);
@@ -1471,13 +1471,13 @@ public class StructureToolProvider extends AbstractToolProvider {
                     }
                 }
 
-                // Check local variables
+                // Check local variables (match structure directly or pointer to structure)
                 for (ghidra.program.model.listing.Variable var : func.getAllVariables()) {
                     // Skip parameters (already checked above)
                     if (var instanceof ghidra.program.model.listing.Parameter) {
                         continue;
                     }
-                    if (var.getDataType().isEquivalent(dt)) {
+                    if (StructureUsageAnalyzer.isTypeOrPointerToType(var.getDataType(), dt)) {
                         Map<String, Object> usage = new HashMap<>();
                         usage.put("functionName", funcName);
                         usage.put("functionAddress", funcAddress);
@@ -1489,12 +1489,12 @@ public class StructureToolProvider extends AbstractToolProvider {
                 }
             }
 
-            // Check memory for applied instances
+            // Check memory for applied instances (match structure directly or pointer to structure)
             Listing listing = program.getListing();
             ghidra.program.model.listing.DataIterator dataIter = listing.getDefinedData(true);
             while (dataIter.hasNext()) {
                 Data data = dataIter.next();
-                if (data.getDataType().isEquivalent(dt)) {
+                if (StructureUsageAnalyzer.isTypeOrPointerToType(data.getDataType(), dt)) {
                     Map<String, Object> usage = new HashMap<>();
                     usage.put("address", AddressUtil.formatAddress(data.getAddress()));
                     usage.put("dataType", data.getDataType().getDisplayName());

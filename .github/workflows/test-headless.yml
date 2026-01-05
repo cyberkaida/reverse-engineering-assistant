@@ -44,6 +44,7 @@ jobs:
       uses: antoniovazquezblanco/setup-ghidra@v2.0.16
       with:
         version: ${{ matrix.ghidra-version }}
+        auth_token: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Setup Gradle
       uses: gradle/actions/setup-gradle@v5

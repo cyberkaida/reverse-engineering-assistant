@@ -108,7 +108,7 @@ repositories {
 dependencies {
 	// Any external dependencies added here will automatically be copied to the lib/ directory when
 	// this extension is built.
-	implementation platform("io.modelcontextprotocol.sdk:mcp-bom:0.14.0")
+	implementation platform("io.modelcontextprotocol.sdk:mcp-bom:0.17.0")
 	implementation "io.modelcontextprotocol.sdk:mcp"
 	implementation "io.modelcontextprotocol.sdk:mcp-json-jackson2"
 	implementation "jakarta.servlet:jakarta.servlet-api:6.1.0"
@@ -122,7 +122,7 @@ dependencies {
 	implementation "com.fasterxml.jackson.core:jackson-annotations:2.19.2"
 
 	// Testing dependencies
-	testImplementation "org.mockito:mockito-core:5.20.0"
+	testImplementation "org.mockito:mockito-core:5.21.0"
 	testImplementation "org.mockito:mockito-inline:5.2.0"
 
 	// Ghidra test dependencies

@@ -17,20 +17,28 @@ package reva.tools.strings;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.Collections;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 
+import ghidra.program.model.address.Address;
 import ghidra.program.model.listing.Data;
 import ghidra.program.model.listing.DataIterator;
+import ghidra.program.model.listing.Function;
+import ghidra.program.model.listing.FunctionManager;
 import ghidra.program.model.listing.Program;
 import ghidra.program.model.mem.MemoryAccessException;
+import ghidra.program.model.symbol.Reference;
+import ghidra.program.model.symbol.ReferenceIterator;
+import ghidra.program.model.symbol.ReferenceManager;
 import io.modelcontextprotocol.server.McpSyncServer;
 import io.modelcontextprotocol.spec.McpSchema;
 import reva.tools.AbstractToolProvider;
+import reva.util.AddressUtil;
 import reva.util.SimilarityComparator;
 
 
@@ -39,6 +47,18 @@ import reva.util.SimilarityComparator;
  * Tool provider for string-related operations.
  */
 public class StringToolProvider extends AbstractToolProvider {
+    /**
+     * Maximum number of referencing functions to return per string.
+     * Prevents unbounded iteration for frequently referenced strings.
+     */
+    private static final int MAX_REFERENCING_FUNCTIONS = 100;
+
+    /**
+     * Temporary key for storing Address objects during similarity search processing.
+     * Used to avoid string parsing round-trip; removed before JSON serialization.
+     */
+    private static final String TEMP_ADDRESS_KEY = "_addressObj";
+
     /**
      * Constructor
      * @param server The MCP server
@@ -82,17 +102,17 @@ public class StringToolProvider extends AbstractToolProvider {
             Program program = getProgramFromArgs(request);
 
             // Count the strings
-            AtomicInteger count = new AtomicInteger(0);
+            int count = 0;
             DataIterator dataIterator = program.getListing().getDefinedData(true);
-            dataIterator.forEach(data -> {
+            for (Data data : dataIterator) {
                 if (data.getValue() instanceof String) {
-                    count.incrementAndGet();
+                    count++;
                 }
-            });
+            }
 
             // Create result data
             Map<String, Object> countData = new HashMap<>();
-            countData.put("count", count.get());
+            countData.put("count", count);
 
             return createJsonResult(countData);
         });
@@ -118,6 +138,11 @@ public class StringToolProvider extends AbstractToolProvider {
             "description", "Maximum number of strings to return (recommended to use get-strings-count first and request chunks of 100 at most)",
             "default", 100
         ));
+        properties.put("includeReferencingFunctions", Map.of(
+            "type", "boolean",
+            "description", "Include list of functions that reference each string (max 100 per string).",
+            "default", false
+        ));
 
         List<String> required = List.of("programPath");
 
@@ -134,33 +159,34 @@ public class StringToolProvider extends AbstractToolProvider {
             // Get program and pagination parameters using helper methods
             Program program = getProgramFromArgs(request);
             PaginationParams pagination = getPaginationParams(request);
+            boolean includeReferencingFunctions = getOptionalBoolean(request, "includeReferencingFunctions", false);
 
             // Get strings with pagination
             List<Map<String, Object>> stringData = new ArrayList<>();
             DataIterator dataIterator = program.getListing().getDefinedData(true);
-            AtomicInteger currentIndex = new AtomicInteger(0);
+            int currentIndex = 0;
 
-            dataIterator.forEach(data -> {
-                if (data.getValue() instanceof String) {
-                    int index = currentIndex.getAndIncrement();
-
-                    // Skip strings before the start index
-                    if (index < pagination.startIndex()) {
-                        return;
-                    }
-
-                    // Stop after we've collected maxCount strings
-                    if (stringData.size() >= pagination.maxCount()) {
-                        return;
-                    }
-
-                    // Collect string data
-                    Map<String, Object> stringInfo = getStringInfo(data);
-                    if (stringInfo != null) {
-                        stringData.add(stringInfo);
-                    }
+            for (Data data : dataIterator) {
+                if (!(data.getValue() instanceof String)) {
+                    continue;
                 }
-            });
+
+                // Skip strings before the start index
+                if (currentIndex++ < pagination.startIndex()) {
+                    continue;
+                }
+
+                // Stop after we've collected maxCount strings
+                if (stringData.size() >= pagination.maxCount()) {
+                    break;
+                }
+
+                // Collect string data
+                Map<String, Object> stringInfo = getStringInfo(data, program, includeReferencingFunctions);
+                if (stringInfo != null) {
+                    stringData.add(stringInfo);
+                }
+            }
 
             // Create pagination metadata
             Map<String, Object> paginationInfo = new HashMap<>();
@@ -168,7 +194,6 @@ public class StringToolProvider extends AbstractToolProvider {
             paginationInfo.put("requestedCount", pagination.maxCount());
             paginationInfo.put("actualCount", stringData.size());
             paginationInfo.put("nextStartIndex", pagination.startIndex() + stringData.size());
-            paginationInfo.put("totalProcessed", currentIndex.get());
 
             // Return as a single JSON array with pagination info first, then string data
             List<Object> resultData = new ArrayList<>();
@@ -204,6 +229,11 @@ public class StringToolProvider extends AbstractToolProvider {
             "description", "Maximum number of strings to return (recommended to use get-strings-count first and request chunks of 100 at most)",
             "default", 100
         ));
+        properties.put("includeReferencingFunctions", Map.of(
+            "type", "boolean",
+            "description", "Include list of functions that reference each string (max 100 per string).",
+            "default", false
+        ));
 
         List<String> required = List.of("programPath","searchString");
 
@@ -221,49 +251,67 @@ public class StringToolProvider extends AbstractToolProvider {
             Program program = getProgramFromArgs(request);
             String searchString = getString(request, "searchString");
             PaginationParams pagination = getPaginationParams(request);
+            boolean includeReferencingFunctions = getOptionalBoolean(request, "includeReferencingFunctions", false);
 
             if (searchString.trim().isEmpty()) {
                 return createErrorResult("Search string cannot be empty");
             }
 
-            // Get strings with pagination
+            // Phase 1: Collect all strings WITHOUT referencing functions (for performance)
+            // Store Address objects temporarily for Phase 4 to avoid string parsing round-trip
             DataIterator dataIterator = program.getListing().getDefinedData(true);
-            AtomicInteger currentIndex = new AtomicInteger(0);
+            List<Map<String, Object>> allStringData = new ArrayList<>();
 
-            List<Map<String, Object>> similarStringData = new ArrayList<>();
-            // Iterate through the data and collect strings
-            dataIterator.forEach(data -> {
+            for (Data data : dataIterator) {
                 if (data.getValue() instanceof String) {
-                    currentIndex.getAndIncrement();
-
-                    // Collect string data
+                    // Collect basic string data without references
                     Map<String, Object> stringInfo = getStringInfo(data);
                     if (stringInfo != null) {
-                        similarStringData.add(stringInfo);
+                        // Store Address object temporarily for Phase 4
+                        stringInfo.put(TEMP_ADDRESS_KEY, data.getAddress());
+                        allStringData.add(stringInfo);
                     }
                 }
-            });
-            Collections.sort(similarStringData, new SimilarityComparator<Map<String, Object>>(searchString, new SimilarityComparator.StringExtractor<Map<String, Object>>() {
+            }
+
+            // Phase 2: Sort by similarity (SimilarityComparator handles null values internally)
+            Collections.sort(allStringData, new SimilarityComparator<Map<String, Object>>(searchString, new SimilarityComparator.StringExtractor<Map<String, Object>>() {
                 @Override
                 public String extract(Map<String, Object> item) {
                     return (String) item.get("content");
                 }
             }));
 
-            List<Map<String, Object>> paginatedStringData = similarStringData.subList(pagination.startIndex(), Math.min(pagination.startIndex() + pagination.maxCount(), similarStringData.size()));
+            // Phase 3: Paginate
+            int startIdx = Math.min(pagination.startIndex(), allStringData.size());
+            int endIdx = Math.min(pagination.startIndex() + pagination.maxCount(), allStringData.size());
+            List<Map<String, Object>> paginatedStringData = new ArrayList<>(allStringData.subList(startIdx, endIdx));
+            boolean searchComplete = endIdx >= allStringData.size();
+
+            // Phase 4: Add referencing functions ONLY for paginated results (performance optimization)
+            for (Map<String, Object> stringInfo : paginatedStringData) {
+                // Remove temporary Address object (not JSON-serializable)
+                Address address = (Address) stringInfo.remove(TEMP_ADDRESS_KEY);
+
+                if (includeReferencingFunctions && address != null) {
+                    List<Map<String, String>> referencingFunctions = getReferencingFunctions(program, address);
+                    stringInfo.put("referencingFunctions", referencingFunctions);
+                    stringInfo.put("referenceCount", referencingFunctions.size());
+                }
+            }
+
             // Create pagination metadata
             Map<String, Object> paginationInfo = new HashMap<>();
+            paginationInfo.put("searchComplete", searchComplete);
             paginationInfo.put("startIndex", pagination.startIndex());
             paginationInfo.put("requestedCount", pagination.maxCount());
             paginationInfo.put("actualCount", paginatedStringData.size());
             paginationInfo.put("nextStartIndex", pagination.startIndex() + paginatedStringData.size());
-            paginationInfo.put("totalProcessed", pagination.startIndex() + paginatedStringData.size());
 
-            // Default return all strings
             List<Object> resultData = new ArrayList<>();
             resultData.add(paginationInfo);
             resultData.addAll(paginatedStringData);
-            return createMultiJsonResult(resultData);
+            return createJsonResult(resultData);
         });
     }
 
@@ -291,6 +339,11 @@ public class StringToolProvider extends AbstractToolProvider {
             "description", "Maximum number of matching strings to return",
             "default", 100
         ));
+        properties.put("includeReferencingFunctions", Map.of(
+            "type", "boolean",
+            "description", "Include list of functions that reference each string (max 100 per string).",
+            "default", false
+        ));
 
         List<String> required = List.of("programPath", "regexPattern");
 
@@ -308,6 +361,7 @@ public class StringToolProvider extends AbstractToolProvider {
             Program program = getProgramFromArgs(request);
             String regexPattern = getString(request, "regexPattern");
             PaginationParams pagination = getPaginationParams(request);
+            boolean includeReferencingFunctions = getOptionalBoolean(request, "includeReferencingFunctions", false);
 
             if (regexPattern.trim().isEmpty()) {
                 return createErrorResult("Regex pattern cannot be empty");
@@ -324,48 +378,44 @@ public class StringToolProvider extends AbstractToolProvider {
             // Search strings matching the regex pattern
             List<Map<String, Object>> matchingStrings = new ArrayList<>();
             DataIterator dataIterator = program.getListing().getDefinedData(true);
-            AtomicInteger totalProcessed = new AtomicInteger(0);
-            AtomicInteger matchesFound = new AtomicInteger(0);
-            AtomicInteger matchesSkipped = new AtomicInteger(0);
+            int matchesFound = 0;
+            boolean searchComplete = true;
 
-            dataIterator.forEach(data -> {
-                if (data.getValue() instanceof String) {
-                    totalProcessed.incrementAndGet();
-                    String stringValue = (String) data.getValue();
-                    
-                    // Check if string matches the regex pattern
-                    if (pattern.matcher(stringValue).find()) {
-                        int currentMatchIndex = matchesFound.getAndIncrement();
-                        
-                        // Skip matches before the start index
-                        if (currentMatchIndex < pagination.startIndex()) {
-                            matchesSkipped.incrementAndGet();
-                            return;
-                        }
-                        
-                        // Stop after we've collected maxCount matches
-                        if (matchingStrings.size() >= pagination.maxCount()) {
-                            return;
-                        }
-                        
-                        // Collect matching string data
-                        Map<String, Object> stringInfo = getStringInfo(data);
-                        if (stringInfo != null) {
-                            matchingStrings.add(stringInfo);
-                        }
+            for (Data data : dataIterator) {
+                if (!(data.getValue() instanceof String)) {
+                    continue;
+                }
+
+                String stringValue = (String) data.getValue();
+
+                // Check if string matches the regex pattern
+                if (pattern.matcher(stringValue).find()) {
+                    // Skip matches before the start index
+                    if (matchesFound++ < pagination.startIndex()) {
+                        continue;
+                    }
+
+                    // Stop after we've collected maxCount matches
+                    if (matchingStrings.size() >= pagination.maxCount()) {
+                        searchComplete = false;
+                        break;
+                    }
+
+                    // Collect matching string data
+                    Map<String, Object> stringInfo = getStringInfo(data, program, includeReferencingFunctions);
+                    if (stringInfo != null) {
+                        matchingStrings.add(stringInfo);
                     }
                 }
-            });
+            }
 
             // Create result metadata
             Map<String, Object> searchMetadata = new HashMap<>();
             searchMetadata.put("regexPattern", regexPattern);
-            searchMetadata.put("totalStringsProcessed", totalProcessed.get());
-            searchMetadata.put("totalMatches", matchesFound.get());
+            searchMetadata.put("searchComplete", searchComplete);
             searchMetadata.put("startIndex", pagination.startIndex());
             searchMetadata.put("requestedCount", pagination.maxCount());
             searchMetadata.put("actualCount", matchingStrings.size());
-            searchMetadata.put("skippedMatches", matchesSkipped.get());
             searchMetadata.put("nextStartIndex", pagination.startIndex() + matchingStrings.size());
 
             // Return as a single JSON array with metadata first, then matching strings
@@ -382,6 +432,17 @@ public class StringToolProvider extends AbstractToolProvider {
      * @return Map of string properties or null if not a string
      */
     private Map<String, Object> getStringInfo(Data data) {
+        return getStringInfo(data, null, false);
+    }
+
+    /**
+     * Extract string information from a Ghidra Data object with optional referencing functions
+     * @param data The data object containing a string
+     * @param program The program (required if includeReferencingFunctions is true)
+     * @param includeReferencingFunctions Whether to include list of functions that reference this string
+     * @return Map of string properties or null if not a string
+     */
+    private Map<String, Object> getStringInfo(Data data, Program program, boolean includeReferencingFunctions) {
         if (!(data.getValue() instanceof String)) {
             return null;
         }
@@ -389,7 +450,7 @@ public class StringToolProvider extends AbstractToolProvider {
         String stringValue = (String) data.getValue();
 
         Map<String, Object> stringInfo = new HashMap<>();
-        stringInfo.put("address", "0x" + data.getAddress().toString());
+        stringInfo.put("address", AddressUtil.formatAddress(data.getAddress()));
         stringInfo.put("content", stringValue);
         stringInfo.put("length", stringValue.length());
 
@@ -413,6 +474,46 @@ public class StringToolProvider extends AbstractToolProvider {
         stringInfo.put("dataType", data.getDataType().getName());
         stringInfo.put("representation", data.getDefaultValueRepresentation());
 
+        // Add referencing functions if requested
+        if (includeReferencingFunctions && program != null) {
+            List<Map<String, String>> referencingFunctions = getReferencingFunctions(program, data.getAddress());
+            stringInfo.put("referencingFunctions", referencingFunctions);
+            stringInfo.put("referenceCount", referencingFunctions.size());
+        }
+
         return stringInfo;
+    }
+
+    /**
+     * Get list of functions that reference a given address
+     * @param program The program
+     * @param address The address to find references to
+     * @return List of function info maps (name, address), limited to MAX_REFERENCING_FUNCTIONS
+     */
+    private List<Map<String, String>> getReferencingFunctions(Program program, Address address) {
+        List<Map<String, String>> functions = new ArrayList<>();
+        Set<String> seenFunctions = new HashSet<>();
+
+        ReferenceManager refManager = program.getReferenceManager();
+        FunctionManager funcManager = program.getFunctionManager();
+        ReferenceIterator refIter = refManager.getReferencesTo(address);
+
+        while (refIter.hasNext() && functions.size() < MAX_REFERENCING_FUNCTIONS) {
+            Reference ref = refIter.next();
+            Function func = funcManager.getFunctionContaining(ref.getFromAddress());
+
+            if (func != null) {
+                String funcKey = func.getEntryPoint().toString();
+                if (!seenFunctions.contains(funcKey)) {
+                    seenFunctions.add(funcKey);
+                    Map<String, String> funcInfo = new HashMap<>();
+                    funcInfo.put("name", func.getName());
+                    funcInfo.put("address", AddressUtil.formatAddress(func.getEntryPoint()));
+                    functions.add(funcInfo);
+                }
+            }
+        }
+
+        return functions;
     }
 }

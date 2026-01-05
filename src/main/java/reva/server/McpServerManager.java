@@ -57,6 +57,11 @@ import reva.tools.symbols.SymbolToolProvider;
 import reva.tools.xrefs.CrossReferencesToolProvider;
 import reva.tools.comments.CommentToolProvider;
 import reva.tools.bookmarks.BookmarkToolProvider;
+import reva.tools.imports.ImportExportToolProvider;
+import reva.tools.dataflow.DataFlowToolProvider;
+import reva.tools.callgraph.CallGraphToolProvider;
+import reva.tools.constants.ConstantSearchToolProvider;
+import reva.tools.vtable.VtableToolProvider;
 import reva.util.RevaInternalServiceRegistry;
 
 /**
@@ -86,21 +91,33 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
     private volatile Program activeProgram;
     private volatile PluginTool activeTool;
 
+    // Mode tracking - headless mode has no GUI context
+    private final boolean headlessMode;
+
     /**
      * Constructor for GUI mode. Initializes the MCP server with all capabilities.
      * This constructor creates a ConfigManager from the PluginTool for backward compatibility.
      * @param pluginTool The plugin tool, used for configuration
      */
     public McpServerManager(PluginTool pluginTool) {
-        this(new ConfigManager(pluginTool));
+        this(new ConfigManager(pluginTool), false);
     }
 
     /**
-     * Constructor with ConfigManager. Initializes the MCP server with all capabilities.
-     * This is the primary constructor used by both GUI and headless modes.
+     * Constructor for headless mode. Initializes the MCP server with all capabilities.
      * @param configManager The configuration manager to use
      */
     public McpServerManager(ConfigManager configManager) {
+        this(configManager, true);
+    }
+
+    /**
+     * Primary constructor with ConfigManager and mode flag.
+     * @param configManager The configuration manager to use
+     * @param headlessMode True if running in headless mode (no GUI context)
+     */
+    private McpServerManager(ConfigManager configManager, boolean headlessMode) {
+        this.headlessMode = headlessMode;
         // Store configuration
         this.configManager = configManager;
         RevaInternalServiceRegistry.registerService(ConfigManager.class, configManager);
@@ -162,12 +179,17 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
         toolProviders.add(new DataToolProvider(server));
         toolProviders.add(new DecompilerToolProvider(server));
         toolProviders.add(new MemoryToolProvider(server));
-        toolProviders.add(new ProjectToolProvider(server));
+        toolProviders.add(new ProjectToolProvider(server, headlessMode));
         toolProviders.add(new CrossReferencesToolProvider(server));
         toolProviders.add(new DataTypeToolProvider(server));
         toolProviders.add(new StructureToolProvider(server));
         toolProviders.add(new CommentToolProvider(server));
         toolProviders.add(new BookmarkToolProvider(server));
+        toolProviders.add(new ImportExportToolProvider(server));
+        toolProviders.add(new DataFlowToolProvider(server));
+        toolProviders.add(new CallGraphToolProvider(server));
+        toolProviders.add(new ConstantSearchToolProvider(server));
+        toolProviders.add(new VtableToolProvider(server));
 
         // Register all tools with the server
         // Note: As of MCP SDK v0.14.0, tool registration is idempotent and replaces duplicates
@@ -206,6 +228,10 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
             servletContextHandler.addFilter(filterHolder, "/*", EnumSet.of(DispatcherType.REQUEST));
             Msg.info(this, "API key authentication enabled for MCP server");
         }
+
+        // Add request logging filter for debugging (only logs when debug mode is enabled)
+        FilterHolder loggingFilter = new FilterHolder(new RequestLoggingFilter(configManager));
+        servletContextHandler.addFilter(loggingFilter, "/*", EnumSet.of(DispatcherType.REQUEST));
 
         ServletHolder servletHolder = new ServletHolder(currentTransportProvider);
         servletHolder.setAsyncSupported(true);
@@ -340,6 +366,14 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
     @Override
     public boolean isServerRunning() {
         return httpServer != null && httpServer.isRunning() && serverReady;
+    }
+
+    /**
+     * Check if running in headless mode (no GUI context)
+     * @return true if running in headless mode
+     */
+    public boolean isHeadlessMode() {
+        return headlessMode;
     }
 
     @Override
@@ -508,5 +542,32 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
         serverReady = false;
 
         Msg.info(this, "MCP server shutdown complete");
+    }
+
+    /**
+     * Get the list of registered tool providers for debug/diagnostic purposes.
+     * @return List of tool providers, or empty list if none registered
+     */
+    public List<ToolProvider> getToolProviders() {
+        return new ArrayList<>(toolProviders);
+    }
+
+    /**
+     * Get the number of registered PluginTools for debug/diagnostic purposes.
+     * @return Number of registered tools
+     */
+    public int getRegisteredToolsCount() {
+        return registeredTools.size();
+    }
+
+    /**
+     * Get the server host binding for debug/diagnostic purposes.
+     * @return Server host string, or null if not configured
+     */
+    public String getServerHost() {
+        if (configManager != null) {
+            return configManager.getServerHost();
+        }
+        return null;
     }
 }

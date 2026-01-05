@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with th
 
 ## Package Overview
 
-The `reva.tools` package implements MCP (Model Context Protocol) tool providers that expose Ghidra's reverse engineering capabilities to AI models. Each tool provider focuses on a specific domain (decompilation, functions, strings, etc.) and follows consistent patterns for parameter handling, error management, and JSON response formatting.
+The `reva.tools` package implements MCP (Model Context Protocol) tool providers that expose Ghidra's reverse engineering capabilities to AI models. The package contains 17 specialized tool providers organized into five categories: Core Analysis, Data & Types, Advanced Analysis, Annotations, and Project Management. Each tool provider focuses on a specific domain and follows consistent patterns for parameter handling, error management, and JSON response formatting.
 
 ## Architecture Patterns
 
@@ -118,9 +118,11 @@ boolean verbose = getOptionalBoolean(request, "verbose", false);
 Integer optionalLimit = getOptionalInteger(args, "limit", null);  // Returns Integer (can be null)
 
 // Maps and lists
-Map<String, String> mappings = getStringMap(args, "mappings");
-Map<String, Object> options = getOptionalMap(args, "options", Map.of());
-List<String> addresses = getOptionalStringList(args, "addresses", List.of());
+Map<String, String> mappings = getStringMap(args, "mappings");  // Required string map
+Map<String, String> optionalMappings = getOptionalStringMap(args, "mappings", Map.of());  // Optional string map
+Map<String, Object> options = getOptionalMap(args, "options", Map.of());  // Optional generic map
+List<String> addresses = getOptionalStringList(args, "addresses", List.of());  // Optional string list
+List<String> tags = getStringList(args, "tags");  // Required string list
 ```
 
 **Exception handling is automatic** - registerTool() wraps handlers to catch exceptions:
@@ -144,12 +146,19 @@ Program program = getProgramFromArgs(request);
 
 // Address resolution (supports both addresses and symbol names)
 Address address = getAddressFromArgs(args, program, "address");
+Address addressCustomKey = getAddressFromArgs(args, program, "addressOrSymbol");
+
+// Symbol name to address resolution (resolves symbol names only)
+Address symbolAddress = getAddressFromSymbolArgs(args, program, "symbolName");
+Address symbolDefaultKey = getAddressFromSymbolArgs(args, program); // Uses "symbolName" as key
 
 // Function resolution (supports names, addresses, and symbols)
 Function function = getFunctionFromArgs(args, program, "functionName");
+Function functionDefault = getFunctionFromArgs(args, program); // Uses "functionNameOrAddress" as key
 
 // Pagination (standard pattern for listing tools)
 PaginationParams pagination = getPaginationParams(request, 50); // 50 = default max
+PaginationParams paginationDefault = getPaginationParams(request); // Default max = 100
 ```
 
 ### Response Patterns
@@ -425,19 +434,34 @@ if (monitor.isCancelled()) {
 
 ## Tool Categories
 
-### Current Tool Providers
-- **project/** - Program listing and project management
-- **functions/** - Function analysis, listing, and management
+### Current Tool Providers (17 Total)
+
+**Core Analysis** (6 providers):
 - **decompiler/** - Decompilation and variable manipulation
+- **functions/** - Function analysis, listing, and management
 - **strings/** - String analysis and search
 - **symbols/** - Symbol table operations
 - **xrefs/** - Cross-reference analysis
 - **memory/** - Memory layout and analysis
+
+**Data & Types** (3 providers):
 - **data/** - Data type and structure analysis
 - **datatypes/** - Data type management
 - **structures/** - Structure definition and analysis
+
+**Advanced Analysis** (5 providers):
+- **callgraph/** - Call graph analysis and navigation
+- **dataflow/** - Data flow analysis and tracking
+- **constants/** - Constant value analysis and identification
+- **vtable/** - Virtual table detection and analysis
+- **imports/** - Import table and external reference analysis
+
+**Annotations** (2 providers):
 - **comments/** - Comment management
 - **bookmarks/** - Bookmark operations
+
+**Project Management** (1 provider):
+- **project/** - Program listing and project management
 
 ### Tool Naming Conventions
 - Use kebab-case for tool names

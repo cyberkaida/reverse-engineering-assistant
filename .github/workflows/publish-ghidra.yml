@@ -23,27 +23,27 @@ jobs:
         # Build only on Linux since the extension is Java-only and platform-independent
         # This simplifies the build process and reduces CI time
         ghidra-version: [
-            "11.4.2",
-            "11.4",
+            "12.0",
             "latest",
         ]
     name: Build distribution 📦
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@v6
     - name: Set up Java 🍵
       uses: actions/setup-java@v5
       with:
         java-version: "21"
         distribution: "microsoft"
     - name: Install Ghidra 🐉
-      uses: antoniovazquezblanco/setup-ghidra@v2.0.14
+      uses: antoniovazquezblanco/setup-ghidra@v2.0.16
       with:
         version: ${{ matrix.ghidra-version }}
+        auth_token: ${{ secrets.GITHUB_TOKEN }}
     - name: Compile ReVa 👩‍💻✨
       run: gradle buildExtension
     - name: Store the distribution packages
-      uses: actions/upload-artifact@v5
+      uses: actions/upload-artifact@v6
       with:
         name: ghidra-distributions-${{ matrix.ghidra-version }}
         path: dist/
@@ -62,7 +62,7 @@ jobs:
       RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
     steps:
     - name: Download all the dists
-      uses: actions/download-artifact@v6
+      uses: actions/download-artifact@v7
       with:
         pattern: ghidra-distributions-*
         path: dist/

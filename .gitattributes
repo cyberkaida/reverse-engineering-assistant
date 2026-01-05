@@ -1,0 +1,5 @@
+tests/fixtures/test_fat_binary filter=lfs diff=lfs merge=lfs -text
+tests/fixtures/test_archive.zip filter=lfs diff=lfs merge=lfs -text
+tests/fixtures/test_arm64 filter=lfs diff=lfs merge=lfs -text
+tests/fixtures/test_x86_64 filter=lfs diff=lfs merge=lfs -text
+tests/fixtures/*.zip filter=lfs diff=lfs merge=lfs -text

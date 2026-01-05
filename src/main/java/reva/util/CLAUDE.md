@@ -4,20 +4,36 @@ This file provides guidance for working with the foundational utility classes in
 
 ## Package Overview
 
-The `reva.util` package contains critical utility classes that provide:
-- **Consistent address formatting** across all tools via `AddressUtil`
-- **Program validation and lookup** with helpful error messages via `ProgramLookupUtil`
-- **Data type parsing** from string representations via `DataTypeParserUtil`
-- **Decompilation context mapping** and cross-reference analysis via `DecompilationContextUtil`
-- **Safe memory access patterns** via `MemoryUtil`
-- **Symbol validation and filtering** via `SymbolUtil`
-- **Service registry patterns** for dependency injection via `RevaInternalServiceRegistry`
-- **MCP schema creation utilities** via `SchemaUtil`
-- **Debug logging with configuration** via `DebugLogger`
-- **Decompilation comparison and diffing** via `DecompilationDiffUtil`
-- **Function similarity analysis** via `SimilarityComparator`
+The `reva.util` package contains 11 critical utility classes that provide:
+- **AddressUtil** - Consistent address formatting and parsing with "0x" prefix
+- **ProgramLookupUtil** - Program validation and lookup with helpful error messages
+- **DataTypeParserUtil** - Data type parsing from string representations (e.g., "char*", "int[10]")
+- **DecompilationContextUtil** - Decompilation context mapping and cross-reference analysis with line numbers
+- **MemoryUtil** - Safe memory access patterns with error handling
+- **SymbolUtil** - Symbol validation and Ghidra default name filtering
+- **RevaInternalServiceRegistry** - Service registry for dependency injection (ConfigManager, etc.)
+- **SchemaUtil** - MCP schema creation utilities with builder pattern
+- **DebugLogger** - Configuration-aware debug logging
+- **DecompilationDiffUtil** - Decompilation comparison and diffing with snippets
+- **SimilarityComparator** - String similarity analysis using longest common substring (LCS)
 
 **CRITICAL**: All tool providers MUST use these utilities instead of direct Ghidra API calls to ensure consistency across the entire ReVa ecosystem.
+
+## Quick Reference - Key Methods by Utility
+
+| Utility | Key Methods | Purpose |
+|---------|------------|---------|
+| **AddressUtil** | `formatAddress()`, `parseAddress()`, `resolveAddressOrSymbol()`, `isUndefinedFunctionAddress()` | Address formatting and parsing with "0x" prefix |
+| **ProgramLookupUtil** | `getValidatedProgram()` | Program validation with helpful error messages |
+| **DataTypeParserUtil** | `parseDataTypeObjectFromString()`, `parseDataTypeFromString()`, `createDataTypeInfo()` | Parse data types from strings like "char*" or "int[10]" |
+| **DecompilationContextUtil** | `getLineNumberForAddress()`, `getDecompilationContext()`, `getEnhancedIncomingReferences()`, `getEnhancedReferencesTo()` | Map addresses to line numbers with context |
+| **MemoryUtil** | `readMemoryBytes()`, `formatHexString()`, `byteArrayToIntList()`, `processMemoryInChunks()` | Safe memory access and formatting |
+| **SymbolUtil** | `isDefaultSymbolName()` | Filter Ghidra default names (FUN_*, LAB_*, etc.) |
+| **RevaInternalServiceRegistry** | `registerService()`, `getService()`, `unregisterService()` | Service dependency injection |
+| **SchemaUtil** | `builder()`, `stringProperty()`, `booleanProperty()`, `integerProperty()`, `createSchema()` | MCP schema creation with builder pattern |
+| **DebugLogger** | `debug()`, `debugConnection()`, `debugPerformance()`, `debugToolExecution()`, `isDebugEnabled()` | Configuration-aware debug logging |
+| **DecompilationDiffUtil** | `createDiff()`, `toMap()` | Compare decompilation before/after with snippets |
+| **SimilarityComparator** | `SimilarityComparator(searchString, extractor)`, `calculateLcsSimilarity()` | Sort by string similarity using LCS algorithm |
 
 ## Core Utility Classes
 
@@ -56,6 +72,10 @@ Address resolved2 = AddressUtil.resolveAddressOrSymbol(program, "0x404000");
 // Get containing function/data
 Function func = AddressUtil.getContainingFunction(program, address);
 Data data = AddressUtil.getContainingData(program, address);
+
+// Check if address is an undefined function location (has code but no function)
+boolean isUndefined = AddressUtil.isUndefinedFunctionAddress(program, address);
+boolean isUndefined2 = AddressUtil.isUndefinedFunctionAddress(program, "0x404000");
 ```
 
 #### Usage Pattern in Tools:
@@ -196,6 +216,10 @@ String context = DecompilationContextUtil.getDecompilationContext(
 List<Map<String, Object>> refs = DecompilationContextUtil.getEnhancedIncomingReferences(
     program, targetFunction, true); // include context
 
+// Get enhanced incoming references with limit (to avoid performance issues)
+List<Map<String, Object>> refs = DecompilationContextUtil.getEnhancedIncomingReferences(
+    program, targetFunction, true, 50); // limit to 50 references
+
 // Get enhanced references to any address
 List<Map<String, Object>> refs = DecompilationContextUtil.getEnhancedReferencesTo(
     program, targetAddress, false); // no context
@@ -203,6 +227,7 @@ List<Map<String, Object>> refs = DecompilationContextUtil.getEnhancedReferencesT
 
 #### Enhanced Reference Format:
 ```java
+// getEnhancedIncomingReferences result format:
 {
     "fromAddress": "0x404020",
     "fromFunction": "main",
@@ -212,7 +237,22 @@ List<Map<String, Object>> refs = DecompilationContextUtil.getEnhancedReferencesT
     "fromSymbol": "main_call_site_1",
     "fromSymbolType": "LABEL"
 }
+
+// getEnhancedReferencesTo result format (includes more detail):
+{
+    "fromAddress": "0x404020",
+    "toAddress": "0x405000",
+    "fromFunction": "main",
+    "fromLine": 15,
+    "context": "...",
+    "referenceType": "UNCONDITIONAL_CALL",
+    "isPrimary": true,
+    "operandIndex": 0,
+    "sourceType": "USER_DEFINED"
+}
 ```
+
+**Performance Note**: When `includeContext=true`, each reference requires a separate decompilation of the calling function. Use the `maxRefs` parameter to limit the number of references processed for functions with many callers.
 
 #### Usage for Cross-Reference Tools:
 ```java
@@ -463,16 +503,16 @@ if (diff.hasChanges()) {
 }
 ```
 
-### SimilarityComparator - Function/Symbol Similarity Analysis
+### SimilarityComparator - String Similarity Analysis
 
-**PRIMARY RULE**: Use this comparator to sort search results by similarity to user input.
+**PRIMARY RULE**: Use this comparator to sort search results by similarity to user input using longest common substring (LCS).
 
 ```java
 import reva.util.SimilarityComparator;
 
 // Create comparator for function name similarity
 SimilarityComparator<Function> comparator = new SimilarityComparator<>(
-    searchString, 
+    searchString,
     new SimilarityComparator.StringExtractor<Function>() {
         @Override
         public String extract(Function function) {
@@ -481,12 +521,22 @@ SimilarityComparator<Function> comparator = new SimilarityComparator<>(
     }
 );
 
-// Sort functions by similarity to search term
+// Or use lambda syntax (Java 8+)
+SimilarityComparator<Function> comparator = new SimilarityComparator<>(
+    searchString,
+    function -> function.getName()
+);
+
+// Sort items by similarity to search term (most similar first)
 List<Function> functions = getFunctions();
 functions.sort(comparator);
 
-// Most similar functions will be at the beginning of the list
+// Calculate raw similarity score (0.0 to 1.0)
+double similarity = SimilarityComparator.calculateLcsSimilarity(
+    "myfunction".toLowerCase(), "my_func".toLowerCase());
 ```
+
+**How it works**: Uses longest common substring (LCS) algorithm to find the longest contiguous sequence of characters that appears in both strings. Higher LCS length means higher similarity.
 
 #### Usage in Search Tools:
 ```java
@@ -775,13 +825,26 @@ public class MyComponent {
 
 ## Important Notes
 
+### Critical Usage Requirements
 - **NEVER bypass these utilities** - They ensure consistency across all ReVa tools
 - **All tools MUST use `AddressUtil.formatAddress()`** for address output in JSON
+  - This ensures the consistent "0x" prefix format across all ReVa responses
 - **All tools MUST use `ProgramLookupUtil.getValidatedProgram()`** for program validation
+  - Provides helpful error messages with suggestions for available programs
 - **Debug logging MUST use `DebugLogger`** to respect configuration settings
+  - Automatically checks if debug mode is enabled before logging
 - **Memory access MUST use `MemoryUtil`** for safety and error handling
+  - Returns null on errors instead of throwing exceptions
 - **Data type parsing MUST use `DataTypeParserUtil`** for consistency
+  - Searches built-in types, target program, then other programs/archives
+- **Decompilation context MUST use `DecompilationContextUtil`** for line number mapping
+  - Handles decompiler timeout configuration automatically
+- **Decompilation diffs MUST use `DecompilationDiffUtil`** for before/after comparison
+  - Creates snippets with context around changed lines
+
+### Testing and Maintenance
 - **These utilities are the foundation** - breaking changes here affect ALL tools
 - **Test utility methods thoroughly** - they are used everywhere
-- **Service registry provides loose coupling** - use it for accessing ReVa services
+- **Service registry provides loose coupling** - use it for accessing ReVa services (ConfigManager, RevaPlugin)
 - **Schema utilities ensure consistent MCP schemas** - use the builder pattern when possible
+- **Similarity comparator uses LCS algorithm** - suitable for substring matching in search results

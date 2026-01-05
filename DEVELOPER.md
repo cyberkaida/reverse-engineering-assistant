@@ -11,8 +11,8 @@ ReVa (Reverse Engineering Assistant) is a Ghidra extension that provides a Model
 ### Core Components
 
 1. **Plugin Architecture** - ReVa provides two plugins to Ghidra:
-   - **[RevaApplicationPlugin](src/main/java/reva/plugin/RevaApplicationPlugin.java)** - An [application-level plugin](https://github.com/NationalSecurityAgency/ghidra/blob/stable/Ghidra/Framework/Project/src/main/java/ghidra/framework/main/ApplicationLevelPlugin.java) that manages the MCP server at the Ghidra application level. This plugin:
-     - Implements `ApplicationLevelPlugin` to persist across tool sessions
+   - **[RevaApplicationPlugin](src/main/java/reva/plugin/RevaApplicationPlugin.java)** - An [application-level plugin](https://github.com/NationalSecurityAgency/ghidra/blob/stable/Ghidra/Framework/Project/src/main/java/ghidra/framework/main/ApplicationLevelOnlyPlugin.java) that manages the MCP server at the Ghidra application level. This plugin:
+     - Implements `ApplicationLevelOnlyPlugin` to persist across tool sessions
      - Starts and manages the MCP server for the entire Ghidra instance
      - Survives when individual analysis tools are closed and reopened
      - Provides the `RevaMcpService` to other plugins
@@ -29,11 +29,17 @@ ReVa (Reverse Engineering Assistant) is a Ghidra extension that provides a Model
 
 2. **[McpServerManager](src/main/java/reva/server/McpServerManager.java)** - Manages the Model Context Protocol server, including configuration, registration of resources and tools. The server lifecycle is tied to Ghidra's lifetime through the application plugin.
 
-3. **[RevaProgramManager](src/main/java/reva/plugin/RevaProgramManager.java)** - Manages program lookup and validation with consistent error handling across all tools.
+3. **[RevaProgramManager](src/main/java/reva/plugin/RevaProgramManager.java)** - Tracks open programs across all Ghidra tools and provides centralized program access.
 
-4. **[RevaInternalServiceRegistry](src/main/java/reva/util/RevaInternalServiceRegistry.java)** - A simple service locator that allows components to find each other at runtime.
+4. **[ProgramLookupUtil](src/main/java/reva/util/ProgramLookupUtil.java)** - Validates program paths and provides helpful error messages. Always use `ProgramLookupUtil.getValidatedProgram(programPath)` for program resolution in tools.
 
-5. **[ConfigManager](src/main/java/reva/util/ConfigManager.java)** - Manages configuration settings for the extension.
+5. **[RevaInternalServiceRegistry](src/main/java/reva/util/RevaInternalServiceRegistry.java)** - A simple service locator that allows components to find each other at runtime.
+
+6. **[ConfigManager](src/main/java/reva/plugin/ConfigManager.java)** - Manages configuration settings for the extension with support for Ghidra ToolOptions (GUI) or file-based (headless) backends.
+
+7. **[AddressUtil](src/main/java/reva/util/AddressUtil.java)** - Provides consistent address formatting for JSON output. Always use `AddressUtil.formatAddress(address)` to ensure addresses have the `0x` prefix.
+
+8. **[DataTypeParserUtil](src/main/java/reva/util/DataTypeParserUtil.java)** - Parses datatype strings (e.g., `"char*"`, `"int[10]"`) into Ghidra DataType objects.
 
 ### MCP Server Components
 
@@ -44,11 +50,45 @@ The MCP server components are divided into two main categories:
 
 Each component follows a provider pattern where the provider is responsible for registering and managing one or more resources or tools.
 
+### Operational Modes
+
+ReVa supports three operational modes, all sharing the same core MCP server infrastructure:
+
+1. **GUI Mode (Ghidra Plugin)** - The standard way to use ReVa when working interactively with Ghidra:
+   - Server runs on `http://localhost:8080/mcp/message` (configurable)
+   - Uses [`RevaApplicationPlugin`](src/main/java/reva/plugin/RevaApplicationPlugin.java) for lifecycle management
+   - Configuration stored in Ghidra's ToolOptions (persists across sessions)
+   - Ideal for interactive analysis with Claude Desktop, VSCode, or other MCP clients
+
+2. **Headless Mode (PyGhidra Script)** - For automated analysis pipelines:
+   - Started via [`RevaHeadlessLauncher`](src/main/java/reva/headless/RevaHeadlessLauncher.java)
+   - Uses file-based configuration (no GUI required)
+   - Integrates with Python scripts using PyGhidra
+   - See [`scripts/reva_headless_server.py`](scripts/reva_headless_server.py) for usage
+
+3. **Claude CLI Mode (Stdio Transport)** - For direct integration with Claude CLI:
+   - Uses the `mcp-reva` Python command
+   - Stdio bridge proxies MCP protocol to local HTTP server (random port)
+   - Automatic temporary project creation and cleanup
+   - Add to Claude CLI: `claude mcp add ReVa -- mcp-reva`
+
+### Tool Provider Categories
+
+ReVa provides 17 tool providers organized by purpose:
+
+| Category | Providers | Description |
+|----------|-----------|-------------|
+| **Core Analysis** | [`DecompilerToolProvider`](src/main/java/reva/tools/decompiler/DecompilerToolProvider.java), [`FunctionToolProvider`](src/main/java/reva/tools/functions/FunctionToolProvider.java), [`StringToolProvider`](src/main/java/reva/tools/strings/StringToolProvider.java), [`SymbolToolProvider`](src/main/java/reva/tools/symbols/SymbolToolProvider.java), [`CrossReferencesToolProvider`](src/main/java/reva/tools/xrefs/CrossReferencesToolProvider.java), [`MemoryToolProvider`](src/main/java/reva/tools/memory/MemoryToolProvider.java) | Primary analysis operations |
+| **Data & Types** | [`DataToolProvider`](src/main/java/reva/tools/data/DataToolProvider.java), [`DataTypeToolProvider`](src/main/java/reva/tools/datatypes/DataTypeToolProvider.java), [`StructureToolProvider`](src/main/java/reva/tools/structures/StructureToolProvider.java) | Data definition and type management |
+| **Advanced Analysis** | [`CallGraphToolProvider`](src/main/java/reva/tools/callgraph/CallGraphToolProvider.java), [`DataFlowToolProvider`](src/main/java/reva/tools/dataflow/DataFlowToolProvider.java), [`ConstantSearchToolProvider`](src/main/java/reva/tools/constants/ConstantSearchToolProvider.java), [`VtableToolProvider`](src/main/java/reva/tools/vtable/VtableToolProvider.java), [`ImportExportToolProvider`](src/main/java/reva/tools/imports/ImportExportToolProvider.java) | Specialized analysis features |
+| **Annotations** | [`CommentToolProvider`](src/main/java/reva/tools/comments/CommentToolProvider.java), [`BookmarkToolProvider`](src/main/java/reva/tools/bookmarks/BookmarkToolProvider.java) | Program annotations |
+| **Project** | [`ProjectToolProvider`](src/main/java/reva/tools/project/ProjectToolProvider.java) | Program and project management |
+
 ## Plugin Architecture and Lifecycle
 
 ### Why an Application Plugin and a Tool Plugin?
 
-ReVa aims to provide a multi-program environment to solve complex reverse engineering tasks. The MCP SSE architecture requires a persistent server for the lifetime of the session.
+ReVa aims to provide a multi-program environment to solve complex reverse engineering tasks. The MCP streamable HTTP architecture requires a persistent server for the lifetime of the session.
 Both of these goals require some components to run for the entire Ghidra session (MCP server, project access), while others need to be tool-specific (current program, current selection).
 
 1. **Application Plugin Benefits**:
@@ -90,6 +130,57 @@ ReVa is designed to handle the Ghidra lifecycle correctly:
 2. **Tool Lifecycle** - The [`RevaPlugin`](src/main/java/reva/plugin/RevaPlugin.java) manages tool-specific functionality and UI.
 3. **Program Lifecycle** - Both plugins coordinate to handle program open/close events, with the application plugin maintaining the program registry.
 4. **Server Lifecycle** - The MCP server starts with Ghidra and stops when Ghidra shuts down, surviving individual tool closures.
+
+## Development Environment
+
+### Prerequisites
+
+| Requirement | Version | Notes |
+|-------------|---------|-------|
+| Java | 21+ | Required by Ghidra 12.0+ |
+| Gradle | 8.x+ | Use `gradle` directly, NOT `./gradlew` |
+| Ghidra | 12.0+ | Set `GHIDRA_INSTALL_DIR` environment variable |
+| Python | 3.10+ | For CLI and headless mode |
+| uv | Latest | Python package manager |
+
+### Version Information
+
+| Component | Version |
+|-----------|---------|
+| MCP SDK | v0.17.0 |
+| Jackson | 2.20.x |
+| Jetty | 11.0.26 |
+| PyGhidra | 3.0.0+ |
+| JUnit | 4 (NOT 5) |
+
+### Build Commands
+
+```bash
+# Set Ghidra installation directory
+export GHIDRA_INSTALL_DIR=/path/to/ghidra
+
+# Build the extension
+gradle
+
+# Install directly to Ghidra
+gradle install
+
+# Clean lib directory if Jackson conflicts occur
+rm lib/*.jar && gradle
+```
+
+### Python Setup
+
+```bash
+# Setup Python environment
+uv sync
+
+# Install CLI for development
+uv pip install -e .
+
+# Run CLI locally
+uv run mcp-reva --verbose
+```
 
 ## Adding New Resources
 
@@ -198,26 +289,22 @@ public class MyNewToolProvider extends AbstractToolProvider {
 
         // Register the tool with a handler
         registerTool(tool, (exchange, args) -> {
-            // Get the program path from the request
-            String programPath = (String) args.get("programPath");
-            if (programPath == null) {
-                return createErrorResult("No program path provided");
-            }
+            // Get the program - use helper method for consistent error handling
+            Program program = getProgramFromArgs(args);
 
-            // Get the program from the path - this will throw ProgramValidationException if invalid
-            try {
-                Program program = RevaProgramManager.getValidatedProgram(programPath);
-            } catch (ProgramValidationException e) {
-                return createErrorResult(e.getMessage());
-            }
+            // Get optional parameters with defaults
+            boolean verbose = getOptionalBoolean(args, "verbose", false);
+            int maxResults = getOptionalInt(args, "maxResults", 100);
 
             // Implement tool logic
+            Address someAddress = program.getMinAddress();
             // ...
 
-            // Return results
+            // Return results - always use AddressUtil for address formatting
             Map<String, Object> resultData = new HashMap<>();
             resultData.put("success", true);
-            resultData.put("message", "Operation completed successfully");
+            resultData.put("programPath", program.getDomainFile().getPathname());
+            resultData.put("address", AddressUtil.formatAddress(someAddress));
 
             return createJsonResult(resultData);
         });
@@ -271,11 +358,72 @@ public class MyNewToolProvider extends AbstractToolProvider {
 
 ## Testing
 
-To test your resources and tools:
+### Test Categories
+
+| Category | Command | Location | Requirements |
+|----------|---------|----------|--------------|
+| Java Unit Tests | `gradle test` | `src/test/` | No Ghidra environment |
+| Java Integration Tests | `gradle integrationTest` | `src/test.slow/` | GUI environment, fork=1 |
+| Python Unit Tests | `uv run pytest -m unit` | `tests/` | Mocked PyGhidra |
+| Python Integration Tests | `uv run pytest -m integration` | `tests/` | PyGhidra available |
+| Python E2E Tests | `uv run pytest -m e2e` | `tests/` | Full CLI subprocess |
+
+### Running Tests
+
+```bash
+# Java unit tests (fast, no Ghidra)
+gradle test --info
+
+# Java integration tests (require GUI)
+gradle integrationTest --info
+
+# Run specific Java test class
+gradle integrationTest --tests "*DecompilerToolProviderIntegrationTest" --info
+
+# Python tests
+uv run pytest                    # All tests
+uv run pytest -m unit            # Fast unit tests with mocks
+uv run pytest -m integration     # Tests requiring PyGhidra
+uv run pytest tests/test_cli.py  # Specific test file
+
+# Complete test suite
+gradle test && gradle integrationTest && uv run pytest
+```
+
+### Integration Test Guidelines
+
+Integration tests must validate **actual Ghidra program state changes**, not just MCP responses:
+
+```java
+@Test
+public void testRenameFunction() throws Exception {
+    // Call the MCP tool
+    CallToolResult result = client.callTool(
+        new CallToolRequest("rename-function", Map.of(
+            "programPath", programPath,
+            "address", "0x01000000",
+            "newName", "myFunction"
+        ))
+    );
+
+    // Verify MCP response
+    assertMcpResultNotError(result, "Tool should not error");
+
+    // **CRITICAL**: Verify actual program state changed
+    Function func = program.getFunctionManager().getFunctionAt(testAddr);
+    assertEquals("myFunction", func.getName());
+}
+```
+
+See [`src/test.slow/CLAUDE.md`](src/test.slow/CLAUDE.md) for the full integration test base class and patterns.
+
+### Manual Testing
+
+For quick manual testing of your tools:
 
 1. Install the extension in Ghidra.
-2. Connect to the MCP server using an MCP client.
-3. Inspect the available resources and tools.
+2. Connect to the MCP server using an MCP client (Claude Desktop, VSCode, etc.).
+3. Use the tool list endpoint to discover available tools.
 4. Test with different input parameters and edge cases.
 
 ## Debugging

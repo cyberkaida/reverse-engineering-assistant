@@ -59,19 +59,26 @@ import reva.util.RevaInternalServiceRegistry;
  */
 public class ProjectToolProvider extends AbstractToolProvider {
 
+    private final boolean headlessMode;
+
     /**
      * Constructor
      * @param server The MCP server
+     * @param headlessMode True if running in headless mode (no GUI context)
      */
-    public ProjectToolProvider(McpSyncServer server) {
+    public ProjectToolProvider(McpSyncServer server, boolean headlessMode) {
         super(server);
+        this.headlessMode = headlessMode;
     }
 
     @Override
     public void registerTools() {
-        registerGetCurrentProgramTool();
+        // GUI-only tools: require ToolManager which isn't available in headless mode
+        if (!headlessMode) {
+            registerGetCurrentProgramTool();
+            registerListOpenProgramsTool();
+        }
         registerListProjectFilesTool();
-        registerListOpenProgramsTool();
         registerCheckinProgramTool();
         registerAnalyzeProgramTool();
         registerChangeProcessorTool();
@@ -850,7 +857,7 @@ public class ProjectToolProvider extends AbstractToolProvider {
                 TaskMonitor importMonitor = TimeoutTaskMonitor.timeoutIn(importTimeoutSeconds, TimeUnit.SECONDS);
 
                 // Create and run the import task synchronously (blocks until completion)
-                ImportBatchTask importTask = new ImportBatchTask(batchInfo, destFolder, null, true, false);
+                ImportBatchTask importTask = new ImportBatchTask(batchInfo, destFolder, null, true, false, false);
                 importTask.run(importMonitor);
 
                 // Check for timeout or cancellation

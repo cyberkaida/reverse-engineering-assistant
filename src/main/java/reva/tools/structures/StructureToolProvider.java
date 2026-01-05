@@ -976,7 +976,7 @@ public class StructureToolProvider extends AbstractToolProvider {
                 // Proceed with deletion
                 int txId = program.startTransaction("Delete Structure");
                 try {
-                    boolean removed = dtm.remove(dt, null);
+                    boolean removed = dtm.remove(dt);
 
                     program.endTransaction(txId, true);
 

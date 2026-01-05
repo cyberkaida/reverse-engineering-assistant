@@ -175,6 +175,134 @@ class TestFatMachoBinaryImport:
         assert has_arm or has_x86, "Should have at least one recognized architecture"
 
 
+class TestImportedFilesInProject:
+    """Tests verifying imported files appear correctly in list-project-files."""
+
+    async def test_archive_files_appear_in_project(self, mcp_stdio_client, isolated_workspace):
+        """
+        After importing an archive, verify all programs appear in list-project-files.
+
+        This tests the integration between import-file and list-project-files,
+        ensuring imported programs are accessible for further analysis.
+        """
+        archive_path = skip_if_fixture_missing("test_archive.zip")
+
+        # First, import the archive
+        import_result = await mcp_stdio_client.call_tool(
+            "import-file",
+            arguments={
+                "path": archive_path,
+                "enableVersionControl": False
+            }
+        )
+
+        assert import_result is not None
+        import_data = json.loads(import_result.content[0].text)
+        assert import_data.get("success") is True, "Import should succeed"
+
+        imported_programs = import_data.get("importedPrograms", [])
+        print(f"\n=== Imported {len(imported_programs)} programs ===")
+        for prog in imported_programs:
+            print(f"  - {prog}")
+
+        # Now verify files appear in list-project-files
+        list_result = await mcp_stdio_client.call_tool(
+            "list-project-files",
+            arguments={"folderPath": "/", "recursive": True}
+        )
+
+        assert list_result is not None
+        assert hasattr(list_result, 'content'), "list-project-files should return content"
+
+        # list-project-files returns multiple content items:
+        # - First item is metadata: {folderPath, folderName, isRecursive, itemCount}
+        # - Subsequent items are file/folder info
+        print(f"\n=== Project files response ===")
+        print(f"Number of content items: {len(list_result.content)}")
+
+        # Parse metadata from first item
+        metadata = json.loads(list_result.content[0].text)
+        item_count = metadata.get("itemCount", 0)
+        print(f"Metadata: {json.dumps(metadata, indent=2)}")
+        print(f"Item count from metadata: {item_count}")
+
+        # Parse file entries from remaining items
+        file_entries = []
+        for i, content in enumerate(list_result.content[1:], 1):
+            try:
+                entry = json.loads(content.text)
+                file_entries.append(entry)
+                print(f"  [{i}] {entry}")
+            except (json.JSONDecodeError, AttributeError):
+                pass
+
+        # Verify we got files matching the import count
+        assert item_count >= len(imported_programs), \
+            f"Should have at least {len(imported_programs)} items, got {item_count}"
+
+        print(f"\n✓ Project listing shows {item_count} items after importing {len(imported_programs)} programs")
+
+    async def test_fat_binary_slices_appear_separately(self, mcp_stdio_client, isolated_workspace):
+        """
+        After importing a fat binary, verify both architecture slices appear in project.
+
+        Fat Mach-O binaries produce multiple programs (one per architecture).
+        This verifies each slice is independently accessible.
+        """
+        fat_binary_path = skip_if_fixture_missing("test_fat_binary")
+
+        # Import the fat binary
+        import_result = await mcp_stdio_client.call_tool(
+            "import-file",
+            arguments={
+                "path": fat_binary_path,
+                "enableVersionControl": False
+            }
+        )
+
+        assert import_result is not None
+        import_data = json.loads(import_result.content[0].text)
+        assert import_data.get("success") is True, "Import should succeed"
+
+        imported_programs = import_data.get("importedPrograms", [])
+        assert len(imported_programs) == 2, f"Fat binary should produce 2 programs, got {len(imported_programs)}"
+
+        print(f"\n=== Imported fat binary slices ===")
+        for prog in imported_programs:
+            print(f"  - {prog}")
+
+        # Verify files appear in list-project-files
+        list_result = await mcp_stdio_client.call_tool(
+            "list-project-files",
+            arguments={"folderPath": "/", "recursive": True}
+        )
+
+        assert list_result is not None
+
+        # list-project-files returns multiple content items:
+        # - First item is metadata with itemCount
+        # - Subsequent items are file/folder info
+        metadata = json.loads(list_result.content[0].text)
+        item_count = metadata.get("itemCount", 0)
+
+        print(f"\n=== Project files after fat binary import ===")
+        print(f"Metadata: {json.dumps(metadata, indent=2)}")
+        print(f"Item count: {item_count}")
+
+        # Verify we have 2 files (one per architecture)
+        assert item_count >= 2, f"Should have at least 2 files (one per arch), got {item_count}"
+
+        # Parse and display file entries
+        for i, content in enumerate(list_result.content[1:], 1):
+            try:
+                entry = json.loads(content.text)
+                print(f"  [{i}] {entry}")
+            except (json.JSONDecodeError, AttributeError):
+                pass
+
+        print(f"\n✓ Fat binary slices appear in project ({item_count} items)")
+
+
 class TestSingleBinaryImport:
     """Tests for importing single-architecture binaries."""
 

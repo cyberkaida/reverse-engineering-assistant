@@ -54,7 +54,6 @@ import ghidra.plugins.importer.batch.BatchGroup;
 import ghidra.plugins.importer.batch.BatchGroup.BatchLoadConfig;
 import ghidra.plugins.importer.batch.BatchGroupLoadSpec;
 import ghidra.plugins.importer.batch.BatchInfo;
-import ghidra.plugins.importer.tasks.ImportBatchTask;
 import ghidra.app.util.bin.ByteProvider;
 import ghidra.framework.store.local.LocalFileSystem;
 import io.modelcontextprotocol.server.McpSyncServer;
@@ -885,7 +884,7 @@ public class ProjectToolProvider extends AbstractToolProvider {
                     return createErrorResult("No supported file formats found in: " + path);
                 }
 
-                // Get configuration for timeouts
+                // Use configuration for timeouts
                 int importTimeoutSeconds = configManager != null ?
                     configManager.getDecompilerTimeoutSeconds() * 2 : 300; // 2x decompiler timeout or 5 min default
                 int analysisTimeoutSeconds = configManager != null ?
@@ -1060,15 +1059,32 @@ public class ProjectToolProvider extends AbstractToolProvider {
                 // Process imported files: analyze if requested, then add to version control
                 // Use the tracked importedDomainFiles list for accurate processing
                 if ((enableVersionControl || analyzeAfterImport) && !importedDomainFiles.isEmpty()) {
-                    TaskMonitor postMonitor = TimeoutTaskMonitor.timeoutIn(analysisTimeoutSeconds, TimeUnit.SECONDS);
+                    int totalFilesToProcess = importedDomainFiles.size();
 
-                    for (DomainFile domainFile : importedDomainFiles) {
+                    for (int fileIndex = 0; fileIndex < totalFilesToProcess; fileIndex++) {
+                        DomainFile domainFile = importedDomainFiles.get(fileIndex);
+
+                        // Create per-file timeout to ensure each file gets equal treatment
+                        TaskMonitor postMonitor = TimeoutTaskMonitor.timeoutIn(analysisTimeoutSeconds, TimeUnit.SECONDS);
+
                         if (postMonitor.isCancelled()) {
+                            // Record timeout error and skipped files
                             detailedErrors.add(Map.of(
                                 "stage", "postProcessing",
                                 "error", "Post-processing timed out",
                                 "errorType", "TimeoutError"
                             ));
+
+                            // Record individual timeout/skip error for each remaining file
+                            for (int j = fileIndex; j < totalFilesToProcess; j++) {
+                                DomainFile remainingFile = importedDomainFiles.get(j);
+                                detailedErrors.add(Map.of(
+                                    "stage", "postProcessing",
+                                    "programPath", remainingFile.getPathname(),
+                                    "error", "Post-processing skipped due to prior timeout",
+                                    "errorType", "TimeoutError"
+                                ));
+                            }
                             break;
                         }
 
@@ -1213,6 +1229,7 @@ public class ProjectToolProvider extends AbstractToolProvider {
     /**
      * Sanitizes a filename by replacing invalid characters with underscores.
      * This is a copy of ImportBatchTask.fixupProjectFilename which is private.
+     * Copied from Ghidra 12.0 source - update if Ghidra's implementation changes.
      *
      * @param filename The filename to sanitize
      * @return The sanitized filename with invalid characters replaced by underscores
@@ -1230,6 +1247,7 @@ public class ProjectToolProvider extends AbstractToolProvider {
     /**
      * Convert a file's FSRL into a target project path, using import path options.
      * This is a copy of ImportBatchTask.fsrlToPath which is package-private.
+     * Copied from Ghidra 12.0 source - update if Ghidra's implementation changes.
      *
      * @param fsrl FSRL of the file to convert
      * @param userSrc FSRL of the user-added source file

@@ -174,7 +174,7 @@ class TestFatMachoBinaryImport:
         print(f"✓ Fat binary slices extracted: {imported_programs}")
         print(f"  Has ARM: {has_arm}, Has x86: {has_x86}")
 
-        assert has_arm or has_x86, "Should have at least one recognized architecture"
+        assert has_arm and has_x86, "Fat binary should have both ARM and x86 architectures"
 
 
 class TestImportedFilesInProject:

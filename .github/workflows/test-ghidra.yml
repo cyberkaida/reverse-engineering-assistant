@@ -25,6 +25,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
     - uses: actions/checkout@v6
+      with:
+        lfs: true
 
     - name: Set up Java 🍵
       uses: actions/setup-java@v5
@@ -88,6 +90,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v6
+      with:
+        lfs: true
 
     - name: Set up Java 🍵
       uses: actions/setup-java@v5
@@ -130,6 +134,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v6
+      with:
+        lfs: true
 
     - name: Set up Java 🍵
       uses: actions/setup-java@v5

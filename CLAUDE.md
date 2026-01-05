@@ -262,13 +262,13 @@ Install via: `claude plugin marketplace add cyberkaida/reverse-engineering-assis
 ### Java
 - Ghidra: 12.0+ (source at `../ghidra`)
 - Java: 21+
-- MCP SDK: io.modelcontextprotocol.sdk v0.14.0 (BOM-managed)
-- Jackson: 2.19.2 (force-resolved for MCP SDK compatibility)
+- MCP SDK: io.modelcontextprotocol.sdk v0.17.0 (BOM-managed)
+- Jackson: 2.20.x (force-resolved for MCP SDK compatibility)
 - Jetty: 11.0.26 (embedded servlet server)
 
 ### Python
 - Python: 3.10+ (managed via uv)
-- PyGhidra: 1.0.0+ (Ghidra initialization)
+- PyGhidra: 3.0.0+ (Ghidra initialization)
 - MCP: Latest (stdio transport implementation)
 - httpx + httpx-sse: MCP HTTP client (for StdioBridge)
 
@@ -315,7 +315,7 @@ Notable tool capabilities added recently:
 - **Testing (Java)**: Integration tests require `java.awt.headless=false`, fork=1
 - **Testing (Python)**: pytest with markers (unit/integration/e2e/cli)
 - **Build**: Use `gradle` directly, NOT `./gradlew`
-- **MCP SDK**: v0.14.0 with forced Jackson 2.19.2 for compatibility
+- **MCP SDK**: v0.17.0 with forced Jackson 2.20.x for compatibility
 
 ## Important Notes
 

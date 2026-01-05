@@ -2,13 +2,61 @@
 
 This file provides guidance for Claude Code when working with the ReVa MCP server architecture in the `reva.server` package.
 
+## Quick Reference
+
+| Item | Value |
+|------|-------|
+| **MCP Endpoint** | `http://localhost:8080/mcp/message` |
+| **Transport** | Streamable HTTP (NOT SSE) |
+| **MCP SDK Version** | v0.17.0 |
+| **Jetty Version** | 11.0.26 |
+| **Default Port** | 8080 |
+| **Default Host** | 127.0.0.1 (localhost) |
+
 ## Package Overview
 
 The `reva.server` package contains the core MCP (Model Context Protocol) server implementation that enables AI-assisted reverse engineering through Ghidra. The server uses Jetty with streamable HTTP transport to provide real-time communication between AI clients and Ghidra's analysis capabilities.
 
+### Architecture Diagram
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        MCP Clients                              │
+│  (Claude CLI, VSCode, other MCP clients)                        │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                    HTTP POST /mcp/message
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                     Jetty HTTP Server                           │
+│  ┌─────────────────────────────────────────────────────────────┐│
+│  │              ApiKeyAuthFilter (optional)                    ││
+│  └─────────────────────────────────────────────────────────────┘│
+│  ┌─────────────────────────────────────────────────────────────┐│
+│  │     HttpServletStreamableServerTransportProvider            ││
+│  └─────────────────────────────────────────────────────────────┘│
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    McpSyncServer                                │
+│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐ │
+│  │ Tool Providers  │  │Resource Providers│  │   Prompts      │ │
+│  │     (17)        │  │      (1+)       │  │   (future)     │ │
+│  └─────────────────┘  └─────────────────┘  └─────────────────┘ │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    Ghidra Programs                              │
+│              (via RevaProgramManager)                           │
+└─────────────────────────────────────────────────────────────────┘
+```
+
 ### Key Architecture Components
 
-- **MCP Server**: Built on MCP SDK v0.14.0 with streamable transport (NOT SSE)
+- **MCP Server**: Built on MCP SDK v0.17.0 with streamable transport (NOT SSE)
 - **HTTP Server**: Jetty 11.0.26 embedded servlet container
 - **Transport Layer**: HttpServletStreamableServerTransportProvider for bidirectional streaming
 - **Security Layer**: Optional API key authentication via ApiKeyAuthFilter
@@ -19,50 +67,37 @@ The `reva.server` package contains the core MCP (Model Context Protocol) server 
 
 ### McpServerManager
 
-The central orchestrator for the entire MCP server infrastructure. This class manages:
+The central orchestrator for the entire MCP server infrastructure. Implements `RevaMcpService` interface.
 
-- **Server Lifecycle**: Start, stop, restart operations with graceful handling
-- **Transport Configuration**: Jetty server setup with streamable HTTP transport
-- **Provider Registration**: Registration of 17 tool providers and resource providers
-- **Multi-Tool Coordination**: Tracking programs across multiple Ghidra tool instances
-- **Configuration Integration**: Dynamic response to configuration changes with automatic restart
-- **Security**: Optional API key authentication filter integration
+**Key Responsibilities:**
 
-#### Key Responsibilities
+| Responsibility | Description |
+|----------------|-------------|
+| Server Lifecycle | Start, stop, restart with graceful handling |
+| Transport Config | Jetty server setup with streamable HTTP |
+| Provider Registration | 17 tool providers + resource providers |
+| Multi-Tool Coordination | Track programs across Ghidra tool instances |
+| Configuration | Dynamic response to config changes |
+| Security | Optional API key authentication |
 
-1. **Server Management**
-   - Initialize MCP server with capabilities (prompts, resources with subscriptions, tools)
-   - Configure Jetty HTTP server with ServerConnector for host/port binding
-   - Manage server startup/shutdown lifecycle with readiness checks
-   - Handle configuration-driven automatic restarts
+### ApiKeyAuthFilter
 
-2. **Provider Orchestration**
-   - Register 17 ToolProvider implementations (symbols, functions, decompiler, data, memory, etc.)
-   - Register ResourceProvider implementations (program list, etc.)
-   - Coordinate program lifecycle events across all providers
-   - Handle provider cleanup on shutdown
+Optional servlet filter for API key authentication:
+- Header: `X-API-Key`
+- Disabled by default
+- Returns HTTP 401 on invalid key
+- Logs authentication attempts
 
-3. **Multi-Tool Support**
-   - Track which tools have which programs open using ConcurrentHashMap
-   - Maintain active program/tool state with volatile fields
-   - Coordinate program open/close events across tools
-   - Notify providers only when last tool closes a program
+## Server Configuration
 
-4. **Security Management**
-   - Optional API key authentication via ApiKeyAuthFilter
-   - Configurable server host binding (localhost, 0.0.0.0, etc.)
-   - Dynamic authentication configuration with automatic restart
-
-## Server Architecture
-
-### MCP Server Configuration
+### MCP Server Initialization
 
 ```java
-// Server capabilities configuration
+// Server capabilities (MCP SDK v0.17.0)
 McpSchema.ServerCapabilities serverCapabilities = McpSchema.ServerCapabilities.builder()
-    .prompts(true)      // Support prompt templates
-    .resources(true, true)  // Support resources with subscriptions
-    .tools(true)        // Support tool calls
+    .prompts(true)           // Support prompt templates
+    .resources(true, true)   // Support resources with subscriptions
+    .tools(true)             // Support tool calls
     .build();
 
 // Server initialization
@@ -99,13 +134,11 @@ httpServer.addConnector(connector);
 httpServer.setHandler(servletContextHandler);
 ```
 
-### Streamable Transport Implementation
-
-The server uses `HttpServletStreamableServerTransportProvider` for bidirectional streaming:
+### Streamable Transport Configuration
 
 ```java
-// Transport provider configuration
-// Note: As of MCP SDK v0.14.0, objectMapper uses McpJsonMapper.getDefault() automatically
+// Transport provider configuration (MCP SDK v0.17.0)
+// Note: objectMapper uses McpJsonMapper.getDefault() automatically
 currentTransportProvider = HttpServletStreamableServerTransportProvider.builder()
     .mcpEndpoint(MCP_MSG_ENDPOINT)  // "/mcp/message"
     .keepAliveInterval(java.time.Duration.ofSeconds(30))
@@ -114,182 +147,116 @@ currentTransportProvider = HttpServletStreamableServerTransportProvider.builder(
 
 **CRITICAL**: Always use `HttpServletStreamableServerTransportProvider` - NEVER revert to SSE transport.
 
-## Server Lifecycle Management
+## Server Lifecycle
 
-### Startup Process
+### Startup Sequence
 
-1. **Configuration Validation**: Check if server is enabled via ConfigManager
-2. **Host/Port Binding**: Configure ServerConnector with host and port
-3. **Security Setup**: Add ApiKeyAuthFilter if authentication is enabled
-4. **Transport Initialization**: Configure streamable HTTP transport
-5. **Provider Registration**: Register all 17 tool providers and resource providers
-6. **Server Launch**: Start Jetty server in background GThreadPool thread
-7. **Readiness Check**: Wait up to 10 seconds for server to be ready
+1. **Configuration Validation** - Check if server is enabled via ConfigManager
+2. **Host/Port Binding** - Configure ServerConnector with host and port
+3. **Security Setup** - Add ApiKeyAuthFilter if authentication is enabled
+4. **Transport Initialization** - Configure streamable HTTP transport
+5. **Provider Registration** - Register all 17 tool providers and resource providers
+6. **Server Launch** - Start Jetty server in background GThreadPool thread
+7. **Readiness Check** - Wait up to 10 seconds for server to be ready
 
-### Shutdown Process
+### Shutdown Sequence
 
-1. **Configuration Cleanup**: Remove config change listeners
-2. **Tool Deregistration**: Clear all registered tools and program mappings
-3. **Provider Cleanup**: Notify all providers to clean up resources
-4. **Server Shutdown**: Stop Jetty server gracefully
-5. **MCP Cleanup**: Close MCP server gracefully
-6. **Thread Pool Shutdown**: Terminate background thread pool
+1. **Configuration Cleanup** - Remove config change listeners
+2. **Tool Deregistration** - Clear all registered tools and program mappings
+3. **Provider Cleanup** - Notify all providers to clean up resources
+4. **Server Shutdown** - Stop Jetty server gracefully
+5. **MCP Cleanup** - Close MCP server gracefully
+6. **Thread Pool Shutdown** - Terminate background thread pool
 
-### Restart Handling
+### Dynamic Restart
 
 The server supports dynamic restart for configuration changes:
 
 ```java
 public void restartServer() {
-    // Stop current server
     stopServer();
-    
-    // Recreate transport with new configuration
     recreateTransportProvider();
-    
-    // Start with new configuration
     startServer();
 }
 ```
 
-## Tool and Resource Provider Registration
+**Configuration changes that trigger restart:**
+- Server port
+- Server host binding
+- Server enabled/disabled
+- API key enabled/disabled
+- API key value
 
-### Tool Provider Registration Pattern
+## Tool and Resource Providers
+
+### Tool Provider Registration
 
 ```java
 private void initializeToolProviders() {
-    // Create all 17 tool providers
+    // Core Analysis (6)
     toolProviders.add(new SymbolToolProvider(server));
     toolProviders.add(new StringToolProvider(server));
     toolProviders.add(new FunctionToolProvider(server));
-    toolProviders.add(new DataToolProvider(server));
     toolProviders.add(new DecompilerToolProvider(server));
-    toolProviders.add(new MemoryToolProvider(server));
-    toolProviders.add(new ProjectToolProvider(server));
     toolProviders.add(new CrossReferencesToolProvider(server));
+    toolProviders.add(new MemoryToolProvider(server));
+
+    // Data & Types (3)
+    toolProviders.add(new DataToolProvider(server));
     toolProviders.add(new DataTypeToolProvider(server));
     toolProviders.add(new StructureToolProvider(server));
-    toolProviders.add(new CommentToolProvider(server));
-    toolProviders.add(new BookmarkToolProvider(server));
-    toolProviders.add(new ImportExportToolProvider(server));
-    toolProviders.add(new DataFlowToolProvider(server));
+
+    // Advanced Analysis (5)
     toolProviders.add(new CallGraphToolProvider(server));
+    toolProviders.add(new DataFlowToolProvider(server));
     toolProviders.add(new ConstantSearchToolProvider(server));
     toolProviders.add(new VtableToolProvider(server));
+    toolProviders.add(new ImportExportToolProvider(server));
+
+    // Annotations (2)
+    toolProviders.add(new CommentToolProvider(server));
+    toolProviders.add(new BookmarkToolProvider(server));
+
+    // Project Management (1)
+    toolProviders.add(new ProjectToolProvider(server));
 
     // Register all tools with the server
-    // Note: As of MCP SDK v0.14.0, tool registration is idempotent and replaces duplicates
+    // Note: MCP SDK v0.17.0 - tool registration is idempotent
     for (ToolProvider provider : toolProviders) {
         provider.registerTools();
     }
 }
 ```
 
-### Resource Provider Registration Pattern
+### Resource Provider Registration
 
 ```java
 private void initializeResourceProviders() {
     resourceProviders.add(new ProgramListResource(server));
     // ... additional resource providers
-    
-    // Register all resources
+
     for (ResourceProvider provider : resourceProviders) {
         provider.register();
     }
 }
 ```
 
-## Configuration Integration
-
-### Dynamic Configuration Updates
-
-The server implements `ConfigChangeListener` to respond to configuration changes:
-
-```java
-@Override
-public void onConfigChanged(String category, String name, Object oldValue, Object newValue) {
-    if (ConfigManager.SERVER_OPTIONS.equals(category)) {
-        if (ConfigManager.SERVER_PORT.equals(name)) {
-            // Port changed - restart server
-            restartServer();
-        } else if (ConfigManager.SERVER_HOST.equals(name)) {
-            // Host binding changed - restart server
-            restartServer();
-        } else if (ConfigManager.SERVER_ENABLED.equals(name)) {
-            // Enable/disable changed - restart server
-            restartServer();
-        } else if (ConfigManager.API_KEY_ENABLED.equals(name)) {
-            // API key authentication toggle - restart server
-            restartServer();
-        } else if (ConfigManager.API_KEY.equals(name)) {
-            // API key value changed - restart server
-            restartServer();
-        }
-    }
-}
-```
-
-### Configuration-Driven Transport Recreation
-
-When configuration changes require transport updates:
-
-```java
-private void recreateTransportProvider() {
-    int serverPort = configManager.getServerPort();
-    String serverHost = configManager.getServerHost();
-    String baseUrl = "http://" + serverHost + ":" + serverPort;
-
-    // Note: As of MCP SDK v0.14.0, objectMapper uses McpJsonMapper.getDefault() automatically
-    currentTransportProvider = HttpServletStreamableServerTransportProvider.builder()
-        .mcpEndpoint(MCP_MSG_ENDPOINT)
-        .keepAliveInterval(java.time.Duration.ofSeconds(30))
-        .build();
-}
-```
-
-## Error Handling and Server Stability
-
-### Graceful Startup Error Handling
-
-```java
-threadPool.submit(() -> {
-    try {
-        httpServer.start();
-        serverReady = true;
-        httpServer.join(); // Blocks until server stops
-    } catch (Exception e) {
-        if (e instanceof InterruptedException) {
-            // Normal shutdown
-            Thread.currentThread().interrupt();
-        } else {
-            Msg.error(this, "Error starting MCP server", e);
-        }
-    }
-});
-```
-
-### Server Readiness Validation
-
-```java
-// Wait for server startup with timeout
-int maxWaitTime = 10000; // 10 seconds
-int totalWait = 0;
-
-while (!serverReady && totalWait < maxWaitTime) {
-    Thread.sleep(waitInterval);
-    totalWait += waitInterval;
-}
-
-if (!serverReady) {
-    Msg.error(this, "Server failed to start within timeout");
-}
-```
-
 ## Threading and Concurrency
 
-### Thread Pool Management
+### Thread-Safe Data Structures
 
-The server uses Ghidra's `GThreadPool` for background operations:
+```java
+// Thread-safe collections for multi-tool tracking
+private final Set<PluginTool> registeredTools = ConcurrentHashMap.newKeySet();
+private final Map<Program, Set<PluginTool>> programToTools = new ConcurrentHashMap<>();
+
+// Volatile fields for cross-thread visibility
+private volatile Program activeProgram;
+private volatile PluginTool activeTool;
+private volatile boolean serverReady = false;
+```
+
+### Thread Pool Management
 
 ```java
 // Initialize dedicated thread pool
@@ -310,65 +277,7 @@ threadPool.submit(() -> {
         }
     }
 });
-
-// Shutdown cleanup
-threadPool.shutdownNow();
 ```
-
-### Thread-Safe Data Structures
-
-All server state uses concurrent data structures for thread safety:
-
-```java
-// Thread-safe collections for multi-tool tracking
-private final Set<PluginTool> registeredTools = ConcurrentHashMap.newKeySet();
-private final Map<Program, Set<PluginTool>> programToTools = new ConcurrentHashMap<>();
-
-// Volatile fields for active state (visibility across threads)
-private volatile Program activeProgram;
-private volatile PluginTool activeTool;
-private volatile boolean serverReady = false;
-```
-
-**Key Pattern**: Use `ConcurrentHashMap.newKeySet()` for thread-safe Set, `ConcurrentHashMap` for Map, and `volatile` for simple state flags.
-
-### ApiKeyAuthFilter
-
-Optional servlet filter that provides API key authentication:
-
-```java
-public class ApiKeyAuthFilter implements Filter {
-    private static final String API_KEY_HEADER = "X-API-Key";
-
-    @Override
-    public void doFilter(ServletRequest request, ServletResponse response, FilterChain chain) {
-        // Check if API key authentication is enabled
-        if (!configManager.isApiKeyEnabled()) {
-            chain.doFilter(request, response);
-            return;
-        }
-
-        // Validate X-API-Key header against configured API key
-        String providedApiKey = httpRequest.getHeader(API_KEY_HEADER);
-        String configuredApiKey = configManager.getApiKey();
-
-        if (providedApiKey == null || !providedApiKey.equals(configuredApiKey)) {
-            sendUnauthorizedResponse(httpResponse, "Invalid API key");
-            return;
-        }
-
-        // API key valid - continue
-        chain.doFilter(request, response);
-    }
-}
-```
-
-**Security Features**:
-- Optional authentication (disabled by default)
-- Checks `X-API-Key` header against configured value
-- Returns HTTP 401 with JSON error response on failure
-- Logs authentication attempts with client IP and user agent
-- Dynamic enable/disable with automatic server restart
 
 ## Multi-Tool Program Coordination
 
@@ -379,10 +288,10 @@ public class ApiKeyAuthFilter implements Filter {
 public void programOpened(Program program, PluginTool tool) {
     // Add to program-tool mapping
     programToTools.computeIfAbsent(program, k -> ConcurrentHashMap.newKeySet()).add(tool);
-    
+
     // Set as active program
     setActiveProgram(program, tool);
-    
+
     // Notify all providers
     for (ResourceProvider provider : resourceProviders) {
         provider.programOpened(program);
@@ -391,14 +300,9 @@ public void programOpened(Program program, PluginTool tool) {
         provider.programOpened(program);
     }
 }
-```
 
-### Program Close Coordination
-
-```java
 @Override
 public void programClosed(Program program, PluginTool tool) {
-    // Remove from mapping
     Set<PluginTool> tools = programToTools.get(program);
     if (tools != null) {
         tools.remove(tool);
@@ -406,8 +310,8 @@ public void programClosed(Program program, PluginTool tool) {
             programToTools.remove(program);
         }
     }
-    
-    // Only notify providers if last tool closed the program
+
+    // Only notify providers if LAST tool closed the program
     if (tools == null || tools.isEmpty()) {
         for (ResourceProvider provider : resourceProviders) {
             provider.programClosed(program);
@@ -419,18 +323,108 @@ public void programClosed(Program program, PluginTool tool) {
 }
 ```
 
-## Testing Patterns for Server Components
+## Configuration Integration
+
+### Dynamic Configuration Updates
+
+The server implements `ConfigChangeListener`:
+
+```java
+@Override
+public void onConfigChanged(String category, String name, Object oldValue, Object newValue) {
+    if (ConfigManager.SERVER_OPTIONS.equals(category)) {
+        // These changes require server restart
+        if (ConfigManager.SERVER_PORT.equals(name) ||
+            ConfigManager.SERVER_HOST.equals(name) ||
+            ConfigManager.SERVER_ENABLED.equals(name) ||
+            ConfigManager.API_KEY_ENABLED.equals(name) ||
+            ConfigManager.API_KEY.equals(name)) {
+            restartServer();
+        }
+    }
+}
+```
+
+## Service Registry Integration
+
+```java
+// Register services for component access
+RevaInternalServiceRegistry.registerService(ConfigManager.class, configManager);
+RevaInternalServiceRegistry.registerService(McpSyncServer.class, server);
+RevaInternalServiceRegistry.registerService(McpServerManager.class, this);
+RevaInternalServiceRegistry.registerService(RevaMcpService.class, this);
+
+// Access services from other components
+McpServerManager serverManager = RevaInternalServiceRegistry.getService(McpServerManager.class);
+ConfigManager configManager = RevaInternalServiceRegistry.getService(ConfigManager.class);
+```
+
+## Adding New Providers
+
+### New Tool Provider Checklist
+
+1. Create class extending `AbstractToolProvider`
+2. Implement `registerTools()` method
+3. Add to `initializeToolProviders()` in McpServerManager
+4. Handle `programOpened()` and `programClosed()` events
+5. Implement `cleanup()` for shutdown
+6. Add package-level CLAUDE.md documentation
+
+### New Resource Provider Checklist
+
+1. Create class extending `AbstractResourceProvider`
+2. Implement `register()` method
+3. Add to `initializeResourceProviders()` in McpServerManager
+4. Handle program lifecycle events
+5. Implement `cleanup()` for shutdown
+
+## Constants
+
+```java
+private static final String MCP_MSG_ENDPOINT = "/mcp/message";
+private static final String MCP_SERVER_NAME = "ReVa";
+private static final String MCP_SERVER_VERSION = "1.0.0";
+private static final String API_KEY_HEADER = "X-API-Key";
+
+// Timeouts and intervals
+private static final int MAX_STARTUP_WAIT = 10000;  // 10 seconds
+private static final int STARTUP_CHECK_INTERVAL = 100;  // 100ms
+private static final Duration KEEP_ALIVE_INTERVAL = Duration.ofSeconds(30);
+```
+
+## Troubleshooting
+
+### Server Won't Start
+
+| Symptom | Cause | Solution |
+|---------|-------|----------|
+| Port already in use | Another process on port 8080 | Change port in Ghidra settings or stop other process |
+| Server not ready timeout | Slow startup or error | Check Ghidra console for errors |
+| Jackson conflicts | Wrong Jackson version | Run `rm lib/*.jar` and rebuild |
+
+### Connection Issues
+
+| Symptom | Cause | Solution |
+|---------|-------|----------|
+| Connection refused | Server not running | Ensure Ghidra is running with ReVa enabled |
+| 401 Unauthorized | API key mismatch | Check X-API-Key header matches configured key |
+| Timeout | Server overloaded | Increase client timeout or reduce concurrent requests |
+
+### Tool Errors
+
+| Symptom | Cause | Solution |
+|---------|-------|----------|
+| Program not found | Program not open in Ghidra | Open program in Ghidra first |
+| Tool not registered | Provider initialization failed | Check logs for registration errors |
+
+## Testing
 
 ### Integration Test Setup
 
 ```java
 // Server manager initialization in tests
 McpServerManager serverManager = new McpServerManager(testTool);
-
-// Register test tool
 serverManager.registerTool(testTool);
-
-// Validate server startup
 assertTrue("Server should be running", serverManager.isServerRunning());
 ```
 
@@ -450,80 +444,21 @@ serverManager.shutdown();
 assertFalse("Server should be stopped", serverManager.isServerRunning());
 ```
 
-## Service Registry Integration
+## Critical Implementation Notes
 
-### Service Registration Pattern
-
-```java
-// Register services for component access
-RevaInternalServiceRegistry.registerService(ConfigManager.class, configManager);
-RevaInternalServiceRegistry.registerService(McpSyncServer.class, server);
-RevaInternalServiceRegistry.registerService(McpServerManager.class, this);
-RevaInternalServiceRegistry.registerService(RevaMcpService.class, this);
-```
-
-### Service Consumption Pattern
-
-```java
-// Access services from other components
-McpServerManager serverManager = RevaInternalServiceRegistry.getService(McpServerManager.class);
-ConfigManager configManager = RevaInternalServiceRegistry.getService(ConfigManager.class);
-```
-
-## Common Development Patterns
-
-### Adding New Tool Providers
-
-1. Create provider class extending `AbstractToolProvider`
-2. Implement `registerTools()` method to define all tools
-3. Add to `initializeToolProviders()` list in McpServerManager
-4. Handle program lifecycle events (`programOpened`, `programClosed`) appropriately
-5. Implement `cleanup()` method for shutdown
-
-### Adding New Resource Providers
-
-1. Create provider class extending `AbstractResourceProvider`
-2. Implement `register()` method to register resources with server
-3. Add to `initializeResourceProviders()` list in McpServerManager
-4. Handle program lifecycle events appropriately
-5. Implement `cleanup()` method for shutdown
-
-### Configuration-Driven Features
-
-1. Add configuration option to `ConfigManager` with getter/setter
-2. Add configuration option name constant to `ConfigManager`
-3. Implement `onConfigChanged()` in McpServerManager or appropriate component
-4. Use `restartServer()` for changes requiring transport/servlet reconfiguration
-5. Handle dynamic updates without restart when possible (minimal changes)
-
-## Important Implementation Notes
-
-- **NEVER revert to SSE transport** - Always use `HttpServletStreamableServerTransportProvider` (streamable HTTP)
-- **MCP SDK v0.14.0** - Tool registration is idempotent; `McpJsonMapper.getDefault()` used automatically
+- **NEVER revert to SSE transport** - Always use `HttpServletStreamableServerTransportProvider`
+- **MCP SDK v0.17.0** - Tool registration is idempotent; `McpJsonMapper.getDefault()` used automatically
 - **Always restore interrupt status** - Use `Thread.currentThread().interrupt()` after catching `InterruptedException`
-- **Volatile for visibility** - `serverReady`, `activeProgram`, `activeTool` must be volatile for thread visibility
-- **ConcurrentHashMap for thread safety** - Use `ConcurrentHashMap.newKeySet()` for sets, `ConcurrentHashMap` for maps
-- **Graceful shutdown** - Always clean up providers, close server, and shutdown thread pool
-- **Multi-tool coordination** - Notify providers only when last tool closes a program
-- **Configuration changes trigger restart** - Port, host, enable/disable, API key changes all restart server
-- **Host binding for security** - Use `ServerConnector` with configurable host (localhost vs 0.0.0.0)
-- **Optional API key auth** - Use `ApiKeyAuthFilter` with X-API-Key header validation
+- **Volatile for visibility** - `serverReady`, `activeProgram`, `activeTool` must be volatile
+- **ConcurrentHashMap for thread safety** - Use `ConcurrentHashMap.newKeySet()` for sets
+- **Graceful shutdown** - Always clean up providers, close server, shutdown thread pool
+- **Multi-tool coordination** - Notify providers only when LAST tool closes a program
+- **Configuration changes trigger restart** - Port, host, enable/disable, API key changes
 
-## Constants and Configuration
+## Related Documentation
 
-```java
-private static final String MCP_MSG_ENDPOINT = "/mcp/message";
-private static final String MCP_SERVER_NAME = "ReVa";
-private static final String MCP_SERVER_VERSION = "1.0.0";
-private static final String API_KEY_HEADER = "X-API-Key";  // For ApiKeyAuthFilter
-
-// Timeouts and intervals
-private static final int MAX_STARTUP_WAIT = 10000; // 10 seconds
-private static final int STARTUP_CHECK_INTERVAL = 100; // 100ms
-private static final Duration KEEP_ALIVE_INTERVAL = Duration.ofSeconds(30);
-```
-
-## Server Classes Summary
-
-- **McpServerManager**: Main server orchestrator, manages lifecycle, providers, and multi-tool coordination
-- **ApiKeyAuthFilter**: Optional servlet filter for API key authentication via X-API-Key header
+- `/src/main/java/reva/plugin/CLAUDE.md` - ConfigManager, plugin architecture
+- `/src/main/java/reva/tools/CLAUDE.md` - Tool provider patterns
+- `/src/main/java/reva/resources/CLAUDE.md` - Resource provider patterns
+- `/src/main/java/reva/services/CLAUDE.md` - RevaMcpService interface
+- `/src/main/java/reva/headless/CLAUDE.md` - Headless mode server usage

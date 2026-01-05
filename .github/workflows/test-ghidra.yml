@@ -25,6 +25,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
     - uses: actions/checkout@v6
+      with:
+        lfs: true
 
     - name: Set up Java 🍵
       uses: actions/setup-java@v5
@@ -36,6 +38,7 @@ jobs:
       uses: antoniovazquezblanco/setup-ghidra@v2.0.16
       with:
         version: ${{ matrix.ghidra-version }}
+        auth_token: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Setup Xvfb for headless testing
       run: |
@@ -87,6 +90,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v6
+      with:
+        lfs: true
 
     - name: Set up Java 🍵
       uses: actions/setup-java@v5
@@ -98,6 +103,7 @@ jobs:
       uses: antoniovazquezblanco/setup-ghidra@v2.0.16
       with:
         version: "latest"
+        auth_token: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Setup Xvfb for headless testing
       run: |
@@ -128,6 +134,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v6
+      with:
+        lfs: true
 
     - name: Set up Java 🍵
       uses: actions/setup-java@v5
@@ -146,7 +154,7 @@ jobs:
       uses: antoniovazquezblanco/setup-ghidra@v2.0.16
       with:
         version: "latest"
-
+        auth_token: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Setup Gradle for CodeQL 🔧
       uses: gradle/actions/setup-gradle@v5

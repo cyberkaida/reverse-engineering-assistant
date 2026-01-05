@@ -30,6 +30,7 @@ import ghidra.util.Msg;
 
 import reva.server.McpServerManager;
 import reva.services.RevaMcpService;
+import reva.ui.CaptureDebugAction;
 import reva.util.RevaInternalServiceRegistry;
 
 /**
@@ -50,6 +51,7 @@ public class RevaApplicationPlugin extends Plugin implements ApplicationLevelOnl
     private McpServerManager serverManager;
     private FrontEndService frontEndService;
     private Project currentProject;
+    private CaptureDebugAction captureDebugAction;
 
     /**
      * Plugin constructor.
@@ -99,12 +101,22 @@ public class RevaApplicationPlugin extends Plugin implements ApplicationLevelOnl
             ShutdownPriority.FIRST.after()
         );
 
+        // Register debug capture menu action
+        captureDebugAction = new CaptureDebugAction(getName(), tool);
+        tool.addAction(captureDebugAction);
+
         Msg.info(this, "ReVa Application Plugin initialization complete - MCP server running at application level");
     }
 
     @Override
     protected void dispose() {
         Msg.info(this, "ReVa Application Plugin disposing...");
+
+        // Remove debug capture action
+        if (captureDebugAction != null) {
+            tool.removeAction(captureDebugAction);
+            captureDebugAction = null;
+        }
 
         // Remove project listener
         if (frontEndService != null) {

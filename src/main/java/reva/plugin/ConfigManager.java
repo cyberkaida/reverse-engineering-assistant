@@ -50,9 +50,12 @@ public class ConfigManager implements ConfigurationBackendListener {
     public static final String API_KEY_ENABLED = "API Key Authentication Enabled";
     public static final String API_KEY = "API Key";
     public static final String DEBUG_MODE = "Debug Mode";
+    public static final String REQUEST_LOGGING_ENABLED = "Request Logging Enabled";
     public static final String MAX_DECOMPILER_SEARCH_FUNCTIONS = "Max Decompiler Search Functions";
     public static final String DECOMPILER_TIMEOUT_SECONDS = "Decompiler Timeout Seconds";
     public static final String IMPORT_ANALYSIS_TIMEOUT_SECONDS = "Import Analysis Timeout Seconds";
+    public static final String WAIT_FOR_ANALYSIS_ON_IMPORT = "Wait For Analysis On Import";
+    public static final String IMPORT_MAX_DEPTH = "Import Max Depth";
 
     // Default values
     private static final int DEFAULT_PORT = 8080;
@@ -61,9 +64,12 @@ public class ConfigManager implements ConfigurationBackendListener {
     private static final boolean DEFAULT_API_KEY_ENABLED = false;
     private static final String DEFAULT_API_KEY = "";
     private static final boolean DEFAULT_DEBUG_MODE = false;
+    private static final boolean DEFAULT_REQUEST_LOGGING_ENABLED = false;
     private static final int DEFAULT_MAX_DECOMPILER_SEARCH_FUNCTIONS = 1000;
     private static final int DEFAULT_DECOMPILER_TIMEOUT_SECONDS = 10;
     private static final int DEFAULT_IMPORT_ANALYSIS_TIMEOUT_SECONDS = 600;
+    private static final boolean DEFAULT_WAIT_FOR_ANALYSIS_ON_IMPORT = true;
+    private static final int DEFAULT_IMPORT_MAX_DEPTH = 10;
 
     private final ConfigurationBackend backend;
     private final Map<String, Object> cachedOptions = new ConcurrentHashMap<>();
@@ -169,12 +175,18 @@ public class ConfigManager implements ConfigurationBackendListener {
         }
         toolOptions.registerOption(DEBUG_MODE, DEFAULT_DEBUG_MODE, help,
             "Whether debug mode is enabled");
+        toolOptions.registerOption(REQUEST_LOGGING_ENABLED, DEFAULT_REQUEST_LOGGING_ENABLED, help,
+            "Enable detailed logging of MCP tool requests and responses to reva-tools.log");
         toolOptions.registerOption(MAX_DECOMPILER_SEARCH_FUNCTIONS, DEFAULT_MAX_DECOMPILER_SEARCH_FUNCTIONS, help,
             "Maximum number of functions before discouraging decompiler search");
         toolOptions.registerOption(DECOMPILER_TIMEOUT_SECONDS, DEFAULT_DECOMPILER_TIMEOUT_SECONDS, help,
             "Timeout in seconds for decompiler operations");
         toolOptions.registerOption(IMPORT_ANALYSIS_TIMEOUT_SECONDS, DEFAULT_IMPORT_ANALYSIS_TIMEOUT_SECONDS, help,
             "Timeout in seconds for analyzing each imported file (default: 10 minutes)");
+        toolOptions.registerOption(WAIT_FOR_ANALYSIS_ON_IMPORT, DEFAULT_WAIT_FOR_ANALYSIS_ON_IMPORT, help,
+            "Whether to run auto-analysis after file import and wait for it to complete (default: true)");
+        toolOptions.registerOption(IMPORT_MAX_DEPTH, DEFAULT_IMPORT_MAX_DEPTH, help,
+            "Maximum depth to recurse into containers/archives when importing (default: 10)");
     }
 
     /**
@@ -196,12 +208,17 @@ public class ConfigManager implements ConfigurationBackendListener {
         cachedOptions.put(API_KEY, apiKey);
 
         cachedOptions.put(DEBUG_MODE, backend.getBoolean(SERVER_OPTIONS, DEBUG_MODE, DEFAULT_DEBUG_MODE));
+        cachedOptions.put(REQUEST_LOGGING_ENABLED, backend.getBoolean(SERVER_OPTIONS, REQUEST_LOGGING_ENABLED, DEFAULT_REQUEST_LOGGING_ENABLED));
         cachedOptions.put(MAX_DECOMPILER_SEARCH_FUNCTIONS,
             backend.getInt(SERVER_OPTIONS, MAX_DECOMPILER_SEARCH_FUNCTIONS, DEFAULT_MAX_DECOMPILER_SEARCH_FUNCTIONS));
         cachedOptions.put(DECOMPILER_TIMEOUT_SECONDS,
             backend.getInt(SERVER_OPTIONS, DECOMPILER_TIMEOUT_SECONDS, DEFAULT_DECOMPILER_TIMEOUT_SECONDS));
         cachedOptions.put(IMPORT_ANALYSIS_TIMEOUT_SECONDS,
             backend.getInt(SERVER_OPTIONS, IMPORT_ANALYSIS_TIMEOUT_SECONDS, DEFAULT_IMPORT_ANALYSIS_TIMEOUT_SECONDS));
+        cachedOptions.put(WAIT_FOR_ANALYSIS_ON_IMPORT,
+            backend.getBoolean(SERVER_OPTIONS, WAIT_FOR_ANALYSIS_ON_IMPORT, DEFAULT_WAIT_FOR_ANALYSIS_ON_IMPORT));
+        cachedOptions.put(IMPORT_MAX_DEPTH,
+            backend.getInt(SERVER_OPTIONS, IMPORT_MAX_DEPTH, DEFAULT_IMPORT_MAX_DEPTH));
 
         Msg.debug(this, "Loaded ReVa configuration settings");
     }
@@ -390,6 +407,23 @@ public class ConfigManager implements ConfigurationBackendListener {
     }
 
     /**
+     * Check if request logging is enabled
+     * @return True if request logging is enabled
+     */
+    public boolean isRequestLoggingEnabled() {
+        return (Boolean) cachedOptions.getOrDefault(REQUEST_LOGGING_ENABLED, DEFAULT_REQUEST_LOGGING_ENABLED);
+    }
+
+    /**
+     * Set whether request logging is enabled
+     * @param enabled True to enable request logging
+     */
+    public void setRequestLoggingEnabled(boolean enabled) {
+        backend.setBoolean(SERVER_OPTIONS, REQUEST_LOGGING_ENABLED, enabled);
+        // onConfigurationChanged() will be called automatically
+    }
+
+    /**
      * Get the maximum number of functions to search in the decompiler
      * @return The configured maximum number of functions
      */
@@ -437,6 +471,40 @@ public class ConfigManager implements ConfigurationBackendListener {
      */
     public void setImportAnalysisTimeoutSeconds(int timeoutSeconds) {
         backend.setInt(SERVER_OPTIONS, IMPORT_ANALYSIS_TIMEOUT_SECONDS, timeoutSeconds);
+        // onConfigurationChanged() will be called automatically
+    }
+
+    /**
+     * Check if analysis should run after import and wait for completion
+     * @return True if analysis should run and wait after import
+     */
+    public boolean isWaitForAnalysisOnImport() {
+        return (Boolean) cachedOptions.getOrDefault(WAIT_FOR_ANALYSIS_ON_IMPORT, DEFAULT_WAIT_FOR_ANALYSIS_ON_IMPORT);
+    }
+
+    /**
+     * Set whether analysis should run after import and wait for completion
+     * @param wait True to run analysis and wait after import
+     */
+    public void setWaitForAnalysisOnImport(boolean wait) {
+        backend.setBoolean(SERVER_OPTIONS, WAIT_FOR_ANALYSIS_ON_IMPORT, wait);
+        // onConfigurationChanged() will be called automatically
+    }
+
+    /**
+     * Get the maximum depth to recurse into containers/archives when importing
+     * @return The maximum import depth
+     */
+    public int getImportMaxDepth() {
+        return (Integer) cachedOptions.getOrDefault(IMPORT_MAX_DEPTH, DEFAULT_IMPORT_MAX_DEPTH);
+    }
+
+    /**
+     * Set the maximum depth to recurse into containers/archives when importing
+     * @param depth The maximum import depth
+     */
+    public void setImportMaxDepth(int depth) {
+        backend.setInt(SERVER_OPTIONS, IMPORT_MAX_DEPTH, depth);
         // onConfigurationChanged() will be called automatically
     }
 

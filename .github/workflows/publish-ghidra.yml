@@ -39,6 +39,7 @@ jobs:
       uses: antoniovazquezblanco/setup-ghidra@v2.0.16
       with:
         version: ${{ matrix.ghidra-version }}
+        auth_token: ${{ secrets.GITHUB_TOKEN }}
     - name: Compile ReVa 👩‍💻✨
       run: gradle buildExtension
     - name: Store the distribution packages

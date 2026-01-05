@@ -31,7 +31,7 @@ def make_mcp_request(
         Tool call result dictionary, or None if request fails
 
     Example:
-        >>> response = make_mcp_request(8080, "list-open-programs")
+        >>> response = make_mcp_request(8080, "list-project-files")
         >>> assert response is not None
     """
     try:
@@ -186,7 +186,7 @@ def get_response_result(response: Optional[Dict[str, Any]]) -> Any:
         AssertionError: If response is None or has an error
 
     Example:
-        >>> response = make_mcp_request(8080, "list-open-programs")
+        >>> response = make_mcp_request(8080, "list-project-files")
         >>> result = get_response_result(response)
     """
     assert response is not None, "Server did not respond"

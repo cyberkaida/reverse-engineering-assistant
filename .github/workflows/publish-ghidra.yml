@@ -1,19 +1,13 @@
 name: Publish Ghidra 🐉 distribution
 on:
-  push:
-    tags:
-      - 'v*'
+  release:
+    types: [published]
   workflow_dispatch:
     inputs:
       release_tag:
         description: 'Release tag to update (e.g., v4.1.0). If not provided, uses the current ref.'
         required: false
         type: string
-      update_existing:
-        description: 'Update existing release instead of creating new one'
-        required: false
-        type: boolean
-        default: true
 jobs:
   build:
     permissions:
@@ -24,7 +18,6 @@ jobs:
         # This simplifies the build process and reduces CI time
         ghidra-version: [
             "12.0",
-            "latest",
         ]
     name: Build distribution 📦
     runs-on: ubuntu-latest
@@ -59,7 +52,7 @@ jobs:
       contents: write  # IMPORTANT: mandatory for making GitHub Releases
       id-token: write  # IMPORTANT: mandatory for sigstore
     env:
-      RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+      RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag || github.ref_name }}
     steps:
     - name: Download all the dists
       uses: actions/download-artifact@v7
@@ -74,19 +67,6 @@ jobs:
         inputs: >-
           ./dist/*.zip
         upload-signing-artifacts: true
-
-    - name: Create or update GitHub Release
-      env:
-        GITHUB_TOKEN: ${{ github.token }}
-      run: |
-        if [[ "${{ inputs.update_existing }}" == "true" ]] && gh release view "$RELEASE_TAG" --repo '${{ github.repository }}' >/dev/null 2>&1; then
-          echo "Release $RELEASE_TAG already exists, will update it"
-        else
-          echo "Creating new release $RELEASE_TAG"
-          gh release create "$RELEASE_TAG" \
-            --repo '${{ github.repository }}' \
-            --notes-from-tag
-        fi
 
     - name: Upload build artifacts and signatures to GitHub Release
       env:

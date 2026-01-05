@@ -26,8 +26,12 @@ pytestmark = [
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 
-def skip_if_fixture_missing(fixture_name: str):
-    """Skip test if fixture file is missing or fail if it's an LFS pointer."""
+def validate_fixture(fixture_name: str):
+    """Validate fixture exists and is not an LFS pointer.
+
+    Skips test if fixture is missing, fails if it's an LFS pointer file.
+    Returns the fixture path as a string if valid.
+    """
     fixture_path = FIXTURES_DIR / fixture_name
     if not fixture_path.exists():
         pytest.skip(f"Test fixture not found: {fixture_path}")
@@ -59,7 +63,7 @@ class TestArchiveImport:
         The fat binary should produce 2 programs.
         Total expected: >= 4 programs imported.
         """
-        archive_path = skip_if_fixture_missing("test_archive.zip")
+        archive_path = validate_fixture("test_archive.zip")
 
         print(f"\n=== Importing archive: {archive_path} ===")
         result = await mcp_stdio_client.call_tool(
@@ -98,7 +102,7 @@ class TestArchiveImport:
 
     async def test_import_archive_response_fields(self, mcp_stdio_client, isolated_workspace):
         """Verify all expected response fields are present when importing an archive."""
-        archive_path = skip_if_fixture_missing("test_archive.zip")
+        archive_path = validate_fixture("test_archive.zip")
 
         result = await mcp_stdio_client.call_tool(
             "import-file",
@@ -136,7 +140,7 @@ class TestFatMachoBinaryImport:
         The fat binary contains arm64 and x86_64 architectures.
         Expected: 2 programs imported (one per slice).
         """
-        fat_binary_path = skip_if_fixture_missing("test_fat_binary")
+        fat_binary_path = validate_fixture("test_fat_binary")
 
         print(f"\n=== Importing fat binary: {fat_binary_path} ===")
         result = await mcp_stdio_client.call_tool(
@@ -187,7 +191,7 @@ class TestImportedFilesInProject:
         This tests the integration between import-file and list-project-files,
         ensuring imported programs are accessible for further analysis.
         """
-        archive_path = skip_if_fixture_missing("test_archive.zip")
+        archive_path = validate_fixture("test_archive.zip")
 
         # First, import the archive
         import_result = await mcp_stdio_client.call_tool(
@@ -252,7 +256,7 @@ class TestImportedFilesInProject:
         Fat Mach-O binaries produce multiple programs (one per architecture).
         This verifies each slice is independently accessible.
         """
-        fat_binary_path = skip_if_fixture_missing("test_fat_binary")
+        fat_binary_path = validate_fixture("test_fat_binary")
 
         # Import the fat binary
         import_result = await mcp_stdio_client.call_tool(
@@ -312,7 +316,7 @@ class TestSingleBinaryImport:
 
     async def test_import_single_arm64_binary(self, mcp_stdio_client, isolated_workspace):
         """Import a single ARM64 binary."""
-        binary_path = skip_if_fixture_missing("test_arm64")
+        binary_path = validate_fixture("test_arm64")
 
         result = await mcp_stdio_client.call_tool(
             "import-file",
@@ -333,7 +337,7 @@ class TestSingleBinaryImport:
 
     async def test_import_single_x86_64_binary(self, mcp_stdio_client, isolated_workspace):
         """Import a single x86_64 binary."""
-        binary_path = skip_if_fixture_missing("test_x86_64")
+        binary_path = validate_fixture("test_x86_64")
 
         result = await mcp_stdio_client.call_tool(
             "import-file",
@@ -362,7 +366,7 @@ class TestImportWithAnalysis:
 
         Expected: analyzedPrograms field populated, filesAnalyzed > 0
         """
-        binary_path = skip_if_fixture_missing("test_arm64")
+        binary_path = validate_fixture("test_arm64")
 
         print(f"\n=== Importing with analysis: {binary_path} ===")
         result = await mcp_stdio_client.call_tool(
@@ -398,7 +402,7 @@ class TestImportWithAnalysis:
 
         This confirms the full import-analyze-query workflow works end-to-end.
         """
-        binary_path = skip_if_fixture_missing("test_arm64")
+        binary_path = validate_fixture("test_arm64")
 
         # Import with analysis
         print(f"\n=== Importing and analyzing: {binary_path} ===")
@@ -468,7 +472,7 @@ class TestImportWithAnalysis:
 
         This ensures multi-architecture binaries are properly analyzed.
         """
-        fat_binary_path = skip_if_fixture_missing("test_fat_binary")
+        fat_binary_path = validate_fixture("test_fat_binary")
 
         # Import with analysis
         print(f"\n=== Importing and analyzing fat binary: {fat_binary_path} ===")
@@ -529,7 +533,7 @@ class TestImportWithAnalysis:
 
         Expected: analyzedPrograms field NOT present
         """
-        binary_path = skip_if_fixture_missing("test_arm64")
+        binary_path = validate_fixture("test_arm64")
 
         result = await mcp_stdio_client.call_tool(
             "import-file",
@@ -556,7 +560,7 @@ class TestImportResponseFields:
 
     async def test_all_response_fields_present(self, mcp_stdio_client, isolated_workspace):
         """Verify all expected response fields are present."""
-        binary_path = skip_if_fixture_missing("test_arm64")
+        binary_path = validate_fixture("test_arm64")
 
         result = await mcp_stdio_client.call_tool(
             "import-file",
@@ -599,7 +603,7 @@ class TestImportResponseFields:
 
     async def test_path_handling_parameters_work(self, mcp_stdio_client, isolated_workspace):
         """Verify path handling parameters are accepted and import succeeds."""
-        binary_path = skip_if_fixture_missing("test_arm64")
+        binary_path = validate_fixture("test_arm64")
 
         # Test with explicit path handling options
         result = await mcp_stdio_client.call_tool(
@@ -691,7 +695,7 @@ class TestImportProgressMessages:
 
         The message should summarize the import operation results.
         """
-        binary_path = skip_if_fixture_missing("test_arm64")
+        binary_path = validate_fixture("test_arm64")
 
         result = await mcp_stdio_client.call_tool(
             "import-file",
@@ -724,7 +728,7 @@ class TestImportProgressMessages:
         When importing an archive with multiple files, the message should
         accurately reflect the number of files processed.
         """
-        archive_path = skip_if_fixture_missing("test_archive.zip")
+        archive_path = validate_fixture("test_archive.zip")
 
         result = await mcp_stdio_client.call_tool(
             "import-file",
@@ -763,7 +767,7 @@ class TestImportProgressMessages:
         When analyzeAfterImport=true, the message should mention how many
         files were analyzed.
         """
-        binary_path = skip_if_fixture_missing("test_arm64")
+        binary_path = validate_fixture("test_arm64")
 
         result = await mcp_stdio_client.call_tool(
             "import-file",

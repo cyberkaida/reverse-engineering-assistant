@@ -108,7 +108,7 @@ public class DebugInfoCollector {
      */
     public Map<String, Object> collectRevaInfo() {
         Map<String, Object> reva = new LinkedHashMap<>();
-        reva.put("version", "1.0.0"); // TODO: Get from build info
+        reva.put("version", getRevaVersion());
 
         // Get configuration
         ConfigManager config = RevaInternalServiceRegistry.getService(ConfigManager.class);
@@ -185,5 +185,27 @@ public class DebugInfoCollector {
         }
 
         return programs;
+    }
+
+    /**
+     * Get the ReVa extension version from the installed extension metadata.
+     * Falls back to "dev" if the extension is not found (e.g., running from source).
+     */
+    private String getRevaVersion() {
+        try {
+            Set<ExtensionDetails> installedExtensions = ExtensionUtils.getInstalledExtensions();
+            for (ExtensionDetails ext : installedExtensions) {
+                if ("ReVa".equals(ext.getName())) {
+                    String version = ext.getVersion();
+                    // Return version if available and not the placeholder
+                    if (version != null && !version.isEmpty() && !version.contains("@")) {
+                        return version;
+                    }
+                }
+            }
+        } catch (Exception e) {
+            // Fall through to default
+        }
+        return "dev";
     }
 }

@@ -19,7 +19,7 @@ pytestmark = pytest.mark.integration
 class TestProgramTools:
     """Test program-related MCP tools"""
 
-    def test_list_programs(self, mcp_client):
+    def test_list_project_files(self, mcp_client):
         """list-project-files tool returns file list (may be empty)"""
         response = mcp_client.call_tool("list-project-files", {"folderPath": "/"})
 
@@ -37,7 +37,7 @@ class TestProgramTools:
             content = result["content"]
             assert isinstance(content, list)
 
-    def test_list_programs_includes_format(self, mcp_client, test_program):
+    def test_list_project_files_includes_format(self, mcp_client, test_program):
         """list-project-files result has expected structure when programs are open"""
         # This test uses test_program fixture to ensure at least one program is available
         # Note: test_program may not be registered with MCP server's project manager

@@ -20,6 +20,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 import ghidra.app.plugin.core.analysis.AutoAnalysisManager;
 import ghidra.framework.data.DefaultCheckinHandler;
@@ -913,7 +914,13 @@ public class ProjectToolProvider extends AbstractToolProvider {
                 // Custom import loop - replaces ImportBatchTask to capture actual imported files
                 int enabledGroups = 0;
                 int skippedGroups = 0;
+                importLoop:
                 for (BatchGroup group : batchInfo.getGroups()) {
+                    // Check for cancellation at the start of each group
+                    if (importMonitor.isCancelled()) {
+                        break importLoop;
+                    }
+
                     // Check if group is enabled (has valid load spec selected)
                     if (!group.isEnabled()) {
                         skippedGroups++;
@@ -935,7 +942,7 @@ public class ProjectToolProvider extends AbstractToolProvider {
 
                     for (BatchLoadConfig config : group.getBatchLoadConfig()) {
                         if (importMonitor.isCancelled()) {
-                            break;
+                            break importLoop;
                         }
 
                         try (ByteProvider byteProvider = FileSystemService.getInstance()
@@ -955,8 +962,10 @@ public class ProjectToolProvider extends AbstractToolProvider {
                             }
 
                             // Compute destination path using Ghidra's path handling logic
+                            // Handle null UASI by falling back to the config's FSRL
+                            FSRL uasiFsrl = (config.getUasi() != null) ? config.getUasi().getFSRL() : config.getFSRL();
                             String pathStr = fsrlToPath(config.getFSRL(),
-                                config.getUasi().getFSRL(), stripLeadingPath, stripAllContainerPath);
+                                uasiFsrl, stripLeadingPath, stripAllContainerPath);
 
                             // Sanitize the filename to replace invalid characters with underscores
                             String sanitizedPath = fixupProjectFilename(pathStr);
@@ -998,11 +1007,12 @@ public class ProjectToolProvider extends AbstractToolProvider {
                                     Msg.info(this, "Imported: " + config.getFSRL() + " -> " + savedFile.getPathname());
                                 }
 
-                                // Track progress and send notification
+                                // Track progress per source file and send notification
                                 processedFiles++;
                                 if (exchange != null) {
-                                    String progressMsg = String.format("Imported %d/%d: %s",
-                                        processedFiles, totalFiles, config.getPreferredFileName());
+                                    // Progress tracks source files, but message shows total imported files
+                                    String progressMsg = String.format("Processed %d/%d sources (%d files imported): %s",
+                                        processedFiles, totalFiles, importedDomainFiles.size(), config.getPreferredFileName());
                                     exchange.progressNotification(new McpSchema.ProgressNotification(
                                         progressToken, (double) processedFiles, (double) totalFiles, progressMsg));
                                 }
@@ -1016,7 +1026,7 @@ public class ProjectToolProvider extends AbstractToolProvider {
                                 "stage", "import",
                                 "sourceFSRL", config.getFSRL().toString(),
                                 "preferredName", config.getPreferredFileName(),
-                                "error", e.getMessage(),
+                                "error", Objects.requireNonNullElse(e.getMessage(), e.toString()),
                                 "errorType", e.getClass().getSimpleName()
                             ));
                             processedFiles++;
@@ -1065,9 +1075,10 @@ public class ProjectToolProvider extends AbstractToolProvider {
                         try {
                             // Run analysis if requested
                             if (analyzeAfterImport && domainFile.getContentType().equals("Program")) {
-                                DomainObject domainObject = domainFile.getDomainObject(this, false, false, postMonitor);
-                                if (domainObject instanceof Program program) {
-                                    try {
+                                DomainObject domainObject = null;
+                                try {
+                                    domainObject = domainFile.getDomainObject(this, false, false, postMonitor);
+                                    if (domainObject instanceof Program program) {
                                         AutoAnalysisManager analysisManager = AutoAnalysisManager.getAnalysisManager(program);
                                         if (analysisManager != null) {
                                             TaskMonitor analysisMonitor = TimeoutTaskMonitor.timeoutIn(analysisTimeoutSeconds, TimeUnit.SECONDS);
@@ -1086,7 +1097,10 @@ public class ProjectToolProvider extends AbstractToolProvider {
                                                 ));
                                             }
                                         }
-                                    } finally {
+                                    }
+                                } finally {
+                                    // Always release the domain object to prevent resource leaks
+                                    if (domainObject != null) {
                                         domainObject.release(this);
                                     }
                                 }
@@ -1098,7 +1112,8 @@ public class ProjectToolProvider extends AbstractToolProvider {
                                     String vcMessage = analyzeAfterImport && analyzedFiles.contains(domainFile.getPathname())
                                         ? "Initial import via ReVa (analyzed)"
                                         : "Initial import via ReVa";
-                                    domainFile.addToVersionControl(vcMessage, true, postMonitor);
+                                    // Second parameter false = check in immediately (don't keep checked out)
+                                    domainFile.addToVersionControl(vcMessage, false, postMonitor);
                                     versionedFiles.add(domainFile.getPathname());
                                 }
                             }
@@ -1106,7 +1121,7 @@ public class ProjectToolProvider extends AbstractToolProvider {
                             detailedErrors.add(Map.of(
                                 "stage", "postProcessing",
                                 "programPath", domainFile.getPathname(),
-                                "error", e.getMessage(),
+                                "error", Objects.requireNonNullElse(e.getMessage(), e.toString()),
                                 "errorType", e.getClass().getSimpleName()
                             ));
                         }
@@ -1230,7 +1245,7 @@ public class ProjectToolProvider extends AbstractToolProvider {
         int filename = fullPath.lastIndexOf('/') + 1;
         int uas = userSrcPath.length();
 
-        int leadStart = (stripLeadingPath == false) ? 0 : userSrcPath.lastIndexOf('/') + 1;
+        int leadStart = !stripLeadingPath ? 0 : userSrcPath.lastIndexOf('/') + 1;
         int leadEnd = Math.min(filename, userSrcPath.length());
         String leading = (leadStart < filename) ? fullPath.substring(leadStart, leadEnd) : "";
         String containerPath = uas < filename && !stripInteriorContainerPath

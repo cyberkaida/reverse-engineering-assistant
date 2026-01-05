@@ -74,7 +74,7 @@ gradle            # no wrapper – use the system `gradle` command
 ## Copilot / Cursor Rules
 
 - Follow the guidance in **.github/copilot-instructions.md** for using the MCP SDK, Gradle (no wrapper), and Java 21.
-- No `.cursor` rules are present in this repository; adhere to the style conventions outlined above for all contributions.
+- Cursor-specific rules, if any are added, should follow the conventions outlined above.
 
 ---
 

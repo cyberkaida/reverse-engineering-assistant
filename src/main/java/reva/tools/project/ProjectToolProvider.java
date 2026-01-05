@@ -783,13 +783,13 @@ public class ProjectToolProvider extends AbstractToolProvider {
         // maxDepth parameter (optional) - controlled by 'Import Max Depth' config setting
         Map<String, Object> maxDepthProperty = new HashMap<>();
         maxDepthProperty.put("type", "integer");
-        maxDepthProperty.put("description", "Maximum container depth to recurse into (default: controlled by 'Import Max Depth' config setting, which defaults to 10)");
+        maxDepthProperty.put("description", "Maximum container depth to recurse into (default: 10)");
         properties.put("maxDepth", maxDepthProperty);
 
         // analyzeAfterImport parameter (optional)
         Map<String, Object> analyzeProperty = new HashMap<>();
         analyzeProperty.put("type", "boolean");
-        analyzeProperty.put("description", "Run auto-analysis after import (default: controlled by 'Wait For Analysis On Import' config setting, which defaults to true)");
+        analyzeProperty.put("description", "Run auto-analysis after import (default: true)");
         properties.put("analyzeAfterImport", analyzeProperty);
 
         // stripLeadingPath parameter (optional)
@@ -1095,7 +1095,7 @@ public class ProjectToolProvider extends AbstractToolProvider {
                             if (analyzeAfterImport && domainFile.getContentType().equals("Program")) {
                                 DomainObject domainObject = null;
                                 try {
-                                    // IMPORTANT: okToOpen must be TRUE (third param). If false, getDomainObject()
+                                    // IMPORTANT: okToRecover (3rd param) must be TRUE. If false, getDomainObject()
                                     // returns null for programs that aren't already open, silently skipping analysis.
                                     domainObject = domainFile.getDomainObject(this, false, true, postMonitor);
                                     if (domainObject instanceof Program program) {
@@ -1252,6 +1252,7 @@ public class ProjectToolProvider extends AbstractToolProvider {
      * Convert a file's FSRL into a target project path, using import path options.
      * This is a copy of ImportBatchTask.fsrlToPath which is package-private.
      * Copied from Ghidra 12.0 source - update if Ghidra's implementation changes.
+     * TODO: Consider requesting this method be made public in a future Ghidra release.
      *
      * @param fsrl FSRL of the file to convert
      * @param userSrc FSRL of the user-added source file

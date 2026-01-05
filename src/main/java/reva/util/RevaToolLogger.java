@@ -338,13 +338,17 @@ public class RevaToolLogger {
             File from = new File(logFile.getParent(), logFile.getName() + "." + i);
             File to = new File(logFile.getParent(), logFile.getName() + "." + (i + 1));
             if (from.exists()) {
-                from.renameTo(to);
+                if (!from.renameTo(to)) {
+                    Msg.warn(RevaToolLogger.class, "Failed to rotate log file: " + from);
+                }
             }
         }
 
         // Rotate current log
         File rotation1 = new File(logFile.getParent(), logFile.getName() + ".1");
-        logFile.renameTo(rotation1);
+        if (!logFile.renameTo(rotation1)) {
+            Msg.warn(RevaToolLogger.class, "Failed to rotate current log file: " + logFile);
+        }
 
         Msg.debug(RevaToolLogger.class, "Rotated log files");
     }

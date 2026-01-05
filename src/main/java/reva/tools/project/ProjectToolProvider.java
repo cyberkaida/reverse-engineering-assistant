@@ -1093,7 +1093,9 @@ public class ProjectToolProvider extends AbstractToolProvider {
                             if (analyzeAfterImport && domainFile.getContentType().equals("Program")) {
                                 DomainObject domainObject = null;
                                 try {
-                                    domainObject = domainFile.getDomainObject(this, false, false, postMonitor);
+                                    // IMPORTANT: okToOpen must be TRUE (third param). If false, getDomainObject()
+                                    // returns null for programs that aren't already open, silently skipping analysis.
+                                    domainObject = domainFile.getDomainObject(this, false, true, postMonitor);
                                     if (domainObject instanceof Program program) {
                                         AutoAnalysisManager analysisManager = AutoAnalysisManager.getAnalysisManager(program);
                                         if (analysisManager != null) {

@@ -18,14 +18,15 @@ jobs:
       matrix:
         os: [ubuntu-latest]
         ghidra-version: [
-            "11.4.2",
-            "11.4",
+            "12.0",
             "latest",
         ]
     name: Test on Ghidra ${{ matrix.ghidra-version }}
     runs-on: ${{ matrix.os }}
     steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@v6
+      with:
+        lfs: true
 
     - name: Set up Java 🍵
       uses: actions/setup-java@v5
@@ -34,9 +35,10 @@ jobs:
         distribution: "microsoft"
 
     - name: Install Ghidra 🐉
-      uses: antoniovazquezblanco/setup-ghidra@v2.0.14
+      uses: antoniovazquezblanco/setup-ghidra@v2.0.16
       with:
         version: ${{ matrix.ghidra-version }}
+        auth_token: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Setup Xvfb for headless testing
       run: |
@@ -64,7 +66,7 @@ jobs:
         DISPLAY: :99
 
     - name: Upload test results
-      uses: actions/upload-artifact@v5
+      uses: actions/upload-artifact@v6
       if: always()
       with:
         name: test-results-${{ matrix.ghidra-version }}
@@ -87,7 +89,9 @@ jobs:
     name: Lint and Check 🔍
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@v6
+      with:
+        lfs: true
 
     - name: Set up Java 🍵
       uses: actions/setup-java@v5
@@ -96,9 +100,10 @@ jobs:
         distribution: "microsoft"
 
     - name: Install Ghidra 🐉
-      uses: antoniovazquezblanco/setup-ghidra@v2.0.14
+      uses: antoniovazquezblanco/setup-ghidra@v2.0.16
       with:
         version: "latest"
+        auth_token: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Setup Xvfb for headless testing
       run: |
@@ -128,7 +133,9 @@ jobs:
       security-events: write
 
     steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@v6
+      with:
+        lfs: true
 
     - name: Set up Java 🍵
       uses: actions/setup-java@v5
@@ -144,10 +151,10 @@ jobs:
         queries: security-extended,security-and-quality
 
     - name: Install Ghidra 🐉
-      uses: antoniovazquezblanco/setup-ghidra@v2.0.14
+      uses: antoniovazquezblanco/setup-ghidra@v2.0.16
       with:
         version: "latest"
-
+        auth_token: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Setup Gradle for CodeQL 🔧
       uses: gradle/actions/setup-gradle@v5

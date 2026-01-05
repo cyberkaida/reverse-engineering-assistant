@@ -138,7 +138,7 @@ mcp-reva CLI → PyGhidra → ReVaLauncher → Jetty (HTTP)
 - **Foundation Layer** (`util/`) - AddressUtil, ProgramLookupUtil, DataTypeParserUtil, etc.
 - **Plugin Layer** (`plugin/`) - ConfigManager, RevaProgramManager, Ghidra lifecycle
 - **Server Layer** (`server/`) - McpServerManager, Jetty server, streamable transport
-- **Tool Layer** (`tools/`) - 11 specialized tool packages (decompiler, functions, strings, etc.)
+- **Tool Layer** (`tools/`) - 17 specialized tool packages (decompiler, functions, strings, callgraph, dataflow, etc.)
 - **Resource Layer** (`resources/`) - Read-only MCP resource providers
 - **Headless Layer** (`headless/`) - RevaHeadlessLauncher for PyGhidra integration
 
@@ -154,7 +154,7 @@ src/main/java/reva/          # Java extension code
   ├── util/                  # Foundational utilities (ALWAYS use these!)
   ├── plugin/                # ConfigManager, plugin lifecycle
   ├── server/                # McpServerManager, Jetty
-  ├── tools/                 # 11 tool provider packages
+  ├── tools/                 # 17 tool provider packages
   ├── resources/             # MCP resource providers
   ├── headless/              # RevaHeadlessLauncher
   └── ui/                    # Optional GUI components
@@ -168,8 +168,15 @@ scripts/                     # Helper scripts (reva_headless_server.py)
 ### Package-Level Documentation
 Each major package contains its own CLAUDE.md file with detailed implementation guidance:
 - **Essential Infrastructure**: `util/`, `plugin/`, `server/` - Core systems documentation
-- **Tool Providers**: Each of the 11 tool packages has comprehensive implementation guides
+- **Tool Providers**: Each of the 17 tool packages has comprehensive implementation guides
 - **Supporting Systems**: `resources/`, `services/`, `ui/` - Specialized component documentation
+
+### Tool Provider Categories
+- **Core Analysis**: decompiler, functions, strings, symbols, xrefs, memory
+- **Data & Types**: data, datatypes, structures
+- **Advanced Analysis**: callgraph, dataflow, constants, vtable, imports
+- **Annotations**: comments, bookmarks
+- **Project Management**: project
 
 ## Development Guidelines
 
@@ -239,10 +246,21 @@ When adding new tools to DecompilerToolProvider:
 - **Headless Mode**: ConfigManager with File or InMemory backend
 - **Claude CLI Mode**: Uses random port, minimal config (optimized for stdio)
 
+## Claude Code Marketplace Skills
+
+ReVa includes Claude Code marketplace plugins (`/ReVa/skills/`) for common reverse engineering workflows:
+- **binary-triage**: Initial binary survey - memory layout, strings, imports, suspicious indicators
+- **deep-analysis**: Focused investigation of specific functions/behaviors with iterative refinement
+- **ctf-rev**: CTF reverse engineering challenges - crackmes, key validators, algorithm recovery
+- **ctf-pwn**: CTF binary exploitation - buffer overflows, format strings, ROP chains
+- **ctf-crypto**: CTF cryptography challenges - weak crypto, key extraction, algorithm identification
+
+Install via: `claude plugin marketplace add cyberkaida/reverse-engineering-assistant`
+
 ## External Dependencies
 
 ### Java
-- Ghidra: 11.4+ (source at `../ghidra`)
+- Ghidra: 12.0+ (source at `../ghidra`)
 - Java: 21+
 - MCP SDK: io.modelcontextprotocol.sdk v0.14.0 (BOM-managed)
 - Jackson: 2.19.2 (force-resolved for MCP SDK compatibility)
@@ -262,6 +280,20 @@ When adding new tools to DecompilerToolProvider:
 - All tools use `ProgramLookupUtil.getValidatedProgram()` for consistent program resolution and helpful error messages
 - When a program cannot be found, the error message will include suggestions of available programs
 
+## Recent Feature Additions
+
+Notable tool capabilities added recently:
+- **Function tagging**: `function-tags` tool for categorizing functions during analysis
+- **Bulk decompilation**: Decompile all callers/referencers of a function in one call
+- **Undefined function discovery**: Find and create functions from call/data references
+- **Call graph analysis**: Trace call paths, find callers/callees
+- **Data flow analysis**: Track data dependencies and value propagation
+- **Constant search**: Find hardcoded values (magic numbers, crypto constants)
+- **Vtable analysis**: Analyze virtual function tables for C++ binaries
+- **Import/export analysis**: Detailed import/export enumeration
+- **Verbose mode**: Many tools support `verbose` parameter for additional context
+- **Signature-only decompilation**: Get function signatures without full decompilation
+
 ## Architecture Decision Records
 
 ### MCP Implementation
@@ -278,7 +310,7 @@ When adding new tools to DecompilerToolProvider:
 - **Port Strategy**: Random ports for CLI mode to avoid conflicts
 
 ### Development Constraints
-- **Java**: Target Java 21, minimum Ghidra 11.4+
+- **Java**: Target Java 21, minimum Ghidra 12.0+
 - **Python**: 3.10+, uv for dependency management
 - **Testing (Java)**: Integration tests require `java.awt.headless=false`, fork=1
 - **Testing (Python)**: pytest with markers (unit/integration/e2e/cli)

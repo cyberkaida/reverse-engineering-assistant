@@ -19,8 +19,10 @@ import ghidra.program.model.address.Address;
 import ghidra.program.model.address.AddressSpace;
 import ghidra.program.model.listing.Data;
 import ghidra.program.model.listing.Function;
+import ghidra.program.model.listing.Instruction;
 import ghidra.program.model.listing.Listing;
 import ghidra.program.model.listing.Program;
+import ghidra.program.model.mem.MemoryBlock;
 import ghidra.program.model.symbol.Symbol;
 import ghidra.program.model.symbol.SymbolTable;
 import java.util.List;
@@ -151,5 +153,64 @@ public class AddressUtil {
 
         // If not, check if this address is within a larger data structure
         return listing.getDataContaining(address);
+    }
+
+    /**
+     * Check if an address could be an undefined function location.
+     * An address is considered an undefined function location if:
+     * - It's not inside a defined function
+     * - It's in executable memory
+     * - There's a valid instruction at that address
+     *
+     * This is useful for providing helpful error messages when users try to
+     * modify variables at an address that has code but no defined function.
+     *
+     * @param program The Ghidra program
+     * @param addressOrSymbol The address string or symbol name to check
+     * @return true if this appears to be an undefined function location
+     */
+    public static boolean isUndefinedFunctionAddress(Program program, String addressOrSymbol) {
+        if (program == null || addressOrSymbol == null || addressOrSymbol.trim().isEmpty()) {
+            return false;
+        }
+
+        Address address = resolveAddressOrSymbol(program, addressOrSymbol);
+        if (address == null) {
+            return false;
+        }
+
+        return isUndefinedFunctionAddress(program, address);
+    }
+
+    /**
+     * Check if an address could be an undefined function location.
+     * An address is considered an undefined function location if:
+     * - It's not inside a defined function
+     * - It's in executable memory
+     * - There's a valid instruction at that address
+     *
+     * @param program The Ghidra program
+     * @param address The address to check
+     * @return true if this appears to be an undefined function location
+     */
+    public static boolean isUndefinedFunctionAddress(Program program, Address address) {
+        if (program == null || address == null) {
+            return false;
+        }
+
+        // Check if there's already a defined function containing this address
+        if (program.getFunctionManager().getFunctionContaining(address) != null) {
+            return false;
+        }
+
+        // Check if it's in executable memory
+        MemoryBlock block = program.getMemory().getBlock(address);
+        if (block == null || !block.isExecute()) {
+            return false;
+        }
+
+        // Check if there's an instruction at the address
+        Instruction instr = program.getListing().getInstructionAt(address);
+        return instr != null;
     }
 }

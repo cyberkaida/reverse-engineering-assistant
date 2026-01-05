@@ -20,6 +20,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 import ghidra.app.plugin.core.analysis.AutoAnalysisManager;
 import ghidra.framework.data.DefaultCheckinHandler;
@@ -41,12 +42,24 @@ import ghidra.util.Msg;
 import ghidra.util.task.TaskMonitor;
 import ghidra.util.task.TimeoutTaskMonitor;
 import java.util.concurrent.TimeUnit;
+import ghidra.app.util.importer.MessageLog;
+import ghidra.app.util.opinion.LoadResults;
+import ghidra.app.util.opinion.LoadSpec;
+import ghidra.app.util.opinion.Loaded;
+import ghidra.app.util.opinion.Loader;
 import ghidra.formats.gfilesystem.FSRL;
+import ghidra.formats.gfilesystem.FSUtilities;
 import ghidra.formats.gfilesystem.FileSystemService;
+import ghidra.plugins.importer.batch.BatchGroup;
+import ghidra.plugins.importer.batch.BatchGroup.BatchLoadConfig;
+import ghidra.plugins.importer.batch.BatchGroupLoadSpec;
 import ghidra.plugins.importer.batch.BatchInfo;
-import ghidra.plugins.importer.tasks.ImportBatchTask;
+import ghidra.app.util.bin.ByteProvider;
+import ghidra.framework.store.local.LocalFileSystem;
 import io.modelcontextprotocol.server.McpSyncServer;
+import io.modelcontextprotocol.server.McpSyncServerExchange;
 import io.modelcontextprotocol.spec.McpSchema;
+import reva.debug.DebugCaptureService;
 import reva.plugin.RevaProgramManager;
 import reva.plugin.ConfigManager;
 import reva.tools.AbstractToolProvider;
@@ -59,23 +72,31 @@ import reva.util.RevaInternalServiceRegistry;
  */
 public class ProjectToolProvider extends AbstractToolProvider {
 
+    private final boolean headlessMode;
+
     /**
      * Constructor
      * @param server The MCP server
+     * @param headlessMode True if running in headless mode (no GUI context)
      */
-    public ProjectToolProvider(McpSyncServer server) {
+    public ProjectToolProvider(McpSyncServer server, boolean headlessMode) {
         super(server);
+        this.headlessMode = headlessMode;
     }
 
     @Override
     public void registerTools() {
-        registerGetCurrentProgramTool();
+        // GUI-only tools: require ToolManager which isn't available in headless mode
+        if (!headlessMode) {
+            registerGetCurrentProgramTool();
+            registerListOpenProgramsTool();
+        }
         registerListProjectFilesTool();
-        registerListOpenProgramsTool();
         registerCheckinProgramTool();
         registerAnalyzeProgramTool();
         registerChangeProcessorTool();
         registerImportFileTool();
+        registerCaptureDebugInfoTool();
     }
 
     /**
@@ -759,17 +780,35 @@ public class ProjectToolProvider extends AbstractToolProvider {
         recursiveProperty.put("description", "Whether to recursively import from containers/archives (default: true)");
         properties.put("recursive", recursiveProperty);
 
-        // maxDepth parameter (optional)
+        // maxDepth parameter (optional) - controlled by 'Import Max Depth' config setting
         Map<String, Object> maxDepthProperty = new HashMap<>();
         maxDepthProperty.put("type", "integer");
-        maxDepthProperty.put("description", "Maximum container depth to recurse into (default: 20)");
+        maxDepthProperty.put("description", "Maximum container depth to recurse into (default: 10)");
         properties.put("maxDepth", maxDepthProperty);
 
         // analyzeAfterImport parameter (optional)
         Map<String, Object> analyzeProperty = new HashMap<>();
         analyzeProperty.put("type", "boolean");
-        analyzeProperty.put("description", "Run auto-analysis after import (default: false)");
+        analyzeProperty.put("description", "Run auto-analysis after import (default: true)");
         properties.put("analyzeAfterImport", analyzeProperty);
+
+        // stripLeadingPath parameter (optional)
+        Map<String, Object> stripLeadingProperty = new HashMap<>();
+        stripLeadingProperty.put("type", "boolean");
+        stripLeadingProperty.put("description", "Omit the source file's leading path from imported file locations (default: true)");
+        properties.put("stripLeadingPath", stripLeadingProperty);
+
+        // stripAllContainerPath parameter (optional)
+        Map<String, Object> stripContainerProperty = new HashMap<>();
+        stripContainerProperty.put("type", "boolean");
+        stripContainerProperty.put("description", "Completely flatten container paths in imported file locations (default: false)");
+        properties.put("stripAllContainerPath", stripContainerProperty);
+
+        // mirrorFs parameter (optional)
+        Map<String, Object> mirrorFsProperty = new HashMap<>();
+        mirrorFsProperty.put("type", "boolean");
+        mirrorFsProperty.put("description", "Mirror the filesystem layout when importing (default: false)");
+        properties.put("mirrorFs", mirrorFsProperty);
 
         // enableVersionControl parameter (optional)
         Map<String, Object> versionControlProperty = new HashMap<>();
@@ -793,12 +832,20 @@ public class ProjectToolProvider extends AbstractToolProvider {
                 // Get required parameter
                 String path = getString(request, "path");
 
+                // Get configuration for defaults
+                ConfigManager configManager = RevaInternalServiceRegistry.getService(ConfigManager.class);
+                boolean defaultAnalyze = configManager != null ? configManager.isWaitForAnalysisOnImport() : true;
+                int defaultMaxDepth = configManager != null ? configManager.getImportMaxDepth() : 10;
+
                 // Get optional parameters with defaults
                 String destinationFolder = getOptionalString(request, "destinationFolder", "/");
                 boolean recursive = getOptionalBoolean(request, "recursive", true);
-                int maxDepth = getOptionalInt(request, "maxDepth", 20);
-                boolean analyzeAfterImport = getOptionalBoolean(request, "analyzeAfterImport", false);
+                int maxDepth = getOptionalInt(request, "maxDepth", defaultMaxDepth);
+                boolean analyzeAfterImport = getOptionalBoolean(request, "analyzeAfterImport", defaultAnalyze);
                 boolean enableVersionControl = getOptionalBoolean(request, "enableVersionControl", true);
+                boolean stripLeadingPath = getOptionalBoolean(request, "stripLeadingPath", true);
+                boolean stripAllContainerPath = getOptionalBoolean(request, "stripAllContainerPath", false);
+                boolean mirrorFs = getOptionalBoolean(request, "mirrorFs", false);
 
                 // Validate file exists
                 File file = new File(path);
@@ -839,56 +886,285 @@ public class ProjectToolProvider extends AbstractToolProvider {
                     return createErrorResult("No supported file formats found in: " + path);
                 }
 
-                // Get configuration for timeouts
-                ConfigManager configManager = RevaInternalServiceRegistry.getService(ConfigManager.class);
+                // Use configuration for timeouts
                 int importTimeoutSeconds = configManager != null ?
                     configManager.getDecompilerTimeoutSeconds() * 2 : 300; // 2x decompiler timeout or 5 min default
                 int analysisTimeoutSeconds = configManager != null ?
                     configManager.getImportAnalysisTimeoutSeconds() : 600; // Default 10 minutes
 
-                // Create timeout-protected monitor for import task
+                // Create timeout-protected monitor for import operations
                 TaskMonitor importMonitor = TimeoutTaskMonitor.timeoutIn(importTimeoutSeconds, TimeUnit.SECONDS);
 
-                // Create and run the import task synchronously (blocks until completion)
-                ImportBatchTask importTask = new ImportBatchTask(batchInfo, destFolder, null, true, false);
-                importTask.run(importMonitor);
+                // Track imported files with accurate DomainFile references
+                List<DomainFile> importedDomainFiles = new ArrayList<>();
+                List<String> importedProgramPaths = new ArrayList<>();
+                List<Map<String, Object>> detailedErrors = new ArrayList<>();
 
-                // Check for timeout or cancellation
-                if (importMonitor.isCancelled()) {
+                // Progress tracking
+                int totalFiles = batchInfo.getTotalCount();
+                int processedFiles = 0;
+                String progressToken = "import-" + System.currentTimeMillis();
+
+                // Send initial progress notification
+                if (exchange != null) {
+                    exchange.progressNotification(new McpSchema.ProgressNotification(
+                        progressToken, 0.0, (double) totalFiles,
+                        "Starting import of " + totalFiles + " file(s) from " + path + "..."));
+                }
+
+                // Custom import loop - replaces ImportBatchTask to capture actual imported files
+                int enabledGroups = 0;
+                int skippedGroups = 0;
+                importLoop:
+                for (BatchGroup group : batchInfo.getGroups()) {
+                    // Check for cancellation at the start of each group
+                    if (importMonitor.isCancelled()) {
+                        break importLoop;
+                    }
+
+                    // Check if group is enabled (has valid load spec selected)
+                    if (!group.isEnabled()) {
+                        skippedGroups++;
+                        Msg.debug(this, "Skipping disabled batch group: " + group.getCriteria());
+                        continue;
+                    }
+                    enabledGroups++;
+
+                    BatchGroupLoadSpec selectedBatchGroupLoadSpec = group.getSelectedBatchGroupLoadSpec();
+                    if (selectedBatchGroupLoadSpec == null) {
+                        detailedErrors.add(Map.of(
+                            "stage", "discovery",
+                            "error", "Enabled group has no selected load spec",
+                            "errorType", "ConfigurationError",
+                            "details", group.getCriteria().toString()
+                        ));
+                        continue;
+                    }
+
+                    for (BatchLoadConfig config : group.getBatchLoadConfig()) {
+                        if (importMonitor.isCancelled()) {
+                            break importLoop;
+                        }
+
+                        try (ByteProvider byteProvider = FileSystemService.getInstance()
+                                .getByteProvider(config.getFSRL(), true, importMonitor)) {
+
+                            LoadSpec loadSpec = config.getLoadSpec(selectedBatchGroupLoadSpec);
+                            if (loadSpec == null) {
+                                detailedErrors.add(Map.of(
+                                    "stage", "import",
+                                    "sourceFSRL", config.getFSRL().toString(),
+                                    "preferredName", config.getPreferredFileName(),
+                                    "error", "No load spec matches selected batch group load spec",
+                                    "errorType", "LoadSpecError"
+                                ));
+                                processedFiles++;
+                                continue;
+                            }
+
+                            // Compute destination path using Ghidra's path handling logic
+                            // Handle null UASI by falling back to the config's FSRL
+                            FSRL uasiFsrl = (config.getUasi() != null) ? config.getUasi().getFSRL() : config.getFSRL();
+                            String pathStr = fsrlToPath(config.getFSRL(),
+                                uasiFsrl, stripLeadingPath, stripAllContainerPath);
+
+                            // Sanitize the filename to replace invalid characters with underscores
+                            String sanitizedPath = fixupProjectFilename(pathStr);
+
+                            // Create settings record for Ghidra 12.0+ API
+                            MessageLog log = new MessageLog();
+                            Loader.ImporterSettings settings = new Loader.ImporterSettings(
+                                byteProvider,
+                                sanitizedPath,
+                                project,
+                                destFolder.getPathname(),
+                                mirrorFs,
+                                loadSpec,
+                                loadSpec.getLoader().getDefaultOptions(byteProvider, loadSpec, null, false, mirrorFs),
+                                this,
+                                log,
+                                importMonitor
+                            );
+
+                            // Load and save - capture each DomainFile
+                            try (LoadResults<?> loadResults = loadSpec.getLoader().load(settings)) {
+                                if (loadResults == null) {
+                                    detailedErrors.add(Map.of(
+                                        "stage", "import",
+                                        "sourceFSRL", config.getFSRL().toString(),
+                                        "preferredName", config.getPreferredFileName(),
+                                        "error", "Loader returned null results",
+                                        "errorType", "LoaderError"
+                                    ));
+                                    processedFiles++;
+                                    continue;
+                                }
+
+                                // CRITICAL: Save each loaded object and capture DomainFile
+                                for (Loaded<?> loaded : loadResults) {
+                                    DomainFile savedFile = loaded.save(importMonitor);
+                                    importedDomainFiles.add(savedFile);
+                                    importedProgramPaths.add(savedFile.getPathname());
+                                    Msg.info(this, "Imported: " + config.getFSRL() + " -> " + savedFile.getPathname());
+                                }
+
+                                // Track progress per source file and send notification
+                                processedFiles++;
+                                if (exchange != null) {
+                                    // Progress tracks source files, but message shows total imported files
+                                    String progressMsg = String.format("Processed %d/%d sources (%d files imported): %s",
+                                        processedFiles, totalFiles, importedDomainFiles.size(), config.getPreferredFileName());
+                                    exchange.progressNotification(new McpSchema.ProgressNotification(
+                                        progressToken, (double) processedFiles, (double) totalFiles, progressMsg));
+                                }
+
+                                if (log.hasMessages()) {
+                                    Msg.info(this, "Import log for " + config.getFSRL() + ": " + log.toString());
+                                }
+                            }
+                        } catch (Exception e) {
+                            detailedErrors.add(Map.of(
+                                "stage", "import",
+                                "sourceFSRL", config.getFSRL().toString(),
+                                "preferredName", config.getPreferredFileName(),
+                                "error", Objects.requireNonNullElse(e.getMessage(), e.toString()),
+                                "errorType", e.getClass().getSimpleName()
+                            ));
+                            processedFiles++;
+                            Msg.error(this, "Import failed for " + config.getFSRL(), e);
+                        }
+                    }
+                }
+
+                // Check for timeout
+                if (importMonitor.isCancelled() && importedDomainFiles.isEmpty()) {
                     return createErrorResult("Import timed out after " + importTimeoutSeconds + " seconds. " +
                         "Try importing fewer files or increase timeout in ReVa configuration.");
                 }
 
-                // Track imported files for version control and analysis
-                List<String> versionedFiles = new ArrayList<>();
-                List<String> analyzedFiles = new ArrayList<>();
-                List<String> errors = new ArrayList<>();
-
-                // Process imported files: analyze if requested, then add to version control
-                if (enableVersionControl || analyzeAfterImport) {
-                    // Create monitor for version control and analysis operations
-                    TaskMonitor vcMonitor = TimeoutTaskMonitor.timeoutIn(importTimeoutSeconds, TimeUnit.SECONDS);
-
-                    // Get all files that were imported, analyze if requested, and add to version control
-                    collectImportedFiles(destFolder, file.getName(), analyzeAfterImport, analysisTimeoutSeconds,
-                        versionedFiles, analyzedFiles, errors, vcMonitor);
+                // Report if no groups were enabled for import
+                if (enabledGroups == 0 && importedDomainFiles.isEmpty()) {
+                    detailedErrors.add(Map.of(
+                        "stage", "discovery",
+                        "error", "No enabled batch groups found",
+                        "errorType", "NoImportableFiles",
+                        "filesDiscovered", batchInfo.getTotalCount(),
+                        "groupsCreated", batchInfo.getGroups().size(),
+                        "skippedGroups", skippedGroups
+                    ));
                 }
 
-                // Collect all imported program paths
-                List<String> importedProgramPaths = new ArrayList<>();
-                collectAllProgramPaths(destFolder, importedProgramPaths);
+                // Track version control and analysis results
+                List<String> versionedFiles = new ArrayList<>();
+                List<String> analyzedFiles = new ArrayList<>();
+
+                // Process imported files: analyze if requested, then add to version control
+                // Use the tracked importedDomainFiles list for accurate processing
+                if ((enableVersionControl || analyzeAfterImport) && !importedDomainFiles.isEmpty()) {
+                    int totalFilesToProcess = importedDomainFiles.size();
+
+                    for (int fileIndex = 0; fileIndex < totalFilesToProcess; fileIndex++) {
+                        DomainFile domainFile = importedDomainFiles.get(fileIndex);
+
+                        // Create per-file timeout to ensure each file gets equal treatment
+                        TaskMonitor postMonitor = TimeoutTaskMonitor.timeoutIn(analysisTimeoutSeconds, TimeUnit.SECONDS);
+
+                        if (postMonitor.isCancelled()) {
+                            // Record timeout error and skipped files
+                            detailedErrors.add(Map.of(
+                                "stage", "postProcessing",
+                                "error", "Post-processing timed out",
+                                "errorType", "TimeoutError"
+                            ));
+
+                            // Record individual timeout/skip error for each remaining file
+                            for (int j = fileIndex; j < totalFilesToProcess; j++) {
+                                DomainFile remainingFile = importedDomainFiles.get(j);
+                                detailedErrors.add(Map.of(
+                                    "stage", "postProcessing",
+                                    "programPath", remainingFile.getPathname(),
+                                    "error", "Post-processing skipped due to prior timeout",
+                                    "errorType", "TimeoutError"
+                                ));
+                            }
+                            break;
+                        }
+
+                        try {
+                            // Run analysis if requested
+                            if (analyzeAfterImport && domainFile.getContentType().equals("Program")) {
+                                DomainObject domainObject = null;
+                                try {
+                                    // IMPORTANT: okToRecover (3rd param) must be TRUE. If false, getDomainObject()
+                                    // returns null for programs that aren't already open, silently skipping analysis.
+                                    domainObject = domainFile.getDomainObject(this, false, true, postMonitor);
+                                    if (domainObject instanceof Program program) {
+                                        AutoAnalysisManager analysisManager = AutoAnalysisManager.getAnalysisManager(program);
+                                        if (analysisManager != null) {
+                                            TaskMonitor analysisMonitor = TimeoutTaskMonitor.timeoutIn(analysisTimeoutSeconds, TimeUnit.SECONDS);
+                                            analysisManager.startAnalysis(analysisMonitor);
+                                            analysisManager.waitForAnalysis(null, analysisMonitor);
+
+                                            if (!analysisMonitor.isCancelled()) {
+                                                program.save("Analysis completed via ReVa import", postMonitor);
+                                                analyzedFiles.add(domainFile.getPathname());
+                                            } else {
+                                                detailedErrors.add(Map.of(
+                                                    "stage", "analysis",
+                                                    "programPath", domainFile.getPathname(),
+                                                    "error", "Analysis timed out",
+                                                    "errorType", "TimeoutError"
+                                                ));
+                                            }
+                                        }
+                                    }
+                                } finally {
+                                    // Always release the domain object to prevent resource leaks
+                                    if (domainObject != null) {
+                                        domainObject.release(this);
+                                    }
+                                }
+                            }
+
+                            // Add to version control if requested
+                            if (enableVersionControl) {
+                                if (domainFile.canAddToRepository()) {
+                                    String vcMessage = analyzeAfterImport && analyzedFiles.contains(domainFile.getPathname())
+                                        ? "Initial import via ReVa (analyzed)"
+                                        : "Initial import via ReVa";
+                                    // Second parameter false = check in immediately (don't keep checked out)
+                                    domainFile.addToVersionControl(vcMessage, false, postMonitor);
+                                    versionedFiles.add(domainFile.getPathname());
+                                }
+                            }
+                        } catch (Exception e) {
+                            detailedErrors.add(Map.of(
+                                "stage", "postProcessing",
+                                "programPath", domainFile.getPathname(),
+                                "error", Objects.requireNonNullElse(e.getMessage(), e.toString()),
+                                "errorType", e.getClass().getSimpleName()
+                            ));
+                        }
+                    }
+                }
 
                 // Create result data
                 Map<String, Object> result = new HashMap<>();
-                result.put("success", true);
+                result.put("success", !importedDomainFiles.isEmpty());
                 result.put("importedFrom", path);
                 result.put("destinationFolder", destinationFolder);
                 result.put("filesDiscovered", batchInfo.getTotalCount());
+                result.put("filesImported", importedDomainFiles.size());
                 result.put("groupsCreated", batchInfo.getGroups().size());
+                result.put("enabledGroups", enabledGroups);
+                result.put("skippedGroups", skippedGroups);
                 result.put("maxDepthUsed", maxDepth);
                 result.put("wasRecursive", recursive);
                 result.put("analyzeAfterImport", analyzeAfterImport);
                 result.put("enableVersionControl", enableVersionControl);
+                result.put("stripLeadingPath", stripLeadingPath);
+                result.put("stripAllContainerPath", stripAllContainerPath);
+                result.put("mirrorFs", mirrorFs);
                 result.put("importedPrograms", importedProgramPaths);
 
                 if (enableVersionControl) {
@@ -901,18 +1177,48 @@ public class ProjectToolProvider extends AbstractToolProvider {
                     result.put("analyzedPrograms", analyzedFiles);
                 }
 
-                if (!errors.isEmpty()) {
-                    result.put("errors", errors);
+                // Include detailed error information
+                if (!detailedErrors.isEmpty()) {
+                    result.put("errors", detailedErrors);
+                    result.put("errorCount", detailedErrors.size());
+
+                    // Build error summary by stage
+                    Map<String, Long> errorsByStage = new HashMap<>();
+                    for (Map<String, Object> error : detailedErrors) {
+                        String stage = (String) error.getOrDefault("stage", "unknown");
+                        errorsByStage.merge(stage, 1L, Long::sum);
+                    }
+                    StringBuilder summary = new StringBuilder();
+                    summary.append(detailedErrors.size()).append(" error(s): ");
+                    boolean first = true;
+                    for (Map.Entry<String, Long> entry : errorsByStage.entrySet()) {
+                        if (!first) summary.append(", ");
+                        summary.append(entry.getValue()).append(" during ").append(entry.getKey());
+                        first = false;
+                    }
+                    result.put("errorSummary", summary.toString());
                 }
 
-                String message = "Import completed successfully. " + batchInfo.getTotalCount() + " files imported";
+                // Build completion message
+                String message = "Import completed. " + importedDomainFiles.size() + " of " +
+                    batchInfo.getTotalCount() + " files imported";
                 if (analyzeAfterImport && analyzedFiles.size() > 0) {
                     message += ", " + analyzedFiles.size() + " analyzed";
                 }
                 if (enableVersionControl && versionedFiles.size() > 0) {
                     message += ", " + versionedFiles.size() + " added to version control";
                 }
+                if (!detailedErrors.isEmpty()) {
+                    message += " (" + detailedErrors.size() + " error(s))";
+                }
                 result.put("message", message + ".");
+
+                // Send final progress notification
+                if (exchange != null) {
+                    exchange.progressNotification(new McpSchema.ProgressNotification(
+                        progressToken, (double) totalFiles, (double) totalFiles,
+                        message + "."));
+                }
 
                 return createJsonResult(result);
 
@@ -920,6 +1226,95 @@ public class ProjectToolProvider extends AbstractToolProvider {
                 return createErrorResult("Invalid parameter: " + e.getMessage());
             } catch (Exception e) {
                 return createErrorResult("Import failed: " + e.getMessage());
+            }
+        });
+    }
+
+    /**
+     * Sanitizes a filename by replacing invalid characters with underscores.
+     * This is a copy of ImportBatchTask.fixupProjectFilename which is private.
+     * Copied from Ghidra 12.0 source - update if Ghidra's implementation changes.
+     *
+     * @param filename The filename to sanitize
+     * @return The sanitized filename with invalid characters replaced by underscores
+     */
+    private String fixupProjectFilename(String filename) {
+        // Replace any invalid characters with underscores
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < filename.length(); i++) {
+            char ch = filename.charAt(i);
+            sb.append(LocalFileSystem.isValidNameCharacter(ch) ? ch : '_');
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Convert a file's FSRL into a target project path, using import path options.
+     * This is a copy of ImportBatchTask.fsrlToPath which is package-private.
+     * Copied from Ghidra 12.0 source - update if Ghidra's implementation changes.
+     * TODO: Consider requesting this method be made public in a future Ghidra release.
+     *
+     * @param fsrl FSRL of the file to convert
+     * @param userSrc FSRL of the user-added source file
+     * @param stripLeadingPath Whether to strip the leading path
+     * @param stripInteriorContainerPath Whether to strip interior container paths
+     * @return Path string for the project destination
+     */
+    private String fsrlToPath(FSRL fsrl, FSRL userSrc, boolean stripLeadingPath,
+            boolean stripInteriorContainerPath) {
+
+        String fullPath = fsrl.toPrettyFullpathString().replace('|', '/');
+        String userSrcPath = userSrc.toPrettyFullpathString().replace('|', '/');
+        int filename = fullPath.lastIndexOf('/') + 1;
+        int uas = userSrcPath.length();
+
+        int leadStart = !stripLeadingPath ? 0 : userSrcPath.lastIndexOf('/') + 1;
+        int leadEnd = Math.min(filename, userSrcPath.length());
+        String leading = (leadStart < filename) ? fullPath.substring(leadStart, leadEnd) : "";
+        String containerPath = uas < filename && !stripInteriorContainerPath
+                ? fullPath.substring(uas, filename)
+                : "";
+        String filenameStr = fullPath.substring(filename);
+        String result = FSUtilities.appendPath(leading, containerPath, filenameStr);
+        return result;
+    }
+
+    /**
+     * Register a tool to capture ReVa debug information for troubleshooting.
+     * Creates a zip file with system info, logs, configuration, and open programs.
+     */
+    private void registerCaptureDebugInfoTool() {
+        Map<String, Object> properties = new HashMap<>();
+        properties.put("message", Map.of(
+            "type", "string",
+            "description", "Optional message describing the issue being debugged"
+        ));
+
+        List<String> required = new ArrayList<>();
+
+        McpSchema.Tool tool = McpSchema.Tool.builder()
+            .name("capture-reva-debug-info")
+            .title("Capture ReVa Debug Information")
+            .description("Creates a zip file containing ReVa debug information for troubleshooting issues. " +
+                "Includes system info, Ghidra config, ReVa settings, MCP server status, open programs, and logs.")
+            .inputSchema(createSchema(properties, required))
+            .build();
+
+        registerTool(tool, (exchange, request) -> {
+            String message = getOptionalString(request, "message", null);
+
+            try {
+                DebugCaptureService debugService = new DebugCaptureService();
+                File debugZip = debugService.captureDebugInfo(message);
+
+                Map<String, Object> result = new HashMap<>();
+                result.put("success", true);
+                result.put("debugZipPath", debugZip.getAbsolutePath());
+                result.put("message", "Debug information captured to: " + debugZip.getAbsolutePath());
+
+                return createJsonResult(result);
+            } catch (Exception e) {
+                return createErrorResult("Failed to capture debug info: " + e.getMessage());
             }
         });
     }

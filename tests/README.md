@@ -130,7 +130,7 @@ Tests configuration loading:
 
 The GitHub Actions workflow (`.github/workflows/test-headless.yml`) runs these tests:
 
-- **Matrix**: Ubuntu/macOS × Python 3.9/3.11/3.12 × Ghidra 11.4.2/latest
+- **Matrix**: Ubuntu/macOS × Python 3.9/3.11/3.12 × Ghidra 12.0/latest
 - **Timeout**: 10 minutes per job
 - **Artifacts**: Uploads logs and pytest cache
 

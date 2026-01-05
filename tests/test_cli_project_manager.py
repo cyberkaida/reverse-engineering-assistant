@@ -22,26 +22,39 @@ class TestProjectManagerInit:
     """Test ProjectManager initialization and directory creation."""
 
     def test_creates_reva_directory_in_cwd(self, isolated_workspace):
-        """ProjectManager creates .reva/projects/ in current directory"""
+        """ProjectManager creates .reva/projects/ on first use (lazy initialization)"""
         from reva_cli.project_manager import ProjectManager
 
         pm = ProjectManager()
 
-        # Should create .reva/projects/ in current directory
+        # Should NOT create directory on init (lazy initialization)
+        assert not (isolated_workspace / ".reva").exists()
+
+        # Manually trigger initialization (normally done by import_binary)
+        pm.projects_dir.mkdir(parents=True, exist_ok=True)
+
+        # Now directory should exist
         assert (isolated_workspace / ".reva").exists()
         assert (isolated_workspace / ".reva" / "projects").exists()
         assert (isolated_workspace / ".reva" / "projects").is_dir()
 
     def test_accepts_custom_projects_dir(self, tmp_path):
-        """ProjectManager accepts custom project directory"""
+        """ProjectManager accepts custom project directory (lazy initialization)"""
         from reva_cli.project_manager import ProjectManager
 
         custom_dir = tmp_path / "custom_projects"
         pm = ProjectManager(projects_dir=custom_dir)
 
+        # Should NOT create directory on init (lazy initialization)
+        assert not custom_dir.exists()
+        assert pm.projects_dir == custom_dir
+
+        # Manually trigger directory creation
+        pm.projects_dir.mkdir(parents=True, exist_ok=True)
+
+        # Now directory should exist
         assert custom_dir.exists()
         assert custom_dir.is_dir()
-        assert pm.projects_dir == custom_dir
 
 
 class TestProjectNaming:

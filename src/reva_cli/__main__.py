@@ -152,14 +152,10 @@ def main():
         pyghidra.start(verbose=args.verbose)
         print("PyGhidra initialized", file=sys.stderr)
 
-        # Initialize project manager (blocking, <1 second)
+        # Initialize project manager (lazy - project created on first tool use)
         print("Initializing project manager...", file=sys.stderr)
         project_manager = ProjectManager()
-
-        # Open or create project (blocking, 1-3 seconds)
-        project = project_manager.open_project()
-        print(f"Project opened: {project.getProject().getName()}", file=sys.stderr)
-        print("Use MCP tools to import binaries into the project", file=sys.stderr)
+        print("Project manager ready (project will be created on first use)", file=sys.stderr)
 
         # Start ReVa server (blocking, 4-7 seconds)
         print("Starting ReVa server...", file=sys.stderr)

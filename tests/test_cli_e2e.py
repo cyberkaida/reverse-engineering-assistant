@@ -65,21 +65,21 @@ class TestMCPToolCalls:
 
         # Check for some essential tools
         tool_names = [tool.name for tool in result.tools]
-        assert "list-open-programs" in tool_names
+        assert "list-project-files" in tool_names
         # Note: Tool names may vary, just ensure we have a substantial list
         assert len([name for name in tool_names if "function" in name.lower()]) > 0
 
     async def test_call_list_programs_tool(self, mcp_stdio_client, test_binary, ghidra_initialized):
-        """Can call list-open-programs tool"""
+        """Can call list-project-files tool"""
         # The test_binary fixture creates a binary in isolated_workspace
         # The ProjectManager should have auto-imported it
 
         result = await mcp_stdio_client.call_tool(
-            "list-open-programs",
-            arguments={}
+            "list-project-files",
+            arguments={"folderPath": "/"}
         )
 
-        # Should get a response (even if no programs are open yet)
+        # Should get a response (even if no files in project yet)
         assert result is not None
         assert hasattr(result, 'content')
 
@@ -103,31 +103,35 @@ class TestMCPToolCalls:
 class TestProjectCreation:
     """Test that mcp-reva creates Ghidra project in .reva/."""
 
-    async def test_creates_reva_directory(self, mcp_stdio_client, isolated_workspace):
-        """CLI creates .reva/projects/ directory"""
-        # After mcp_stdio_client starts, ProjectManager should have run
+    async def test_does_not_create_reva_directory(self, mcp_stdio_client, isolated_workspace, test_binary):
+        """CLI does NOT create .reva directory in stdio mode (lazy initialization prevents unnecessary creation)"""
         reva_dir = isolated_workspace / ".reva"
-        projects_dir = reva_dir / "projects"
 
-        # Give it a moment to create the project
+        # After CLI starts, .reva should NOT exist (lazy initialization)
+        assert not reva_dir.exists(), ".reva directory should not exist at startup"
+
+        # Even after using MCP tools, .reva should NOT be created
+        # (MCP tools use Java-side project management, not Python ProjectManager)
+        await mcp_stdio_client.call_tool(
+            "import-file",
+            arguments={"path": str(test_binary)}
+        )
+
+        # .reva still should NOT exist (ProjectManager.import_binary() was never called)
+        assert not reva_dir.exists(), ".reva directory should not be created by MCP tools in stdio mode"
+
+    async def test_lazy_initialization_prevents_directory_creation(self, mcp_stdio_client, isolated_workspace):
+        """ProjectManager lazy initialization prevents .reva directory creation at startup"""
+        reva_dir = isolated_workspace / ".reva"
+
+        # The mcp_stdio_client fixture starts the CLI which creates a ProjectManager
+        # With lazy initialization, .reva should NOT be created
+        assert not reva_dir.exists(), ".reva directory should not be created by CLI startup"
+
+        # Verify this remains true after a short delay
         import asyncio
-        await asyncio.sleep(1)
-
-        assert reva_dir.exists(), ".reva directory not created"
-        assert projects_dir.exists(), ".reva/projects directory not created"
-
-    async def test_project_name_based_on_cwd(self, mcp_stdio_client, isolated_workspace):
-        """Project name is derived from workspace directory"""
-        # The project should be named after the temp directory
-        projects_dir = isolated_workspace / ".reva" / "projects"
-
-        import asyncio
-        await asyncio.sleep(1)
-
-        # Should have created a project directory
-        if projects_dir.exists():
-            project_dirs = list(projects_dir.iterdir())
-            assert len(project_dirs) > 0, "No project directory created"
+        await asyncio.sleep(0.5)
+        assert not reva_dir.exists(), ".reva directory should still not exist after CLI is running"
 
 
 class TestBinaryAutoImport:
@@ -142,10 +146,10 @@ class TestBinaryAutoImport:
         import asyncio
         await asyncio.sleep(5)
 
-        # Try to list programs
+        # Try to list files in project
         result = await mcp_stdio_client.call_tool(
-            "list-open-programs",
-            arguments={}
+            "list-project-files",
+            arguments={"folderPath": "/"}
         )
 
         # Ideally we'd check if the binary was imported, but that requires

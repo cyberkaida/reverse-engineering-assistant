@@ -388,6 +388,129 @@ class TestImportWithAnalysis:
 
         print(f"✓ Analysis completed: {files_analyzed} programs analyzed")
 
+    async def test_analysis_discovers_functions(self, mcp_stdio_client, isolated_workspace):
+        """
+        Verify that analysis actually discovers functions in the imported binary.
+
+        This confirms the full import-analyze-query workflow works end-to-end.
+        """
+        binary_path = skip_if_fixture_missing("test_arm64")
+
+        # Import with analysis
+        print(f"\n=== Importing and analyzing: {binary_path} ===")
+        import_result = await mcp_stdio_client.call_tool(
+            "import-file",
+            arguments={
+                "path": binary_path,
+                "enableVersionControl": False,
+                "analyzeAfterImport": True
+            }
+        )
+
+        assert import_result is not None
+        import_data = json.loads(import_result.content[0].text)
+        assert import_data.get("success") is True, "Import should succeed"
+
+        # Get the program path from import result
+        imported_programs = import_data.get("importedPrograms", [])
+        assert len(imported_programs) > 0, "Should have imported at least one program"
+        program_path = imported_programs[0]
+        print(f"Imported program: {program_path}")
+
+        # Query functions in the analyzed program
+        print(f"\n=== Querying functions in {program_path} ===")
+        functions_result = await mcp_stdio_client.call_tool(
+            "get-functions",
+            arguments={
+                "programPath": program_path,
+                "maxCount": 50
+            }
+        )
+
+        assert functions_result is not None
+        assert hasattr(functions_result, 'content'), "get-functions should return content"
+
+        # Parse functions response
+        functions_text = functions_result.content[0].text
+        functions_data = json.loads(functions_text)
+
+        # Check for functions discovered
+        functions = functions_data.get("functions", [])
+        function_count = functions_data.get("count", len(functions))
+
+        print(f"Functions discovered: {function_count}")
+        if functions:
+            print("Sample functions:")
+            for func in functions[:5]:
+                name = func.get("name", "unknown")
+                addr = func.get("address", "unknown")
+                print(f"  - {name} @ {addr}")
+
+        # The test binaries should have at least one function (entry point)
+        assert function_count > 0, \
+            f"Analysis should discover at least one function, got {function_count}"
+
+        print(f"\n✓ Analysis correctly discovered {function_count} functions")
+
+    async def test_fat_binary_analysis_discovers_functions_in_both_slices(
+        self, mcp_stdio_client, isolated_workspace
+    ):
+        """
+        Import and analyze a fat binary, verify functions discovered in both slices.
+
+        This ensures multi-architecture binaries are properly analyzed.
+        """
+        fat_binary_path = skip_if_fixture_missing("test_fat_binary")
+
+        # Import with analysis
+        print(f"\n=== Importing and analyzing fat binary: {fat_binary_path} ===")
+        import_result = await mcp_stdio_client.call_tool(
+            "import-file",
+            arguments={
+                "path": fat_binary_path,
+                "enableVersionControl": False,
+                "analyzeAfterImport": True
+            }
+        )
+
+        assert import_result is not None
+        import_data = json.loads(import_result.content[0].text)
+        assert import_data.get("success") is True, "Import should succeed"
+
+        imported_programs = import_data.get("importedPrograms", [])
+        assert len(imported_programs) == 2, \
+            f"Fat binary should produce 2 programs, got {len(imported_programs)}"
+
+        # Query functions in each architecture slice
+        for program_path in imported_programs:
+            print(f"\n=== Querying functions in {program_path} ===")
+
+            functions_result = await mcp_stdio_client.call_tool(
+                "get-functions",
+                arguments={
+                    "programPath": program_path,
+                    "maxCount": 20
+                }
+            )
+
+            assert functions_result is not None
+
+            functions_text = functions_result.content[0].text
+            functions_data = json.loads(functions_text)
+
+            functions = functions_data.get("functions", [])
+            function_count = functions_data.get("count", len(functions))
+
+            print(f"  Functions in {program_path}: {function_count}")
+            if functions:
+                for func in functions[:3]:
+                    print(f"    - {func.get('name', 'unknown')} @ {func.get('address', 'unknown')}")
+
+            assert function_count > 0, \
+                f"Each slice should have at least one function, got {function_count} in {program_path}"
+
+        print(f"\n✓ Both architecture slices analyzed correctly")
+
     async def test_import_without_analysis(self, mcp_stdio_client, isolated_workspace):
         """
         Import with analyzeAfterImport=false (default) and verify no analysis.

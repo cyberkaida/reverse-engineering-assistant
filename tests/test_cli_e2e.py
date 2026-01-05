@@ -65,21 +65,21 @@ class TestMCPToolCalls:
 
         # Check for some essential tools
         tool_names = [tool.name for tool in result.tools]
-        assert "list-open-programs" in tool_names
+        assert "list-project-files" in tool_names
         # Note: Tool names may vary, just ensure we have a substantial list
         assert len([name for name in tool_names if "function" in name.lower()]) > 0
 
     async def test_call_list_programs_tool(self, mcp_stdio_client, test_binary, ghidra_initialized):
-        """Can call list-open-programs tool"""
+        """Can call list-project-files tool"""
         # The test_binary fixture creates a binary in isolated_workspace
         # The ProjectManager should have auto-imported it
 
         result = await mcp_stdio_client.call_tool(
-            "list-open-programs",
-            arguments={}
+            "list-project-files",
+            arguments={"folderPath": "/"}
         )
 
-        # Should get a response (even if no programs are open yet)
+        # Should get a response (even if no files in project yet)
         assert result is not None
         assert hasattr(result, 'content')
 
@@ -146,10 +146,10 @@ class TestBinaryAutoImport:
         import asyncio
         await asyncio.sleep(5)
 
-        # Try to list programs
+        # Try to list files in project
         result = await mcp_stdio_client.call_tool(
-            "list-open-programs",
-            arguments={}
+            "list-project-files",
+            arguments={"folderPath": "/"}
         )
 
         # Ideally we'd check if the binary was imported, but that requires

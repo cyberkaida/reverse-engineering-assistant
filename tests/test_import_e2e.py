@@ -28,10 +28,24 @@ FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 
 def skip_if_fixture_missing(fixture_name: str):
-    """Skip test if fixture file is missing."""
+    """Skip test if fixture file is missing or fail if it's an LFS pointer."""
     fixture_path = FIXTURES_DIR / fixture_name
     if not fixture_path.exists():
         pytest.skip(f"Test fixture not found: {fixture_path}")
+
+    # Check if it's an LFS pointer file (small text file starting with "version")
+    file_size = fixture_path.stat().st_size
+    if file_size < 200:  # LFS pointers are ~130 bytes
+        try:
+            content = fixture_path.read_text()
+            if content.startswith("version https://git-lfs.github.com"):
+                pytest.fail(
+                    f"Test fixture {fixture_name} is a Git LFS pointer, not the actual file. "
+                    "Run 'git lfs pull' locally or enable LFS in CI checkout."
+                )
+        except UnicodeDecodeError:
+            pass  # Binary file, not a pointer
+
     return str(fixture_path)
 
 

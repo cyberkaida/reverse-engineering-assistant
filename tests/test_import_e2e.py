@@ -12,7 +12,6 @@ Test Fixtures:
 
 import pytest
 import json
-import os
 from pathlib import Path
 
 # Mark all tests in this file
@@ -112,11 +111,12 @@ class TestArchiveImport:
         assert result is not None
         data = json.loads(result.content[0].text)
 
-        # Required fields (note: filesImported is computed from len(importedPrograms))
+        # Required fields returned by the import-file tool
         required_fields = [
             "success",
             "importedFrom",
             "filesDiscovered",
+            "filesImported",
             "importedPrograms",
             "groupsCreated",
         ]
@@ -167,7 +167,9 @@ class TestFatMachoBinaryImport:
         # Check architecture names (Ghidra uses various naming conventions)
         programs_str = " ".join(imported_programs).lower()
         has_arm = "arm" in programs_str or "aarch" in programs_str
-        has_x86 = "x86" in programs_str or "64" in programs_str
+        # Use specific x86 patterns to avoid matching "aarch64"
+        x86_markers = ("x86", "x86_64", "x86-64", "amd64", "i386", "i686")
+        has_x86 = any(marker in programs_str for marker in x86_markers)
 
         print(f"✓ Fat binary slices extracted: {imported_programs}")
         print(f"  Has ARM: {has_arm}, Has x86: {has_x86}")
@@ -234,6 +236,7 @@ class TestImportedFilesInProject:
                 file_entries.append(entry)
                 print(f"  [{i}] {entry}")
             except (json.JSONDecodeError, AttributeError):
+                # Skip non-JSON content items (e.g., progress messages or malformed entries)
                 pass
 
         # Verify we got files matching the import count
@@ -298,6 +301,7 @@ class TestImportedFilesInProject:
                 entry = json.loads(content.text)
                 print(f"  [{i}] {entry}")
             except (json.JSONDecodeError, AttributeError):
+                # Skip non-JSON content items (e.g., progress messages or malformed entries)
                 pass
 
         print(f"\n✓ Fat binary slices appear in project ({item_count} items)")
@@ -513,7 +517,7 @@ class TestImportWithAnalysis:
 
     async def test_import_without_analysis(self, mcp_stdio_client, isolated_workspace):
         """
-        Import with analyzeAfterImport=false (default) and verify no analysis.
+        Import with analyzeAfterImport=false (overriding default=true) and verify no analysis.
 
         Expected: analyzedPrograms field NOT present
         """
@@ -563,6 +567,7 @@ class TestImportResponseFields:
             "importedFrom",
             "destinationFolder",
             "filesDiscovered",
+            "filesImported",
             "importedPrograms",
             "groupsCreated",
             "maxDepthUsed",
@@ -667,3 +672,112 @@ class TestImportErrorHandling:
         except json.JSONDecodeError:
             # Non-JSON error message
             print(f"✓ Tool returned error message: {content_text}")
+
+
+class TestImportProgressMessages:
+    """Tests verifying progress message fields are correctly populated."""
+
+    async def test_import_response_contains_message(self, mcp_stdio_client, isolated_workspace):
+        """
+        Verify the import response includes a human-readable message field.
+
+        The message should summarize the import operation results.
+        """
+        binary_path = skip_if_fixture_missing("test_arm64")
+
+        result = await mcp_stdio_client.call_tool(
+            "import-file",
+            arguments={
+                "path": binary_path,
+                "enableVersionControl": False
+            }
+        )
+
+        assert result is not None
+        data = json.loads(result.content[0].text)
+        assert data.get("success") is True, "Import should succeed"
+
+        # Verify message field is present and meaningful
+        assert "message" in data, "Response should include 'message' field"
+        message = data["message"]
+
+        # Message should mention the import completion and file counts
+        assert "Import completed" in message or "imported" in message.lower(), \
+            f"Message should mention import completion: {message}"
+        assert any(char.isdigit() for char in message), \
+            f"Message should include file counts: {message}"
+
+        print(f"✓ Import message: {message}")
+
+    async def test_archive_import_message_shows_counts(self, mcp_stdio_client, isolated_workspace):
+        """
+        Verify archive import message shows discovered and imported file counts.
+
+        When importing an archive with multiple files, the message should
+        accurately reflect the number of files processed.
+        """
+        archive_path = skip_if_fixture_missing("test_archive.zip")
+
+        result = await mcp_stdio_client.call_tool(
+            "import-file",
+            arguments={
+                "path": archive_path,
+                "enableVersionControl": False
+            }
+        )
+
+        assert result is not None
+        data = json.loads(result.content[0].text)
+        assert data.get("success") is True, "Import should succeed"
+
+        # Verify counts are present
+        files_discovered = data.get("filesDiscovered", 0)
+        files_imported = data.get("filesImported", 0)
+        imported_programs = len(data.get("importedPrograms", []))
+
+        assert files_discovered >= 3, f"Should discover at least 3 files, got {files_discovered}"
+        assert files_imported >= 3, f"Should import at least 3 files, got {files_imported}"
+
+        # Verify message references the counts
+        message = data.get("message", "")
+        assert str(files_imported) in message or str(files_discovered) in message, \
+            f"Message should reference file counts: {message}"
+
+        print(f"✓ Archive import message: {message}")
+        print(f"  Discovered: {files_discovered}, Imported: {files_imported}, Programs: {imported_programs}")
+
+    async def test_import_with_analysis_message_shows_analysis_count(
+        self, mcp_stdio_client, isolated_workspace
+    ):
+        """
+        Verify import with analysis shows analysis count in message.
+
+        When analyzeAfterImport=true, the message should mention how many
+        files were analyzed.
+        """
+        binary_path = skip_if_fixture_missing("test_arm64")
+
+        result = await mcp_stdio_client.call_tool(
+            "import-file",
+            arguments={
+                "path": binary_path,
+                "enableVersionControl": False,
+                "analyzeAfterImport": True
+            }
+        )
+
+        assert result is not None
+        data = json.loads(result.content[0].text)
+        assert data.get("success") is True, "Import should succeed"
+
+        # Verify analysis was performed
+        analyzed_count = data.get("filesAnalyzed", 0)
+        assert analyzed_count > 0, "Should have analyzed at least one file"
+
+        # Verify message mentions analysis
+        message = data.get("message", "")
+        assert "analy" in message.lower(), \
+            f"Message should mention analysis when analyzeAfterImport=true: {message}"
+
+        print(f"✓ Import with analysis message: {message}")
+        print(f"  Files analyzed: {analyzed_count}")

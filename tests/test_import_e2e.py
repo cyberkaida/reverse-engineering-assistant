@@ -434,13 +434,17 @@ class TestImportWithAnalysis:
         assert functions_result is not None
         assert hasattr(functions_result, 'content'), "get-functions should return content"
 
-        # Parse functions response
-        functions_text = functions_result.content[0].text
-        functions_data = json.loads(functions_text)
+        # Parse functions response - multi-part format:
+        # content[0] = metadata (totalCount, actualCount, etc.)
+        # content[1+] = individual function objects
+        metadata = json.loads(functions_result.content[0].text)
+        function_count = metadata.get("totalCount", metadata.get("actualCount", 0))
 
-        # Check for functions discovered
-        functions = functions_data.get("functions", [])
-        function_count = functions_data.get("count", len(functions))
+        # Parse individual function objects from remaining content items
+        functions = []
+        for i in range(1, len(functions_result.content)):
+            func = json.loads(functions_result.content[i].text)
+            functions.append(func)
 
         print(f"Functions discovered: {function_count}")
         if functions:
@@ -499,11 +503,15 @@ class TestImportWithAnalysis:
 
             assert functions_result is not None
 
-            functions_text = functions_result.content[0].text
-            functions_data = json.loads(functions_text)
+            # Parse multi-part response: metadata + function objects
+            metadata = json.loads(functions_result.content[0].text)
+            function_count = metadata.get("totalCount", metadata.get("actualCount", 0))
 
-            functions = functions_data.get("functions", [])
-            function_count = functions_data.get("count", len(functions))
+            # Parse individual function objects
+            functions = []
+            for i in range(1, len(functions_result.content)):
+                func = json.loads(functions_result.content[i].text)
+                functions.append(func)
 
             print(f"  Functions in {program_path}: {function_count}")
             if functions:

@@ -59,6 +59,7 @@ import ghidra.framework.store.local.LocalFileSystem;
 import io.modelcontextprotocol.server.McpSyncServer;
 import io.modelcontextprotocol.server.McpSyncServerExchange;
 import io.modelcontextprotocol.spec.McpSchema;
+import reva.debug.DebugCaptureService;
 import reva.plugin.RevaProgramManager;
 import reva.plugin.ConfigManager;
 import reva.tools.AbstractToolProvider;
@@ -95,6 +96,7 @@ public class ProjectToolProvider extends AbstractToolProvider {
         registerAnalyzeProgramTool();
         registerChangeProcessorTool();
         registerImportFileTool();
+        registerCaptureDebugInfoTool();
     }
 
     /**
@@ -1274,6 +1276,46 @@ public class ProjectToolProvider extends AbstractToolProvider {
         String filenameStr = fullPath.substring(filename);
         String result = FSUtilities.appendPath(leading, containerPath, filenameStr);
         return result;
+    }
+
+    /**
+     * Register a tool to capture ReVa debug information for troubleshooting.
+     * Creates a zip file with system info, logs, configuration, and open programs.
+     */
+    private void registerCaptureDebugInfoTool() {
+        Map<String, Object> properties = new HashMap<>();
+        properties.put("message", Map.of(
+            "type", "string",
+            "description", "Optional message describing the issue being debugged"
+        ));
+
+        List<String> required = new ArrayList<>();
+
+        McpSchema.Tool tool = McpSchema.Tool.builder()
+            .name("capture-reva-debug-info")
+            .title("Capture ReVa Debug Information")
+            .description("Creates a zip file containing ReVa debug information for troubleshooting issues. " +
+                "Includes system info, Ghidra config, ReVa settings, MCP server status, open programs, and logs.")
+            .inputSchema(createSchema(properties, required))
+            .build();
+
+        registerTool(tool, (exchange, request) -> {
+            String message = getOptionalString(request, "message", null);
+
+            try {
+                DebugCaptureService debugService = new DebugCaptureService();
+                File debugZip = debugService.captureDebugInfo(message);
+
+                Map<String, Object> result = new HashMap<>();
+                result.put("success", true);
+                result.put("debugZipPath", debugZip.getAbsolutePath());
+                result.put("message", "Debug information captured to: " + debugZip.getAbsolutePath());
+
+                return createJsonResult(result);
+            } catch (Exception e) {
+                return createErrorResult("Failed to capture debug info: " + e.getMessage());
+            }
+        });
     }
 
 }

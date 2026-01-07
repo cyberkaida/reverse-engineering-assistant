@@ -30,11 +30,15 @@ import org.eclipse.jetty.servlet.ServletHolder;
 import java.util.EnumSet;
 import jakarta.servlet.DispatcherType;
 
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
 import generic.concurrent.GThreadPool;
 import ghidra.framework.plugintool.PluginTool;
 import ghidra.program.model.listing.Program;
 import ghidra.util.Msg;
 
+import io.modelcontextprotocol.json.jackson.JacksonMcpJsonMapper;
 import io.modelcontextprotocol.server.McpServer;
 import io.modelcontextprotocol.server.McpSyncServer;
 import io.modelcontextprotocol.server.transport.HttpServletStreamableServerTransportProvider;
@@ -440,10 +444,18 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
         String serverHost = configManager.getServerHost();
         String baseUrl = "http://" + serverHost + ":" + serverPort;
 
+        // Create ObjectMapper configured to ignore unknown properties
+        // This is a workaround for MCP SDK issue #724 where the SDK doesn't handle
+        // newer protocol fields (e.g., from VS Code MCP client using protocol 2025-11-25)
+        // See: https://github.com/modelcontextprotocol/java-sdk/issues/724
+        ObjectMapper objectMapper = new ObjectMapper();
+        objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        JacksonMcpJsonMapper jsonMapper = new JacksonMcpJsonMapper(objectMapper);
+
         // Create new transport provider with updated configuration
-        // Note: As of MCP SDK v0.14.0, the builder uses McpJsonMapper.getDefault() automatically
         currentTransportProvider = HttpServletStreamableServerTransportProvider.builder()
             .mcpEndpoint(MCP_MSG_ENDPOINT)
+            .jsonMapper(jsonMapper)
             .keepAliveInterval(java.time.Duration.ofSeconds(30))
             .build();
     }

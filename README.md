@@ -173,6 +173,15 @@ You can install with:
 claude plugin marketplace add cyberkaida/reverse-engineering-assistant
 ```
 
+### sk
+
+Install via [sk](https://github.com/803/skills-supply), the universal package manager for AI agent skills.
+
+```bash
+sk pkg add claude-plugin ReVa@cyberkaida/reverse-engineering-assistant
+sk sync
+```
+
 This will add the [ReVa skills](/ReVa/skills/) to your Claude Code installation.
 
 - Binary Triage

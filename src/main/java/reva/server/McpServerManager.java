@@ -51,6 +51,7 @@ import reva.services.RevaMcpService;
 import reva.tools.ToolProvider;
 import reva.tools.data.DataToolProvider;
 import reva.tools.datatypes.DataTypeToolProvider;
+import reva.tools.classes.ClassToolProvider;
 import reva.tools.decompiler.DecompilerToolProvider;
 import reva.tools.functions.FunctionToolProvider;
 import reva.tools.memory.MemoryToolProvider;
@@ -186,6 +187,7 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
         toolProviders.add(new ProjectToolProvider(server, headlessMode));
         toolProviders.add(new CrossReferencesToolProvider(server));
         toolProviders.add(new DataTypeToolProvider(server));
+        toolProviders.add(new ClassToolProvider(server));
         toolProviders.add(new StructureToolProvider(server));
         toolProviders.add(new CommentToolProvider(server));
         toolProviders.add(new BookmarkToolProvider(server));

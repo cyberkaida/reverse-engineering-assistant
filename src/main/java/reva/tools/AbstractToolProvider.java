@@ -496,6 +496,25 @@ public abstract class AbstractToolProvider implements ToolProvider {
     }
 
     /**
+     * Get an optional generic list parameter from arguments
+     * @param args The arguments map
+     * @param key The parameter key
+     * @param defaultValue The default value if not present
+     * @return The list value or default
+     */
+    @SuppressWarnings("unchecked")
+    protected <T> List<T> getOptionalList(Map<String, Object> args, String key, List<T> defaultValue) {
+        Object value = args.get(key);
+        if (value == null) {
+            return defaultValue;
+        }
+        if (value instanceof List) {
+            return (List<T>) value;
+        }
+        throw new IllegalArgumentException("Parameter '" + key + "' must be a list");
+    }
+
+    /**
      * Get a required string map parameter from arguments
      * @param args The arguments map
      * @param key The parameter key

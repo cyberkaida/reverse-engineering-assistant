@@ -59,8 +59,9 @@ clone_ghidra_source() {
 
 # Download and extract Ghidra binary (background)
 install_ghidra_binary() {
-    # Check if already installed
-    existing=$(find "${GHIDRA_INSTALL_BASE}" -maxdepth 1 -name "ghidra_*" -type d 2>/dev/null | head -1)
+    # Check if already installed (mkdir -p ensures find doesn't fail with pipefail)
+    mkdir -p "${GHIDRA_INSTALL_BASE}"
+    existing=$(find "${GHIDRA_INSTALL_BASE}" -maxdepth 1 -name "ghidra_*" -type d | head -1)
     if [ -n "${existing}" ]; then
         log "Ghidra binary already installed at ${existing}"
         echo "${existing}"
@@ -83,7 +84,6 @@ install_ghidra_binary() {
     filename=$(basename "${download_url}")
     log "Downloading ${filename}..."
 
-    mkdir -p "${GHIDRA_INSTALL_BASE}"
     curl -fsSL -o "/tmp/${filename}" "${download_url}"
 
     log "Extracting ${filename}..."

@@ -139,11 +139,59 @@ else
     log "WARNING: Ghidra binary not available, build will fail"
 fi
 
+# Configure JVM proxy for Gradle (JVM doesn't honor https_proxy)
+setup_gradle_proxy() {
+    local proxy_url="${https_proxy:-${HTTPS_PROXY:-}}"
+    [ -z "${proxy_url}" ] && return 0
+
+    # Parse proxy URL: http://user:pass@host:port
+    local proxy_hostport proxy_host proxy_port
+    proxy_hostport=$(echo "${proxy_url}" | sed 's|http://.*@||')
+    proxy_host=$(echo "${proxy_hostport}" | cut -d: -f1)
+    proxy_port=$(echo "${proxy_hostport}" | cut -d: -f2)
+
+    # Check if proxy requires authentication (has user@host pattern)
+    if echo "${proxy_url}" | grep -q '@'; then
+        log "Proxy with auth detected, starting local forwarding proxy..."
+        local proxy_script="${CLAUDE_PROJECT_DIR}/.claude/hooks/gradle-proxy.py"
+        python3 "${proxy_script}" &
+        GRADLE_PROXY_PID=$!
+
+        # Wait for proxy to be ready
+        local retries=0
+        while [ ${retries} -lt 10 ]; do
+            if curl -s --proxy http://127.0.0.1:18080 --max-time 2 https://repo.maven.apache.org/ >/dev/null 2>&1; then
+                break
+            fi
+            sleep 0.5
+            retries=$((retries + 1))
+        done
+
+        if [ ${retries} -ge 10 ]; then
+            log "WARNING: Local proxy failed to start, Gradle may not resolve dependencies"
+            return 1
+        fi
+
+        proxy_host="127.0.0.1"
+        proxy_port="18080"
+        log "Local proxy ready on ${proxy_host}:${proxy_port}"
+    fi
+
+    local java_proxy_opts="-Dhttps.proxyHost=${proxy_host} -Dhttps.proxyPort=${proxy_port} -Dhttp.proxyHost=${proxy_host} -Dhttp.proxyPort=${proxy_port}"
+    export JAVA_TOOL_OPTIONS="${java_proxy_opts}"
+
+    if [ -n "${CLAUDE_ENV_FILE:-}" ]; then
+        echo "JAVA_TOOL_OPTIONS=${java_proxy_opts}" >> "${CLAUDE_ENV_FILE}"
+        log "Persisted JAVA_TOOL_OPTIONS for Gradle proxy"
+    fi
+}
+
 # Warm gradle dependency cache
 if [ "${BINARY_OK}" = true ] && command -v gradle &>/dev/null; then
+    setup_gradle_proxy
     log "Warming gradle dependency cache..."
     cd "${CLAUDE_PROJECT_DIR}"
-    gradle dependencies --quiet 2>&1 | tail -3
+    gradle --no-daemon dependencies --quiet 2>&1 | tail -3
     log "Gradle dependencies cached"
 fi
 

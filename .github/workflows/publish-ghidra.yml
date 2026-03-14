@@ -18,6 +18,10 @@ jobs:
         # This simplifies the build process and reduces CI time
         ghidra-version: [
             "12.0",
+            "12.0.1",
+            "12.0.2",
+            "12.0.3",
+            "12.0.4",
         ]
     name: Build distribution 📦
     runs-on: ubuntu-latest
@@ -29,14 +33,14 @@ jobs:
         java-version: "21"
         distribution: "microsoft"
     - name: Install Ghidra 🐉
-      uses: antoniovazquezblanco/setup-ghidra@v2.0.18
+      uses: antoniovazquezblanco/setup-ghidra@v2.0.19
       with:
         version: ${{ matrix.ghidra-version }}
         auth_token: ${{ secrets.GITHUB_TOKEN }}
     - name: Compile ReVa 👩‍💻✨
       run: gradle buildExtension
     - name: Store the distribution packages
-      uses: actions/upload-artifact@v6
+      uses: actions/upload-artifact@v7
       with:
         name: ghidra-distributions-${{ matrix.ghidra-version }}
         path: dist/
@@ -55,7 +59,7 @@ jobs:
       RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag || github.ref_name }}
     steps:
     - name: Download all the dists
-      uses: actions/download-artifact@v7
+      uses: actions/download-artifact@v8
       with:
         pattern: ghidra-distributions-*
         path: dist/

@@ -256,7 +256,7 @@ When no structure is defined:
 ```json
 {
     "hasStructure": false,
-    "note": "No structure defined at this address. Use create-structure to define one."
+    "note": "No structure defined at this address. Use parse-c-structure to define one."
 }
 ```
 

@@ -345,7 +345,7 @@ public class DataToolProvider extends AbstractToolProvider {
         try {
             List<Content> contents = new ArrayList<>();
             contents.add(new TextContent(JSON.writeValueAsString(resultData)));
-            return new CallToolResult(contents, false);
+            return CallToolResult.builder().content(contents).isError(false).build();
         } catch (JsonProcessingException e) {
             return createErrorResult("Error converting data to JSON: " + e.getMessage());
         }

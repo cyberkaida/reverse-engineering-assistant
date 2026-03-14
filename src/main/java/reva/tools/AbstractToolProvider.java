@@ -91,10 +91,10 @@ public abstract class AbstractToolProvider implements ToolProvider {
      * @return CallToolResult with error flag set
      */
     protected McpSchema.CallToolResult createErrorResult(String errorMessage) {
-        return new McpSchema.CallToolResult(
-            List.of(new TextContent(errorMessage)),
-            true
-        );
+        return McpSchema.CallToolResult.builder()
+            .content(List.of(new TextContent(errorMessage)))
+            .isError(true)
+            .build();
     }
 
     /**
@@ -104,10 +104,10 @@ public abstract class AbstractToolProvider implements ToolProvider {
      */
     protected McpSchema.CallToolResult createJsonResult(Object data) {
         try {
-            return new McpSchema.CallToolResult(
-                List.of(new TextContent(JSON.writeValueAsString(data))),
-                false
-            );
+            return McpSchema.CallToolResult.builder()
+                .content(List.of(new TextContent(JSON.writeValueAsString(data))))
+                .isError(false)
+                .build();
         } catch (JsonProcessingException e) {
             return createErrorResult("Error serializing result to JSON: " + e.getMessage());
         }
@@ -124,7 +124,10 @@ public abstract class AbstractToolProvider implements ToolProvider {
             for (Object data : dataList) {
                 contents.add(new TextContent(JSON.writeValueAsString(data)));
             }
-            return new McpSchema.CallToolResult(contents, false);
+            return McpSchema.CallToolResult.builder()
+                .content(contents)
+                .isError(false)
+                .build();
         } catch (JsonProcessingException e) {
             return createErrorResult("Error serializing results to JSON: " + e.getMessage());
         }

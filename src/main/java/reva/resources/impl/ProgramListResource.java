@@ -53,13 +53,12 @@ public class ProgramListResource extends AbstractResourceProvider {
 
     @Override
     public void register() {
-        Resource resource = new Resource(
-            RESOURCE_ID,
-            RESOURCE_NAME,
-            RESOURCE_DESCRIPTION,
-            RESOURCE_MIME_TYPE,
-            null  // No schema needed for this resource
-        );
+        Resource resource = Resource.builder()
+            .uri(RESOURCE_ID)
+            .name(RESOURCE_NAME)
+            .description(RESOURCE_DESCRIPTION)
+            .mimeType(RESOURCE_MIME_TYPE)
+            .build();
 
         SyncResourceSpecification resourceSpec = new SyncResourceSpecification(
             resource,

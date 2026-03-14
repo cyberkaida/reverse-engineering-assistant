@@ -19,7 +19,8 @@ class TestLauncherLifecycle:
         """Launcher can start and stop cleanly"""
         from reva.headless import RevaHeadlessLauncher
 
-        launcher = RevaHeadlessLauncher()
+        # Use random port to avoid conflicts with other tests
+        launcher = RevaHeadlessLauncher(None, True)
 
         # Should not be running initially
         assert not launcher.isRunning()
@@ -50,7 +51,8 @@ class TestLauncherLifecycle:
         """waitForServer returns False if called before start"""
         from reva.headless import RevaHeadlessLauncher
 
-        launcher = RevaHeadlessLauncher()
+        # Random port to avoid conflicts (never actually starts)
+        launcher = RevaHeadlessLauncher(None, True)
 
         # Should timeout immediately since server not started
         ready = launcher.waitForServer(1000)
@@ -109,17 +111,18 @@ class TestLauncherConfiguration:
     def test_launcher_with_missing_config_file(self, ghidra_initialized, tmp_path):
         """Launcher handles missing config file gracefully with defaults"""
         from reva.headless import RevaHeadlessLauncher
+        from java.io import File
 
-        # Create launcher with non-existent config - should use defaults
-        nonexistent = tmp_path / "does_not_exist.properties"
-        launcher = RevaHeadlessLauncher(str(nonexistent))
+        # Create launcher with non-existent config and random port
+        nonexistent = File(str(tmp_path / "does_not_exist.properties"))
+        launcher = RevaHeadlessLauncher(nonexistent, True)  # useRandomPort=True
 
         # Should start successfully with default config
         launcher.start()
         assert launcher.waitForServer(30000)
 
-        # Should use default port
+        # Should have a valid port (random)
         port = launcher.getPort()
-        assert port == 8080
+        assert 1024 < port < 65535
 
         launcher.stop()

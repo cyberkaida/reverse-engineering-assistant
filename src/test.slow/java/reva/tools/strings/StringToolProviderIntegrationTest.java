@@ -325,16 +325,16 @@ public class StringToolProviderIntegrationTest extends RevaIntegrationTestBase {
     }
 
     @Test
-    public void testSearchStringsRegexWithValidPattern() throws Exception {
+    public void testGetStringsWithRegexValidPattern() throws Exception {
         withMcpClient(createMcpTransport(), (Consumer<McpSyncClient>) client -> {
             client.initialize();
 
-            // Search for strings containing "String"
+            // Search for strings containing "String" using regexPattern
             Map<String, Object> arguments = new HashMap<>();
             arguments.put("programPath", programPath);
             arguments.put("regexPattern", ".*String.*");
 
-            CallToolResult result = client.callTool(new CallToolRequest("search-strings-regex", arguments));
+            CallToolResult result = client.callTool(new CallToolRequest("get-strings", arguments));
 
             assertNotNull("Result should not be null", result);
             assertMcpResultNotError(result, "Result should not have error");
@@ -373,7 +373,7 @@ public class StringToolProviderIntegrationTest extends RevaIntegrationTestBase {
     }
 
     @Test
-    public void testSearchStringsRegexWithExactMatch() throws Exception {
+    public void testGetStringsWithRegexExactMatch() throws Exception {
         withMcpClient(createMcpTransport(), (Consumer<McpSyncClient>) client -> {
             client.initialize();
 
@@ -382,7 +382,7 @@ public class StringToolProviderIntegrationTest extends RevaIntegrationTestBase {
             arguments.put("programPath", programPath);
             arguments.put("regexPattern", "^Hello World$");
 
-            CallToolResult result = client.callTool(new CallToolRequest("search-strings-regex", arguments));
+            CallToolResult result = client.callTool(new CallToolRequest("get-strings", arguments));
 
             assertNotNull("Result should not be null", result);
             assertMcpResultNotError(result, "Result should not have error");
@@ -405,7 +405,7 @@ public class StringToolProviderIntegrationTest extends RevaIntegrationTestBase {
     }
 
     @Test
-    public void testSearchStringsRegexWithNoMatches() throws Exception {
+    public void testGetStringsWithRegexNoMatches() throws Exception {
         withMcpClient(createMcpTransport(), (Consumer<McpSyncClient>) client -> {
             client.initialize();
 
@@ -414,7 +414,7 @@ public class StringToolProviderIntegrationTest extends RevaIntegrationTestBase {
             arguments.put("programPath", programPath);
             arguments.put("regexPattern", "^NoMatchPattern12345$");
 
-            CallToolResult result = client.callTool(new CallToolRequest("search-strings-regex", arguments));
+            CallToolResult result = client.callTool(new CallToolRequest("get-strings", arguments));
 
             assertNotNull("Result should not be null", result);
             assertMcpResultNotError(result, "Result should not have error");
@@ -429,7 +429,7 @@ public class StringToolProviderIntegrationTest extends RevaIntegrationTestBase {
     }
 
     @Test
-    public void testSearchStringsRegexWithInvalidPattern() throws Exception {
+    public void testGetStringsWithRegexInvalidPattern() throws Exception {
         withMcpClient(createMcpTransport(), (Consumer<McpSyncClient>) client -> {
             client.initialize();
 
@@ -438,7 +438,7 @@ public class StringToolProviderIntegrationTest extends RevaIntegrationTestBase {
             arguments.put("programPath", programPath);
             arguments.put("regexPattern", "[invalid(regex");
 
-            CallToolResult result = client.callTool(new CallToolRequest("search-strings-regex", arguments));
+            CallToolResult result = client.callTool(new CallToolRequest("get-strings", arguments));
 
             // Should return an error for invalid regex
             assertNotNull("Result should not be null", result);
@@ -452,7 +452,7 @@ public class StringToolProviderIntegrationTest extends RevaIntegrationTestBase {
     }
 
     @Test
-    public void testSearchStringsRegexWithPagination() throws Exception {
+    public void testGetStringsWithRegexPagination() throws Exception {
         withMcpClient(createMcpTransport(), (Consumer<McpSyncClient>) client -> {
             client.initialize();
 
@@ -463,7 +463,7 @@ public class StringToolProviderIntegrationTest extends RevaIntegrationTestBase {
             arguments.put("startIndex", 0);
             arguments.put("maxCount", 1);
 
-            CallToolResult result = client.callTool(new CallToolRequest("search-strings-regex", arguments));
+            CallToolResult result = client.callTool(new CallToolRequest("get-strings", arguments));
 
             assertNotNull("Result should not be null", result);
             assertMcpResultNotError(result, "Result should not have error");
@@ -481,7 +481,7 @@ public class StringToolProviderIntegrationTest extends RevaIntegrationTestBase {
             // If search was not complete (more matches exist), test second page
             if (!searchComplete) {
                 arguments.put("startIndex", 1);
-                CallToolResult secondResult = client.callTool(new CallToolRequest("search-strings-regex", arguments));
+                CallToolResult secondResult = client.callTool(new CallToolRequest("get-strings", arguments));
 
                 TextContent secondContent = (TextContent) secondResult.content().get(0);
                 JsonNode secondJson = parseJsonContent(secondContent.text());
@@ -500,24 +500,63 @@ public class StringToolProviderIntegrationTest extends RevaIntegrationTestBase {
     }
 
     @Test
-    public void testSearchStringsRegexWithNoArguments() throws Exception {
-        verifyMcpToolFailsWithError("search-strings-regex", new HashMap<>(), "program");
+    public void testGetStringsWithSimilaritySearch() throws Exception {
+        withMcpClient(createMcpTransport(), (Consumer<McpSyncClient>) client -> {
+            client.initialize();
+
+            // Search for strings similar to "Hello"
+            Map<String, Object> arguments = new HashMap<>();
+            arguments.put("programPath", programPath);
+            arguments.put("searchString", "Hello");
+            arguments.put("maxCount", 10);
+
+            CallToolResult result = client.callTool(new CallToolRequest("get-strings", arguments));
+
+            assertNotNull("Result should not be null", result);
+            assertMcpResultNotError(result, "Result should not have error");
+
+            TextContent content = (TextContent) result.content().get(0);
+            JsonNode json = parseJsonContent(content.text());
+
+            assertTrue("Result should be an array", json.isArray());
+            assertTrue("Result should have at least metadata", json.size() >= 1);
+
+            // Check metadata
+            JsonNode metadata = json.get(0);
+            assertTrue("Metadata should have searchComplete", metadata.has("searchComplete"));
+            assertTrue("Metadata should have actualCount", metadata.has("actualCount"));
+
+            int actualCount = metadata.get("actualCount").asInt();
+            assertTrue("Should find at least our 3 test strings", actualCount >= 3);
+
+            // First result should be the most similar to "Hello" - which is "Hello World"
+            if (actualCount > 0) {
+                JsonNode firstString = json.get(1);
+                assertEquals("Most similar string to 'Hello' should be 'Hello World'",
+                    "Hello World", firstString.get("content").asText());
+            }
+        });
     }
 
     @Test
-    public void testSearchStringsRegexWithMissingPattern() throws Exception {
-        Map<String, Object> arguments = new HashMap<>();
-        arguments.put("programPath", programPath);
+    public void testGetStringsBothSearchParamsError() throws Exception {
+        withMcpClient(createMcpTransport(), (Consumer<McpSyncClient>) client -> {
+            client.initialize();
 
-        verifyMcpToolFailsWithError("search-strings-regex", arguments, "Pattern");
-    }
+            // Provide both searchString and regexPattern - should error
+            Map<String, Object> arguments = new HashMap<>();
+            arguments.put("programPath", programPath);
+            arguments.put("searchString", "Hello");
+            arguments.put("regexPattern", ".*");
 
-    @Test
-    public void testSearchStringsRegexWithInvalidProgramPath() throws Exception {
-        Map<String, Object> arguments = new HashMap<>();
-        arguments.put("programPath", "/invalid/path");
-        arguments.put("regexPattern", ".*");
+            CallToolResult result = client.callTool(new CallToolRequest("get-strings", arguments));
 
-        verifyMcpToolFailsWithError("search-strings-regex", arguments, "Program");
+            assertNotNull("Result should not be null", result);
+
+            TextContent content = (TextContent) result.content().get(0);
+            String text = content.text();
+            assertTrue("Should contain error about mutual exclusivity",
+                text.contains("mutually exclusive"));
+        });
     }
 }

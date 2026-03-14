@@ -6,10 +6,11 @@ Fixtures:
 - test_program: Create a test program with memory and strings (reused across tests)
 - server: Start and stop a ReVa headless server for each test
 - mcp_client: Helper object for making MCP requests
+- capture_ghidra_logs: Auto-use fixture that prints Ghidra logs on test failure
 
 Fixture Scopes:
 - session: Created once, shared across all tests (ghidra_initialized, test_program)
-- function: Created for each test function (server, mcp_client)
+- function: Created for each test function (server, mcp_client, capture_ghidra_logs)
 """
 
 import pytest
@@ -17,6 +18,19 @@ import pytest_asyncio
 import sys
 import os
 from pathlib import Path
+
+
+# ============================================================================
+# Pytest Hooks
+# ============================================================================
+
+@pytest.hookimpl(tryfirst=True, hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    """Store test result on the node so fixtures can check outcome."""
+    outcome = yield
+    report = outcome.get_result()
+    # Store the report for each phase (setup, call, teardown)
+    setattr(item, f"_report_{report.when}", report)
 
 
 @pytest.fixture(scope="session")
@@ -41,6 +55,61 @@ def ghidra_initialized():
     yield
 
     # No explicit cleanup needed - PyGhidra handles shutdown
+
+
+@pytest.fixture(autouse=True)
+def capture_ghidra_logs(request):
+    """
+    Capture Ghidra application.log entries during each test.
+
+    On test failure, reads and prints any new log entries that were written
+    during the test. This helps diagnose Java-side issues (Jetty, MCP server,
+    Ghidra internals) that are otherwise invisible in pytest output.
+
+    Only activates when Ghidra/PyGhidra is initialized (integration tests).
+    Safely no-ops for unit tests that don't use Ghidra.
+
+    Scope: function (autouse - runs for every test)
+    """
+    log_file = None
+    start_pos = 0
+
+    try:
+        from ghidra.framework import Application
+        if Application.isInitialized():
+            log_file = Path(str(Application.getUserSettingsDirectory())) / "application.log"
+            start_pos = log_file.stat().st_size if log_file.exists() else 0
+    except Exception:
+        pass  # Ghidra not available (unit tests, mocked environment)
+
+    yield
+
+    if log_file is None:
+        return
+
+    # After the test, check if it failed and print new log entries
+    report = getattr(request.node, "_report_call", None)
+    if report is not None and report.failed:
+        if log_file.exists() and log_file.stat().st_size > start_pos:
+            try:
+                with open(log_file, "r", errors="replace") as f:
+                    f.seek(start_pos)
+                    new_entries = f.read()
+                if new_entries.strip():
+                    print(f"\n{'='*72}")
+                    print(f"  Ghidra application.log entries during failed test:")
+                    print(f"  {request.node.nodeid}")
+                    print(f"{'='*72}")
+                    # Limit output to last 200 lines to avoid flooding
+                    lines = new_entries.strip().splitlines()
+                    if len(lines) > 200:
+                        print(f"  ... ({len(lines) - 200} lines omitted) ...")
+                        lines = lines[-200:]
+                    for line in lines:
+                        print(f"  {line}")
+                    print(f"{'='*72}\n")
+            except Exception as e:
+                print(f"[capture_ghidra_logs] Failed to read log: {e}")
 
 
 @pytest.fixture(scope="session")
@@ -89,10 +158,10 @@ def test_program(ghidra_initialized):
 @pytest.fixture
 def server(ghidra_initialized):
     """
-    Start a ReVa headless server for a test.
+    Start a ReVa headless server for a test on a random port.
 
-    Creates a new server instance, starts it, waits for it to become ready,
-    and automatically stops it after the test completes.
+    Uses a random available port to avoid conflicts with other tests
+    (especially launcher tests that may also bind to port 8080).
 
     Scope: function (new server for each test)
 
@@ -104,9 +173,10 @@ def server(ghidra_initialized):
     """
     from reva.headless import RevaHeadlessLauncher
 
-    launcher = RevaHeadlessLauncher()
+    # Use random port to avoid conflicts with launcher tests
+    launcher = RevaHeadlessLauncher(None, True)  # configFile=None, useRandomPort=True
 
-    print(f"\n[Fixture] Starting ReVa headless server...")
+    print(f"\n[Fixture] Starting ReVa headless server (random port)...")
     launcher.start()
 
     # Wait for server to be ready (30 second timeout)

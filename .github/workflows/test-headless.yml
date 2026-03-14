@@ -104,4 +104,5 @@ jobs:
           test-results.xml
           *.log
           .pytest_cache/
+          ~/.ghidra/**/application.log
         if-no-files-found: ignore

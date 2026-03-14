@@ -41,7 +41,6 @@ import ghidra.util.Msg;
 import io.modelcontextprotocol.json.jackson2.JacksonMcpJsonMapper;
 import io.modelcontextprotocol.server.McpServer;
 import io.modelcontextprotocol.server.McpSyncServer;
-import io.modelcontextprotocol.server.transport.HttpServletStreamableServerTransportProvider;
 import io.modelcontextprotocol.spec.McpSchema;
 import reva.plugin.ConfigManager;
 import reva.plugin.ConfigChangeListener;
@@ -80,7 +79,7 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
     private static final String MCP_SERVER_VERSION = "1.0.0";
 
     private final McpSyncServer server;
-    private HttpServletStreamableServerTransportProvider currentTransportProvider;
+    private ResilientStreamableServerTransportProvider currentTransportProvider;
     private Server httpServer;
     private final GThreadPool threadPool;
     private final ConfigManager configManager;
@@ -246,6 +245,7 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
         ServerConnector connector = new ServerConnector(httpServer);
         connector.setHost(serverHost);
         connector.setPort(serverPort);
+        connector.setIdleTimeout(600000); // 10 minutes - defense in depth against stale connections
         httpServer.addConnector(connector);
         httpServer.setHandler(servletContextHandler);
 
@@ -453,7 +453,9 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
         JacksonMcpJsonMapper jsonMapper = new JacksonMcpJsonMapper(objectMapper);
 
         // Create new transport provider with updated configuration
-        currentTransportProvider = HttpServletStreamableServerTransportProvider.builder()
+        // Uses ResilientStreamableServerTransportProvider (forked from MCP SDK) to fix
+        // a bug where serialization errors permanently kill the session.
+        currentTransportProvider = ResilientStreamableServerTransportProvider.builder()
             .mcpEndpoint(MCP_MSG_ENDPOINT)
             .jsonMapper(jsonMapper)
             .keepAliveInterval(java.time.Duration.ofSeconds(30))

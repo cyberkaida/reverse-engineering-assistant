@@ -222,7 +222,7 @@ When adding new tools to DecompilerToolProvider:
 - Handle decompilation failures gracefully with try-catch and timeouts
 - Validate parameters before processing using AbstractToolProvider helpers
 - Return structured JSON with success flags and program metadata
-- Wrap parameter extraction in try-catch blocks to convert IllegalArgumentException to error responses
+- Exception handling is automatic: `registerTool()` wraps all handlers to catch `IllegalArgumentException` and `ProgramValidationException` and convert them to error responses. Manual try-catch is only needed for custom error handling or resource cleanup (e.g., DecompInterface disposal).
 - Use pagination for large datasets (functions, symbols, strings, etc.)
 
 ## MCP Server Configuration
@@ -280,25 +280,11 @@ Install via: `claude plugin marketplace add cyberkaida/reverse-engineering-assis
 - All tools use `ProgramLookupUtil.getValidatedProgram()` for consistent program resolution and helpful error messages
 - When a program cannot be found, the error message will include suggestions of available programs
 
-## Recent Feature Additions
-
-Notable tool capabilities added recently:
-- **Function tagging**: `function-tags` tool for categorizing functions during analysis
-- **Bulk decompilation**: Decompile all callers/referencers of a function in one call
-- **Undefined function discovery**: Find and create functions from call/data references
-- **Call graph analysis**: Trace call paths, find callers/callees
-- **Data flow analysis**: Track data dependencies and value propagation
-- **Constant search**: Find hardcoded values (magic numbers, crypto constants)
-- **Vtable analysis**: Analyze virtual function tables for C++ binaries
-- **Import/export analysis**: Detailed import/export enumeration
-- **Verbose mode**: Many tools support `verbose` parameter for additional context
-- **Signature-only decompilation**: Get function signatures without full decompilation
-
 ## Architecture Decision Records
 
 ### MCP Implementation
-- **Transport (Java)**: HttpServletStreamableServerTransportProvider (NOT SSE) via Jetty
-- **Transport (Python)**: Stdio ↔ HTTP proxy via async StdioBridge
+- **Transport (Java)**: ResilientStreamableServerTransportProvider (forked from MCP SDK, NOT SSE) via Jetty
+- **Transport (Python)**: Stdio ↔ HTTP proxy via ReconnectingBackend + StdioBridge
 - **Server**: Embedded Jetty servlet server, thread-safe with ConcurrentHashMap
 - **Tool Pattern**: AbstractToolProvider base class with consistent error handling
 - **Config Pattern**: Backend abstraction (ToolOptions/File/InMemory) for multi-mode support
@@ -320,7 +306,7 @@ Notable tool capabilities added recently:
 ## Important Notes
 
 ### Critical
-- **NEVER revert to SSE transport** - uses streamable HttpServlet transport
+- **NEVER revert to SSE transport** - uses ResilientStreamableServerTransportProvider (forked from MCP SDK to fix session-killing bug)
 - **Memory**: Always dispose DecompInterface instances to prevent leaks
 - **Testing**: Fork every Java integration test (forkEvery=1) to prevent conflicts
 - **Python Init**: PyGhidra/server must initialize BEFORE asyncio.run() in CLI

@@ -55,20 +55,30 @@ async def _make_mcp_request_async(
     """
     from mcp.client.streamable_http import streamablehttp_client
     from mcp import ClientSession
+    import httpx
 
     url = f"http://localhost:{port}/mcp/message"
 
+    def _no_keepalive_factory(headers=None, timeout=None, auth=None):
+        """Disable keepalive to avoid stale TCP connections after SSE responses."""
+        return httpx.AsyncClient(
+            headers=headers,
+            timeout=timeout,
+            auth=auth,
+            limits=httpx.Limits(max_keepalive_connections=0),
+        )
+
     try:
         # Use the streamable HTTP client from MCP SDK
-        async with streamablehttp_client(url, timeout=float(timeout)) as (read_stream, write_stream, get_session_id):
+        async with streamablehttp_client(
+            url,
+            timeout=float(timeout),
+            httpx_client_factory=_no_keepalive_factory,
+        ) as (read_stream, write_stream, get_session_id):
             async with ClientSession(read_stream, write_stream) as session:
                 # Initialize the session
                 init_result = await session.initialize()
                 print(f"DEBUG: Initialized session, server info: {init_result}")
-
-                # List available tools for debugging
-                tools_result = await session.list_tools()
-                print(f"DEBUG: Available tools: {tools_result}")
 
                 # Call the tool
                 print(f"DEBUG: Calling tool '{tool_name}' with arguments {arguments}")

@@ -45,17 +45,17 @@ public class StructureToolProviderIntegrationTest extends RevaIntegrationTestBas
     public void setUpStructureTests() throws Exception {
         // Get program path for use in tests - this is how RevaProgramManager identifies programs
         programPath = program.getDomainFile().getPathname();
-        
+
         // Open the program in the tool's ProgramManager so it can be found by RevaProgramManager
         env.open(program);
-        
+
         // Also open it directly in the tool's ProgramManager service to ensure it's available
         ghidra.app.services.ProgramManager programManager = tool.getService(ghidra.app.services.ProgramManager.class);
         if (programManager != null) {
             programManager.openProgram(program);
         }
-        
-        
+
+
         // Register the program with the server manager so it can be found by the tools
         if (serverManager != null) {
             serverManager.programOpened(program, tool);
@@ -75,6 +75,9 @@ public class StructureToolProviderIntegrationTest extends RevaIntegrationTestBas
             boolean foundParseC = false;
             boolean foundValidateC = false;
             boolean foundCreateStructure = false;
+            boolean foundAddStructureField = false;
+            boolean foundModifyStructureField = false;
+            boolean foundModifyStructureFromC = false;
 
             for (Tool tool : tools.tools()) {
                 if ("parse-c-structure".equals(tool.name())) {
@@ -86,11 +89,24 @@ public class StructureToolProviderIntegrationTest extends RevaIntegrationTestBas
                 if ("create-structure".equals(tool.name())) {
                     foundCreateStructure = true;
                 }
+                if ("add-structure-field".equals(tool.name())) {
+                    foundAddStructureField = true;
+                }
+                if ("modify-structure-field".equals(tool.name())) {
+                    foundModifyStructureField = true;
+                }
+                if ("modify-structure-from-c".equals(tool.name())) {
+                    foundModifyStructureFromC = true;
+                }
             }
 
             assertTrue("parse-c-structure tool should be available", foundParseC);
             assertTrue("validate-c-structure tool should be available", foundValidateC);
-            assertTrue("create-structure tool should be available", foundCreateStructure);
+            // Removed tools should NOT be present
+            assertFalse("create-structure tool should have been removed", foundCreateStructure);
+            assertFalse("add-structure-field tool should have been removed", foundAddStructureField);
+            assertFalse("modify-structure-field tool should have been removed", foundModifyStructureField);
+            assertFalse("modify-structure-from-c tool should have been removed", foundModifyStructureFromC);
         });
     }
 
@@ -107,22 +123,75 @@ public class StructureToolProviderIntegrationTest extends RevaIntegrationTestBas
 
             assertNotNull("Result should not be null", result);
             assertMcpResultNotError(result, "Result should not be an error");
-            
+
             // Parse the JSON content
             TextContent content = (TextContent) result.content().get(0);
             JsonNode json = parseJsonContent(content.text());
-            
+
             assertEquals("TestStruct", json.get("name").asText());
             assertEquals("Successfully created structure: TestStruct", json.get("message").asText());
-            
+
             // Verify structure was created in program
             DataTypeManager dtm = program.getDataTypeManager();
             DataType dt = findDataTypeByName(dtm, "TestStruct");
             assertNotNull("Structure should exist in program", dt);
             assertTrue("Should be a Structure", dt instanceof Structure);
-            
+
             Structure struct = (Structure) dt;
             assertEquals("Should have 2 components", 2, struct.getNumComponents());
+        });
+    }
+
+    @Test
+    public void testParseCStructureReplacesExisting() throws Exception {
+        withMcpClient(createMcpTransport(), client -> {
+            client.initialize();
+
+            // Create initial structure
+            Map<String, Object> createArgs = new HashMap<>();
+            createArgs.put("programPath", programPath);
+            createArgs.put("cDefinition", "struct ReplaceTest { int field1; char field2; };");
+
+            CallToolResult createResult = client.callTool(new CallToolRequest("parse-c-structure", createArgs));
+            assertMcpResultNotError(createResult, "Structure creation should succeed");
+
+            // Verify initial structure
+            DataTypeManager dtm = program.getDataTypeManager();
+            DataType dt = findDataTypeByName(dtm, "ReplaceTest");
+            assertNotNull("Structure should exist", dt);
+            Structure struct = (Structure) dt;
+            assertEquals("Should have 2 fields initially", 2, struct.getNumComponents());
+
+            // Replace structure with different fields using parse-c-structure
+            Map<String, Object> replaceArgs = new HashMap<>();
+            replaceArgs.put("programPath", programPath);
+            replaceArgs.put("cDefinition", "struct ReplaceTest { int field1; short field2; long field3; };");
+
+            CallToolResult replaceResult = client.callTool(new CallToolRequest("parse-c-structure", replaceArgs));
+            assertMcpResultNotError(replaceResult, "Structure replacement should succeed");
+
+            TextContent content = (TextContent) replaceResult.content().get(0);
+            JsonNode json = parseJsonContent(content.text());
+            assertEquals("Successfully modified structure from C definition: ReplaceTest",
+                         json.get("message").asText());
+            assertEquals(3, json.get("fieldsCount").asInt());
+
+            // Verify the structure was modified in the program
+            dt = findDataTypeByName(dtm, "ReplaceTest");
+            struct = (Structure) dt;
+            assertEquals("Should now have 3 fields", 3, struct.getNumComponents());
+
+            // Verify field types
+            ghidra.program.model.data.DataTypeComponent field1 = struct.getComponent(0);
+            ghidra.program.model.data.DataTypeComponent field2 = struct.getComponent(1);
+            ghidra.program.model.data.DataTypeComponent field3 = struct.getComponent(2);
+
+            assertEquals("field1", field1.getFieldName());
+            assertEquals("field2", field2.getFieldName());
+            assertEquals("field3", field3.getFieldName());
+
+            assertTrue("field2 should be short", field2.getDataType().getName().contains("short"));
+            assertTrue("field3 should be long", field3.getDataType().getName().contains("long"));
         });
     }
 
@@ -139,92 +208,25 @@ public class StructureToolProviderIntegrationTest extends RevaIntegrationTestBas
 
             assertNotNull("Result should not be null", result);
             assertMcpResultNotError(result, "Result should not be an error");
-            
+
             TextContent content = (TextContent) result.content().get(0);
             JsonNode json = parseJsonContent(content.text());
-            
+
             assertTrue("Should be valid", json.get("valid").asBoolean());
             assertEquals("ValidStruct", json.get("parsedType").asText());
-            
+
             // Test invalid structure
             arguments.put("cDefinition", "struct InvalidStruct { unknown_type field; };");
             result = client.callTool(new CallToolRequest("validate-c-structure", arguments));
-            
+
             assertNotNull("Result should not be null", result);
             assertMcpResultNotError(result, "Result should not be an error");
-            
+
             content = (TextContent) result.content().get(0);
             json = parseJsonContent(content.text());
-            
+
             assertFalse("Should be invalid", json.get("valid").asBoolean());
             assertNotNull("Should have error message", json.get("error"));
-        });
-    }
-
-    @Test
-    public void testCreateEmptyStructure() throws Exception {
-        withMcpClient(createMcpTransport(), client -> {
-            client.initialize();
-
-            Map<String, Object> arguments = new HashMap<>();
-            arguments.put("programPath", programPath);
-            arguments.put("name", "EmptyStruct");
-            arguments.put("size", 0);
-            arguments.put("type", "structure");
-
-            CallToolResult result = client.callTool(new CallToolRequest("create-structure", arguments));
-
-            assertNotNull("Result should not be null", result);
-            assertMcpResultNotError(result, "Result should not be an error");
-            
-            TextContent content = (TextContent) result.content().get(0);
-            JsonNode json = parseJsonContent(content.text());
-            
-            assertEquals("EmptyStruct", json.get("name").asText());
-            assertFalse("Should not be a union", json.get("isUnion").asBoolean());
-            
-            // Verify structure exists
-            DataType dt = findDataTypeByName(program.getDataTypeManager(), "EmptyStruct");
-            assertNotNull("Structure should exist", dt);
-        });
-    }
-
-    @Test
-    public void testAddStructureField() throws Exception {
-        withMcpClient(createMcpTransport(), client -> {
-            client.initialize();
-
-            // First create a structure
-            Map<String, Object> createArgs = new HashMap<>();
-            createArgs.put("programPath", programPath);
-            createArgs.put("name", "TestFieldStruct");
-
-            CallToolResult createResult = client.callTool(new CallToolRequest("create-structure", createArgs));
-            assertMcpResultNotError(createResult, "Create structure should not error");
-
-            // Add a field
-            Map<String, Object> addArgs = new HashMap<>();
-            addArgs.put("programPath", programPath);
-            addArgs.put("structureName", "TestFieldStruct");
-            addArgs.put("fieldName", "myField");
-            addArgs.put("dataType", "int");
-            addArgs.put("comment", "Test field");
-
-            CallToolResult result = client.callTool(new CallToolRequest("add-structure-field", addArgs));
-
-            assertNotNull("Result should not be null", result);
-            assertMcpResultNotError(result, "Result should not be an error");
-            
-            TextContent content = (TextContent) result.content().get(0);
-            JsonNode json = parseJsonContent(content.text());
-            
-            assertEquals("Successfully added field: myField", json.get("message").asText());
-            
-            // Verify field was added
-            DataType dt = findDataTypeByName(program.getDataTypeManager(), "TestFieldStruct");
-            Structure struct = (Structure) dt;
-            assertEquals("Should have 1 component", 1, struct.getNumComponents());
-            assertEquals("myField", struct.getComponent(0).getFieldName());
         });
     }
 
@@ -250,21 +252,63 @@ public class StructureToolProviderIntegrationTest extends RevaIntegrationTestBas
 
             assertNotNull("Result should not be null", result);
             assertMcpResultNotError(result, "Result should not be an error");
-            
+
             TextContent content = (TextContent) result.content().get(0);
             JsonNode json = parseJsonContent(content.text());
-            
+
             assertEquals("InfoStruct", json.get("name").asText());
             assertEquals(3, json.get("numComponents").asInt());
-            
+
             JsonNode fields = json.get("fields");
             assertNotNull("Should have fields", fields);
             assertEquals("Should have 3 fields", 3, fields.size());
-            
+
             // Check first field
             JsonNode firstField = fields.get(0);
             assertEquals("id", firstField.get("fieldName").asText());
             assertEquals("int", firstField.get("dataType").asText());
+        });
+    }
+
+    @Test
+    public void testGetStructureInfoHasCRepresentation() throws Exception {
+        withMcpClient(createMcpTransport(), client -> {
+            client.initialize();
+
+            // Create a structure
+            Map<String, Object> args = new HashMap<>();
+            args.put("programPath", programPath);
+            args.put("cDefinition", "struct CRepTest { int x; char name[16]; void* ptr; };");
+
+            CallToolResult createResult = client.callTool(new CallToolRequest("parse-c-structure", args));
+            assertMcpResultNotError(createResult, "Create structure should not error");
+
+            // Get structure info
+            Map<String, Object> infoArgs = new HashMap<>();
+            infoArgs.put("programPath", programPath);
+            infoArgs.put("structureName", "CRepTest");
+
+            CallToolResult result = client.callTool(new CallToolRequest("get-structure-info", infoArgs));
+            assertMcpResultNotError(result, "Get info should not error");
+
+            TextContent content = (TextContent) result.content().get(0);
+            JsonNode json = parseJsonContent(content.text());
+
+            // Verify C representation is present and well-formed
+            JsonNode cRep = json.get("cRepresentation");
+            assertNotNull("Should have C representation", cRep);
+            String cCode = cRep.asText();
+
+            assertTrue("C representation should start with struct keyword",
+                cCode.startsWith("struct CRepTest {"));
+            assertTrue("C representation should end with };",
+                cCode.endsWith("};"));
+            assertTrue("C representation should contain field x",
+                cCode.contains("x;"));
+            assertTrue("C representation should contain field name",
+                cCode.contains("name;"));
+            assertTrue("C representation should contain field ptr",
+                cCode.contains("ptr;"));
         });
     }
 
@@ -279,7 +323,7 @@ public class StructureToolProviderIntegrationTest extends RevaIntegrationTestBas
                 "struct Struct2 { char b; };",
                 "union Union1 { int x; float y; };"
             };
-            
+
             for (String def : structDefs) {
                 Map<String, Object> args = new HashMap<>();
                 args.put("programPath", programPath);
@@ -287,24 +331,24 @@ public class StructureToolProviderIntegrationTest extends RevaIntegrationTestBas
                 CallToolResult createResult = client.callTool(new CallToolRequest("parse-c-structure", args));
                 assertMcpResultNotError(createResult, "Create structure should not error: " + def);
             }
-            
+
             // List structures
             Map<String, Object> listArgs = new HashMap<>();
             listArgs.put("programPath", programPath);
-            
+
             CallToolResult result = client.callTool(new CallToolRequest("list-structures", listArgs));
-            
+
             assertNotNull("Result should not be null", result);
             assertMcpResultNotError(result, "Result should not be an error");
-            
+
             TextContent content = (TextContent) result.content().get(0);
             JsonNode json = parseJsonContent(content.text());
-            
+
             JsonNode structures = json.get("structures");
-            
+
             // Should have at least the 3 we created
             assertTrue("Should have at least 3 structures", structures.size() >= 3);
-            
+
             // Verify our structures are in the list
             boolean foundStruct1 = false, foundStruct2 = false, foundUnion1 = false;
             for (JsonNode struct : structures) {
@@ -313,7 +357,7 @@ public class StructureToolProviderIntegrationTest extends RevaIntegrationTestBas
                 if ("Struct2".equals(name)) foundStruct2 = true;
                 if ("Union1".equals(name)) foundUnion1 = true;
             }
-            
+
             assertTrue("Should find Struct1", foundStruct1);
             assertTrue("Should find Struct2", foundStruct2);
             assertTrue("Should find Union1", foundUnion1);
@@ -325,12 +369,12 @@ public class StructureToolProviderIntegrationTest extends RevaIntegrationTestBas
         withMcpClient(createMcpTransport(), client -> {
             client.initialize();
 
-            // Create a structure
+            // Create a structure using parse-c-structure
             Map<String, Object> createArgs = new HashMap<>();
             createArgs.put("programPath", programPath);
-            createArgs.put("name", "ToBeDeleted");
+            createArgs.put("cDefinition", "struct ToBeDeleted { int dummy; };");
 
-            CallToolResult createResult = client.callTool(new CallToolRequest("create-structure", createArgs));
+            CallToolResult createResult = client.callTool(new CallToolRequest("parse-c-structure", createArgs));
             assertMcpResultNotError(createResult, "Create structure should not error");
 
             // Verify it exists
@@ -346,359 +390,15 @@ public class StructureToolProviderIntegrationTest extends RevaIntegrationTestBas
 
             assertNotNull("Result should not be null", result);
             assertMcpResultNotError(result, "Result should not be an error");
-            
+
             TextContent content = (TextContent) result.content().get(0);
             JsonNode json = parseJsonContent(content.text());
-            
+
             assertTrue("Should be deleted", json.get("deleted").asBoolean());
-            
+
             // Verify it's gone
             dt = findDataTypeByName(program.getDataTypeManager(), "ToBeDeleted");
             assertNull("Structure should not exist after deletion", dt);
-        });
-    }
-
-    @Test
-    public void testParseCHeader() throws Exception {
-        withMcpClient(createMcpTransport(), client -> {
-            client.initialize();
-
-            String headerContent = 
-                "struct Point { int x; int y; };\n" +
-                "struct Rectangle { int width; int height; };";
-
-            Map<String, Object> args = new HashMap<>();
-            args.put("programPath", programPath);
-            args.put("headerContent", headerContent);
-
-            CallToolResult result = client.callTool(new CallToolRequest("parse-c-header", args));
-
-            assertNotNull("Result should not be null", result);
-            assertMcpResultNotError(result, "Result should not be an error");
-            
-            TextContent content = (TextContent) result.content().get(0);
-            JsonNode json = parseJsonContent(content.text());
-            
-            JsonNode createdTypes = json.get("createdTypes");
-            
-            assertTrue("Should create at least one type", createdTypes.size() >= 1);
-            
-            // Verify at least one structure was created
-            DataTypeManager dtm = program.getDataTypeManager();
-            DataType point = findDataTypeByName(dtm, "Point");
-            DataType rectangle = findDataTypeByName(dtm, "Rectangle");
-            
-            assertTrue("At least one structure (Point or Rectangle) should exist", 
-                point != null || rectangle != null);
-        });
-    }
-
-    @Test
-    public void testComplexNestedStructure() throws Exception {
-        withMcpClient(createMcpTransport(), client -> {
-            client.initialize();
-
-            String complexDef = 
-                "struct Node {\n" +
-                "    int value;\n" +
-                "    struct Node* left;\n" +
-                "    struct Node* right;\n" +
-                "    union {\n" +
-                "        int intData;\n" +
-                "        float floatData;\n" +
-                "    } data;\n" +
-                "};";
-
-            Map<String, Object> args = new HashMap<>();
-            args.put("programPath", programPath);
-            args.put("cDefinition", complexDef);
-
-            CallToolResult result = client.callTool(new CallToolRequest("parse-c-structure", args));
-
-            assertNotNull("Result should not be null", result);
-            assertMcpResultNotError(result, "Result should not be an error");
-            
-            // Get detailed info
-            Map<String, Object> infoArgs = new HashMap<>();
-            infoArgs.put("programPath", programPath);
-            infoArgs.put("structureName", "Node");
-
-            result = client.callTool(new CallToolRequest("get-structure-info", infoArgs));
-            
-            TextContent content = (TextContent) result.content().get(0);
-            JsonNode json = parseJsonContent(content.text());
-            
-            assertNotNull("Should have C representation", json.get("cRepresentation"));
-            assertEquals("Should have 4 components", 4, json.get("numComponents").asInt());
-        });
-    }
-
-    @Test
-    public void testGetStructureInfoCondensesUndefinedBytes() throws Exception {
-        withMcpClient(createMcpTransport(), client -> {
-            client.initialize();
-
-            // Create a structure with a specific size that will have many undefined bytes
-            Map<String, Object> createArgs = new HashMap<>();
-            createArgs.put("programPath", programPath);
-            createArgs.put("name", "LargeStruct");
-            createArgs.put("size", 100); // 100 bytes
-
-            CallToolResult createResult = client.callTool(new CallToolRequest("create-structure", createArgs));
-            assertMcpResultNotError(createResult, "Create structure should not error");
-
-            // Add just a few defined fields, leaving many undefined bytes
-            Map<String, Object> addArgs1 = new HashMap<>();
-            addArgs1.put("programPath", programPath);
-            addArgs1.put("structureName", "LargeStruct");
-            addArgs1.put("fieldName", "firstField");
-            addArgs1.put("dataType", "int");
-            addArgs1.put("offset", 0);
-
-            client.callTool(new CallToolRequest("add-structure-field", addArgs1));
-
-            Map<String, Object> addArgs2 = new HashMap<>();
-            addArgs2.put("programPath", programPath);
-            addArgs2.put("structureName", "LargeStruct");
-            addArgs2.put("fieldName", "lastField");
-            addArgs2.put("dataType", "int");
-            addArgs2.put("offset", 96); // Near the end
-
-            client.callTool(new CallToolRequest("add-structure-field", addArgs2));
-
-            // Get structure info
-            Map<String, Object> infoArgs = new HashMap<>();
-            infoArgs.put("programPath", programPath);
-            infoArgs.put("structureName", "LargeStruct");
-
-            CallToolResult result = client.callTool(new CallToolRequest("get-structure-info", infoArgs));
-
-            assertNotNull("Result should not be null", result);
-            assertMcpResultNotError(result, "Result should not be an error");
-
-            TextContent content = (TextContent) result.content().get(0);
-            JsonNode json = parseJsonContent(content.text());
-
-            JsonNode fields = json.get("fields");
-            assertNotNull("Should have fields", fields);
-
-            // Verify that undefined bytes were condensed
-            // Should have: firstField, condensed undefined range, lastField
-            // Instead of 100+ individual undefined byte fields
-            assertTrue("Should have fewer than 10 fields due to condensing", fields.size() < 10);
-
-            // Check for condensed field
-            boolean foundCondensed = false;
-            for (JsonNode field : fields) {
-                if (field.has("isCondensed") && field.get("isCondensed").asBoolean()) {
-                    foundCondensed = true;
-                    assertEquals("<undefined>", field.get("fieldName").asText());
-                    assertTrue("Condensed range should have componentCount > 1",
-                        field.get("componentCount").asInt() > 1);
-                }
-            }
-
-            assertTrue("Should have at least one condensed undefined range", foundCondensed);
-
-            // Verify C representation is also condensed
-            JsonNode cRepresentation = json.get("cRepresentation");
-            assertNotNull("Should have C representation", cRepresentation);
-            String cCode = cRepresentation.asText();
-
-            // C representation should contain condensed undefined arrays
-            assertTrue("C representation should contain condensed undefined ranges",
-                cCode.contains("undefined reserved_0x"));
-            assertTrue("C representation should show offset ranges in comments",
-                cCode.contains("// 0x"));
-
-            // Count lines in C representation (excluding struct declaration and closing brace)
-            String[] cLines = cCode.split("\n");
-            int fieldLines = 0;
-            for (String line : cLines) {
-                if (line.trim().endsWith(";")) {
-                    fieldLines++;
-                }
-            }
-
-            // Should have much fewer lines than the original 100 components
-            assertTrue("C representation should have fewer than 20 lines due to condensing",
-                fieldLines < 20);
-        });
-    }
-
-    @Test
-    public void testModifyStructureFieldDataType() throws Exception {
-        withMcpClient(createMcpTransport(), client -> {
-            client.initialize();
-
-            // First create a structure with a field
-            Map<String, Object> createArgs = new HashMap<>();
-            createArgs.put("programPath", programPath);
-            createArgs.put("cDefinition", "struct ModifyTest1 { void *field1; int field2; };");
-
-            CallToolResult createResult = client.callTool(new CallToolRequest("parse-c-structure", createArgs));
-            assertMcpResultNotError(createResult, "Structure creation should succeed");
-
-            // Verify initial structure
-            DataTypeManager dtm = program.getDataTypeManager();
-            DataType dt = findDataTypeByName(dtm, "ModifyTest1");
-            assertNotNull("Structure should exist", dt);
-            Structure struct = (Structure) dt;
-            assertEquals("Should have 2 fields", 2, struct.getNumComponents());
-
-            // Verify field1 is void *
-            ghidra.program.model.data.DataTypeComponent field1Before = struct.getComponent(0);
-            assertEquals("field1", field1Before.getFieldName());
-            assertTrue("field1 should be pointer", field1Before.getDataType().getName().contains("pointer") ||
-                       field1Before.getDataType().getDisplayName().contains("*"));
-
-            // Modify field1 to be int *
-            Map<String, Object> modifyArgs = new HashMap<>();
-            modifyArgs.put("programPath", programPath);
-            modifyArgs.put("structureName", "ModifyTest1");
-            modifyArgs.put("fieldName", "field1");
-            modifyArgs.put("newDataType", "int *");
-
-            CallToolResult modifyResult = client.callTool(new CallToolRequest("modify-structure-field", modifyArgs));
-            assertMcpResultNotError(modifyResult, "Field modification should succeed");
-
-            TextContent content = (TextContent) modifyResult.content().get(0);
-            JsonNode json = parseJsonContent(content.text());
-            assertEquals("Successfully modified field in structure: ModifyTest1", json.get("message").asText());
-
-            // Verify the field was actually modified in the program
-            dt = findDataTypeByName(dtm, "ModifyTest1");
-            struct = (Structure) dt;
-            ghidra.program.model.data.DataTypeComponent field1After = struct.getComponent(0);
-            assertEquals("field1", field1After.getFieldName());
-
-            // Verify data type changed (int * instead of void *)
-            String fieldTypeName = field1After.getDataType().getDisplayName();
-            assertTrue("field1 should now be int pointer, got: " + fieldTypeName,
-                       fieldTypeName.contains("int") && fieldTypeName.contains("*"));
-        });
-    }
-
-    @Test
-    public void testModifyStructureFieldName() throws Exception {
-        withMcpClient(createMcpTransport(), client -> {
-            client.initialize();
-
-            // Create a structure
-            Map<String, Object> createArgs = new HashMap<>();
-            createArgs.put("programPath", programPath);
-            createArgs.put("cDefinition", "struct ModifyTest2 { int oldName; };");
-
-            CallToolResult createResult = client.callTool(new CallToolRequest("parse-c-structure", createArgs));
-            assertMcpResultNotError(createResult, "Structure creation should succeed");
-
-            // Rename the field
-            Map<String, Object> modifyArgs = new HashMap<>();
-            modifyArgs.put("programPath", programPath);
-            modifyArgs.put("structureName", "ModifyTest2");
-            modifyArgs.put("fieldName", "oldName");
-            modifyArgs.put("newFieldName", "newName");
-
-            CallToolResult modifyResult = client.callTool(new CallToolRequest("modify-structure-field", modifyArgs));
-            assertMcpResultNotError(modifyResult, "Field rename should succeed");
-
-            // Verify the field was renamed in the program
-            DataTypeManager dtm = program.getDataTypeManager();
-            DataType dt = findDataTypeByName(dtm, "ModifyTest2");
-            Structure struct = (Structure) dt;
-            ghidra.program.model.data.DataTypeComponent field = struct.getComponent(0);
-            assertEquals("Field should be renamed to newName", "newName", field.getFieldName());
-        });
-    }
-
-    @Test
-    public void testModifyStructureFieldByOffset() throws Exception {
-        withMcpClient(createMcpTransport(), client -> {
-            client.initialize();
-
-            // Create a structure
-            Map<String, Object> createArgs = new HashMap<>();
-            createArgs.put("programPath", programPath);
-            createArgs.put("cDefinition", "struct ModifyTest3 { int field1; char field2; };");
-
-            CallToolResult createResult = client.callTool(new CallToolRequest("parse-c-structure", createArgs));
-            assertMcpResultNotError(createResult, "Structure creation should succeed");
-
-            // Get offset of field2 (should be at offset 4 after the int)
-            DataTypeManager dtm = program.getDataTypeManager();
-            DataType dt = findDataTypeByName(dtm, "ModifyTest3");
-            Structure struct = (Structure) dt;
-            int field2Offset = struct.getComponent(1).getOffset();
-
-            // Modify field2 by offset instead of name
-            Map<String, Object> modifyArgs = new HashMap<>();
-            modifyArgs.put("programPath", programPath);
-            modifyArgs.put("structureName", "ModifyTest3");
-            modifyArgs.put("offset", field2Offset);
-            modifyArgs.put("newDataType", "short");
-
-            CallToolResult modifyResult = client.callTool(new CallToolRequest("modify-structure-field", modifyArgs));
-            assertMcpResultNotError(modifyResult, "Field modification by offset should succeed");
-
-            // Verify the field was modified
-            dt = findDataTypeByName(dtm, "ModifyTest3");
-            struct = (Structure) dt;
-            ghidra.program.model.data.DataTypeComponent field2 = struct.getComponentAt(field2Offset);
-            assertEquals("field2", field2.getFieldName());
-            assertTrue("field2 should now be short",
-                       field2.getDataType().getName().contains("short"));
-        });
-    }
-
-    @Test
-    public void testModifyStructureFromC() throws Exception {
-        withMcpClient(createMcpTransport(), client -> {
-            client.initialize();
-
-            // Create initial structure
-            Map<String, Object> createArgs = new HashMap<>();
-            createArgs.put("programPath", programPath);
-            createArgs.put("cDefinition", "struct ModifyTest4 { int field1; char field2; };");
-
-            CallToolResult createResult = client.callTool(new CallToolRequest("parse-c-structure", createArgs));
-            assertMcpResultNotError(createResult, "Structure creation should succeed");
-
-            // Verify initial structure
-            DataTypeManager dtm = program.getDataTypeManager();
-            DataType dt = findDataTypeByName(dtm, "ModifyTest4");
-            Structure struct = (Structure) dt;
-            assertEquals("Should have 2 fields initially", 2, struct.getNumComponents());
-
-            // Modify structure using C definition
-            Map<String, Object> modifyArgs = new HashMap<>();
-            modifyArgs.put("programPath", programPath);
-            modifyArgs.put("cDefinition", "struct ModifyTest4 { int field1; short field2; long field3; };");
-
-            CallToolResult modifyResult = client.callTool(new CallToolRequest("modify-structure-from-c", modifyArgs));
-            assertMcpResultNotError(modifyResult, "Structure modification from C should succeed");
-
-            TextContent content = (TextContent) modifyResult.content().get(0);
-            JsonNode json = parseJsonContent(content.text());
-            assertEquals("Successfully modified structure from C definition: ModifyTest4",
-                         json.get("message").asText());
-            assertEquals(3, json.get("fieldsCount").asInt());
-
-            // Verify the structure was modified in the program
-            dt = findDataTypeByName(dtm, "ModifyTest4");
-            struct = (Structure) dt;
-            assertEquals("Should now have 3 fields", 3, struct.getNumComponents());
-
-            // Verify field types
-            ghidra.program.model.data.DataTypeComponent field1 = struct.getComponent(0);
-            ghidra.program.model.data.DataTypeComponent field2 = struct.getComponent(1);
-            ghidra.program.model.data.DataTypeComponent field3 = struct.getComponent(2);
-
-            assertEquals("field1", field1.getFieldName());
-            assertEquals("field2", field2.getFieldName());
-            assertEquals("field3", field3.getFieldName());
-
-            assertTrue("field2 should be short", field2.getDataType().getName().contains("short"));
-            assertTrue("field3 should be long", field3.getDataType().getName().contains("long"));
         });
     }
 
@@ -707,7 +407,7 @@ public class StructureToolProviderIntegrationTest extends RevaIntegrationTestBas
         withMcpClient(createMcpTransport(), client -> {
             client.initialize();
 
-            // Create a structure
+            // Create a structure using parse-c-structure
             Map<String, Object> createArgs = new HashMap<>();
             createArgs.put("programPath", programPath);
             createArgs.put("cDefinition", "struct DeleteTestForce { int field1; };");
@@ -737,6 +437,81 @@ public class StructureToolProviderIntegrationTest extends RevaIntegrationTestBas
             // Verify structure was deleted
             dt = findDataTypeByName(dtm, "DeleteTestForce");
             assertNull("Structure should be deleted", dt);
+        });
+    }
+
+    @Test
+    public void testParseCHeader() throws Exception {
+        withMcpClient(createMcpTransport(), client -> {
+            client.initialize();
+
+            String headerContent =
+                "struct Point { int x; int y; };\n" +
+                "struct Rectangle { int width; int height; };";
+
+            Map<String, Object> args = new HashMap<>();
+            args.put("programPath", programPath);
+            args.put("headerContent", headerContent);
+
+            CallToolResult result = client.callTool(new CallToolRequest("parse-c-header", args));
+
+            assertNotNull("Result should not be null", result);
+            assertMcpResultNotError(result, "Result should not be an error");
+
+            TextContent content = (TextContent) result.content().get(0);
+            JsonNode json = parseJsonContent(content.text());
+
+            JsonNode createdTypes = json.get("createdTypes");
+
+            assertTrue("Should create at least one type", createdTypes.size() >= 1);
+
+            // Verify at least one structure was created
+            DataTypeManager dtm = program.getDataTypeManager();
+            DataType point = findDataTypeByName(dtm, "Point");
+            DataType rectangle = findDataTypeByName(dtm, "Rectangle");
+
+            assertTrue("At least one structure (Point or Rectangle) should exist",
+                point != null || rectangle != null);
+        });
+    }
+
+    @Test
+    public void testComplexNestedStructure() throws Exception {
+        withMcpClient(createMcpTransport(), client -> {
+            client.initialize();
+
+            String complexDef =
+                "struct Node {\n" +
+                "    int value;\n" +
+                "    struct Node* left;\n" +
+                "    struct Node* right;\n" +
+                "    union {\n" +
+                "        int intData;\n" +
+                "        float floatData;\n" +
+                "    } data;\n" +
+                "};";
+
+            Map<String, Object> args = new HashMap<>();
+            args.put("programPath", programPath);
+            args.put("cDefinition", complexDef);
+
+            CallToolResult result = client.callTool(new CallToolRequest("parse-c-structure", args));
+
+            assertNotNull("Result should not be null", result);
+            assertMcpResultNotError(result, "Result should not be an error");
+
+            // Get detailed info
+            Map<String, Object> infoArgs = new HashMap<>();
+            infoArgs.put("programPath", programPath);
+            infoArgs.put("structureName", "Node");
+
+            result = client.callTool(new CallToolRequest("get-structure-info", infoArgs));
+
+            TextContent content = (TextContent) result.content().get(0);
+            JsonNode json = parseJsonContent(content.text());
+
+            assertNotNull("Should have C representation", json.get("cRepresentation"));
+            assertEquals("Should have 4 components", 4, json.get("numComponents").asInt());
         });
     }
 

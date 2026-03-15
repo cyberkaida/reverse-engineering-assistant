@@ -112,14 +112,11 @@ public class StructureToolProvider extends AbstractToolProvider {
                         // Set packing before adding components so layout is correct
                         existingStruct.setPackingEnabled(parsedStruct.isPackingEnabled());
 
-                        // Remove all existing components
-                        while (existingStruct.getNumComponents() > 0) {
-                            existingStruct.delete(0);
-                        }
+                        // Clear all existing components
+                        existingStruct.deleteAll();
 
-                        // Add all components from the parsed structure
-                        for (int i = 0; i < parsedStruct.getNumComponents(); i++) {
-                            DataTypeComponent comp = parsedStruct.getComponent(i);
+                        // Add all defined components from the parsed structure
+                        for (DataTypeComponent comp : parsedStruct.getDefinedComponents()) {
                             DataType fieldType = comp.getDataType();
 
                             // Resolve the field type in the program's DTM
@@ -133,6 +130,9 @@ public class StructureToolProvider extends AbstractToolProvider {
                                     comp.getFieldName(),
                                     comp.getComment()
                                 );
+                            } else if (existingStruct.isPackingEnabled()) {
+                                existingStruct.add(fieldType, comp.getLength(),
+                                    comp.getFieldName(), comp.getComment());
                             } else {
                                 existingStruct.insertAtOffset(comp.getOffset(), fieldType,
                                     comp.getLength(), comp.getFieldName(), comp.getComment());
@@ -157,7 +157,7 @@ public class StructureToolProvider extends AbstractToolProvider {
 
                         Map<String, Object> result = createDetailedStructureInfo(existingStruct);
                         result.put("message", "Successfully modified structure from C definition: " + structName);
-                        result.put("fieldsCount", existingStruct.getNumComponents());
+                        result.put("numComponents", existingStruct.getNumDefinedComponents());
                         return createJsonResult(result);
                     } else {
                         // New structure or replacing non-structure: resolve into DTM
@@ -165,14 +165,15 @@ public class StructureToolProvider extends AbstractToolProvider {
                         Category cat = dtm.createCategory(catPath);
 
                         DataType resolved = dtm.resolve(dt, DataTypeConflictHandler.REPLACE_HANDLER);
-                        if (cat != null && resolved.getCategoryPath() != catPath) {
-                            resolved.setName(resolved.getName());
+                        if (cat != null && !resolved.getCategoryPath().equals(catPath)) {
                             cat.moveDataType(resolved, DataTypeConflictHandler.REPLACE_HANDLER);
                         }
 
                         program.endTransaction(txId, true);
 
-                        Map<String, Object> result = createStructureInfo(resolved);
+                        Map<String, Object> result = (resolved instanceof Composite)
+                            ? createDetailedStructureInfo((Composite) resolved)
+                            : createStructureInfo(resolved);
                         result.put("message", "Successfully created structure: " + resolved.getName());
                         return createJsonResult(result);
                     }
@@ -303,7 +304,17 @@ public class StructureToolProvider extends AbstractToolProvider {
         properties.put("programPath", SchemaUtil.createStringProperty("Path of the program"));
         properties.put("category", SchemaUtil.createOptionalStringProperty("Filter by category path"));
         properties.put("nameFilter", SchemaUtil.createOptionalStringProperty("Filter by name (substring match)"));
-        properties.put("includeBuiltIn", SchemaUtil.createOptionalBooleanProperty("Include built-in types"));
+        properties.put("includeBuiltIn", SchemaUtil.createOptionalBooleanProperty("Include built-in types (default: false)"));
+        properties.put("startIndex", Map.of(
+            "type", "integer",
+            "description", "Starting index for pagination (0-based)",
+            "default", 0
+        ));
+        properties.put("maxCount", Map.of(
+            "type", "integer",
+            "description", "Maximum number of structures to return",
+            "default", 100
+        ));
 
         List<String> required = new ArrayList<>();
         required.add("programPath");
@@ -311,7 +322,7 @@ public class StructureToolProvider extends AbstractToolProvider {
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("list-structures")
             .title("List Structures")
-            .description("List all structures in a program")
+            .description("List structures and unions in a program with optional filtering and pagination")
             .inputSchema(createSchema(properties, required))
             .build();
 
@@ -322,9 +333,12 @@ public class StructureToolProvider extends AbstractToolProvider {
                 String categoryFilter = getOptionalString(request, "category", null);
                 String nameFilter = getOptionalString(request, "nameFilter", null);
                 boolean includeBuiltIn = getOptionalBoolean(request, "includeBuiltIn", false);
+                PaginationParams pagination = getPaginationParams(request, 100);
 
                 DataTypeManager dtm = program.getDataTypeManager();
                 List<Map<String, Object>> structures = new ArrayList<>();
+                int matchIndex = 0;
+                int totalMatches = 0;
 
                 // Get all data types
                 Iterator<DataType> iter = dtm.getAllDataTypes();
@@ -335,7 +349,8 @@ public class StructureToolProvider extends AbstractToolProvider {
                     }
 
                     // Apply filters
-                    if (!includeBuiltIn && dt.getSourceArchive().getName().equals("BuiltInTypes")) {
+                    if (!includeBuiltIn && dt.getSourceArchive() != null
+                        && dt.getSourceArchive().getName().equals("BuiltInTypes")) {
                         continue;
                     }
 
@@ -349,12 +364,25 @@ public class StructureToolProvider extends AbstractToolProvider {
                         continue;
                     }
 
-                    structures.add(createStructureInfo(dt));
+                    totalMatches++;
+
+                    // Apply pagination
+                    if (matchIndex >= pagination.startIndex()
+                        && structures.size() < pagination.maxCount()) {
+                        structures.add(createStructureInfo(dt));
+                    }
+                    matchIndex++;
                 }
 
                 Map<String, Object> result = new HashMap<>();
-                result.put("count", structures.size());
                 result.put("structures", structures);
+                Map<String, Object> paginationInfo = new HashMap<>();
+                paginationInfo.put("startIndex", pagination.startIndex());
+                paginationInfo.put("requestedCount", pagination.maxCount());
+                paginationInfo.put("returnedCount", structures.size());
+                paginationInfo.put("totalCount", totalMatches);
+                paginationInfo.put("nextStartIndex", pagination.startIndex() + structures.size());
+                result.put("pagination", paginationInfo);
 
                 return createJsonResult(result);
 
@@ -615,8 +643,7 @@ public class StructureToolProvider extends AbstractToolProvider {
                     DataType dt = parser.parse(headerContent);
                     if (dt != null) {
                         DataType resolved = dtm.resolve(dt, DataTypeConflictHandler.REPLACE_HANDLER);
-                        if (cat != null && resolved.getCategoryPath() != catPath) {
-                            resolved.setName(resolved.getName());
+                        if (cat != null && !resolved.getCategoryPath().equals(catPath)) {
                             cat.moveDataType(resolved, DataTypeConflictHandler.REPLACE_HANDLER);
                         }
                         createdTypes.add(createStructureInfo(resolved));
@@ -639,8 +666,7 @@ public class StructureToolProvider extends AbstractToolProvider {
                                     DataType lineDt = parser.parse(currentDef.toString());
                                     if (lineDt != null) {
                                         DataType resolved = dtm.resolve(lineDt, DataTypeConflictHandler.REPLACE_HANDLER);
-                                        if (cat != null && resolved.getCategoryPath() != catPath) {
-                                            resolved.setName(resolved.getName());
+                                        if (cat != null && !resolved.getCategoryPath().equals(catPath)) {
                                             cat.moveDataType(resolved, DataTypeConflictHandler.REPLACE_HANDLER);
                                         }
                                         createdTypes.add(createStructureInfo(resolved));
@@ -801,25 +827,24 @@ public class StructureToolProvider extends AbstractToolProvider {
     }
 
     /**
-     * Check if a field is an undefined/default field that should be condensed
+     * Check if a field is an undefined/default field that should be condensed.
+     * Requires BOTH a default/missing name AND an undefined datatype to avoid
+     * false positives on user-named fields or user-created types.
      */
     private boolean isUndefinedField(DataTypeComponent comp) {
-        // Check if the field name is null or empty (undefined)
+        // Check if the datatype is actually undefined
+        if (!Undefined.isUndefined(comp.getDataType())) {
+            return false;
+        }
+
+        // Also require a default or missing field name
         String fieldName = comp.getFieldName();
         if (fieldName == null || fieldName.isEmpty()) {
             return true;
         }
 
-        // Check if it's a Ghidra default field name like "field_0x0", "field_0x1", etc.
-        // These are generated for undefined structure areas
+        // Ghidra default field names for undefined areas
         if (fieldName.startsWith("field_0x") || fieldName.startsWith("field0x")) {
-            return true;
-        }
-
-        // Check if the datatype is "undefined" or "undefined1"
-        DataType fieldType = comp.getDataType();
-        String typeName = fieldType.getName();
-        if (typeName != null && typeName.startsWith("undefined")) {
             return true;
         }
 
@@ -857,12 +882,12 @@ public class StructureToolProvider extends AbstractToolProvider {
                     i++;
                 }
 
-                // Generate condensed line with offset range comment
-                sb.append("undefined reserved_0x");
+                // Generate condensed line using valid C type for round-trip compatibility
+                sb.append("uint8_t reserved_0x");
                 sb.append(String.format("%x", startOffset));
                 sb.append("[").append(totalLength).append("]");
                 sb.append(";");
-                sb.append(" // 0x");
+                sb.append(" // undefined padding 0x");
                 sb.append(String.format("%x", startOffset));
                 sb.append("-0x");
                 sb.append(String.format("%x", startOffset + totalLength - 1));

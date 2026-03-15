@@ -54,6 +54,12 @@ public class StringToolProvider extends AbstractToolProvider {
     private static final int MAX_REFERENCING_FUNCTIONS = 100;
 
     /**
+     * Maximum length of a string value to include in responses.
+     * Longer strings (e.g., GoLang concatenated blobs) are truncated to this length.
+     */
+    private static final int MAX_STRING_VALUE_LENGTH = 500;
+
+    /**
      * Temporary key for storing Address objects during similarity search processing.
      * Used to avoid string parsing round-trip; removed before JSON serialization.
      */
@@ -110,6 +116,7 @@ public class StringToolProvider extends AbstractToolProvider {
 
             // Create result data
             Map<String, Object> countData = new HashMap<>();
+            countData.put("programPath", program.getDomainFile().getPathname());
             countData.put("count", count);
 
             return createJsonResult(countData);
@@ -383,28 +390,41 @@ public class StringToolProvider extends AbstractToolProvider {
 
         Map<String, Object> stringInfo = new HashMap<>();
         stringInfo.put("address", AddressUtil.formatAddress(data.getAddress()));
-        stringInfo.put("content", stringValue);
         stringInfo.put("length", stringValue.length());
 
-        // Get the raw bytes
-        try {
-            byte[] bytes = data.getBytes();
-            if (bytes != null) {
-                // Convert bytes to hex string
-                StringBuilder hexString = new StringBuilder();
-                for (byte b : bytes) {
-                    hexString.append(String.format("%02x", b & 0xff));
-                }
-                stringInfo.put("hexBytes", hexString.toString());
-                stringInfo.put("byteLength", bytes.length);
-            }
-        } catch (MemoryAccessException e) {
-            stringInfo.put("bytesError", "Memory access error: " + e.getMessage());
+        // Truncate long strings to prevent huge responses (e.g., GoLang concatenated blobs)
+        if (stringValue.length() > MAX_STRING_VALUE_LENGTH) {
+            stringInfo.put("content", stringValue.substring(0, MAX_STRING_VALUE_LENGTH));
+            stringInfo.put("truncated", true);
+            stringInfo.put("fullLength", stringValue.length());
+            stringInfo.put("note", "Use get-data or read-memory at this address to retrieve the full string");
+        } else {
+            stringInfo.put("content", stringValue);
         }
 
-        // Add the data type and representation
+        // Get the raw bytes (skip for truncated strings to avoid huge hex output)
+        if (stringValue.length() <= MAX_STRING_VALUE_LENGTH) {
+            try {
+                byte[] bytes = data.getBytes();
+                if (bytes != null) {
+                    // Convert bytes to hex string
+                    StringBuilder hexString = new StringBuilder();
+                    for (byte b : bytes) {
+                        hexString.append(String.format("%02x", b & 0xff));
+                    }
+                    stringInfo.put("hexBytes", hexString.toString());
+                    stringInfo.put("byteLength", bytes.length);
+                }
+            } catch (MemoryAccessException e) {
+                stringInfo.put("bytesError", "Memory access error: " + e.getMessage());
+            }
+        }
+
+        // Add the data type and representation (skip representation for truncated strings)
         stringInfo.put("dataType", data.getDataType().getName());
-        stringInfo.put("representation", data.getDefaultValueRepresentation());
+        if (stringValue.length() <= MAX_STRING_VALUE_LENGTH) {
+            stringInfo.put("representation", data.getDefaultValueRepresentation());
+        }
 
         // Add referencing functions if requested
         if (includeReferencingFunctions && program != null) {

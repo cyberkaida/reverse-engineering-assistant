@@ -302,15 +302,16 @@ public class CallGraphToolProvider extends AbstractToolProvider {
             }
         }
 
-        // Sort by address - use entry point directly for reliable comparison
+        // Sort by address numerically
         callerList.sort((a, b) -> {
             String addrStrA = (String) a.get("address");
             String addrStrB = (String) b.get("address");
             if (addrStrA == null && addrStrB == null) return 0;
             if (addrStrA == null) return 1;  // Nulls sort to end
             if (addrStrB == null) return -1;
-            // Compare hex strings (both have 0x prefix from AddressUtil)
-            return addrStrA.compareTo(addrStrB);
+            long addrA = Long.parseUnsignedLong(addrStrA.startsWith("0x") ? addrStrA.substring(2) : addrStrA, 16);
+            long addrB = Long.parseUnsignedLong(addrStrB.startsWith("0x") ? addrStrB.substring(2) : addrStrB, 16);
+            return Long.compareUnsigned(addrA, addrB);
         });
 
         Map<String, Object> result = new HashMap<>();

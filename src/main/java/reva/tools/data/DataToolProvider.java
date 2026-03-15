@@ -165,7 +165,11 @@ public class DataToolProvider extends AbstractToolProvider {
 
                     // Clear any existing data at the address
                     if (listing.getDataAt(targetAddress) != null) {
-                        listing.clearCodeUnits(targetAddress, targetAddress.add(dataType.getLength() - 1), false);
+                        if (dataType.getLength() > 0) {
+                            listing.clearCodeUnits(targetAddress, targetAddress.add(dataType.getLength() - 1), false);
+                        } else {
+                            listing.clearCodeUnits(targetAddress, targetAddress, false);
+                        }
                     }
 
                     // Create the data at the address with the specified data type
@@ -180,7 +184,7 @@ public class DataToolProvider extends AbstractToolProvider {
                     // Create result data
                     Map<String, Object> resultData = new HashMap<>();
                     resultData.put("success", true);
-                    resultData.put("address", "0x" + targetAddress.toString());
+                    resultData.put("address", AddressUtil.formatAddress(targetAddress));
                     resultData.put("dataType", dataType.getName());
                     resultData.put("dataTypeDisplayName", dataType.getDisplayName());
                     resultData.put("length", dataType.getLength());
@@ -276,7 +280,7 @@ public class DataToolProvider extends AbstractToolProvider {
                 Map<String, Object> resultData = new HashMap<>();
                 resultData.put("success", true);
                 resultData.put("labelName", labelName);
-                resultData.put("address", "0x" + address.toString());
+                resultData.put("address", AddressUtil.formatAddress(address));
                 resultData.put("isPrimary", symbol.isPrimary());
 
                 return createJsonResult(resultData);
@@ -305,6 +309,7 @@ public class DataToolProvider extends AbstractToolProvider {
 
         // Create result data
         Map<String, Object> resultData = new HashMap<>();
+        resultData.put("programPath", program.getDomainFile().getPathname());
         resultData.put("address", AddressUtil.formatAddress(data.getAddress()));
         resultData.put("dataType", data.getDataType().getName());
         resultData.put("length", data.getLength());

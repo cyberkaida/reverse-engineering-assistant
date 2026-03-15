@@ -237,7 +237,7 @@ public class VtableToolProvider extends AbstractToolProvider {
             result.put("hasStructure", true);
         } else {
             result.put("hasStructure", false);
-            result.put("note", "No structure defined at this address. Use create-structure to define one.");
+            result.put("note", "No structure defined at this address. Use parse-c-structure to define one.");
         }
 
         result.put("entries", entries);

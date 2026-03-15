@@ -29,6 +29,7 @@ import ghidra.program.model.symbol.SymbolType;
 import io.modelcontextprotocol.server.McpSyncServer;
 import io.modelcontextprotocol.spec.McpSchema;
 import reva.tools.AbstractToolProvider;
+import reva.util.AddressUtil;
 import reva.util.SymbolUtil;
 
 /**
@@ -167,34 +168,36 @@ public class SymbolToolProvider extends AbstractToolProvider {
             SymbolTable symbolTable = program.getSymbolTable();
             SymbolIterator symbolIterator = symbolTable.getAllSymbols(true);
 
-            AtomicInteger currentIndex = new AtomicInteger(0);
+            int currentIndex = 0;
 
-            symbolIterator.forEach(symbol -> {
+            while (symbolIterator.hasNext()) {
+                Symbol symbol = symbolIterator.next();
+
                 // Skip external symbols if not included
                 if (!includeExternal && symbol.isExternal()) {
-                    return;
+                    continue;
                 }
 
                 // Skip default names if filtering is enabled
                 if (filterDefaultNames && SymbolUtil.isDefaultSymbolName(symbol.getName())) {
-                    return;
+                    continue;
                 }
 
-                int index = currentIndex.getAndIncrement();
+                int index = currentIndex++;
 
                 // Skip symbols before the start index
                 if (index < pagination.startIndex()) {
-                    return;
+                    continue;
                 }
 
                 // Stop after we've collected maxCount symbols
                 if (symbolData.size() >= pagination.maxCount()) {
-                    return;
+                    break;
                 }
 
                 // Collect symbol data
                 symbolData.add(createSymbolInfo(symbol));
-            });
+            }
 
             // Create pagination metadata
             Map<String, Object> paginationInfo = new HashMap<>();
@@ -202,7 +205,7 @@ public class SymbolToolProvider extends AbstractToolProvider {
             paginationInfo.put("requestedCount", pagination.maxCount());
             paginationInfo.put("actualCount", symbolData.size());
             paginationInfo.put("nextStartIndex", pagination.startIndex() + symbolData.size());
-            paginationInfo.put("totalProcessed", currentIndex.get());
+            paginationInfo.put("totalProcessed", currentIndex);
             paginationInfo.put("includeExternal", includeExternal);
             paginationInfo.put("filterDefaultNames", filterDefaultNames);
 
@@ -223,7 +226,7 @@ public class SymbolToolProvider extends AbstractToolProvider {
     private Map<String, Object> createSymbolInfo(Symbol symbol) {
         Map<String, Object> symbolInfo = new HashMap<>();
         symbolInfo.put("name", symbol.getName());
-        symbolInfo.put("address", "0x" + symbol.getAddress().toString());
+        symbolInfo.put("address", AddressUtil.formatAddress(symbol.getAddress()));
         symbolInfo.put("namespace", symbol.getParentNamespace().getName());
         symbolInfo.put("id", symbol.getID());
         symbolInfo.put("symbolType", symbol.getSymbolType().toString());

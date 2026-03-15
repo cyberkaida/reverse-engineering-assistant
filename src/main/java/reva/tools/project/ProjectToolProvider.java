@@ -725,6 +725,9 @@ public class ProjectToolProvider extends AbstractToolProvider {
                 // Create language compiler spec pair
                 LanguageCompilerSpecPair lcsPair = new LanguageCompilerSpecPair(langId, compilerSpec.getCompilerSpecID());
 
+                // Capture old language before changing
+                String oldLanguageId = program.getLanguage().getLanguageID().getIdAsString();
+
                 // Change the processor
                 int transactionID = program.startTransaction("Change processor architecture");
                 try {
@@ -738,7 +741,7 @@ public class ProjectToolProvider extends AbstractToolProvider {
                 Map<String, Object> result = new HashMap<>();
                 result.put("success", true);
                 result.put("programPath", programPath);
-                result.put("oldLanguage", program.getLanguage().getLanguageID().getIdAsString());
+                result.put("oldLanguage", oldLanguageId);
                 result.put("newLanguage", languageId);
                 result.put("newCompilerSpec", compilerSpec.getCompilerSpecID().getIdAsString());
                 result.put("message", "Processor architecture changed successfully");
@@ -1148,31 +1151,21 @@ public class ProjectToolProvider extends AbstractToolProvider {
                     }
                 }
 
-                // Create result data
+                // Create result data (omit echo-back of input config to keep response concise)
                 Map<String, Object> result = new HashMap<>();
                 result.put("success", !importedDomainFiles.isEmpty());
                 result.put("importedFrom", path);
                 result.put("destinationFolder", destinationFolder);
                 result.put("filesDiscovered", batchInfo.getTotalCount());
                 result.put("filesImported", importedDomainFiles.size());
-                result.put("groupsCreated", batchInfo.getGroups().size());
-                result.put("enabledGroups", enabledGroups);
-                result.put("skippedGroups", skippedGroups);
-                result.put("maxDepthUsed", maxDepth);
-                result.put("wasRecursive", recursive);
-                result.put("analyzeAfterImport", analyzeAfterImport);
-                result.put("enableVersionControl", enableVersionControl);
-                result.put("stripLeadingPath", stripLeadingPath);
-                result.put("stripAllContainerPath", stripAllContainerPath);
-                result.put("mirrorFs", mirrorFs);
                 result.put("importedPrograms", importedProgramPaths);
 
-                if (enableVersionControl) {
+                if (enableVersionControl && !versionedFiles.isEmpty()) {
                     result.put("filesAddedToVersionControl", versionedFiles.size());
                     result.put("versionedPrograms", versionedFiles);
                 }
 
-                if (analyzeAfterImport) {
+                if (analyzeAfterImport && !analyzedFiles.isEmpty()) {
                     result.put("filesAnalyzed", analyzedFiles.size());
                     result.put("analyzedPrograms", analyzedFiles);
                 }

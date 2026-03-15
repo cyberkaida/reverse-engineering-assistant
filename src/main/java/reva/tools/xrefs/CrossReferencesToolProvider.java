@@ -237,7 +237,7 @@ public class CrossReferencesToolProvider extends AbstractToolProvider {
                 
                 // Create result data
                 Map<String, Object> resultData = new HashMap<>();
-                resultData.put("program", program.getName());
+                resultData.put("programPath", program.getDomainFile().getPathname());
                 resultData.put("location", locationInfo);
                 resultData.put("referencesTo", referencesTo);
                 resultData.put("referencesFrom", referencesFrom);

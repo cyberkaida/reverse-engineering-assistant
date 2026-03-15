@@ -1426,8 +1426,8 @@ public class DecompilerToolProvider extends AbstractToolProvider {
                 for (Address addr : lineAddresses.getAddresses(true)) {
                     Instruction instruction = listing.getInstructionAt(addr);
                     if (instruction != null) {
-                        assemblyLines.add(String.format("0x%s: %s",
-                            instruction.getAddress().toString(),
+                        assemblyLines.add(String.format("%s: %s",
+                            AddressUtil.formatAddress(instruction.getAddress()),
                             instruction.toString()));
                     }
                 }
@@ -1542,7 +1542,7 @@ public class DecompilerToolProvider extends AbstractToolProvider {
             }
 
         } catch (PatternSyntaxException e) {
-            logError(toolName + ": Invalid regex pattern: " + pattern, e);
+            throw new IllegalArgumentException("Invalid regex pattern: " + e.getMessage(), e);
         } catch (Exception e) {
             logError(toolName + ": Error during decompilation search", e);
         }
@@ -1710,7 +1710,7 @@ public class DecompilerToolProvider extends AbstractToolProvider {
         String comment = cu.getComment(commentType);
         if (comment != null && !comment.isEmpty()) {
             Map<String, Object> commentInfo = new HashMap<>();
-            commentInfo.put("address", address.toString());
+            commentInfo.put("address", AddressUtil.formatAddress(address));
             commentInfo.put("type", typeString);
             commentInfo.put("comment", comment);
             comments.add(commentInfo);
@@ -1837,7 +1837,7 @@ public class DecompilerToolProvider extends AbstractToolProvider {
                     result.put("success", true);
                     result.put("functionName", function.getName());
                     result.put("lineNumber", lineNumber);
-                    result.put("address", targetAddress.toString());
+                    result.put("address", AddressUtil.formatAddress(targetAddress));
                     result.put("commentType", commentTypeStr);
                     result.put("comment", comment);
 

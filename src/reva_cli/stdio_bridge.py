@@ -16,7 +16,7 @@ import httpx
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.client.streamable_http import streamablehttp_client
-from mcp import ClientSession
+from mcp import ClientSession, McpError
 from mcp.types import (
     Tool,
     Resource,
@@ -39,6 +39,19 @@ def _no_keepalive_httpx_factory(headers=None, timeout=None, auth=None):
         auth=auth,
         limits=httpx.Limits(max_keepalive_connections=0),
     )
+
+
+def _is_transport_error(e: Exception) -> bool:
+    """Check if an exception is a transport-level error that warrants reconnection.
+
+    MCP-level errors (like tool not found) are valid protocol responses and should
+    NOT trigger reconnection. Only network/transport failures should reconnect.
+    """
+    if isinstance(e, McpError):
+        return False
+    if isinstance(e, (httpx.HTTPError, ConnectionError, OSError, TimeoutError)):
+        return True
+    return False
 
 
 class ReconnectingBackend:
@@ -87,7 +100,8 @@ class ReconnectingBackend:
     async def forward(self, method: str, *args, **kwargs):
         """Forward a method call to the backend session, reconnecting on failure.
 
-        On the first failure, disconnects, reconnects, and retries once.
+        Only reconnects on transport errors (network failures, timeouts).
+        MCP-level errors (tool not found, invalid params) propagate as-is.
         """
         if not self._session:
             raise RuntimeError("Backend not connected")
@@ -95,10 +109,12 @@ class ReconnectingBackend:
         try:
             return await getattr(self._session, method)(*args, **kwargs)
         except Exception as e:
-            print(f"Backend call failed ({method}): {e}, reconnecting...", file=sys.stderr)
-            await self.disconnect()
-            await self.connect()
-            return await getattr(self._session, method)(*args, **kwargs)
+            if _is_transport_error(e):
+                print(f"Backend transport error ({method}): {e}, reconnecting...", file=sys.stderr)
+                await self.disconnect()
+                await self.connect()
+                return await getattr(self._session, method)(*args, **kwargs)
+            raise
 
 
 class ReVaStdioBridge:

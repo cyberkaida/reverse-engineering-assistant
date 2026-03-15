@@ -54,6 +54,7 @@ public class ConfigManager implements ConfigurationBackendListener {
     public static final String MAX_DECOMPILER_SEARCH_FUNCTIONS = "Max Decompiler Search Functions";
     public static final String DECOMPILER_TIMEOUT_SECONDS = "Decompiler Timeout Seconds";
     public static final String IMPORT_ANALYSIS_TIMEOUT_SECONDS = "Import Analysis Timeout Seconds";
+    private static final String IMPORT_TIMEOUT_SECONDS = "Import Timeout (seconds)";
     public static final String WAIT_FOR_ANALYSIS_ON_IMPORT = "Wait For Analysis On Import";
     public static final String IMPORT_MAX_DEPTH = "Import Max Depth";
 
@@ -68,6 +69,7 @@ public class ConfigManager implements ConfigurationBackendListener {
     private static final int DEFAULT_MAX_DECOMPILER_SEARCH_FUNCTIONS = 1000;
     private static final int DEFAULT_DECOMPILER_TIMEOUT_SECONDS = 10;
     private static final int DEFAULT_IMPORT_ANALYSIS_TIMEOUT_SECONDS = 600;
+    private static final int DEFAULT_IMPORT_TIMEOUT_SECONDS = 120;
     private static final boolean DEFAULT_WAIT_FOR_ANALYSIS_ON_IMPORT = true;
     private static final int DEFAULT_IMPORT_MAX_DEPTH = 10;
 
@@ -183,6 +185,8 @@ public class ConfigManager implements ConfigurationBackendListener {
             "Timeout in seconds for decompiler operations");
         toolOptions.registerOption(IMPORT_ANALYSIS_TIMEOUT_SECONDS, DEFAULT_IMPORT_ANALYSIS_TIMEOUT_SECONDS, help,
             "Timeout in seconds for analyzing each imported file (default: 10 minutes)");
+        toolOptions.registerOption(IMPORT_TIMEOUT_SECONDS, DEFAULT_IMPORT_TIMEOUT_SECONDS, help,
+            "Timeout in seconds for file import operations");
         toolOptions.registerOption(WAIT_FOR_ANALYSIS_ON_IMPORT, DEFAULT_WAIT_FOR_ANALYSIS_ON_IMPORT, help,
             "Whether to run auto-analysis after file import and wait for it to complete (default: true)");
         toolOptions.registerOption(IMPORT_MAX_DEPTH, DEFAULT_IMPORT_MAX_DEPTH, help,
@@ -215,6 +219,8 @@ public class ConfigManager implements ConfigurationBackendListener {
             backend.getInt(SERVER_OPTIONS, DECOMPILER_TIMEOUT_SECONDS, DEFAULT_DECOMPILER_TIMEOUT_SECONDS));
         cachedOptions.put(IMPORT_ANALYSIS_TIMEOUT_SECONDS,
             backend.getInt(SERVER_OPTIONS, IMPORT_ANALYSIS_TIMEOUT_SECONDS, DEFAULT_IMPORT_ANALYSIS_TIMEOUT_SECONDS));
+        cachedOptions.put(IMPORT_TIMEOUT_SECONDS,
+            backend.getInt(SERVER_OPTIONS, IMPORT_TIMEOUT_SECONDS, DEFAULT_IMPORT_TIMEOUT_SECONDS));
         cachedOptions.put(WAIT_FOR_ANALYSIS_ON_IMPORT,
             backend.getBoolean(SERVER_OPTIONS, WAIT_FOR_ANALYSIS_ON_IMPORT, DEFAULT_WAIT_FOR_ANALYSIS_ON_IMPORT));
         cachedOptions.put(IMPORT_MAX_DEPTH,
@@ -463,6 +469,14 @@ public class ConfigManager implements ConfigurationBackendListener {
      */
     public int getImportAnalysisTimeoutSeconds() {
         return (Integer) cachedOptions.getOrDefault(IMPORT_ANALYSIS_TIMEOUT_SECONDS, DEFAULT_IMPORT_ANALYSIS_TIMEOUT_SECONDS);
+    }
+
+    /**
+     * Get the import timeout in seconds (for file import operations, distinct from analysis timeout)
+     * @return The configured timeout in seconds for importing files
+     */
+    public int getImportTimeoutSeconds() {
+        return (Integer) cachedOptions.getOrDefault(IMPORT_TIMEOUT_SECONDS, DEFAULT_IMPORT_TIMEOUT_SECONDS);
     }
 
     /**

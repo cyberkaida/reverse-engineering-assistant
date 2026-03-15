@@ -888,7 +888,7 @@ public class ProjectToolProvider extends AbstractToolProvider {
 
                 // Use configuration for timeouts
                 int importTimeoutSeconds = configManager != null ?
-                    configManager.getDecompilerTimeoutSeconds() * 2 : 300; // 2x decompiler timeout or 5 min default
+                    configManager.getImportTimeoutSeconds() : 120; // Dedicated import timeout or 2 min default
                 int analysisTimeoutSeconds = configManager != null ?
                     configManager.getImportAnalysisTimeoutSeconds() : 600; // Default 10 minutes
 

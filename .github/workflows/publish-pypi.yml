@@ -1,11 +1,8 @@
 name: Publish Python 🐍 distribution to PyPI
 
 on:
-  push:
-    tags:
-      - 'v*'
-    branches:
-      - 'develop'
+  release:
+    types: [published]
   workflow_dispatch:
     inputs:
       publish_to:
@@ -57,11 +54,10 @@ jobs:
 
   publish-to-testpypi:
     name: Publish to TestPyPI 🧪
-    # Only run on develop branch pushes or manual dispatch with testpypi/both
+    # Only run on manual dispatch with testpypi/both
     if: |
-      github.ref == 'refs/heads/develop' ||
-      (github.event_name == 'workflow_dispatch' &&
-       (github.event.inputs.publish_to == 'testpypi' || github.event.inputs.publish_to == 'both'))
+      github.event_name == 'workflow_dispatch' &&
+      (github.event.inputs.publish_to == 'testpypi' || github.event.inputs.publish_to == 'both')
     needs:
       - build
     runs-on: ubuntu-latest
@@ -86,9 +82,9 @@ jobs:
 
   publish-to-pypi:
     name: Publish to PyPI 🚀
-    # Only run on tag pushes or manual dispatch with pypi/both
+    # Only run on release publish or manual dispatch with pypi/both
     if: |
-      startsWith(github.ref, 'refs/tags/v') ||
+      github.event_name == 'release' ||
       (github.event_name == 'workflow_dispatch' &&
        (github.event.inputs.publish_to == 'pypi' || github.event.inputs.publish_to == 'both'))
     needs:
@@ -116,12 +112,12 @@ jobs:
           upload-signing-artifacts: true
 
       - name: Upload signatures to GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: github.event_name == 'release'
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
-          # Upload Python package signatures to existing release created by publish-ghidra.yml
-          gh release upload '${{ github.ref_name }}' ./dist/*.sigstore* --clobber \
+          # Upload Python package signatures to existing release
+          gh release upload '${{ github.event.release.tag_name }}' ./dist/*.sigstore* --clobber \
             --repo '${{ github.repository }}'
 
       - name: Publish to PyPI

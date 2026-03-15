@@ -106,3 +106,10 @@ jobs:
           .pytest_cache/
           ~/.ghidra/**/application.log
         if-no-files-found: ignore
+
+    - name: Test Summary
+      uses: test-summary/action@v2
+      with:
+        show: "fail, skip"
+        paths: test-results.xml
+      if: always()

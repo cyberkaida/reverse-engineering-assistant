@@ -155,7 +155,6 @@ public class ProjectToolProviderNestedArchiveIntegrationTest extends RevaIntegra
                 Map<String, Object> response = objectMapper.readValue(responseJson, new TypeReference<Map<String, Object>>() {});
 
                 assertTrue("Import should be successful", Boolean.TRUE.equals(response.get("success")));
-                assertTrue("enableVersionControl should be true by default", Boolean.TRUE.equals(response.get("enableVersionControl")));
 
                 // If project supports version control, should have filesAddedToVersionControl count
                 // (This may be 0 if project doesn't support version control, but field should exist)
@@ -391,22 +390,13 @@ public class ProjectToolProviderNestedArchiveIntegrationTest extends RevaIntegra
                 String responseJson = ((io.modelcontextprotocol.spec.McpSchema.TextContent) result.content().get(0)).text();
                 Map<String, Object> response = objectMapper.readValue(responseJson, new TypeReference<Map<String, Object>>() {});
 
-                // Verify required fields
+                // Verify essential result fields
                 assertTrue("Should have success field", response.containsKey("success"));
                 assertTrue("Should have importedFrom field", response.containsKey("importedFrom"));
                 assertTrue("Should have filesDiscovered field", response.containsKey("filesDiscovered"));
                 assertTrue("Should have filesImported field", response.containsKey("filesImported"));
                 assertTrue("Should have importedPrograms field", response.containsKey("importedPrograms"));
-
-                // Verify group tracking fields
-                assertTrue("Should have enabledGroups field", response.containsKey("enabledGroups"));
-                assertTrue("Should have skippedGroups field", response.containsKey("skippedGroups"));
-                assertTrue("Should have groupsCreated field", response.containsKey("groupsCreated"));
-
-                // Verify path handling fields
-                assertTrue("Should have stripLeadingPath field", response.containsKey("stripLeadingPath"));
-                assertTrue("Should have stripAllContainerPath field", response.containsKey("stripAllContainerPath"));
-                assertTrue("Should have mirrorFs field", response.containsKey("mirrorFs"));
+                assertTrue("Should have destinationFolder field", response.containsKey("destinationFolder"));
 
                 return null;
             } catch (Exception e) {

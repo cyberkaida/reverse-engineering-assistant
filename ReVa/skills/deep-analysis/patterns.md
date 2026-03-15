@@ -40,7 +40,7 @@ State updates:
 **Investigation strategy:**
 1. `read-memory` at constant arrays - compare to known S-boxes
 2. Count loop iterations - indicates cipher type/key size
-3. `search-strings-regex` for algorithm names
+3. `get-strings` with `regexPattern` for algorithm names
 4. Check cross-references to constants - find cipher initialization
 
 ### Stream Cipher Recognition

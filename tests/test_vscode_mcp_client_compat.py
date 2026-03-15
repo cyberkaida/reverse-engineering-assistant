@@ -397,3 +397,10 @@ class TestProtocolVersionNegotiation:
                         datetime.date.fromisoformat(negotiated_version)
                     except (ValueError, TypeError):
                         pytest.fail(f"Protocol version should be a valid date, got: {negotiated_version}")
+                    # Verify it's a known MCP protocol version
+                    known_versions = {"2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25"}
+                    assert negotiated_version in known_versions, (
+                        f"Protocol version {negotiated_version} is not a known MCP version. "
+                        f"Known versions: {sorted(known_versions)}. "
+                        f"Update this set if a new protocol version was intentionally adopted."
+                    )

@@ -191,7 +191,7 @@ This is a **thinking framework**, not a rigid checklist. Adapt to the challenge:
 1. `get-current-program` or `list-project-files` → Identify target binary
 2. `get-memory-blocks` → Map sections, identify protections
 3. `get-functions` filterDefaultNames=false → Count functions (stripped vs. symbolic)
-4. `search-strings-regex` pattern="flag" → Find flag-related strings
+4. `get-strings` regexPattern="flag" → Find flag-related strings
 5. `get-symbols` includeExternal=true → List imported functions
 
 **Identify entry points and input vectors:**
@@ -233,7 +233,7 @@ This is a **thinking framework**, not a rigid checklist. Adapt to the challenge:
 
 12. `find-cross-references` to vulnerable function → How is it called?
 13. Check for exploitation helpers: system(), exec(), "/bin/sh" string
-14. `search-strings-regex` pattern="/bin/(sh|bash)" → Find shell strings
+14. `get-strings` regexPattern="/bin/(sh|bash)" → Find shell strings
 15. `search-decompilation` pattern="system|exec" → Find execution functions
 
 ### Phase 3: Exploitation Strategy (5-10 tool calls)
@@ -263,7 +263,7 @@ Based on protections and available primitives:
 
 **Investigation for each strategy:**
 
-1. `search-strings-regex` pattern="(\\x2f|/)bin/(sh|bash)" → Find shell strings
+1. `get-strings` regexPattern="(\\x2f|/)bin/(sh|bash)" → Find shell strings
 2. `find-cross-references` to "/bin/sh" → Get string address
 3. `get-symbols` includeExternal=true → Find system/exec imports
 4. `get-decompilation` of system → Get address (if not PIE)
@@ -393,7 +393,7 @@ See `patterns.md` for detailed vulnerability patterns:
 **Discovery**:
 1. `get-symbols` includeExternal=true → Find libc imports
 2. `find-cross-references` to system, execve → Get addresses
-3. `search-strings-regex` pattern="/bin/sh" → Find shell string
+3. `get-strings` regexPattern="/bin/sh" → Find shell string
 
 **Exploitation** (no ASLR):
 - Overwrite return address → system function address
@@ -456,7 +456,7 @@ See `patterns.md` for detailed vulnerability patterns:
 
 ### Discovery Tools
 - `get-symbols` → Find unsafe API imports
-- `search-strings-regex` → Find interesting strings (flag, shell, paths)
+- `get-strings` → Find interesting strings (flag, shell, paths)
 - `search-decompilation` → Find vulnerability patterns (unsafe functions)
 - `get-functions-by-similarity` → Find functions similar to known vulnerable pattern
 

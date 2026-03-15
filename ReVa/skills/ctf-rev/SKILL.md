@@ -195,7 +195,7 @@ Dynamic: Verify flag works
 
 **Workflow:**
 ```
-1. search-strings-regex pattern="(scanf|read|fgets|input)"
+1. get-strings regexPattern="(scanf|read|fgets|input)"
 2. find-cross-references to input function
 3. Trace data flow: input → storage → transformation → usage
 4. Follow transformations until you reach comparison/validation
@@ -369,7 +369,7 @@ CTF challenges often test recognition of standard patterns. See `patterns.md` fo
 **Find the interesting parts quickly:**
 
 ```
-search-strings-regex pattern="(flag|key|password|correct|wrong|success)"
+get-strings regexPattern="(flag|key|password|correct|wrong|success)"
 → Find win/lose conditions
 
 search-decompilation pattern="(scanf|read|input|strcmp|memcmp)"

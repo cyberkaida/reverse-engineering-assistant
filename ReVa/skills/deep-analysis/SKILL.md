@@ -94,7 +94,7 @@ Every 3-5 tool calls, ask:
 ### "Does this use cryptography?"
 
 **Discovery:**
-1. `search-strings-regex` pattern="(AES|RSA|encrypt|decrypt|crypto|cipher)"
+1. `get-strings` regexPattern="(AES|RSA|encrypt|decrypt|crypto|cipher)"
 2. `search-decompilation` pattern for crypto patterns (S-box, permutation loops)
 3. `get-symbols` includeExternal=true → Check for crypto API imports
 
@@ -116,7 +116,7 @@ Every 3-5 tool calls, ask:
 ### "What is the C2 address?"
 
 **Discovery:**
-1. `search-strings-regex` pattern="(http|https|[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+|\.com|\.net|\.org)"
+1. `get-strings` regexPattern="(http|https|[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+|\.com|\.net|\.org)"
 2. `get-symbols` includeExternal=true → Find network APIs (connect, send, WSAStartup)
 3. `search-decompilation` pattern="(connect|send|recv|socket)"
 
@@ -167,8 +167,8 @@ Every 3-5 tool calls, ask:
 Use broad search tools first, then narrow focus:
 ```
 search-decompilation pattern="..." → Find functions doing X
-search-strings-regex pattern="..." → Find strings matching pattern
-get-strings-by-similarity searchString="..." → Find similar strings
+get-strings regexPattern="..." → Find strings matching pattern
+get-strings searchString="..." → Find similar strings
 get-functions-by-similarity searchString="..." → Find similar functions
 find-cross-references location="..." direction="to" → Who references this?
 ```
@@ -490,14 +490,14 @@ get-decompilation functionNameOrAddress="..." limit=30
 
 **If string-focused:**
 ```
-get-strings-by-similarity searchString="..."
+get-strings searchString="..."
 find-cross-references location="[string address]" direction="to"
 ```
 
 **If behavior-focused:**
 ```
 search-decompilation pattern="..."
-search-strings-regex pattern="..."
+get-strings regexPattern="..."
 ```
 
 ### Set Starting Bookmark
@@ -548,7 +548,7 @@ User: "Does function FUN_00401234 use encryption?"
 [Call 1] get-decompilation FUN_00401234 limit=30 includeIncomingReferences=true
 → See loop with array access, XOR operations, called from 3 functions
 
-[Call 2] search-strings-regex pattern="(AES|encrypt|crypto)"
+[Call 2] get-strings regexPattern="(AES|encrypt|crypto)"
 → No crypto strings found in binary
 
 [Call 3] find-cross-references location="0x401234" direction="to" includeContext=true

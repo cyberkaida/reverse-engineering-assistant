@@ -167,7 +167,7 @@ User: "Does this binary use encryption?"
 
 1. Search for crypto-related strings:
 ```
-search-strings-regex pattern="(AES|RSA|encrypt|decrypt|crypto|cipher|key)"
+get-strings regexPattern="(AES|RSA|encrypt|decrypt|crypto|cipher|key)"
   caseSensitive=false
 ```
 
@@ -321,7 +321,7 @@ User: "What is the command and control server address?"
 
 1. Search for URLs and IPs:
 ```
-search-strings-regex pattern="(https?://|[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}|\.com|\.net)"
+get-strings regexPattern="(https?://|[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}|\.com|\.net)"
   caseSensitive=false
 ```
 
@@ -329,7 +329,7 @@ Find: No obvious domain/IP strings
 
 2. Search for network-related strings:
 ```
-search-strings-regex pattern="(connect|server|host|port|callback|beacon)"
+get-strings regexPattern="(connect|server|host|port|callback|beacon)"
   caseSensitive=false
 ```
 

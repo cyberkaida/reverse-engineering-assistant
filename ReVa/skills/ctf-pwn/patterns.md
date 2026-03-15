@@ -644,7 +644,7 @@ Use: Predict heap layout, target heap objects
 1. `get-decompilation` of vulnerable function → Find buffer overflow
 2. `rename-variables` → buffer, user_input, size
 3. Calculate offset: buffer to return address (usually buffer_size + 8)
-4. `search-strings-regex` pattern="/bin/sh" → Find shell string
+4. `get-strings` regexPattern="/bin/sh" → Find shell string
 5. `get-symbols` includeExternal=true → Find system() import
 6. `set-bookmark` type="Analysis" category="Exploit Plan"
 7. Document payload structure in comment
@@ -712,7 +712,7 @@ Use: Predict heap layout, target heap objects
 
 **Investigation steps**:
 1. `get-decompilation` → Find buffer overflow
-2. `search-strings-regex` pattern="/bin/sh" → Get shell string address
+2. `get-strings` regexPattern="/bin/sh" → Get shell string address
 3. `get-symbols` includeExternal=true → Find system import
 4. Check calling convention (x86: stack args, x64: RDI register)
 5. Calculate ROP gadgets if needed: pop rdi; ret

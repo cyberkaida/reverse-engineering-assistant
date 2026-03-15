@@ -27,6 +27,7 @@ import ghidra.program.model.mem.MemoryBlock;
 import io.modelcontextprotocol.server.McpSyncServer;
 import io.modelcontextprotocol.spec.McpSchema;
 import reva.tools.AbstractToolProvider;
+import reva.util.AddressUtil;
 import reva.util.MemoryUtil;
 import reva.util.SchemaUtil;
 
@@ -81,8 +82,8 @@ public class MemoryToolProvider extends AbstractToolProvider {
             for (MemoryBlock block : memory.getBlocks()) {
                 Map<String, Object> blockInfo = new HashMap<>();
                 blockInfo.put("name", block.getName());
-                blockInfo.put("start", block.getStart().toString());
-                blockInfo.put("end", block.getEnd().toString());
+                blockInfo.put("start", AddressUtil.formatAddress(block.getStart()));
+                blockInfo.put("end", AddressUtil.formatAddress(block.getEnd()));
                 blockInfo.put("size", block.getSize());
                 blockInfo.put("readable", block.isRead());
                 blockInfo.put("writable", block.isWrite());
@@ -95,7 +96,10 @@ public class MemoryToolProvider extends AbstractToolProvider {
                 blockData.add(blockInfo);
             }
 
-            return createJsonResult(blockData);
+            Map<String, Object> result = new HashMap<>();
+            result.put("programPath", program.getDomainFile().getPathname());
+            result.put("blocks", blockData);
+            return createJsonResult(result);
         });
     }
 
@@ -131,6 +135,9 @@ public class MemoryToolProvider extends AbstractToolProvider {
             if (length <= 0) {
                 return createErrorResult("Invalid length: " + length);
             }
+            if (length > 8192) {
+                return createErrorResult("Maximum read length is 8192 bytes. Use multiple reads for larger regions.");
+            }
 
             // Get the format from the request
             String format = getOptionalString(request, "format", "hex");
@@ -143,8 +150,9 @@ public class MemoryToolProvider extends AbstractToolProvider {
 
             // Format the result
             Map<String, Object> result = new HashMap<>();
-            result.put("address", address.toString());
+            result.put("address", AddressUtil.formatAddress(address));
             result.put("length", bytes.length);
+            result.put("programPath", program.getDomainFile().getPathname());
 
             if ("hex".equals(format) || "both".equals(format)) {
                 result.put("hex", MemoryUtil.formatHexString(bytes));

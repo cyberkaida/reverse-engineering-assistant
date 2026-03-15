@@ -73,7 +73,7 @@ public class CommentToolProvider extends AbstractToolProvider {
         properties.put("programPath", SchemaUtil.stringProperty("Path to the program in the Ghidra Project"));
         properties.put("addressOrSymbol", SchemaUtil.stringProperty("Address or symbol name where to set the comment"));
         properties.put("commentType", SchemaUtil.stringPropertyWithDefault(
-            "Type of comment: 'pre', 'eol', 'post', 'plate', or 'repeatable'", "pre"));
+            "Type of comment: 'pre', 'eol', 'post', 'plate', or 'repeatable'", "eol"));
         properties.put("comment", SchemaUtil.stringProperty("The comment text to set"));
 
         List<String> required = List.of("programPath", "addressOrSymbol", "comment");
@@ -106,7 +106,7 @@ public class CommentToolProvider extends AbstractToolProvider {
 
                     Map<String, Object> result = new HashMap<>();
                     result.put("success", true);
-                    result.put("address", address.toString());
+                    result.put("address", AddressUtil.formatAddress(address));
                     result.put("commentType", commentTypeStr);
                     result.put("comment", comment);
 
@@ -182,7 +182,7 @@ public class CommentToolProvider extends AbstractToolProvider {
 
                 addresses = new AddressSet(start, end);
             } else {
-                return createErrorResult("Either 'address' or 'addressRange' must be provided");
+                return createErrorResult("Either 'addressOrSymbol' or 'addressRange' must be provided");
             }
 
             List<CommentType> types = new ArrayList<>();
@@ -210,7 +210,7 @@ public class CommentToolProvider extends AbstractToolProvider {
                     String comment = codeUnit.getComment(type);
                     if (comment != null && !comment.isEmpty()) {
                         Map<String, Object> commentInfo = new HashMap<>();
-                        commentInfo.put("address", addr.toString());
+                        commentInfo.put("address", AddressUtil.formatAddress(addr));
                         commentInfo.put("commentType", getCommentTypeName(type));
                         commentInfo.put("comment", comment);
                         comments.add(commentInfo);
@@ -265,7 +265,7 @@ public class CommentToolProvider extends AbstractToolProvider {
 
                     Map<String, Object> result = new HashMap<>();
                     result.put("success", true);
-                    result.put("address", address.toString());
+                    result.put("address", AddressUtil.formatAddress(address));
                     result.put("commentType", commentTypeStr);
 
                     program.endTransaction(transactionId, true);
@@ -344,7 +344,7 @@ public class CommentToolProvider extends AbstractToolProvider {
                         String commentLower = caseSensitive ? comment : comment.toLowerCase();
                         if (commentLower.contains(searchLower)) {
                             Map<String, Object> result = new HashMap<>();
-                            result.put("address", addr.toString());
+                            result.put("address", AddressUtil.formatAddress(addr));
                             result.put("commentType", getCommentTypeName(type));
                             result.put("comment", comment);
 

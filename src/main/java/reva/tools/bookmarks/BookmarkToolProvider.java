@@ -30,6 +30,7 @@ import ghidra.program.model.listing.Program;
 import io.modelcontextprotocol.server.McpSyncServer;
 import io.modelcontextprotocol.spec.McpSchema;
 import reva.tools.AbstractToolProvider;
+import reva.util.AddressUtil;
 import reva.util.SchemaUtil;
 
 /**
@@ -100,7 +101,7 @@ public class BookmarkToolProvider extends AbstractToolProvider {
                     Map<String, Object> result = new HashMap<>();
                     result.put("success", true);
                     result.put("id", bookmark.getId());
-                    result.put("address", address.toString());
+                    result.put("address", AddressUtil.formatAddress(address));
                     result.put("type", type);
                     result.put("category", category);
                     result.put("comment", comment);
@@ -137,6 +138,7 @@ public class BookmarkToolProvider extends AbstractToolProvider {
 
         properties.put("type", SchemaUtil.stringProperty("Filter by bookmark type (optional)"));
         properties.put("category", SchemaUtil.stringProperty("Filter by bookmark category (optional)"));
+        properties.put("maxResults", SchemaUtil.integerPropertyWithDefault("Maximum number of bookmarks to return (default 200)", 200));
 
         List<String> required = List.of("programPath");
 
@@ -154,9 +156,11 @@ public class BookmarkToolProvider extends AbstractToolProvider {
             Map<String, Object> addressRange = getOptionalMap(request.arguments(), "addressRange", null);
             String typeFilter = getOptionalString(request, "type", null);
             String categoryFilter = getOptionalString(request, "category", null);
+            int maxResults = getOptionalInt(request, "maxResults", 200);
 
             BookmarkManager bookmarkMgr = program.getBookmarkManager();
             List<Map<String, Object>> bookmarks = new ArrayList<>();
+            boolean truncated = false;
 
             if (addressStr != null) {
                 // Get bookmarks at specific address
@@ -169,6 +173,10 @@ public class BookmarkToolProvider extends AbstractToolProvider {
 
                 Bookmark[] bookmarksAtAddr = bookmarkMgr.getBookmarks(address);
                 for (Bookmark bookmark : bookmarksAtAddr) {
+                    if (bookmarks.size() >= maxResults) {
+                        truncated = true;
+                        break;
+                    }
                     if (matchesFilters(bookmark, typeFilter, categoryFilter)) {
                         bookmarks.add(bookmarkToMap(bookmark));
                     }
@@ -189,6 +197,10 @@ public class BookmarkToolProvider extends AbstractToolProvider {
                 AddressSet addrSet = new AddressSet(start, end);
                 Iterator<Bookmark> iter = bookmarkMgr.getBookmarksIterator();
                 while (iter.hasNext()) {
+                    if (bookmarks.size() >= maxResults) {
+                        truncated = true;
+                        break;
+                    }
                     Bookmark bookmark = iter.next();
                     if (addrSet.contains(bookmark.getAddress()) &&
                         matchesFilters(bookmark, typeFilter, categoryFilter)) {
@@ -202,6 +214,10 @@ public class BookmarkToolProvider extends AbstractToolProvider {
                     bookmarkMgr.getBookmarksIterator();
 
                 while (iter.hasNext()) {
+                    if (bookmarks.size() >= maxResults) {
+                        truncated = true;
+                        break;
+                    }
                     Bookmark bookmark = iter.next();
                     if (matchesFilters(bookmark, typeFilter, categoryFilter)) {
                         bookmarks.add(bookmarkToMap(bookmark));
@@ -212,6 +228,7 @@ public class BookmarkToolProvider extends AbstractToolProvider {
             Map<String, Object> result = new HashMap<>();
             result.put("bookmarks", bookmarks);
             result.put("count", bookmarks.size());
+            result.put("truncated", truncated);
 
             return createJsonResult(result);
         });
@@ -258,7 +275,7 @@ public class BookmarkToolProvider extends AbstractToolProvider {
 
                     Map<String, Object> result = new HashMap<>();
                     result.put("success", true);
-                    result.put("address", address.toString());
+                    result.put("address", AddressUtil.formatAddress(address));
                     result.put("type", type);
                     result.put("category", category);
 
@@ -443,7 +460,7 @@ public class BookmarkToolProvider extends AbstractToolProvider {
         if (typeFilter != null && !bookmark.getTypeString().equals(typeFilter)) {
             return false;
         }
-        if (categoryFilter != null && !bookmark.getCategory().equals(categoryFilter)) {
+        if (categoryFilter != null && !categoryFilter.equals(bookmark.getCategory())) {
             return false;
         }
         return true;
@@ -457,7 +474,7 @@ public class BookmarkToolProvider extends AbstractToolProvider {
     private Map<String, Object> bookmarkToMap(Bookmark bookmark) {
         Map<String, Object> map = new HashMap<>();
         map.put("id", bookmark.getId());
-        map.put("address", bookmark.getAddress().toString());
+        map.put("address", AddressUtil.formatAddress(bookmark.getAddress()));
         map.put("type", bookmark.getTypeString());
         map.put("category", bookmark.getCategory());
         map.put("comment", bookmark.getComment());

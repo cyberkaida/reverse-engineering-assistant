@@ -119,10 +119,10 @@ class TestArchiveImport:
         required_fields = [
             "success",
             "importedFrom",
+            "destinationFolder",
             "filesDiscovered",
             "filesImported",
             "importedPrograms",
-            "groupsCreated",
         ]
 
         for field in required_fields:
@@ -581,8 +581,6 @@ class TestImportResponseFields:
             "filesDiscovered",
             "filesImported",
             "importedPrograms",
-            "groupsCreated",
-            "maxDepthUsed",
         ]
 
         for field in required_fields:
@@ -591,10 +589,9 @@ class TestImportResponseFields:
 
         # Optional/conditional fields - just log their presence
         optional_fields = [
-            "enableVersionControl",
-            "analyzeAfterImport",
             "message",
-            "wasRecursive",
+            "filesAddedToVersionControl",
+            "filesAnalyzed",
         ]
 
         for field in optional_fields:

@@ -101,7 +101,6 @@ public class StructureToolProvider extends AbstractToolProvider {
                     }
 
                     String structName = dt.getName();
-                    boolean replaced = false;
 
                     // Check if a structure with this name already exists
                     DataType existingDt = findDataTypeByName(dtm, structName);
@@ -109,6 +108,9 @@ public class StructureToolProvider extends AbstractToolProvider {
                         // Replace existing structure: clear fields and rebuild
                         Structure existingStruct = (Structure) existingDt;
                         Structure parsedStruct = (Structure) dt;
+
+                        // Set packing before adding components so layout is correct
+                        existingStruct.setPackingEnabled(parsedStruct.isPackingEnabled());
 
                         // Remove all existing components
                         while (existingStruct.getNumComponents() > 0) {
@@ -132,7 +134,8 @@ public class StructureToolProvider extends AbstractToolProvider {
                                     comp.getComment()
                                 );
                             } else {
-                                existingStruct.add(fieldType, comp.getFieldName(), comp.getComment());
+                                existingStruct.insertAtOffset(comp.getOffset(), fieldType,
+                                    comp.getLength(), comp.getFieldName(), comp.getComment());
                             }
                         }
 
@@ -140,9 +143,15 @@ public class StructureToolProvider extends AbstractToolProvider {
                         if (parsedStruct.getDescription() != null) {
                             existingStruct.setDescription(parsedStruct.getDescription());
                         }
-                        existingStruct.setPackingEnabled(parsedStruct.isPackingEnabled());
 
-                        replaced = true;
+                        // Apply category if specified
+                        CategoryPath catPath = new CategoryPath(category);
+                        if (!existingStruct.getCategoryPath().equals(catPath)) {
+                            Category cat = dtm.createCategory(catPath);
+                            if (cat != null) {
+                                cat.moveDataType(existingStruct, DataTypeConflictHandler.REPLACE_HANDLER);
+                            }
+                        }
 
                         program.endTransaction(txId, true);
 
@@ -851,7 +860,7 @@ public class StructureToolProvider extends AbstractToolProvider {
                 // Generate condensed line with offset range comment
                 sb.append("undefined reserved_0x");
                 sb.append(String.format("%x", startOffset));
-                sb.append("[").append(count).append("]");
+                sb.append("[").append(totalLength).append("]");
                 sb.append(";");
                 sb.append(" // 0x");
                 sb.append(String.format("%x", startOffset));

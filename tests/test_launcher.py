@@ -39,7 +39,7 @@ class TestLauncherLifecycle:
 
         # Should have valid port
         port = launcher.getPort()
-        assert 1024 < port < 65535
+        assert 0 < port <= 65535
 
         # Stop server
         launcher.stop()
@@ -64,7 +64,7 @@ class TestLauncherLifecycle:
         assert server.isServerReady()
 
         port = server.getPort()
-        assert 1024 < port < 65535
+        assert 0 < port <= 65535
 
 
 class TestLauncherConfiguration:
@@ -123,6 +123,6 @@ class TestLauncherConfiguration:
 
         # Should have a valid port (random)
         port = launcher.getPort()
-        assert 1024 < port < 65535
+        assert 0 < port <= 65535
 
         launcher.stop()

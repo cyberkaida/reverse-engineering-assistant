@@ -73,7 +73,7 @@ Padding:
 
 **ReVa detection:**
 ```
-search-strings-regex pattern="[A-Za-z0-9+/]{64}"
+get-strings regexPattern="[A-Za-z0-9+/]{64}"
 → Find base64 alphabet
 
 search-decompilation pattern="& 0x3f"
@@ -276,7 +276,7 @@ Custom alphabet:
 
 **ReVa detection:**
 ```
-search-strings-regex pattern="[A-Z]{26}"
+get-strings regexPattern="[A-Z]{26}"
 → Find alphabet strings
 
 search-decompilation pattern="(- 'A'|% 26)"
@@ -735,7 +735,7 @@ Check length:
 
 **ReVa detection:**
 ```
-search-strings-regex pattern="(flag\\{|CTF\\{)"
+get-strings regexPattern="(flag\\{|CTF\\{)"
 → Find flag format strings
 
 get-decompilation of validation
@@ -799,7 +799,7 @@ Hidden success logic:
 
 **ReVa detection:**
 ```
-search-strings-regex pattern="(flag|/flag|flag\\.txt)"
+get-strings regexPattern="(flag|/flag|flag\\.txt)"
 → Find flag file references
 
 find-cross-references to flag file

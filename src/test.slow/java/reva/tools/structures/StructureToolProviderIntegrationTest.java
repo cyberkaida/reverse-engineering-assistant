@@ -174,7 +174,7 @@ public class StructureToolProviderIntegrationTest extends RevaIntegrationTestBas
             JsonNode json = parseJsonContent(content.text());
             assertEquals("Successfully modified structure from C definition: ReplaceTest",
                          json.get("message").asText());
-            assertEquals(3, json.get("fieldsCount").asInt());
+            assertEquals(3, json.get("numComponents").asInt());
 
             // Verify the structure was modified in the program
             dt = findDataTypeByName(dtm, "ReplaceTest");

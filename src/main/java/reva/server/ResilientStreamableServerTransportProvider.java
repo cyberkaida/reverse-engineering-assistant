@@ -15,7 +15,7 @@
  */
 
 /*
- * Forked from MCP Java SDK's HttpServletStreamableServerTransportProvider (v0.17.0).
+ * Forked from MCP Java SDK's HttpServletStreamableServerTransportProvider (v1.1.0).
  *
  * FIX: The upstream sendMessage() catches bare Exception and unconditionally removes
  * the session from the sessions map. A serialization error on a single message

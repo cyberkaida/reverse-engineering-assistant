@@ -23,7 +23,7 @@ This document provides pattern recognition guides for identifying and analyzing 
 
 **What to check:**
 ```
-search-strings-regex pattern="(encrypt|decrypt|crypto|cipher|AES|DES|RSA|RC4|key|hash|salt|iv)"
+get-strings regexPattern="(encrypt|decrypt|crypto|cipher|AES|DES|RSA|RC4|key|hash|salt|iv)"
 get-symbols includeExternal=true → Look for crypto API imports
 search-decompilation pattern="(xor|sbox|round|permut)"
 ```
@@ -457,7 +457,7 @@ Caesar cipher (special case):
 ### Step 1: Initial Detection
 ```
 1. Search for crypto strings
-   search-strings-regex pattern="(encrypt|decrypt|aes|rsa|md5|sha|key)"
+   get-strings regexPattern="(encrypt|decrypt|aes|rsa|md5|sha|key)"
 
 2. Check for crypto API imports
    get-symbols includeExternal=true → Look for OpenSSL, Windows Crypto API

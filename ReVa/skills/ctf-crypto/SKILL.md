@@ -82,8 +82,8 @@ Solving CTF crypto challenges in binaries follows a systematic investigation fra
 5. Follow cross-references from strings/constants to crypto functions
 
 **Tools**:
-- `search-strings-regex` for crypto keywords
-- `get-strings-by-similarity` for algorithm names
+- `get-strings` with `regexPattern` for crypto keywords
+- `get-strings` with `searchString` for algorithm names
 - `read-memory` to inspect constant arrays
 - `find-cross-references` to trace usage
 
@@ -226,7 +226,7 @@ Key pattern categories:
 
 ### Discovery Phase
 ```
-search-strings-regex pattern="(AES|RSA|encrypt|decrypt|crypto|cipher|key)"
+get-strings regexPattern="(AES|RSA|encrypt|decrypt|crypto|cipher|key)"
 get-symbols includeExternal=true  → Check for crypto API imports
 search-decompilation pattern="(xor|sbox|round|block)"
 ```

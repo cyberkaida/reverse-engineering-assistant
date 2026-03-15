@@ -22,7 +22,9 @@
  * permanently kills the entire session. This fork splits the catch block to separate
  * serialization failures (non-fatal) from connection failures (fatal).
  *
- * See: https://github.com/modelcontextprotocol/java-sdk/issues/XXX
+ * No upstream issue filed yet — the bug is in HttpServletStreamableServerTransportProvider.sendMessage()
+ * which catches bare Exception and unconditionally calls sessions.remove(), so any serialization
+ * error permanently kills the session.
  */
 package reva.server;
 

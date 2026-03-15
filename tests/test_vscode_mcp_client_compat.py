@@ -23,7 +23,7 @@ The workaround in ReVa configures Jackson ObjectMapper with
 FAIL_ON_UNKNOWN_PROPERTIES=false.
 """
 
-import re
+import datetime
 
 import pytest
 import httpx
@@ -393,6 +393,7 @@ class TestProtocolVersionNegotiation:
                     negotiated_version = result["result"].get("protocolVersion")
                     # Verify the server returned a valid version string
                     assert negotiated_version is not None, "Server should negotiate a protocol version"
-                    assert re.match(r"^\d{4}-\d{2}-\d{2}$", negotiated_version), (
-                        f"Protocol version should be a date string, got: {negotiated_version}"
-                    )
+                    try:
+                        datetime.date.fromisoformat(negotiated_version)
+                    except (ValueError, TypeError):
+                        pytest.fail(f"Protocol version should be a valid date, got: {negotiated_version}")

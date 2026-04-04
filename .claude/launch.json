@@ -1,0 +1,19 @@
+{
+  "version": "1.0.0",
+  "configurations": [
+    {
+      "name": "ReVa Headless MCP Server",
+      "runtimeExecutable": "uv",
+      "runtimeArgs": ["run", "python", "scripts/reva_headless_server.py", "--wait"],
+      "port": 8080,
+      "autoVerify": false
+    },
+    {
+      "name": "ReVa CLI (stdio bridge)",
+      "runtimeExecutable": "uv",
+      "runtimeArgs": ["run", "mcp-reva", "--verbose"],
+      "port": 8080,
+      "autoVerify": false
+    }
+  ]
+}

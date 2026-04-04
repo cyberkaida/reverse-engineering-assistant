@@ -5,7 +5,16 @@ set -euo pipefail
 # - Local: lightweight checks only
 # - Remote (claude.ai/code): full automated Ghidra setup
 
-GHIDRA_SOURCE_DIR="${CLAUDE_PROJECT_DIR}/../ghidra"
+# Resolve actual repo root — handles git worktrees correctly.
+# In a linked worktree CLAUDE_PROJECT_DIR is the worktree root, not the main repo root.
+# --git-common-dir returns the main repo's .git path (absolute) when in a worktree.
+_GIT_COMMON=$(git -C "${CLAUDE_PROJECT_DIR}" rev-parse --git-common-dir 2>/dev/null || echo "")
+if [ -n "${_GIT_COMMON}" ] && [ "${_GIT_COMMON}" != ".git" ] && [ -d "${_GIT_COMMON}" ]; then
+    REPO_ROOT=$(dirname "${_GIT_COMMON}")
+else
+    REPO_ROOT="${CLAUDE_PROJECT_DIR}"
+fi
+GHIDRA_SOURCE_DIR="${REPO_ROOT}/../ghidra"
 GHIDRA_INSTALL_BASE="${HOME}/.local/opt"
 LOG_FILE="/tmp/reva-setup.log"
 

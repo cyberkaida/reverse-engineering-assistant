@@ -64,10 +64,21 @@
         contexts. This is the most commonly missed step during setup.</P>
 
         <BLOCKQUOTE>
-          <P><IMG border="0" src="help/shared/warning.png" alt=""> ReVa must be
-          activated in <B>both</B> the Project window and the CodeBrowser. Activating
-          it in only one location will result in the server not starting or programs
-          not being visible to MCP clients.</P>
+          <P><IMG border="0" src="help/shared/note.png" alt=""> ReVa's plugins have
+          <CODE>STABLE</CODE> status, which means they <B>auto-load in Ghidra's default
+          tool configurations</B> (the default CodeBrowser and the Project window) after
+          a fresh Ghidra installation with ReVa installed. If you are using a fresh
+          Ghidra setup, ReVa should already be active after restarting Ghidra &mdash;
+          check the log for the server-started message before proceeding.</P>
+        </BLOCKQUOTE>
+
+        <BLOCKQUOTE>
+          <P><IMG border="0" src="help/shared/warning.png" alt=""> Users with
+          <B>existing or customized tool configurations</B> may not pick up the
+          auto-load. In that case, ReVa must be activated manually in <B>both</B>
+          the Project window and the CodeBrowser as described below. Activating it
+          in only one location will result in the server not starting or programs not
+          being visible to MCP clients.</P>
         </BLOCKQUOTE>
 
         <H3><A name="ActivateProjectWindow"></A>Step 1: Activate in the Project Window</H3>

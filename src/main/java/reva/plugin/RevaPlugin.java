@@ -35,7 +35,7 @@ import reva.util.RevaInternalServiceRegistry;
  * and handles program lifecycle events for this specific tool.
  */
 @PluginInfo(
-    status = PluginStatus.RELEASED,
+    status = PluginStatus.STABLE,
     packageName = "ReVa",
     category = PluginCategoryNames.COMMON,
     shortDescription = "Reverse Engineering Assistant (Tool)",

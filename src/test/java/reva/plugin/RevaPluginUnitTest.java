@@ -34,7 +34,7 @@ public class RevaPluginUnitTest {
         PluginInfo info = RevaPlugin.class.getAnnotation(PluginInfo.class);
 
         assertNotNull("Plugin should have @PluginInfo annotation", info);
-        assertEquals("Plugin status should be RELEASED", PluginStatus.RELEASED, info.status());
+        assertEquals("Plugin status should be STABLE", PluginStatus.STABLE, info.status());
         assertEquals("Plugin package name should be ReVa", "ReVa", info.packageName());
         assertEquals("Plugin category should be COMMON", PluginCategoryNames.COMMON, info.category());
         assertEquals("Plugin short description should match",

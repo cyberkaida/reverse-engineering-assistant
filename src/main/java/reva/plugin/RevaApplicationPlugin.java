@@ -39,7 +39,7 @@ import reva.util.RevaInternalServiceRegistry;
  * running even when individual analysis tools are closed and reopened.
  */
 @PluginInfo(
-    status = PluginStatus.RELEASED,
+    status = PluginStatus.STABLE,
     packageName = "ReVa",
     category = PluginCategoryNames.COMMON,
     shortDescription = "ReVa Application Manager",

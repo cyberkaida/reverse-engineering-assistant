@@ -1,0 +1,534 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+
+<HTML>
+  <HEAD>
+    <META name="generator" content=
+    "HTML Tidy for Java (vers. 2009-12-01), see jtidy.sourceforge.net">
+    <META http-equiv="Content-Language" content="en-us">
+    <META http-equiv="Content-Type" content="text/html; charset=windows-1252">
+
+    <TITLE>ReVa Skills &amp; Analysis Workflows</TITLE>
+    <LINK rel="stylesheet" type="text/css" href="help/shared/DefaultStyle.css">
+  </HEAD>
+
+  <BODY>
+    <H1><A name="ReVaSkills"></A><CENTER>ReVa Skills &amp; Analysis Workflows</CENTER></H1>
+
+    <BLOCKQUOTE>
+      <P>ReVa provides a set of <B>Claude Code marketplace skills</B> &mdash; structured
+      analysis workflows that guide an AI assistant through common reverse engineering tasks.
+      Each skill encodes expert methodology as a repeatable, step-by-step process that the
+      assistant follows while using ReVa's MCP tools.</P>
+
+      <P>Skills are invoked as slash commands in Claude Code (e.g., <CODE>/ReVa:binary-triage</CODE>).
+      They do not replace ReVa's tools; rather, they orchestrate tool usage into coherent
+      workflows.</P>
+    </BLOCKQUOTE>
+
+    <!-- ==================== Installation ==================== -->
+
+    <H2><A name="Installation"></A>Installing Skills</H2>
+
+    <BLOCKQUOTE>
+      <P>To install the ReVa skills in Claude Code, run the following command:</P>
+
+      <BLOCKQUOTE>
+        <CODE>claude plugin marketplace add cyberkaida/reverse-engineering-assistant</CODE>
+      </BLOCKQUOTE>
+
+      <P>Once installed, the skills are available as slash commands in any Claude Code
+      conversation where the ReVa MCP server is connected.</P>
+    </BLOCKQUOTE>
+
+    <!-- ==================== Binary Triage ==================== -->
+
+    <H2><A name="BinaryTriage"></A>/ReVa:binary-triage &mdash; Initial Binary Survey</H2>
+
+    <BLOCKQUOTE>
+      <P>The <B>binary-triage</B> skill performs a systematic initial survey of a binary to
+      quickly understand what it does and identify areas of interest. This is typically the
+      first skill you run when examining a new binary. It produces a structured triage report
+      that serves as the foundation for deeper analysis.</P>
+
+      <H3><A name="TriageWorkflow"></A>8-Step Workflow</H3>
+
+      <BLOCKQUOTE>
+        <P>The triage follows eight systematic steps:</P>
+
+        <OL>
+          <LI><B>Identify the program</B> &mdash; Determine the target program using
+          <CODE>get-current-program</CODE> or <CODE>list-project-files</CODE>. Gather basic
+          metadata: architecture, compiler, image base, address size.</LI>
+
+          <LI><B>Survey memory layout</B> &mdash; Examine memory sections (<CODE>.text</CODE>,
+          <CODE>.data</CODE>, <CODE>.rodata</CODE>, <CODE>.bss</CODE>) to understand the
+          program's structure, identify code vs. data regions, and note unusual section names
+          or permissions.</LI>
+
+          <LI><B>Survey strings</B> &mdash; Search for interesting strings across multiple
+          categories: network indicators (URLs, IPs, hostnames), file paths, API references,
+          error messages, debug strings, and suspicious keywords.</LI>
+
+          <LI><B>Survey symbols and imports</B> &mdash; Examine imported functions, categorized
+          by type:
+            <UL>
+              <LI><I>Network</I> &mdash; socket, connect, send, recv, HTTP functions</LI>
+              <LI><I>File I/O</I> &mdash; open, read, write, file manipulation</LI>
+              <LI><I>Process</I> &mdash; exec, fork, CreateProcess, thread functions</LI>
+              <LI><I>Crypto</I> &mdash; encryption, hashing, SSL/TLS functions</LI>
+              <LI><I>Anti-analysis</I> &mdash; debugger detection, timing checks</LI>
+            </UL>
+          </LI>
+
+          <LI><B>Survey functions</B> &mdash; Count total functions, analyze the ratio of named
+          to unnamed functions, identify unusually large or complex functions.</LI>
+
+          <LI><B>Cross-reference analysis</B> &mdash; Follow cross-references for key findings
+          from previous steps to understand how interesting items are connected.</LI>
+
+          <LI><B>Selective initial decompilation</B> &mdash; Decompile entry points and
+          functions flagged as suspicious to get an initial understanding of behavior.</LI>
+
+          <LI><B>Document findings and create task list</B> &mdash; Compile all findings into
+          a structured report and create a prioritized list of areas for deeper
+          investigation.</LI>
+        </OL>
+      </BLOCKQUOTE>
+
+      <H3><A name="TriageOutput"></A>Output Format</H3>
+
+      <BLOCKQUOTE>
+        <P>The triage produces a structured report covering:</P>
+
+        <UL>
+          <LI><B>Program Overview</B> &mdash; Architecture, compiler, size, basic metadata</LI>
+          <LI><B>Memory Layout</B> &mdash; Sections, permissions, notable regions</LI>
+          <LI><B>String Analysis</B> &mdash; Categorized interesting strings</LI>
+          <LI><B>Import Analysis</B> &mdash; Categorized imported functions</LI>
+          <LI><B>Function Analysis</B> &mdash; Statistics and notable functions</LI>
+          <LI><B>Suspicious Indicators</B> &mdash; Anything warranting further investigation</LI>
+          <LI><B>Recommended Next Steps</B> &mdash; Prioritized task list for deeper analysis</LI>
+        </UL>
+      </BLOCKQUOTE>
+    </BLOCKQUOTE>
+
+    <!-- ==================== Deep Analysis ==================== -->
+
+    <H2><A name="DeepAnalysis"></A>/ReVa:deep-analysis &mdash; Focused Investigation</H2>
+
+    <BLOCKQUOTE>
+      <P>The <B>deep-analysis</B> skill performs focused, depth-first investigation of specific
+      reverse engineering questions. Unlike the broad survey of binary-triage, deep-analysis
+      dives deep into a particular question or area, iteratively improving the program database
+      as it goes.</P>
+
+      <P>Use this skill when you have a specific question like:</P>
+
+      <UL>
+        <LI>"What does this function do?"</LI>
+        <LI>"Does this binary use cryptography?"</LI>
+        <LI>"What is the C2 server address?"</LI>
+        <LI>"Fix the types in this function"</LI>
+      </UL>
+
+      <H3><A name="DeepAnalysisLoop"></A>Core Analysis Loop</H3>
+
+      <BLOCKQUOTE>
+        <P>The skill operates as an iterative loop, typically running 3&ndash;7 iterations with
+        a budget of 10&ndash;15 tool calls. Each iteration follows seven steps:</P>
+
+        <OL>
+          <LI><B>READ</B> &mdash; Gather current context by reading decompilation, checking
+          cross-references, examining data types, or following call graphs.</LI>
+
+          <LI><B>UNDERSTAND</B> &mdash; Analyze what you see. Form hypotheses about what the
+          code does, what data structures are in play, what algorithms are being used.</LI>
+
+          <LI><B>IMPROVE</B> &mdash; Make small, incremental improvements to the program
+          database: rename variables and functions, correct data types, fix function prototypes.
+          Each improvement makes the next read more informative.</LI>
+
+          <LI><B>VERIFY</B> &mdash; Re-read the modified function or area to confirm the
+          improvement is correct and the decompilation now makes more sense.</LI>
+
+          <LI><B>FOLLOW THREADS</B> &mdash; Pursue evidence by following cross-references to
+          callers and callees, tracing data flow, or examining related functions.</LI>
+
+          <LI><B>TRACK PROGRESS</B> &mdash; Document findings using bookmarks in the Ghidra
+          database so that progress is preserved and key locations are marked.</LI>
+
+          <LI><B>ON-TASK CHECK</B> &mdash; Evaluate whether the current investigation thread
+          is still relevant to the original question. Avoid going down rabbit holes.</LI>
+        </OL>
+      </BLOCKQUOTE>
+
+      <H3><A name="DeepAnalysisOutput"></A>Output Format</H3>
+
+      <BLOCKQUOTE>
+        <P>The skill returns a structured JSON result containing:</P>
+
+        <UL>
+          <LI><B>answer</B> &mdash; Direct answer to the original question</LI>
+          <LI><B>confidence</B> &mdash; How confident the analysis is</LI>
+          <LI><B>evidence</B> &mdash; Specific evidence supporting the answer</LI>
+          <LI><B>assumptions</B> &mdash; Any assumptions made during analysis</LI>
+          <LI><B>improvements</B> &mdash; Changes made to the program database</LI>
+          <LI><B>unanswered threads</B> &mdash; Open questions for further investigation</LI>
+        </UL>
+      </BLOCKQUOTE>
+    </BLOCKQUOTE>
+
+    <!-- ==================== CTF Reverse ==================== -->
+
+    <H2><A name="CtfRev"></A>/ReVa:ctf-rev &mdash; CTF Reverse Engineering</H2>
+
+    <BLOCKQUOTE>
+      <P>The <B>ctf-rev</B> skill is designed for solving Capture The Flag (CTF) reverse
+      engineering challenges &mdash; crackmes, binary bombs, key validators, obfuscated code,
+      and any challenge that requires understanding a program to extract a flag, key, or
+      password.</P>
+
+      <H3><A name="CtfRevQuestions"></A>Three Core Questions</H3>
+
+      <BLOCKQUOTE>
+        <P>The skill is built around three fundamental questions that guide the analysis:</P>
+
+        <OL>
+          <LI><B>What does the program EXPECT?</B> &mdash; What input format, structure, and
+          validation does the program require? What are the constraints on valid input?</LI>
+
+          <LI><B>What does the program DO?</B> &mdash; What transformations, comparisons, and
+          algorithms does the program apply to the input? How does it decide if input is
+          correct?</LI>
+
+          <LI><B>How do I REVERSE it?</B> &mdash; Is the transformation reversible? Can it be
+          brute-forced? Can the answer be derived mathematically? Can a check be bypassed?</LI>
+        </OL>
+      </BLOCKQUOTE>
+
+      <H3><A name="CtfRevStrategies"></A>Analysis Strategies</H3>
+
+      <BLOCKQUOTE>
+        <P>The skill applies four main strategies, chosen based on the challenge structure:</P>
+
+        <TABLE border="1" cellpadding="4" cellspacing="0" width="100%">
+          <TR>
+            <TH>Strategy</TH>
+            <TH>Approach</TH>
+            <TH>Best For</TH>
+          </TR>
+          <TR>
+            <TD><B>Top-Down</B></TD>
+            <TD>Start from the win condition (success message, flag output) and work backwards
+            through the code to determine what input produces that outcome.</TD>
+            <TD>Key validators, password checkers</TD>
+          </TR>
+          <TR>
+            <TD><B>Bottom-Up</B></TD>
+            <TD>Trace user input forward through the program's data flow to understand what
+            transformations are applied and where the validation occurs.</TD>
+            <TD>Complex input processing, multi-stage checks</TD>
+          </TR>
+          <TR>
+            <TD><B>Pattern Recognition</B></TD>
+            <TD>Identify standard algorithms (XOR ciphers, base64, hash comparisons, TEA/XTEA)
+            by their constants, structure, and behavior.</TD>
+            <TD>Crypto challenges, encoding schemes</TD>
+          </TR>
+          <TR>
+            <TD><B>Constraint Solving</B></TD>
+            <TD>Frame the validation as a set of mathematical constraints and solve them
+            symbolically or through enumeration.</TD>
+            <TD>Character-by-character checks, mathematical puzzles</TD>
+          </TR>
+        </TABLE>
+      </BLOCKQUOTE>
+
+      <H3><A name="CtfRevPhases"></A>Workflow Phases</H3>
+
+      <BLOCKQUOTE>
+        <P>The analysis proceeds in three phases:</P>
+
+        <OL>
+          <LI><B>Initial Assessment</B> &mdash; Quick triage: identify the binary type, find
+          entry points, locate success/failure strings, map the high-level control flow.</LI>
+
+          <LI><B>Focused Investigation</B> &mdash; Deep dive into the validation logic,
+          algorithm recovery, and constraint identification using the most appropriate
+          strategy.</LI>
+
+          <LI><B>Solution Extraction</B> &mdash; Construct the flag, key, or password from the
+          analysis. Verify the solution against the program's logic.</LI>
+        </OL>
+      </BLOCKQUOTE>
+    </BLOCKQUOTE>
+
+    <!-- ==================== CTF Pwn ==================== -->
+
+    <H2><A name="CtfPwn"></A>/ReVa:ctf-pwn &mdash; CTF Binary Exploitation</H2>
+
+    <BLOCKQUOTE>
+      <P>The <B>ctf-pwn</B> skill solves CTF binary exploitation challenges by discovering
+      and exploiting memory corruption vulnerabilities to read flags. It covers buffer overflows,
+      format string bugs, heap exploitation, ROP chains, and other common exploitation
+      techniques.</P>
+
+      <H3><A name="CtfPwnQuestions"></A>Seven Core Questions</H3>
+
+      <BLOCKQUOTE>
+        <P>The skill follows an exploitation-focused question sequence:</P>
+
+        <OL>
+          <LI><B>What data do I control?</B> &mdash; Identify all input vectors: stdin, argv,
+          files, network, environment variables.</LI>
+
+          <LI><B>Where does my data go?</B> &mdash; Trace controlled data into memory: stack
+          buffers, heap allocations, global variables.</LI>
+
+          <LI><B>What is nearby in memory?</B> &mdash; Examine what sits adjacent to the
+          buffer: return addresses, function pointers, vtable pointers, other buffers.</LI>
+
+          <LI><B>Can I overflow?</B> &mdash; Determine if the buffer has bounds checking.
+          Calculate exact offsets to targets of interest.</LI>
+
+          <LI><B>What can I overwrite?</B> &mdash; Identify exploitable targets: return
+          addresses, GOT entries, function pointers, heap metadata.</LI>
+
+          <LI><B>Where can I redirect execution?</B> &mdash; Find useful code to jump to:
+          win functions, gadgets for ROP, libc functions, shellcode locations.</LI>
+
+          <LI><B>How do I read the flag?</B> &mdash; Determine the flag location and the
+          mechanism to output it: existing print functions, system() calls, read/write
+          primitives.</LI>
+        </OL>
+      </BLOCKQUOTE>
+
+      <H3><A name="CtfPwnPhases"></A>Exploitation Phases</H3>
+
+      <BLOCKQUOTE>
+        <OL>
+          <LI><B>Binary Reconnaissance</B> &mdash; Identify architecture, protections (NX,
+          ASLR, canaries, PIE, RELRO), input mechanisms, and interesting functions.</LI>
+
+          <LI><B>Vulnerability Analysis</B> &mdash; Locate the vulnerability, determine its
+          type, and calculate key values (buffer sizes, offsets, alignment).</LI>
+
+          <LI><B>Exploitation Strategy</B> &mdash; Choose the exploitation technique based on
+          available protections and vulnerability type.</LI>
+
+          <LI><B>Payload Construction</B> &mdash; Build the exploit payload with exact offsets,
+          addresses, and any ROP chains or format strings needed.</LI>
+
+          <LI><B>Exploitation Validation</B> &mdash; Verify the exploit plan against the
+          binary's constraints and output a pwntools script skeleton.</LI>
+        </OL>
+      </BLOCKQUOTE>
+
+      <H3><A name="CtfPwnTechniques"></A>Supported Techniques</H3>
+
+      <BLOCKQUOTE>
+        <TABLE border="1" cellpadding="4" cellspacing="0" width="100%">
+          <TR>
+            <TH>Technique</TH>
+            <TH>Description</TH>
+          </TR>
+          <TR>
+            <TD><B>Stack Buffer Overflow</B></TD>
+            <TD>Overwrite return address or saved registers to redirect execution</TD>
+          </TR>
+          <TR>
+            <TD><B>Format String</B></TD>
+            <TD>Exploit printf-family functions with attacker-controlled format strings for
+            arbitrary read/write</TD>
+          </TR>
+          <TR>
+            <TD><B>ROP Chains</B></TD>
+            <TD>Chain return-oriented programming gadgets to bypass NX protections</TD>
+          </TR>
+          <TR>
+            <TD><B>ret2libc</B></TD>
+            <TD>Redirect execution to libc functions (system, execve) without shellcode</TD>
+          </TR>
+          <TR>
+            <TD><B>Heap Exploitation</B></TD>
+            <TD>Exploit heap metadata corruption (use-after-free, double-free, overflow)</TD>
+          </TR>
+          <TR>
+            <TD><B>Integer Overflow</B></TD>
+            <TD>Exploit integer arithmetic bugs to bypass size checks or cause
+            under/overflows</TD>
+          </TR>
+        </TABLE>
+
+        <P><IMG src="help/shared/note.png" alt="Note"> The ctf-pwn skill focuses on
+        <I>static analysis and exploit planning</I>. It produces exploit strategies and
+        pwntools script skeletons for execution outside of Ghidra.</P>
+      </BLOCKQUOTE>
+    </BLOCKQUOTE>
+
+    <!-- ==================== CTF Crypto ==================== -->
+
+    <H2><A name="CtfCrypto"></A>/ReVa:ctf-crypto &mdash; CTF Cryptography</H2>
+
+    <BLOCKQUOTE>
+      <P>The <B>ctf-crypto</B> skill solves CTF cryptography challenges by identifying,
+      analyzing, and exploiting weak or custom cryptographic implementations found in binaries.
+      It focuses on <I>implementation weaknesses</I> rather than mathematical cryptanalysis
+      &mdash; the vulnerabilities are in the code, not in the math.</P>
+
+      <H3><A name="CtfCryptoPhases"></A>Four-Phase Framework</H3>
+
+      <BLOCKQUOTE>
+        <OL>
+          <LI><B>Crypto Detection</B> &mdash; Determine if and where cryptography is used.
+          Search for crypto-related strings, constants (S-boxes, round constants, magic numbers),
+          and characteristic code patterns.</LI>
+
+          <LI><B>Algorithm Identification</B> &mdash; Identify the specific algorithm. Is it a
+          standard algorithm (AES, DES, RC4, RSA) or a custom cipher? Match constants and
+          structures to known algorithms.</LI>
+
+          <LI><B>Implementation Analysis</B> &mdash; Examine how the algorithm is implemented.
+          Look for weaknesses: hardcoded keys, weak random number generation, ECB mode usage,
+          custom modifications to standard algorithms.</LI>
+
+          <LI><B>Key Extraction or Breaking</B> &mdash; Exploit the identified weakness to
+          recover the key or plaintext. This may involve extracting hardcoded values, predicting
+          RNG output, or reversing a custom cipher.</LI>
+        </OL>
+      </BLOCKQUOTE>
+
+      <H3><A name="CtfCryptoMethodologies"></A>Core Methodologies</H3>
+
+      <BLOCKQUOTE>
+        <TABLE border="1" cellpadding="4" cellspacing="0" width="100%">
+          <TR>
+            <TH>Methodology</TH>
+            <TH>Description</TH>
+          </TR>
+          <TR>
+            <TD><B>String &amp; Constant Analysis</B></TD>
+            <TD>Search for crypto keywords, locate magic constant arrays (S-boxes, round
+            constants), and identify algorithm signatures.</TD>
+          </TR>
+          <TR>
+            <TD><B>Pattern Recognition</B></TD>
+            <TD>Identify algorithms by their structural patterns: XOR loops, Feistel networks,
+            substitution-permutation networks, modular arithmetic.</TD>
+          </TR>
+          <TR>
+            <TD><B>Data Flow Analysis</B></TD>
+            <TD>Trace key material through the program: where keys are loaded, how they are
+            derived, where they are used, and whether they are exposed.</TD>
+          </TR>
+          <TR>
+            <TD><B>Weakness Discovery</B></TD>
+            <TD>Find exploitable implementation flaws: hardcoded keys, weak or predictable RNG
+            seeds, reused nonces, missing authentication, custom cipher designs.</TD>
+          </TR>
+          <TR>
+            <TD><B>Reverse Engineering Decryption</B></TD>
+            <TD>Understand the complete encryption/decryption logic to build a standalone
+            decryption routine or extract the key directly.</TD>
+          </TR>
+        </TABLE>
+      </BLOCKQUOTE>
+
+      <H3><A name="CtfCryptoPatterns"></A>Common Weakness Patterns</H3>
+
+      <BLOCKQUOTE>
+        <TABLE border="1" cellpadding="4" cellspacing="0" width="100%">
+          <TR>
+            <TH>Pattern</TH>
+            <TH>Vulnerability</TH>
+            <TH>Exploitation</TH>
+          </TR>
+          <TR>
+            <TD><B>Weak Custom Cipher</B></TD>
+            <TD>Home-grown encryption using simple XOR or substitution</TD>
+            <TD>Reverse the algorithm and decrypt directly</TD>
+          </TR>
+          <TR>
+            <TD><B>Hardcoded Key</B></TD>
+            <TD>Encryption key embedded in the binary as a constant</TD>
+            <TD>Extract the key from the binary's data sections</TD>
+          </TR>
+          <TR>
+            <TD><B>Weak RNG</B></TD>
+            <TD>Predictable random number generator (time-seeded, linear)</TD>
+            <TD>Predict or brute-force the RNG seed to derive the key</TD>
+          </TR>
+          <TR>
+            <TD><B>Weak Key Derivation</B></TD>
+            <TD>Key derived from limited or predictable input</TD>
+            <TD>Enumerate or compute the key space</TD>
+          </TR>
+          <TR>
+            <TD><B>Implementation Bugs</B></TD>
+            <TD>Off-by-one errors, wrong block modes, partial encryption</TD>
+            <TD>Exploit the specific flaw to bypass or weaken encryption</TD>
+          </TR>
+          <TR>
+            <TD><B>Obfuscated Standard</B></TD>
+            <TD>Standard algorithm with renamed functions or shuffled code</TD>
+            <TD>Identify the algorithm by constants, then apply standard attacks</TD>
+          </TR>
+        </TABLE>
+      </BLOCKQUOTE>
+    </BLOCKQUOTE>
+
+    <!-- ==================== Choosing a Skill ==================== -->
+
+    <H2><A name="ChoosingSkill"></A>Choosing the Right Skill</H2>
+
+    <BLOCKQUOTE>
+      <TABLE border="1" cellpadding="4" cellspacing="0" width="100%">
+        <TR>
+          <TH>Scenario</TH>
+          <TH>Skill</TH>
+        </TR>
+        <TR>
+          <TD>First look at an unknown binary</TD>
+          <TD><CODE>/ReVa:binary-triage</CODE></TD>
+        </TR>
+        <TR>
+          <TD>"What does function X do?" or "Fix types in function Y"</TD>
+          <TD><CODE>/ReVa:deep-analysis</CODE></TD>
+        </TR>
+        <TR>
+          <TD>CTF challenge: find the flag/key/password</TD>
+          <TD><CODE>/ReVa:ctf-rev</CODE></TD>
+        </TR>
+        <TR>
+          <TD>CTF challenge: exploit a memory corruption bug</TD>
+          <TD><CODE>/ReVa:ctf-pwn</CODE></TD>
+        </TR>
+        <TR>
+          <TD>CTF challenge: break or bypass encryption</TD>
+          <TD><CODE>/ReVa:ctf-crypto</CODE></TD>
+        </TR>
+        <TR>
+          <TD>General analysis without a specific skill</TD>
+          <TD>Use ReVa tools directly without a skill</TD>
+        </TR>
+      </TABLE>
+
+      <P><IMG src="help/shared/tip.png" alt="Tip"> Skills can be combined. A common pattern is
+      to start with <CODE>/ReVa:binary-triage</CODE> for an overview, then use
+      <CODE>/ReVa:deep-analysis</CODE> to investigate specific findings. For CTF challenges,
+      the specialized CTF skills often work best as a starting point.</P>
+    </BLOCKQUOTE>
+
+    <!-- ==================== Footer ==================== -->
+
+    <BR>
+    <P class="providedbyplugin">Provided by: <I>ReVa</I></P>
+
+    <P class="relatedtopic">Related Topics:</P>
+
+    <UL>
+      <LI><A href="ReVa_concepts.html">Architecture &amp; Concepts</A></LI>
+      <LI><A href="ReVa_project_tools.html">Project Management Tools</A></LI>
+    </UL>
+  </BODY>
+</HTML>

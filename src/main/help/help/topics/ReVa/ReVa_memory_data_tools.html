@@ -1,0 +1,612 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+
+<HTML>
+  <HEAD>
+    <META name="generator" content=
+    "HTML Tidy for Java (vers. 2009-12-01), see jtidy.sourceforge.net">
+    <META http-equiv="Content-Language" content="en-us">
+    <META http-equiv="Content-Type" content="text/html; charset=windows-1252">
+
+    <TITLE>ReVa - Memory, Data, Strings &amp; Symbol Tools</TITLE>
+    <LINK rel="stylesheet" type="text/css" href="help/shared/DefaultStyle.css">
+  </HEAD>
+
+  <BODY>
+    <H1 align="center" style="color: navy;"><a name="MemoryDataTools"></a>ReVa - Memory, Data, Strings &amp; Symbol Tools</H1>
+
+    <P>These tools provide access to program memory layout, raw data reading, defined data inspection,
+    data type application, label creation, string extraction, and symbol enumeration. Together they
+    form the foundation for understanding a binary's data landscape.</P>
+
+    <!-- ======================================================================== -->
+    <H2 style="color: brown;"><a name="MemoryTools"></a>Memory Tools</H2>
+
+    <P>Tools for inspecting the memory layout of a program and reading raw bytes from memory.</P>
+
+    <!-- get-memory-blocks -->
+    <H3 style="color: blue;"><a name="GetMemoryBlocks"></a>get-memory-blocks</H3>
+
+    <P>Retrieves all memory blocks from the program, including their address ranges, sizes, and
+    permission flags. This provides a high-level view of the program's memory layout.</P>
+
+    <BLOCKQUOTE>
+      <H4>Parameters</H4>
+      <TABLE border="1" cellpadding="4" cellspacing="0">
+        <TR><TH>Name</TH><TH>Type</TH><TH>Required</TH><TH>Description</TH></TR>
+        <TR>
+          <TD><CODE>programPath</CODE></TD>
+          <TD>string</TD>
+          <TD>Yes</TD>
+          <TD>Path in the Ghidra Project to the program.</TD>
+        </TR>
+      </TABLE>
+
+      <H4>Return Value</H4>
+      <TABLE border="1" cellpadding="4" cellspacing="0">
+        <TR><TH>Field</TH><TH>Type</TH><TH>Description</TH></TR>
+        <TR><TD><CODE>programPath</CODE></TD><TD>string</TD><TD>Path to the program.</TD></TR>
+        <TR><TD><CODE>blocks</CODE></TD><TD>array</TD><TD>Array of memory block objects.</TD></TR>
+      </TABLE>
+
+      <P>Each block object contains:</P>
+      <TABLE border="1" cellpadding="4" cellspacing="0">
+        <TR><TH>Field</TH><TH>Type</TH><TH>Description</TH></TR>
+        <TR><TD><CODE>name</CODE></TD><TD>string</TD><TD>Block name (e.g., <CODE>".text"</CODE>, <CODE>".data"</CODE>, <CODE>".bss"</CODE>).</TD></TR>
+        <TR><TD><CODE>start</CODE></TD><TD>string</TD><TD>Start address (e.g., <CODE>"0x00400000"</CODE>).</TD></TR>
+        <TR><TD><CODE>end</CODE></TD><TD>string</TD><TD>End address.</TD></TR>
+        <TR><TD><CODE>size</CODE></TD><TD>long</TD><TD>Block size in bytes.</TD></TR>
+        <TR><TD><CODE>readable</CODE></TD><TD>boolean</TD><TD>Whether the block is readable.</TD></TR>
+        <TR><TD><CODE>writable</CODE></TD><TD>boolean</TD><TD>Whether the block is writable.</TD></TR>
+        <TR><TD><CODE>executable</CODE></TD><TD>boolean</TD><TD>Whether the block is executable.</TD></TR>
+        <TR><TD><CODE>initialized</CODE></TD><TD>boolean</TD><TD>Whether the block contains initialized data.</TD></TR>
+        <TR><TD><CODE>volatile</CODE></TD><TD>boolean</TD><TD>Whether the block is volatile memory.</TD></TR>
+        <TR><TD><CODE>mapped</CODE></TD><TD>boolean</TD><TD>Whether the block is memory-mapped.</TD></TR>
+        <TR><TD><CODE>overlay</CODE></TD><TD>boolean</TD><TD>Whether the block is an overlay.</TD></TR>
+      </TABLE>
+
+      <P><IMG src="help/shared/note.png"> Use this tool first to understand the program's memory
+      layout before reading memory with <CODE>read-memory</CODE>. The permission flags are
+      particularly useful for identifying code sections (executable), data sections (readable/writable),
+      and uninitialized regions.</P>
+    </BLOCKQUOTE>
+
+    <!-- read-memory -->
+    <H3 style="color: blue;"><a name="ReadMemory"></a>read-memory</H3>
+
+    <P>Reads raw bytes from memory at a specific address. Supports multiple output formats and
+    accepts both hex addresses and symbol names.</P>
+
+    <BLOCKQUOTE>
+      <H4>Parameters</H4>
+      <TABLE border="1" cellpadding="4" cellspacing="0">
+        <TR><TH>Name</TH><TH>Type</TH><TH>Required</TH><TH>Default</TH><TH>Description</TH></TR>
+        <TR>
+          <TD><CODE>programPath</CODE></TD>
+          <TD>string</TD>
+          <TD>Yes</TD>
+          <TD>&mdash;</TD>
+          <TD>Path in the Ghidra Project to the program.</TD>
+        </TR>
+        <TR>
+          <TD><CODE>addressOrSymbol</CODE></TD>
+          <TD>string</TD>
+          <TD>Yes</TD>
+          <TD>&mdash;</TD>
+          <TD>Address (e.g., <CODE>"00400000"</CODE>) or symbol name (e.g., <CODE>"main"</CODE>).</TD>
+        </TR>
+        <TR>
+          <TD><CODE>length</CODE></TD>
+          <TD>integer</TD>
+          <TD>No</TD>
+          <TD><CODE>16</CODE></TD>
+          <TD>Number of bytes to read. Must be between 1 and 8192.</TD>
+        </TR>
+        <TR>
+          <TD><CODE>format</CODE></TD>
+          <TD>string</TD>
+          <TD>No</TD>
+          <TD><CODE>"hex"</CODE></TD>
+          <TD>Output format: <CODE>"hex"</CODE>, <CODE>"bytes"</CODE>, or <CODE>"both"</CODE>.</TD>
+        </TR>
+      </TABLE>
+
+      <H4>Return Value</H4>
+      <TABLE border="1" cellpadding="4" cellspacing="0">
+        <TR><TH>Field</TH><TH>Type</TH><TH>Description</TH></TR>
+        <TR><TD><CODE>address</CODE></TD><TD>string</TD><TD>Formatted start address.</TD></TR>
+        <TR><TD><CODE>length</CODE></TD><TD>integer</TD><TD>Actual number of bytes read.</TD></TR>
+        <TR><TD><CODE>programPath</CODE></TD><TD>string</TD><TD>Path to the program.</TD></TR>
+        <TR><TD><CODE>hex</CODE></TD><TD>string</TD><TD>Hexadecimal representation (present when format is <CODE>"hex"</CODE> or <CODE>"both"</CODE>).</TD></TR>
+        <TR><TD><CODE>bytes</CODE></TD><TD>array</TD><TD>Array of integer byte values 0&ndash;255 (present when format is <CODE>"bytes"</CODE> or <CODE>"both"</CODE>).</TD></TR>
+      </TABLE>
+
+      <P><IMG src="help/shared/note.png"> The maximum read length is <B>8192 bytes</B>. Attempting
+      to read more will produce an error. For large memory regions, issue multiple reads with
+      advancing addresses.</P>
+    </BLOCKQUOTE>
+
+    <!-- ======================================================================== -->
+    <H2 style="color: brown;"><a name="DataTools"></a>Data Tools</H2>
+
+    <P>Tools for inspecting defined data at addresses, applying data types, and creating labels.</P>
+
+    <!-- get-data -->
+    <H3 style="color: blue;"><a name="GetData"></a>get-data</H3>
+
+    <P>Retrieves the defined data at a specific address or symbol, including its data type, value,
+    and raw bytes. If the address falls within a larger data item, the containing data is returned.</P>
+
+    <BLOCKQUOTE>
+      <H4>Parameters</H4>
+      <TABLE border="1" cellpadding="4" cellspacing="0">
+        <TR><TH>Name</TH><TH>Type</TH><TH>Required</TH><TH>Description</TH></TR>
+        <TR>
+          <TD><CODE>programPath</CODE></TD>
+          <TD>string</TD>
+          <TD>Yes</TD>
+          <TD>Path in the Ghidra Project to the program.</TD>
+        </TR>
+        <TR>
+          <TD><CODE>addressOrSymbol</CODE></TD>
+          <TD>string</TD>
+          <TD>Yes</TD>
+          <TD>Address (e.g., <CODE>"0x00400000"</CODE>) or symbol name (e.g., <CODE>"main"</CODE>).</TD>
+        </TR>
+      </TABLE>
+
+      <H4>Return Value</H4>
+      <TABLE border="1" cellpadding="4" cellspacing="0">
+        <TR><TH>Field</TH><TH>Type</TH><TH>Description</TH></TR>
+        <TR><TD><CODE>programPath</CODE></TD><TD>string</TD><TD>Path to the program.</TD></TR>
+        <TR><TD><CODE>address</CODE></TD><TD>string</TD><TD>Formatted address of the data.</TD></TR>
+        <TR><TD><CODE>dataType</CODE></TD><TD>string</TD><TD>Name of the data type (e.g., <CODE>"dword"</CODE>, <CODE>"string"</CODE>).</TD></TR>
+        <TR><TD><CODE>length</CODE></TD><TD>integer</TD><TD>Length of the data in bytes.</TD></TR>
+        <TR><TD><CODE>symbolName</CODE></TD><TD>string</TD><TD>Symbol name at this address (if any).</TD></TR>
+        <TR><TD><CODE>symbolNamespace</CODE></TD><TD>string</TD><TD>Namespace of the symbol (if any).</TD></TR>
+        <TR><TD><CODE>hexBytes</CODE></TD><TD>string</TD><TD>Hex representation of the raw bytes.</TD></TR>
+        <TR><TD><CODE>representation</CODE></TD><TD>string</TD><TD>Ghidra's string representation of the value.</TD></TR>
+        <TR><TD><CODE>valueType</CODE></TD><TD>string</TD><TD>Java class name of the value object.</TD></TR>
+        <TR><TD><CODE>value</CODE></TD><TD>string</TD><TD>String representation of the actual value.</TD></TR>
+      </TABLE>
+
+      <P><IMG src="help/shared/note.png"> If no data is defined at the given address, an error is
+      returned. If a memory access error occurs when reading bytes, the <CODE>hexBytes</CODE> field
+      may contain an error indicator instead of actual byte data.</P>
+    </BLOCKQUOTE>
+
+    <!-- apply-data-type -->
+    <H3 style="color: blue;"><a name="ApplyDataType"></a>apply-data-type</H3>
+
+    <P>Applies a data type to a specific address in the program. The data type is specified using
+    C-style string syntax and resolved through the program's data type archives.</P>
+
+    <BLOCKQUOTE>
+      <H4>Parameters</H4>
+      <TABLE border="1" cellpadding="4" cellspacing="0">
+        <TR><TH>Name</TH><TH>Type</TH><TH>Required</TH><TH>Default</TH><TH>Description</TH></TR>
+        <TR>
+          <TD><CODE>programPath</CODE></TD>
+          <TD>string</TD>
+          <TD>Yes</TD>
+          <TD>&mdash;</TD>
+          <TD>Path in the Ghidra Project to the program.</TD>
+        </TR>
+        <TR>
+          <TD><CODE>addressOrSymbol</CODE></TD>
+          <TD>string</TD>
+          <TD>Yes</TD>
+          <TD>&mdash;</TD>
+          <TD>Address or symbol name where the data type should be applied.</TD>
+        </TR>
+        <TR>
+          <TD><CODE>dataTypeString</CODE></TD>
+          <TD>string</TD>
+          <TD>Yes</TD>
+          <TD>&mdash;</TD>
+          <TD>String representation of the data type (e.g., <CODE>"char**"</CODE>, <CODE>"int[10]"</CODE>,
+              <CODE>"dword"</CODE>).</TD>
+        </TR>
+        <TR>
+          <TD><CODE>archiveName</CODE></TD>
+          <TD>string</TD>
+          <TD>No</TD>
+          <TD><CODE>""</CODE> (all archives)</TD>
+          <TD>Name of a specific data type archive to search. If empty, all archives are searched.</TD>
+        </TR>
+      </TABLE>
+
+      <H4>Return Value</H4>
+      <TABLE border="1" cellpadding="4" cellspacing="0">
+        <TR><TH>Field</TH><TH>Type</TH><TH>Description</TH></TR>
+        <TR><TD><CODE>success</CODE></TD><TD>boolean</TD><TD>Always <CODE>true</CODE> on success.</TD></TR>
+        <TR><TD><CODE>address</CODE></TD><TD>string</TD><TD>Formatted address where the type was applied.</TD></TR>
+        <TR><TD><CODE>dataType</CODE></TD><TD>string</TD><TD>Name of the applied data type.</TD></TR>
+        <TR><TD><CODE>dataTypeDisplayName</CODE></TD><TD>string</TD><TD>Display name of the data type.</TD></TR>
+        <TR><TD><CODE>length</CODE></TD><TD>integer</TD><TD>Length of the data type in bytes.</TD></TR>
+      </TABLE>
+
+      <P><IMG src="help/shared/note.png"> The tool automatically clears existing code units at the
+      address before applying the new type. If the data type string cannot be parsed, the error
+      message will suggest using <CODE>get-data-type-archives</CODE> to discover available types.
+      This operation runs within a Ghidra transaction and rolls back on failure.</P>
+    </BLOCKQUOTE>
+
+    <!-- create-label -->
+    <H3 style="color: blue;"><a name="CreateLabel"></a>create-label</H3>
+
+    <P>Creates a named label (symbol) at a specific address in the program. Labels serve as
+    named references that appear in the disassembly listing and can be used as address targets
+    in other tools.</P>
+
+    <BLOCKQUOTE>
+      <H4>Parameters</H4>
+      <TABLE border="1" cellpadding="4" cellspacing="0">
+        <TR><TH>Name</TH><TH>Type</TH><TH>Required</TH><TH>Default</TH><TH>Description</TH></TR>
+        <TR>
+          <TD><CODE>programPath</CODE></TD>
+          <TD>string</TD>
+          <TD>Yes</TD>
+          <TD>&mdash;</TD>
+          <TD>Path to the program in the Ghidra Project.</TD>
+        </TR>
+        <TR>
+          <TD><CODE>addressOrSymbol</CODE></TD>
+          <TD>string</TD>
+          <TD>Yes</TD>
+          <TD>&mdash;</TD>
+          <TD>Address or existing symbol name where the label should be created.</TD>
+        </TR>
+        <TR>
+          <TD><CODE>labelName</CODE></TD>
+          <TD>string</TD>
+          <TD>Yes</TD>
+          <TD>&mdash;</TD>
+          <TD>Name for the new label. Must not be empty.</TD>
+        </TR>
+        <TR>
+          <TD><CODE>setAsPrimary</CODE></TD>
+          <TD>boolean</TD>
+          <TD>No</TD>
+          <TD><CODE>true</CODE></TD>
+          <TD>Whether to set this label as the primary symbol at the address.</TD>
+        </TR>
+      </TABLE>
+
+      <H4>Return Value</H4>
+      <TABLE border="1" cellpadding="4" cellspacing="0">
+        <TR><TH>Field</TH><TH>Type</TH><TH>Description</TH></TR>
+        <TR><TD><CODE>success</CODE></TD><TD>boolean</TD><TD>Always <CODE>true</CODE> on success.</TD></TR>
+        <TR><TD><CODE>labelName</CODE></TD><TD>string</TD><TD>Name of the created label.</TD></TR>
+        <TR><TD><CODE>address</CODE></TD><TD>string</TD><TD>Formatted address.</TD></TR>
+        <TR><TD><CODE>isPrimary</CODE></TD><TD>boolean</TD><TD>Whether the label is the primary symbol.</TD></TR>
+      </TABLE>
+
+      <P><IMG src="help/shared/note.png"> Labels are created with <CODE>SourceType.USER_DEFINED</CODE>,
+      indicating they were explicitly set by a user (or AI assistant) rather than auto-generated by
+      Ghidra's analysis. An address can have multiple labels, but only one can be primary.</P>
+    </BLOCKQUOTE>
+
+    <!-- ======================================================================== -->
+    <H2 style="color: brown;"><a name="StringTools"></a>String Tools</H2>
+
+    <P>Tools for discovering and searching strings within a program's defined data.</P>
+
+    <!-- get-strings-count -->
+    <H3 style="color: blue;"><a name="GetStringsCount"></a>get-strings-count</H3>
+
+    <P>Returns the total count of strings defined in the program. Use this before calling
+    <CODE>get-strings</CODE> to plan pagination.</P>
+
+    <BLOCKQUOTE>
+      <H4>Parameters</H4>
+      <TABLE border="1" cellpadding="4" cellspacing="0">
+        <TR><TH>Name</TH><TH>Type</TH><TH>Required</TH><TH>Description</TH></TR>
+        <TR>
+          <TD><CODE>programPath</CODE></TD>
+          <TD>string</TD>
+          <TD>Yes</TD>
+          <TD>Path in the Ghidra Project to the program.</TD>
+        </TR>
+      </TABLE>
+
+      <H4>Return Value</H4>
+      <TABLE border="1" cellpadding="4" cellspacing="0">
+        <TR><TH>Field</TH><TH>Type</TH><TH>Description</TH></TR>
+        <TR><TD><CODE>programPath</CODE></TD><TD>string</TD><TD>Path to the program.</TD></TR>
+        <TR><TD><CODE>count</CODE></TD><TD>integer</TD><TD>Total number of defined strings.</TD></TR>
+      </TABLE>
+    </BLOCKQUOTE>
+
+    <!-- get-strings -->
+    <H3 style="color: blue;"><a name="GetStrings"></a>get-strings</H3>
+
+    <P>Retrieves strings from the program with support for three search modes: paginated listing,
+    similarity-sorted search, and regex filtering. Optionally includes referencing function
+    information.</P>
+
+    <BLOCKQUOTE>
+      <H4>Parameters</H4>
+      <TABLE border="1" cellpadding="4" cellspacing="0">
+        <TR><TH>Name</TH><TH>Type</TH><TH>Required</TH><TH>Default</TH><TH>Description</TH></TR>
+        <TR>
+          <TD><CODE>programPath</CODE></TD>
+          <TD>string</TD>
+          <TD>Yes</TD>
+          <TD>&mdash;</TD>
+          <TD>Path in the Ghidra Project to the program.</TD>
+        </TR>
+        <TR>
+          <TD><CODE>searchString</CODE></TD>
+          <TD>string</TD>
+          <TD>No</TD>
+          <TD>&mdash;</TD>
+          <TD>Sort results by similarity to this string using LCS-based scoring.
+              <B>Mutually exclusive</B> with <CODE>regexPattern</CODE>.</TD>
+        </TR>
+        <TR>
+          <TD><CODE>regexPattern</CODE></TD>
+          <TD>string</TD>
+          <TD>No</TD>
+          <TD>&mdash;</TD>
+          <TD>Filter results using a Java regex pattern.
+              <B>Mutually exclusive</B> with <CODE>searchString</CODE>.</TD>
+        </TR>
+        <TR>
+          <TD><CODE>startIndex</CODE></TD>
+          <TD>integer</TD>
+          <TD>No</TD>
+          <TD><CODE>0</CODE></TD>
+          <TD>Starting index for pagination (0-based).</TD>
+        </TR>
+        <TR>
+          <TD><CODE>maxCount</CODE></TD>
+          <TD>integer</TD>
+          <TD>No</TD>
+          <TD><CODE>100</CODE></TD>
+          <TD>Maximum number of strings to return.</TD>
+        </TR>
+        <TR>
+          <TD><CODE>includeReferencingFunctions</CODE></TD>
+          <TD>boolean</TD>
+          <TD>No</TD>
+          <TD><CODE>false</CODE></TD>
+          <TD>Whether to include the list of functions that reference each string.</TD>
+        </TR>
+      </TABLE>
+
+      <H4>Search Modes</H4>
+      <TABLE border="1" cellpadding="4" cellspacing="0">
+        <TR><TH>Mode</TH><TH>Activated By</TH><TH>Behavior</TH></TR>
+        <TR>
+          <TD><B>List-all</B></TD>
+          <TD>No search parameters</TD>
+          <TD>Paginated iteration through all strings in memory order.</TD>
+        </TR>
+        <TR>
+          <TD><B>Similarity</B></TD>
+          <TD><CODE>searchString</CODE> provided</TD>
+          <TD>All strings are sorted by LCS (Longest Common Subsequence) similarity score,
+              then paginated. Best matches appear first.</TD>
+        </TR>
+        <TR>
+          <TD><B>Regex</B></TD>
+          <TD><CODE>regexPattern</CODE> provided</TD>
+          <TD>Strings are streamed through the regex filter with early termination at
+              <CODE>maxCount</CODE>.</TD>
+        </TR>
+      </TABLE>
+
+      <H4>Return Value</H4>
+      <P>A multi-result response. The first object contains mode-specific metadata:</P>
+      <TABLE border="1" cellpadding="4" cellspacing="0">
+        <TR><TH>Field</TH><TH>Type</TH><TH>Description</TH></TR>
+        <TR><TD><CODE>startIndex</CODE></TD><TD>integer</TD><TD>Starting index used.</TD></TR>
+        <TR><TD><CODE>requestedCount</CODE></TD><TD>integer</TD><TD>Requested maximum count.</TD></TR>
+        <TR><TD><CODE>actualCount</CODE></TD><TD>integer</TD><TD>Number of strings returned.</TD></TR>
+        <TR><TD><CODE>nextStartIndex</CODE></TD><TD>integer</TD><TD>Index for fetching the next page.</TD></TR>
+        <TR><TD><CODE>searchComplete</CODE></TD><TD>boolean</TD><TD>Whether all matching strings have been returned (similarity/regex modes only).</TD></TR>
+        <TR><TD><CODE>regexPattern</CODE></TD><TD>string</TD><TD>The regex pattern used (regex mode only).</TD></TR>
+      </TABLE>
+
+      <P>Subsequent objects each describe one string:</P>
+      <TABLE border="1" cellpadding="4" cellspacing="0">
+        <TR><TH>Field</TH><TH>Type</TH><TH>Description</TH></TR>
+        <TR><TD><CODE>address</CODE></TD><TD>string</TD><TD>Formatted address of the string.</TD></TR>
+        <TR><TD><CODE>content</CODE></TD><TD>string</TD><TD>String value (up to 500 characters).</TD></TR>
+        <TR><TD><CODE>length</CODE></TD><TD>integer</TD><TD>String length in characters.</TD></TR>
+        <TR><TD><CODE>dataType</CODE></TD><TD>string</TD><TD>Data type name (e.g., <CODE>"string"</CODE>, <CODE>"unicode"</CODE>).</TD></TR>
+        <TR><TD><CODE>hexBytes</CODE></TD><TD>string</TD><TD>Hex representation of the raw bytes (omitted if truncated).</TD></TR>
+        <TR><TD><CODE>byteLength</CODE></TD><TD>integer</TD><TD>Length in bytes including null terminator.</TD></TR>
+        <TR><TD><CODE>representation</CODE></TD><TD>string</TD><TD>Ghidra's default representation (omitted if truncated).</TD></TR>
+        <TR><TD><CODE>truncated</CODE></TD><TD>boolean</TD><TD>Present and <CODE>true</CODE> if the string exceeds 500 characters.</TD></TR>
+        <TR><TD><CODE>fullLength</CODE></TD><TD>integer</TD><TD>Full length if truncated.</TD></TR>
+        <TR><TD><CODE>note</CODE></TD><TD>string</TD><TD>Suggestion to use <CODE>get-data</CODE> or <CODE>read-memory</CODE> for full content (if truncated).</TD></TR>
+        <TR><TD><CODE>referencingFunctions</CODE></TD><TD>array</TD><TD>Functions referencing this string (if <CODE>includeReferencingFunctions=true</CODE>).</TD></TR>
+        <TR><TD><CODE>referenceCount</CODE></TD><TD>integer</TD><TD>Number of referencing functions (if requested).</TD></TR>
+      </TABLE>
+
+      <H4>Limits</H4>
+      <UL>
+        <LI><B>Maximum string length:</B> 500 characters. Longer strings are truncated with a note
+            suggesting alternative tools for reading the full content.</LI>
+        <LI><B>Maximum referencing functions:</B> 100 per string.</LI>
+      </UL>
+
+      <P><IMG src="help/shared/note.png"> The <CODE>searchString</CODE> and
+      <CODE>regexPattern</CODE> parameters are mutually exclusive. Providing both will produce an
+      error. In similarity mode, referencing functions are only loaded for the paginated subset,
+      not all strings, for performance.</P>
+    </BLOCKQUOTE>
+
+    <!-- ======================================================================== -->
+    <H2 style="color: brown;"><a name="SymbolTools"></a>Symbol Tools</H2>
+
+    <P>Tools for enumerating and browsing symbols defined in the program.</P>
+
+    <!-- get-symbols-count -->
+    <H3 style="color: blue;"><a name="GetSymbolsCount"></a>get-symbols-count</H3>
+
+    <P>Returns the total count of symbols in the program, with optional filtering. Use this before
+    calling <CODE>get-symbols</CODE> to plan pagination.</P>
+
+    <BLOCKQUOTE>
+      <H4>Parameters</H4>
+      <TABLE border="1" cellpadding="4" cellspacing="0">
+        <TR><TH>Name</TH><TH>Type</TH><TH>Required</TH><TH>Default</TH><TH>Description</TH></TR>
+        <TR>
+          <TD><CODE>programPath</CODE></TD>
+          <TD>string</TD>
+          <TD>Yes</TD>
+          <TD>&mdash;</TD>
+          <TD>Path in the Ghidra Project to the program.</TD>
+        </TR>
+        <TR>
+          <TD><CODE>includeExternal</CODE></TD>
+          <TD>boolean</TD>
+          <TD>No</TD>
+          <TD><CODE>false</CODE></TD>
+          <TD>Whether to include external symbols (imports from other libraries).</TD>
+        </TR>
+        <TR>
+          <TD><CODE>filterDefaultNames</CODE></TD>
+          <TD>boolean</TD>
+          <TD>No</TD>
+          <TD><CODE>true</CODE></TD>
+          <TD>Filter out Ghidra-generated default names (e.g., <CODE>FUN_</CODE>, <CODE>DAT_</CODE>,
+              <CODE>LAB_</CODE>).</TD>
+        </TR>
+      </TABLE>
+
+      <H4>Return Value</H4>
+      <TABLE border="1" cellpadding="4" cellspacing="0">
+        <TR><TH>Field</TH><TH>Type</TH><TH>Description</TH></TR>
+        <TR><TD><CODE>count</CODE></TD><TD>integer</TD><TD>Total number of symbols matching the filters.</TD></TR>
+        <TR><TD><CODE>includeExternal</CODE></TD><TD>boolean</TD><TD>Whether external symbols were included.</TD></TR>
+        <TR><TD><CODE>filterDefaultNames</CODE></TD><TD>boolean</TD><TD>Whether default names were filtered.</TD></TR>
+      </TABLE>
+    </BLOCKQUOTE>
+
+    <!-- get-symbols -->
+    <H3 style="color: blue;"><a name="GetSymbols"></a>get-symbols</H3>
+
+    <P>Retrieves symbols from the program with pagination. Each symbol includes its name, address,
+    namespace, type, and source information.</P>
+
+    <BLOCKQUOTE>
+      <H4>Parameters</H4>
+      <TABLE border="1" cellpadding="4" cellspacing="0">
+        <TR><TH>Name</TH><TH>Type</TH><TH>Required</TH><TH>Default</TH><TH>Description</TH></TR>
+        <TR>
+          <TD><CODE>programPath</CODE></TD>
+          <TD>string</TD>
+          <TD>Yes</TD>
+          <TD>&mdash;</TD>
+          <TD>Path in the Ghidra Project to the program.</TD>
+        </TR>
+        <TR>
+          <TD><CODE>includeExternal</CODE></TD>
+          <TD>boolean</TD>
+          <TD>No</TD>
+          <TD><CODE>false</CODE></TD>
+          <TD>Whether to include external symbols.</TD>
+        </TR>
+        <TR>
+          <TD><CODE>startIndex</CODE></TD>
+          <TD>integer</TD>
+          <TD>No</TD>
+          <TD><CODE>0</CODE></TD>
+          <TD>Starting index for pagination (0-based).</TD>
+        </TR>
+        <TR>
+          <TD><CODE>maxCount</CODE></TD>
+          <TD>integer</TD>
+          <TD>No</TD>
+          <TD><CODE>200</CODE></TD>
+          <TD>Maximum number of symbols to return. Recommended chunks of 200.</TD>
+        </TR>
+        <TR>
+          <TD><CODE>filterDefaultNames</CODE></TD>
+          <TD>boolean</TD>
+          <TD>No</TD>
+          <TD><CODE>true</CODE></TD>
+          <TD>Filter out Ghidra-generated default names.</TD>
+        </TR>
+      </TABLE>
+
+      <H4>Return Value</H4>
+      <P>A multi-result response. The first object contains pagination metadata:</P>
+      <TABLE border="1" cellpadding="4" cellspacing="0">
+        <TR><TH>Field</TH><TH>Type</TH><TH>Description</TH></TR>
+        <TR><TD><CODE>startIndex</CODE></TD><TD>integer</TD><TD>Starting index used.</TD></TR>
+        <TR><TD><CODE>requestedCount</CODE></TD><TD>integer</TD><TD>Requested maximum count.</TD></TR>
+        <TR><TD><CODE>actualCount</CODE></TD><TD>integer</TD><TD>Number of symbols returned.</TD></TR>
+        <TR><TD><CODE>nextStartIndex</CODE></TD><TD>integer</TD><TD>Index for the next page.</TD></TR>
+        <TR><TD><CODE>totalProcessed</CODE></TD><TD>integer</TD><TD>Total symbols examined (before filtering).</TD></TR>
+        <TR><TD><CODE>includeExternal</CODE></TD><TD>boolean</TD><TD>Whether external symbols were included.</TD></TR>
+        <TR><TD><CODE>filterDefaultNames</CODE></TD><TD>boolean</TD><TD>Whether default names were filtered.</TD></TR>
+      </TABLE>
+
+      <P>Subsequent objects each describe one symbol:</P>
+      <TABLE border="1" cellpadding="4" cellspacing="0">
+        <TR><TH>Field</TH><TH>Type</TH><TH>Description</TH></TR>
+        <TR><TD><CODE>name</CODE></TD><TD>string</TD><TD>Symbol name.</TD></TR>
+        <TR><TD><CODE>address</CODE></TD><TD>string</TD><TD>Formatted address.</TD></TR>
+        <TR><TD><CODE>namespace</CODE></TD><TD>string</TD><TD>Symbol's namespace name.</TD></TR>
+        <TR><TD><CODE>id</CODE></TD><TD>long</TD><TD>Unique symbol ID.</TD></TR>
+        <TR><TD><CODE>symbolType</CODE></TD><TD>string</TD><TD>Type of symbol: <CODE>FUNCTION</CODE>, <CODE>LABEL</CODE>, <CODE>GLOBAL_VAR</CODE>, etc.</TD></TR>
+        <TR><TD><CODE>isPrimary</CODE></TD><TD>boolean</TD><TD>Whether this is the primary symbol at its address.</TD></TR>
+        <TR><TD><CODE>isExternal</CODE></TD><TD>boolean</TD><TD>Whether the symbol is external.</TD></TR>
+        <TR><TD><CODE>isFunction</CODE></TD><TD>boolean</TD><TD><CODE>true</CODE> if the symbol type is <CODE>FUNCTION</CODE>.</TD></TR>
+      </TABLE>
+
+      <H4>Default Name Filtering</H4>
+      <P>When <CODE>filterDefaultNames</CODE> is <CODE>true</CODE> (the default), symbols with
+      the following Ghidra-generated prefixes are excluded:</P>
+      <UL>
+        <LI><CODE>FUN_</CODE> &mdash; Auto-named functions</LI>
+        <LI><CODE>LAB_</CODE> &mdash; Auto-named labels</LI>
+        <LI><CODE>SUB_</CODE> &mdash; Auto-named subroutines</LI>
+        <LI><CODE>DAT_</CODE> &mdash; Auto-named data</LI>
+        <LI><CODE>EXT_</CODE> &mdash; Auto-named externals</LI>
+        <LI><CODE>PTR_</CODE> &mdash; Auto-named pointers</LI>
+        <LI><CODE>ARRAY_</CODE> &mdash; Auto-named arrays</LI>
+      </UL>
+
+      <P><IMG src="help/shared/note.png"> Use <CODE>get-symbols-count</CODE> with the same filter
+      settings to determine the total number of symbols before paginating. The
+      <CODE>nextStartIndex</CODE> field in the response indicates the correct starting index for
+      the next page.</P>
+    </BLOCKQUOTE>
+
+    <!-- ======================================================================== -->
+    <H2 style="color: brown;"><a name="Tips"></a>Tips &amp; Best Practices</H2>
+
+    <UL>
+      <LI>Start with <CODE>get-memory-blocks</CODE> to understand the program's layout before
+          reading specific addresses.</LI>
+      <LI>Use <CODE>get-strings-count</CODE> and <CODE>get-symbols-count</CODE> before their
+          respective listing tools to plan pagination.</LI>
+      <LI>The similarity search mode in <CODE>get-strings</CODE> is particularly useful for finding
+          strings related to a known concept (e.g., searching for <CODE>"password"</CODE> will
+          surface strings like <CODE>"Enter password"</CODE>, <CODE>"Password incorrect"</CODE>).</LI>
+      <LI>Use <CODE>create-label</CODE> to annotate addresses of interest for easier navigation
+          in subsequent analysis.</LI>
+      <LI>When applying data types, use <CODE>get-data-type-archives</CODE> from the
+          <A href="ReVa_data_type_tools.html">Data Type Tools</A> to discover
+          available types if a type string cannot be resolved.</LI>
+      <LI>Set <CODE>filterDefaultNames=false</CODE> on symbol tools if you need to see all symbols
+          including Ghidra's auto-generated names.</LI>
+    </UL>
+
+    <!-- ======================================================================== -->
+    <BR>
+    <P style="color: gray;">Provided by: <B>ReVa</B> &mdash; Reverse Engineering Assistant</P>
+    <P style="color: purple;"><B>Related Topics:</B></P>
+    <UL>
+      <LI><A href="ReVa_data_type_tools.html">Data Types &amp; Structures</A></LI>
+      <LI><A href="ReVa_import_export_tools.html">Imports, Exports &amp; Thunks</A></LI>
+      <LI><A href="ReVa_annotation_tools.html">Comments &amp; Bookmarks</A></LI>
+    </UL>
+
+  </BODY>
+</HTML>

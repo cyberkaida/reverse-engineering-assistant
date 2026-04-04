@@ -47,13 +47,13 @@ jobs:
         python-version: "3.10"
 
     - name: Install Ghidra ${{ matrix.ghidra-version }}
-      uses: antoniovazquezblanco/setup-ghidra@v2.0.19
+      uses: antoniovazquezblanco/setup-ghidra@v2.1.0
       with:
         version: ${{ matrix.ghidra-version }}
         auth_token: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Setup Gradle
-      uses: gradle/actions/setup-gradle@v5
+      uses: gradle/actions/setup-gradle@v6
       with:
         gradle-version: "8.14"
 

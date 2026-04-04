@@ -5,7 +5,10 @@ set -euo pipefail
 # - Local: lightweight checks only
 # - Remote (claude.ai/code): full automated Ghidra setup
 
-GHIDRA_SOURCE_DIR="${CLAUDE_PROJECT_DIR}/../ghidra"
+# Use git-common-dir so this works from worktrees as well as the main checkout
+_git_common_dir=$(git -C "${CLAUDE_PROJECT_DIR}" rev-parse --git-common-dir)
+[[ "${_git_common_dir}" = /* ]] || _git_common_dir="${CLAUDE_PROJECT_DIR}/${_git_common_dir}"
+GHIDRA_SOURCE_DIR="$(dirname "${_git_common_dir}")/../ghidra"
 GHIDRA_INSTALL_BASE="${HOME}/.local/opt"
 LOG_FILE="/tmp/reva-setup.log"
 

@@ -1,0 +1,558 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+
+<HTML>
+  <HEAD>
+    <META name="generator" content=
+    "HTML Tidy for Java (vers. 2009-12-01), see jtidy.sourceforge.net">
+    <META http-equiv="Content-Language" content="en-us">
+    <META http-equiv="Content-Type" content="text/html; charset=windows-1252">
+
+    <TITLE>ReVa - Virtual Table &amp; Constant Tools</TITLE>
+    <LINK rel="stylesheet" type="text/css" href="help/shared/DefaultStyle.css">
+  </HEAD>
+
+  <BODY>
+    <H1 align="center" style="color: navy;"><a name="VtableConstantTools"></a>ReVa - Virtual Table &amp; Constant Tools</H1>
+
+    <P>These tools support advanced binary analysis tasks: analyzing C++ virtual function tables
+    (vtables) and searching for constant values used in instructions. Vtable tools are essential
+    for understanding class hierarchies and virtual method dispatch in C++ binaries. Constant tools
+    help identify magic numbers, error codes, buffer sizes, and other significant values.</P>
+
+    <!-- ======================================================================== -->
+    <H2 style="color: brown;"><a name="VtableTools"></a>Virtual Table Tools</H2>
+
+    <P>Tools for analyzing virtual function tables (vtables), finding callers of virtual methods,
+    and discovering which classes implement a given virtual function.</P>
+
+    <!-- analyze-vtable -->
+    <H3 style="color: blue;"><a name="AnalyzeVtable"></a>analyze-vtable</H3>
+
+    <P>Analyzes a virtual function table at a given address, returning the list of function pointers
+    with their slot indices and byte offsets. Supports both structure-based analysis (when a
+    structure data type is defined at the address) and raw pointer probing as a fallback.</P>
+
+    <BLOCKQUOTE>
+      <H4>Parameters</H4>
+      <TABLE border="1" cellpadding="4" cellspacing="0">
+        <TR><TH>Name</TH><TH>Type</TH><TH>Required</TH><TH>Default</TH><TH>Description</TH></TR>
+        <TR>
+          <TD><CODE>programPath</CODE></TD>
+          <TD>string</TD>
+          <TD>Yes</TD>
+          <TD>&mdash;</TD>
+          <TD>Path in the Ghidra Project to the program.</TD>
+        </TR>
+        <TR>
+          <TD><CODE>vtableAddress</CODE></TD>
+          <TD>string</TD>
+          <TD>Yes</TD>
+          <TD>&mdash;</TD>
+          <TD>Address of the vtable to analyze.</TD>
+        </TR>
+        <TR>
+          <TD><CODE>maxEntries</CODE></TD>
+          <TD>integer</TD>
+          <TD>No</TD>
+          <TD><CODE>200</CODE></TD>
+          <TD>Maximum number of vtable entries to read. Clamped to range 1&ndash;1000.</TD>
+        </TR>
+      </TABLE>
+
+      <H4>Return Value</H4>
+      <TABLE border="1" cellpadding="4" cellspacing="0">
+        <TR><TH>Field</TH><TH>Type</TH><TH>Description</TH></TR>
+        <TR><TD><CODE>programPath</CODE></TD><TD>string</TD><TD>Path to the program.</TD></TR>
+        <TR><TD><CODE>vtableAddress</CODE></TD><TD>string</TD><TD>Address of the vtable.</TD></TR>
+        <TR><TD><CODE>pointerSize</CODE></TD><TD>integer</TD><TD>Pointer size in bytes (4 or 8).</TD></TR>
+        <TR><TD><CODE>entryCount</CODE></TD><TD>integer</TD><TD>Number of entries found.</TD></TR>
+        <TR><TD><CODE>hasStructure</CODE></TD><TD>boolean</TD><TD>Whether a structure data type was found at the address.</TD></TR>
+        <TR><TD><CODE>structureName</CODE></TD><TD>string</TD><TD>Name of the structure (present when <CODE>hasStructure=true</CODE>).</TD></TR>
+        <TR><TD><CODE>note</CODE></TD><TD>string</TD><TD>Analysis notes (present when <CODE>hasStructure=false</CODE>).</TD></TR>
+        <TR><TD><CODE>entries</CODE></TD><TD>array</TD><TD>Array of vtable entry objects.</TD></TR>
+      </TABLE>
+
+      <P>Each vtable entry contains:</P>
+      <TABLE border="1" cellpadding="4" cellspacing="0">
+        <TR><TH>Field</TH><TH>Type</TH><TH>Description</TH></TR>
+        <TR><TD><CODE>slot</CODE></TD><TD>integer</TD><TD>Slot index (0-based).</TD></TR>
+        <TR><TD><CODE>offset</CODE></TD><TD>string</TD><TD>Byte offset from vtable start (e.g., <CODE>"0x10"</CODE>).</TD></TR>
+        <TR><TD><CODE>address</CODE></TD><TD>string</TD><TD>Target function address.</TD></TR>
+        <TR><TD><CODE>functionName</CODE></TD><TD>string</TD><TD>Target function name (optional).</TD></TR>
+        <TR><TD><CODE>signature</CODE></TD><TD>string</TD><TD>Function signature (optional).</TD></TR>
+        <TR><TD><CODE>fieldName</CODE></TD><TD>string</TD><TD>Structure field name (structure-based analysis only).</TD></TR>
+        <TR><TD><CODE>fieldType</CODE></TD><TD>string</TD><TD>Structure field type (structure-based analysis only).</TD></TR>
+        <TR><TD><CODE>note</CODE></TD><TD>string</TD><TD>Additional notes (e.g., <CODE>"Not a function - possibly RTTI"</CODE>).</TD></TR>
+      </TABLE>
+
+      <H4>Analysis Strategies</H4>
+      <OL>
+        <LI><B>Structure-based</B> (preferred) &mdash; If a Structure data type is defined at the
+            vtable address, the tool uses its components for accurate field names and types. This
+            produces the most reliable results.</LI>
+        <LI><B>Memory-based</B> (fallback) &mdash; If no structure is defined, the tool reads raw
+            pointers from memory and probes each one to determine if it points to a function.</LI>
+      </OL>
+
+      <H4>Vtable Boundary Detection</H4>
+      <P>In memory-based mode, the tool uses heuristics to detect the end of the vtable:</P>
+      <UL>
+        <LI>Requires a minimum of 2 consecutive function pointers to identify a valid vtable.</LI>
+        <LI>Allows up to 1 non-function pointer (which may be an RTTI pointer, common in MSVC).</LI>
+        <LI>Stops reading after 2 consecutive non-function pointers, indicating the end of the vtable.</LI>
+        <LI>Initial probe examines the first 5 entries to validate the vtable.</LI>
+      </UL>
+    </BLOCKQUOTE>
+
+    <!-- find-vtable-callers -->
+    <H3 style="color: blue;"><a name="FindVtableCallers"></a>find-vtable-callers</H3>
+
+    <P>Finds all indirect call instructions that could be dispatching a virtual method through
+    its vtable slot. Given a function that appears in a vtable, this tool identifies all indirect
+    calls with a matching byte offset. Offset extraction patterns are optimized for x86/x64
+    architectures.</P>
+
+    <BLOCKQUOTE>
+      <H4>Parameters</H4>
+      <TABLE border="1" cellpadding="4" cellspacing="0">
+        <TR><TH>Name</TH><TH>Type</TH><TH>Required</TH><TH>Default</TH><TH>Description</TH></TR>
+        <TR>
+          <TD><CODE>programPath</CODE></TD>
+          <TD>string</TD>
+          <TD>Yes</TD>
+          <TD>&mdash;</TD>
+          <TD>Path in the Ghidra Project to the program.</TD>
+        </TR>
+        <TR>
+          <TD><CODE>functionAddress</CODE></TD>
+          <TD>string</TD>
+          <TD>Yes</TD>
+          <TD>&mdash;</TD>
+          <TD>Address or name of the function that is called via vtable dispatch.</TD>
+        </TR>
+        <TR>
+          <TD><CODE>vtableAddress</CODE></TD>
+          <TD>string</TD>
+          <TD>No</TD>
+          <TD>&mdash;</TD>
+          <TD>Address of the vtable containing the function. If not provided, the tool will
+              automatically search for vtables containing this function.</TD>
+        </TR>
+        <TR>
+          <TD><CODE>maxResults</CODE></TD>
+          <TD>integer</TD>
+          <TD>No</TD>
+          <TD><CODE>500</CODE></TD>
+          <TD>Maximum number of results to return. Clamped to range 1&ndash;10000.</TD>
+        </TR>
+      </TABLE>
+
+      <H4>Return Value</H4>
+      <TABLE border="1" cellpadding="4" cellspacing="0">
+        <TR><TH>Field</TH><TH>Type</TH><TH>Description</TH></TR>
+        <TR><TD><CODE>programPath</CODE></TD><TD>string</TD><TD>Path to the program.</TD></TR>
+        <TR><TD><CODE>functionAddress</CODE></TD><TD>string</TD><TD>Address of the target function.</TD></TR>
+        <TR><TD><CODE>functionName</CODE></TD><TD>string</TD><TD>Name of the target function.</TD></TR>
+        <TR><TD><CODE>vtables</CODE></TD><TD>array</TD><TD>Vtables containing this function.</TD></TR>
+        <TR><TD><CODE>potentialCallerCount</CODE></TD><TD>integer</TD><TD>Number of potential callers found.</TD></TR>
+        <TR><TD><CODE>note</CODE></TD><TD>string</TD><TD>Summary note.</TD></TR>
+        <TR><TD><CODE>potentialCallers</CODE></TD><TD>array</TD><TD>Array of potential caller objects.</TD></TR>
+      </TABLE>
+
+      <P>Each vtable entry contains:</P>
+      <TABLE border="1" cellpadding="4" cellspacing="0">
+        <TR><TH>Field</TH><TH>Type</TH><TH>Description</TH></TR>
+        <TR><TD><CODE>vtableAddress</CODE></TD><TD>string</TD><TD>Address of the vtable.</TD></TR>
+        <TR><TD><CODE>slotIndex</CODE></TD><TD>integer</TD><TD>Slot index within the vtable.</TD></TR>
+        <TR><TD><CODE>slotOffset</CODE></TD><TD>string</TD><TD>Byte offset of the slot (e.g., <CODE>"0x18"</CODE>).</TD></TR>
+      </TABLE>
+
+      <P>Each potential caller contains:</P>
+      <TABLE border="1" cellpadding="4" cellspacing="0">
+        <TR><TH>Field</TH><TH>Type</TH><TH>Description</TH></TR>
+        <TR><TD><CODE>address</CODE></TD><TD>string</TD><TD>Address of the indirect call instruction.</TD></TR>
+        <TR><TD><CODE>instruction</CODE></TD><TD>string</TD><TD>Full instruction text (e.g., <CODE>"CALL qword ptr [RAX + 0x18]"</CODE>).</TD></TR>
+        <TR><TD><CODE>operand</CODE></TD><TD>string</TD><TD>Operand representation.</TD></TR>
+        <TR><TD><CODE>offset</CODE></TD><TD>string</TD><TD>Extracted offset from the operand.</TD></TR>
+        <TR><TD><CODE>function</CODE></TD><TD>string</TD><TD>Name of the function containing this call.</TD></TR>
+        <TR><TD><CODE>functionAddress</CODE></TD><TD>string</TD><TD>Address of the containing function.</TD></TR>
+      </TABLE>
+
+      <H4>Offset Extraction Patterns (x86/x64)</H4>
+      <P>The tool recognizes these operand patterns for extracting vtable offsets:</P>
+      <TABLE border="1" cellpadding="4" cellspacing="0">
+        <TR><TH>Pattern</TH><TH>Example</TH><TH>Extracted Offset</TH></TR>
+        <TR><TD>Hex offset</TD><TD><CODE>[RAX + 0x20]</CODE></TD><TD><CODE>0x20</CODE></TD></TR>
+        <TR><TD>Decimal offset</TD><TD><CODE>[RAX + 32]</CODE></TD><TD><CODE>32</CODE></TD></TR>
+        <TR><TD>Zero offset (no addition)</TD><TD><CODE>[RAX]</CODE></TD><TD><CODE>0</CODE></TD></TR>
+      </TABLE>
+
+      <P>Only indirect calls (computed flow type) are matched. Results are deduplicated by source
+      address.</P>
+
+      <H4>Limits</H4>
+      <UL>
+        <LI><B>Timeout:</B> 120 seconds.</LI>
+        <LI><B>Max slot search:</B> 1000 slots per vtable.</LI>
+        <LI><B>Max results:</B> 10000.</LI>
+      </UL>
+
+      <P><IMG src="help/shared/note.png"> If <CODE>vtableAddress</CODE> is not provided, the tool
+      automatically searches for vtables containing the function. If no vtables are found, an
+      error is returned indicating that the function may not be virtual or vtables have not been
+      identified yet.</P>
+    </BLOCKQUOTE>
+
+    <!-- find-vtables-containing-function -->
+    <H3 style="color: blue;"><a name="FindVtablesContainingFunction"></a>find-vtables-containing-function</H3>
+
+    <P>Finds all vtables that contain a pointer to a given function. This is useful for discovering
+    which C++ classes implement a particular virtual method, especially when analyzing class
+    hierarchies and polymorphism.</P>
+
+    <BLOCKQUOTE>
+      <H4>Parameters</H4>
+      <TABLE border="1" cellpadding="4" cellspacing="0">
+        <TR><TH>Name</TH><TH>Type</TH><TH>Required</TH><TH>Description</TH></TR>
+        <TR>
+          <TD><CODE>programPath</CODE></TD>
+          <TD>string</TD>
+          <TD>Yes</TD>
+          <TD>Path in the Ghidra Project to the program.</TD>
+        </TR>
+        <TR>
+          <TD><CODE>functionAddress</CODE></TD>
+          <TD>string</TD>
+          <TD>Yes</TD>
+          <TD>Address or name of the function to search for in vtables.</TD>
+        </TR>
+      </TABLE>
+
+      <H4>Return Value</H4>
+      <TABLE border="1" cellpadding="4" cellspacing="0">
+        <TR><TH>Field</TH><TH>Type</TH><TH>Description</TH></TR>
+        <TR><TD><CODE>programPath</CODE></TD><TD>string</TD><TD>Path to the program.</TD></TR>
+        <TR><TD><CODE>functionAddress</CODE></TD><TD>string</TD><TD>Address of the function.</TD></TR>
+        <TR><TD><CODE>functionName</CODE></TD><TD>string</TD><TD>Name of the function.</TD></TR>
+        <TR><TD><CODE>vtableCount</CODE></TD><TD>integer</TD><TD>Number of vtables containing this function.</TD></TR>
+        <TR><TD><CODE>vtables</CODE></TD><TD>array</TD><TD>Array of vtable location objects.</TD></TR>
+      </TABLE>
+
+      <P>Each vtable location contains:</P>
+      <TABLE border="1" cellpadding="4" cellspacing="0">
+        <TR><TH>Field</TH><TH>Type</TH><TH>Description</TH></TR>
+        <TR><TD><CODE>vtableAddress</CODE></TD><TD>string</TD><TD>Address of the vtable.</TD></TR>
+        <TR><TD><CODE>slotIndex</CODE></TD><TD>integer</TD><TD>Slot index where the function appears.</TD></TR>
+        <TR><TD><CODE>slotOffset</CODE></TD><TD>string</TD><TD>Byte offset of the slot.</TD></TR>
+        <TR><TD><CODE>possibleClassName</CODE></TD><TD>string</TD><TD>Guessed class name from symbols or RTTI (optional).</TD></TR>
+      </TABLE>
+
+      <H4>Class Name Discovery</H4>
+      <P>The tool attempts to determine the owning class using several strategies:</P>
+      <TABLE border="1" cellpadding="4" cellspacing="0">
+        <TR><TH>Compiler</TH><TH>Symbol Pattern</TH><TH>Example</TH></TR>
+        <TR><TD>GCC/Clang</TD><TD><CODE>vtable for ClassName</CODE> or <CODE>_ZTV9ClassName</CODE></TD><TD><CODE>vtable for MyClass</CODE></TD></TR>
+        <TR><TD>MSVC</TD><TD><CODE>??_7ClassName@@6B@</CODE></TD><TD><CODE>??_7CDocument@@6B@</CODE></TD></TR>
+        <TR><TD>RTTI</TD><TD><CODE>typeinfo for ClassName</CODE> or <CODE>??_R4ClassName@@</CODE></TD><TD>(pointer before vtable, MSVC pattern)</TD></TR>
+      </TABLE>
+
+      <P>The tool also walks backwards from data references to the function to locate the vtable
+      start address, and validates that candidate vtables have at least 2 function pointers.</P>
+
+      <H4>Limits</H4>
+      <UL>
+        <LI><B>Timeout:</B> 120 seconds.</LI>
+      </UL>
+    </BLOCKQUOTE>
+
+    <!-- ======================================================================== -->
+    <H2 style="color: brown;"><a name="ConstantTools"></a>Constant Search Tools</H2>
+
+    <P>Tools for finding constant values (immediate operands) used in instructions. These tools
+    scan the program's instruction listing to locate magic numbers, error codes, buffer sizes,
+    and other significant constant values.</P>
+
+    <P><IMG src="help/shared/note.png"> All constant search tools share common limits: a
+    <B>120-second timeout</B> and a <B>2,000,000 instruction scan limit</B>. For very large
+    binaries, the <CODE>instructionLimitReached</CODE> flag in the response indicates whether
+    the scan was truncated.</P>
+
+    <!-- find-constant-uses -->
+    <H3 style="color: blue;"><a name="FindConstantUses"></a>find-constant-uses</H3>
+
+    <P>Finds all locations where a specific constant value is used as an immediate operand in
+    instructions. Useful for locating magic numbers, error codes, buffer sizes, or other
+    significant values throughout the binary.</P>
+
+    <BLOCKQUOTE>
+      <H4>Parameters</H4>
+      <TABLE border="1" cellpadding="4" cellspacing="0">
+        <TR><TH>Name</TH><TH>Type</TH><TH>Required</TH><TH>Default</TH><TH>Description</TH></TR>
+        <TR>
+          <TD><CODE>programPath</CODE></TD>
+          <TD>string</TD>
+          <TD>Yes</TD>
+          <TD>&mdash;</TD>
+          <TD>Path in the Ghidra Project to the program.</TD>
+        </TR>
+        <TR>
+          <TD><CODE>value</CODE></TD>
+          <TD>string</TD>
+          <TD>Yes</TD>
+          <TD>&mdash;</TD>
+          <TD>The constant value to search for. Supports decimal (<CODE>123</CODE>),
+              hexadecimal with <CODE>0x</CODE> prefix (<CODE>0x7b</CODE>), and
+              negative values (<CODE>-1</CODE>).</TD>
+        </TR>
+        <TR>
+          <TD><CODE>maxResults</CODE></TD>
+          <TD>integer</TD>
+          <TD>No</TD>
+          <TD><CODE>500</CODE></TD>
+          <TD>Maximum number of results to return. Clamped to range 1&ndash;10000.</TD>
+        </TR>
+      </TABLE>
+
+      <H4>Return Value</H4>
+      <TABLE border="1" cellpadding="4" cellspacing="0">
+        <TR><TH>Field</TH><TH>Type</TH><TH>Description</TH></TR>
+        <TR><TD><CODE>programPath</CODE></TD><TD>string</TD><TD>Path to the program.</TD></TR>
+        <TR><TD><CODE>searchedValue</CODE></TD><TD>string</TD><TD>Formatted search value (e.g., <CODE>"0x7b (123)"</CODE>).</TD></TR>
+        <TR><TD><CODE>resultCount</CODE></TD><TD>integer</TD><TD>Number of results found.</TD></TR>
+        <TR><TD><CODE>truncated</CODE></TD><TD>boolean</TD><TD><CODE>true</CODE> if <CODE>maxResults</CODE> was reached.</TD></TR>
+        <TR><TD><CODE>instructionLimitReached</CODE></TD><TD>boolean</TD><TD>Present if the 2M instruction limit was hit.</TD></TR>
+        <TR><TD><CODE>results</CODE></TD><TD>array</TD><TD>Array of result objects.</TD></TR>
+      </TABLE>
+
+      <P>Each result contains:</P>
+      <TABLE border="1" cellpadding="4" cellspacing="0">
+        <TR><TH>Field</TH><TH>Type</TH><TH>Description</TH></TR>
+        <TR><TD><CODE>address</CODE></TD><TD>string</TD><TD>Address of the instruction.</TD></TR>
+        <TR><TD><CODE>mnemonic</CODE></TD><TD>string</TD><TD>Instruction mnemonic (e.g., <CODE>"mov"</CODE>, <CODE>"cmp"</CODE>).</TD></TR>
+        <TR><TD><CODE>operandIndex</CODE></TD><TD>integer</TD><TD>Index of the operand containing the constant.</TD></TR>
+        <TR><TD><CODE>instruction</CODE></TD><TD>string</TD><TD>Full instruction text.</TD></TR>
+        <TR><TD><CODE>value</CODE></TD><TD>string</TD><TD>Formatted constant value.</TD></TR>
+        <TR><TD><CODE>function</CODE></TD><TD>string</TD><TD>Name of the containing function.</TD></TR>
+        <TR><TD><CODE>functionAddress</CODE></TD><TD>string</TD><TD>Address of the containing function.</TD></TR>
+      </TABLE>
+
+      <H4>Value Matching</H4>
+      <P>The tool checks both <B>signed</B> and <B>unsigned</B> interpretations of each scalar
+      operand. This means searching for <CODE>-1</CODE> will find instructions using
+      <CODE>0xFFFFFFFF</CODE> (32-bit) or <CODE>0xFFFFFFFFFFFFFFFF</CODE> (64-bit), and vice versa.
+      Each instruction is counted only once, even if multiple operands contain the target value.</P>
+    </BLOCKQUOTE>
+
+    <!-- find-constants-in-range -->
+    <H3 style="color: blue;"><a name="FindConstantsInRange"></a>find-constants-in-range</H3>
+
+    <P>Finds all constant values that fall within a specified numeric range. Useful for locating
+    error codes (e.g., HTTP status codes 400&ndash;599), enum values, or constants within expected
+    bounds.</P>
+
+    <BLOCKQUOTE>
+      <H4>Parameters</H4>
+      <TABLE border="1" cellpadding="4" cellspacing="0">
+        <TR><TH>Name</TH><TH>Type</TH><TH>Required</TH><TH>Default</TH><TH>Description</TH></TR>
+        <TR>
+          <TD><CODE>programPath</CODE></TD>
+          <TD>string</TD>
+          <TD>Yes</TD>
+          <TD>&mdash;</TD>
+          <TD>Path in the Ghidra Project to the program.</TD>
+        </TR>
+        <TR>
+          <TD><CODE>minValue</CODE></TD>
+          <TD>string</TD>
+          <TD>Yes</TD>
+          <TD>&mdash;</TD>
+          <TD>Minimum value, inclusive. Decimal or hex with <CODE>0x</CODE> prefix.</TD>
+        </TR>
+        <TR>
+          <TD><CODE>maxValue</CODE></TD>
+          <TD>string</TD>
+          <TD>Yes</TD>
+          <TD>&mdash;</TD>
+          <TD>Maximum value, inclusive. Decimal or hex with <CODE>0x</CODE> prefix.</TD>
+        </TR>
+        <TR>
+          <TD><CODE>maxResults</CODE></TD>
+          <TD>integer</TD>
+          <TD>No</TD>
+          <TD><CODE>500</CODE></TD>
+          <TD>Maximum number of results to return. Clamped to range 1&ndash;10000.</TD>
+        </TR>
+      </TABLE>
+
+      <H4>Return Value</H4>
+      <TABLE border="1" cellpadding="4" cellspacing="0">
+        <TR><TH>Field</TH><TH>Type</TH><TH>Description</TH></TR>
+        <TR><TD><CODE>programPath</CODE></TD><TD>string</TD><TD>Path to the program.</TD></TR>
+        <TR><TD><CODE>range</CODE></TD><TD>object</TD><TD>Contains <CODE>min</CODE> and <CODE>max</CODE> formatted values.</TD></TR>
+        <TR><TD><CODE>uniqueValuesFound</CODE></TD><TD>integer</TD><TD>Number of distinct constant values found.</TD></TR>
+        <TR><TD><CODE>totalOccurrences</CODE></TD><TD>integer</TD><TD>Total number of instruction occurrences.</TD></TR>
+        <TR><TD><CODE>truncated</CODE></TD><TD>boolean</TD><TD><CODE>true</CODE> if <CODE>maxResults</CODE> was reached.</TD></TR>
+        <TR><TD><CODE>instructionLimitReached</CODE></TD><TD>boolean</TD><TD>Present if the 2M instruction limit was hit.</TD></TR>
+        <TR><TD><CODE>uniqueValues</CODE></TD><TD>array</TD><TD>Distinct values sorted by frequency (most common first).</TD></TR>
+        <TR><TD><CODE>results</CODE></TD><TD>array</TD><TD>Individual instruction details (same format as <CODE>find-constant-uses</CODE>).</TD></TR>
+      </TABLE>
+
+      <P>Each unique value entry contains:</P>
+      <TABLE border="1" cellpadding="4" cellspacing="0">
+        <TR><TH>Field</TH><TH>Type</TH><TH>Description</TH></TR>
+        <TR><TD><CODE>value</CODE></TD><TD>string</TD><TD>Formatted constant value.</TD></TR>
+        <TR><TD><CODE>decimal</CODE></TD><TD>integer</TD><TD>Decimal representation.</TD></TR>
+        <TR><TD><CODE>occurrences</CODE></TD><TD>integer</TD><TD>Number of times this value appears.</TD></TR>
+      </TABLE>
+
+      <H4>Range Checking</H4>
+      <P>The tool checks the <B>signed interpretation first</B> (the common use case for ranges),
+      then checks the <B>unsigned interpretation</B> using proper unsigned comparison for large
+      values. A match in either interpretation is accepted.</P>
+    </BLOCKQUOTE>
+
+    <!-- list-common-constants -->
+    <H3 style="color: blue;"><a name="ListCommonConstants"></a>list-common-constants</H3>
+
+    <P>Finds the most frequently used constant values in the program and identifies known
+    magic numbers. By default, small values (0&ndash;255) and -1 are filtered out as noise,
+    since they are overwhelmingly common in most binaries.</P>
+
+    <BLOCKQUOTE>
+      <H4>Parameters</H4>
+      <TABLE border="1" cellpadding="4" cellspacing="0">
+        <TR><TH>Name</TH><TH>Type</TH><TH>Required</TH><TH>Default</TH><TH>Description</TH></TR>
+        <TR>
+          <TD><CODE>programPath</CODE></TD>
+          <TD>string</TD>
+          <TD>Yes</TD>
+          <TD>&mdash;</TD>
+          <TD>Path in the Ghidra Project to the program.</TD>
+        </TR>
+        <TR>
+          <TD><CODE>topN</CODE></TD>
+          <TD>integer</TD>
+          <TD>No</TD>
+          <TD><CODE>50</CODE></TD>
+          <TD>Number of most-frequent constants to return. Clamped to range 1&ndash;10000.</TD>
+        </TR>
+        <TR>
+          <TD><CODE>minValue</CODE></TD>
+          <TD>string</TD>
+          <TD>No</TD>
+          <TD>&mdash;</TD>
+          <TD>Explicit minimum value filter (decimal or hex). Overrides the default noise filter.</TD>
+        </TR>
+        <TR>
+          <TD><CODE>includeSmallValues</CODE></TD>
+          <TD>boolean</TD>
+          <TD>No</TD>
+          <TD><CODE>false</CODE></TD>
+          <TD>Include values 0&ndash;255 that are normally filtered as noise.</TD>
+        </TR>
+      </TABLE>
+
+      <H4>Return Value</H4>
+      <TABLE border="1" cellpadding="4" cellspacing="0">
+        <TR><TH>Field</TH><TH>Type</TH><TH>Description</TH></TR>
+        <TR><TD><CODE>programPath</CODE></TD><TD>string</TD><TD>Path to the program.</TD></TR>
+        <TR><TD><CODE>totalUniqueConstants</CODE></TD><TD>integer</TD><TD>Total unique constant values found (after filtering).</TD></TR>
+        <TR><TD><CODE>returned</CODE></TD><TD>integer</TD><TD>Number of constants returned.</TD></TR>
+        <TR><TD><CODE>filterApplied</CODE></TD><TD>string</TD><TD>Description of the active filter.</TD></TR>
+        <TR><TD><CODE>instructionLimitReached</CODE></TD><TD>boolean</TD><TD>Present if the 2M instruction limit was hit.</TD></TR>
+        <TR><TD><CODE>constants</CODE></TD><TD>array</TD><TD>Array of constant objects, sorted by frequency (descending).</TD></TR>
+      </TABLE>
+
+      <P>Each constant object contains:</P>
+      <TABLE border="1" cellpadding="4" cellspacing="0">
+        <TR><TH>Field</TH><TH>Type</TH><TH>Description</TH></TR>
+        <TR><TD><CODE>value</CODE></TD><TD>string</TD><TD>Formatted value (e.g., <CODE>"0x1000 (4096)"</CODE> or <CODE>"0"</CODE>).</TD></TR>
+        <TR><TD><CODE>decimal</CODE></TD><TD>integer</TD><TD>Decimal representation.</TD></TR>
+        <TR><TD><CODE>occurrences</CODE></TD><TD>integer</TD><TD>Total number of uses.</TD></TR>
+        <TR><TD><CODE>uniqueFunctions</CODE></TD><TD>integer</TD><TD>Number of distinct functions that use this constant.</TD></TR>
+        <TR><TD><CODE>description</CODE></TD><TD>string</TD><TD>Human-readable description if the value is a recognized constant (optional).</TD></TR>
+        <TR><TD><CODE>sampleLocations</CODE></TD><TD>array</TD><TD>Up to 5 example addresses where this constant is used.</TD></TR>
+      </TABLE>
+
+      <H4>Known Constant Recognition</H4>
+      <P>The tool recognizes the following categories of constants (checked in priority order):</P>
+
+      <TABLE border="1" cellpadding="4" cellspacing="0">
+        <TR><TH>Category</TH><TH>Examples</TH><TH>Description</TH></TR>
+        <TR>
+          <TD><B>Common sizes</B></TD>
+          <TD><CODE>0x400</CODE>, <CODE>0x1000</CODE>, <CODE>0x2000</CODE>, <CODE>0x10000</CODE>, <CODE>0x100000</CODE>, <CODE>0x400000</CODE></TD>
+          <TD>1 KB, 4 KB (page size), 8 KB, 64 KB, 1 MB, 4 MB</TD>
+        </TR>
+        <TR>
+          <TD><B>Integer limits</B></TD>
+          <TD><CODE>0x7fffffff</CODE>, <CODE>0x80000000</CODE>, <CODE>0x7fffffffffffffff</CODE></TD>
+          <TD>INT32_MAX, INT32_MIN/sign bit, INT64_MAX</TD>
+        </TR>
+        <TR>
+          <TD><B>Bit masks</B></TD>
+          <TD><CODE>0xffff</CODE>, <CODE>0xffffff</CODE>, <CODE>0xffffffff</CODE></TD>
+          <TD>16-bit mask, 24-bit mask, 32-bit mask / -1</TD>
+        </TR>
+        <TR>
+          <TD><B>Powers of 2</B></TD>
+          <TD>Any value where <CODE>(value &amp; (value - 1)) == 0</CODE></TD>
+          <TD>Reported as <CODE>"2^n (power of 2)"</CODE></TD>
+        </TR>
+        <TR>
+          <TD><B>HTTP status codes</B></TD>
+          <TD><CODE>100</CODE>&ndash;<CODE>599</CODE></TD>
+          <TD><CODE>"Possible HTTP status code"</CODE></TD>
+        </TR>
+        <TR>
+          <TD><B>Windows errors</B></TD>
+          <TD><CODE>0x80000000</CODE>&ndash;<CODE>0x8000ffff</CODE></TD>
+          <TD><CODE>"Possible HRESULT/NTSTATUS"</CODE></TD>
+        </TR>
+        <TR>
+          <TD><B>Magic numbers</B></TD>
+          <TD><CODE>0x5a4d</CODE>, <CODE>0x4550</CODE>, <CODE>0x464c457f</CODE>, <CODE>0xdeadbeef</CODE>, <CODE>0xcafebabe</CODE>, <CODE>0xfeedface</CODE></TD>
+          <TD>MZ header, PE signature, ELF magic, debug marker, Java class/Mach-O FAT, Mach-O 32/64-bit</TD>
+        </TR>
+      </TABLE>
+
+      <P><IMG src="help/shared/note.png"> The noise filter (excluding 0&ndash;255 and -1) is
+      applied to both signed and unsigned interpretations. If either interpretation exceeds the
+      threshold, the value passes the filter. The <CODE>uniqueFunctions</CODE> field is particularly
+      useful for distinguishing constants that are used broadly across the program from those
+      concentrated in a single function.</P>
+    </BLOCKQUOTE>
+
+    <!-- ======================================================================== -->
+    <H2 style="color: brown;"><a name="Tips"></a>Tips &amp; Best Practices</H2>
+
+    <UL>
+      <LI>Use <CODE>analyze-vtable</CODE> to inspect a known vtable, then
+          <CODE>find-vtable-callers</CODE> to find where those virtual methods are called.</LI>
+      <LI>Use <CODE>find-vtables-containing-function</CODE> to discover class hierarchies &mdash;
+          if a function appears in multiple vtables, those classes likely share a common base.</LI>
+      <LI>For the best vtable analysis results, define a structure at the vtable address first
+          using the <A href="ReVa_data_type_tools.html">Structure Tools</A>.</LI>
+      <LI>Start with <CODE>list-common-constants</CODE> for a broad overview of significant
+          constants, then use <CODE>find-constant-uses</CODE> to trace specific values of interest.</LI>
+      <LI>Use <CODE>find-constants-in-range</CODE> with HTTP status code ranges (400&ndash;599)
+          to identify error handling code, or with HRESULT ranges to find Windows error paths.</LI>
+      <LI>When searching for a constant, remember that both signed and unsigned interpretations
+          are checked &mdash; searching for <CODE>-1</CODE> will also find <CODE>0xFFFFFFFF</CODE>.</LI>
+      <LI>The <CODE>uniqueFunctions</CODE> count in <CODE>list-common-constants</CODE> helps
+          distinguish pervasive constants (alignment, buffer sizes) from localized ones (algorithm
+          keys, protocol markers).</LI>
+    </UL>
+
+    <!-- ======================================================================== -->
+    <BR>
+    <P style="color: gray;">Provided by: <B>ReVa</B> &mdash; Reverse Engineering Assistant</P>
+    <P style="color: purple;"><B>Related Topics:</B></P>
+    <UL>
+      <LI><A href="ReVa_import_export_tools.html">Imports, Exports &amp; Thunks</A></LI>
+      <LI><A href="ReVa_data_type_tools.html">Data Types &amp; Structures</A></LI>
+      <LI><A href="ReVa_memory_data_tools.html">Memory, Data, Strings &amp; Symbols</A></LI>
+    </UL>
+
+  </BODY>
+</HTML>

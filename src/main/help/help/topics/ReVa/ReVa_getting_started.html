@@ -1,0 +1,486 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+
+<HTML>
+  <HEAD>
+    <META http-equiv="Content-Type" content="text/html; charset=windows-1252">
+    <TITLE>ReVa - Getting Started</TITLE>
+    <LINK rel="stylesheet" type="text/css" href="help/shared/DefaultStyle.css">
+  </HEAD>
+
+  <BODY>
+
+    <H1><A name="ReVa_GettingStarted"></A>Getting Started</H1>
+
+    <BLOCKQUOTE>
+
+      <P>This page walks through the first steps of using ReVa for AI-assisted
+      reverse engineering. It assumes ReVa is already installed and activated.
+      If not, see <A href="ReVa_installation.html">Installation and Setup</A>
+      first.</P>
+
+      <H2><A name="OpeningAProgram"></A>Opening a Program</H2>
+
+      <BLOCKQUOTE>
+
+        <P>Before an MCP client can analyze a binary, the binary must be open
+        in Ghidra with ReVa activated:</P>
+
+        <OL>
+          <LI>Open Ghidra and select (or create) a project.</LI>
+
+          <LI>Import a binary into the project if it is not already present.
+          Use
+          <B>File<IMG alt="" src="help/shared/arrow.gif" border="0">Import
+          File</B> from the Project window, or drag the file into the project
+          panel.</LI>
+
+          <LI>Double-click the imported program to open it in the CodeBrowser.</LI>
+
+          <LI>If prompted, allow Ghidra to run auto-analysis. ReVa works best
+          when analysis is complete, as tools such as the decompiler and
+          cross-reference finder depend on the analysis results.</LI>
+
+          <LI>Verify ReVa is active in the CodeBrowser (see
+          <A href="ReVa_installation.html#ActivateCodeBrowser">Plugin
+          Activation</A>).</LI>
+        </OL>
+
+        <P>The program is now visible to MCP clients. Multiple programs can be
+        open simultaneously across different CodeBrowser windows, and all are
+        accessible through the same MCP server.</P>
+
+        <BLOCKQUOTE>
+          <P><IMG border="0" src="help/shared/tip.png" alt="" border="0"> In CLI
+          mode (<CODE>mcp-reva</CODE>), programs are imported through the
+          <CODE>import-file</CODE> tool rather than the Ghidra GUI. The CLI
+          creates a temporary project automatically.</P>
+        </BLOCKQUOTE>
+
+      </BLOCKQUOTE>
+
+      <H2><A name="ConnectingClient"></A>Connecting an MCP Client</H2>
+
+      <BLOCKQUOTE>
+
+        <P>With ReVa running and a program open, connect an MCP client to begin
+        analysis. The following example uses Claude Code, but any
+        MCP-compatible client works.</P>
+
+        <OL>
+          <LI>Ensure the ReVa server is running. In GUI mode, the server starts
+          automatically when Ghidra launches with ReVa activated.</LI>
+
+          <LI>Configure the MCP client to connect to ReVa. For Claude Code with
+          a direct HTTP connection, add the following to the MCP configuration:
+
+          <PRE>{
+  "mcpServers": {
+    "ReVa": {
+      "url": "http://localhost:8080/mcp/message"
+    }
+  }
+}</PRE></LI>
+
+          <LI>Start a conversation with the AI assistant. It now has access to
+          all of ReVa's tools and can interact with the open program.</LI>
+        </OL>
+
+        <P>To verify the connection, ask the assistant to list open programs.
+        It will call the <CODE>list-open-programs</CODE> tool and return the
+        available programs with their paths and architectures.</P>
+
+      </BLOCKQUOTE>
+
+      <H2><A name="FirstSession"></A>Your First Analysis Session</H2>
+
+      <BLOCKQUOTE>
+
+        <P>The following examples demonstrate common analysis tasks. Each
+        example shows a natural-language query and describes the tools the
+        assistant will use to answer it.</P>
+
+        <H3><A name="ExampleOverview"></A>Getting an Overview</H3>
+
+        <BLOCKQUOTE>
+
+          <P>Start by asking the assistant for a high-level overview of the
+          binary:</P>
+
+          <BLOCKQUOTE>
+            <P><I>"What does this program do? Give me an overview of its
+            functionality."</I></P>
+          </BLOCKQUOTE>
+
+          <P>The assistant will typically:</P>
+
+          <OL>
+            <LI>Call <CODE>list-open-programs</CODE> to identify available
+            programs and their architectures.</LI>
+            <LI>Call <CODE>get-strings</CODE> to survey string references for
+            clues about functionality.</LI>
+            <LI>Call <CODE>list-imports</CODE> to examine library dependencies
+            and API usage.</LI>
+            <LI>Call <CODE>list-exports</CODE> to identify the program's public
+            interface.</LI>
+            <LI>Call <CODE>get-functions</CODE> to survey named functions.</LI>
+            <LI>Decompile key functions with <CODE>get-decompilation</CODE> to
+            understand their behavior.</LI>
+          </OL>
+
+        </BLOCKQUOTE>
+
+        <H3><A name="ExampleFunction"></A>Analyzing a Function</H3>
+
+        <BLOCKQUOTE>
+
+          <P>Ask about a specific function by name or address:</P>
+
+          <BLOCKQUOTE>
+            <P><I>"Decompile the main function and explain what it does."</I></P>
+          </BLOCKQUOTE>
+
+          <BLOCKQUOTE>
+            <P><I>"What does the function at 0x00401000 do?"</I></P>
+          </BLOCKQUOTE>
+
+          <P>The assistant will decompile the function, analyze its logic, and
+          explain the behavior. It may follow cross-references to understand
+          called subroutines and data accesses.</P>
+
+        </BLOCKQUOTE>
+
+        <H3><A name="ExampleRename"></A>Renaming and Annotating</H3>
+
+        <BLOCKQUOTE>
+
+          <P>Ask the assistant to improve the database as it understands the
+          program:</P>
+
+          <BLOCKQUOTE>
+            <P><I>"Rename the variables in this function to meaningful names
+            based on their usage."</I></P>
+          </BLOCKQUOTE>
+
+          <BLOCKQUOTE>
+            <P><I>"Add a comment to 0x00401050 explaining that this is the
+            packet parsing routine."</I></P>
+          </BLOCKQUOTE>
+
+          <P>These operations modify the Ghidra program database. The changes
+          appear immediately in the CodeBrowser and persist when the program is
+          saved. All modifications can be undone with
+          <B>Edit<IMG alt="" src="help/shared/arrow.gif" border="0">Undo</B>.</P>
+
+        </BLOCKQUOTE>
+
+        <H3><A name="ExampleTracing"></A>Tracing Data Flow</H3>
+
+        <BLOCKQUOTE>
+
+          <P>Ask more complex analytical questions that require multiple tool
+          calls:</P>
+
+          <BLOCKQUOTE>
+            <P><I>"Where does the user input from recv() end up? Trace the data
+            flow forward."</I></P>
+          </BLOCKQUOTE>
+
+          <BLOCKQUOTE>
+            <P><I>"What functions call the encryption routine, and what keys do
+            they pass?"</I></P>
+          </BLOCKQUOTE>
+
+          <P>The assistant will combine cross-reference lookups, data flow
+          tracing, call graph traversal, and decompilation to answer these
+          multi-step questions.</P>
+
+        </BLOCKQUOTE>
+
+        <H3><A name="ExampleStructures"></A>Defining Structures</H3>
+
+        <BLOCKQUOTE>
+
+          <P>Ask the assistant to create and apply data types:</P>
+
+          <BLOCKQUOTE>
+            <P><I>"This function operates on a network packet. Define a C
+            structure for the packet format based on how the fields are
+            accessed."</I></P>
+          </BLOCKQUOTE>
+
+          <P>The assistant will analyze field accesses in the decompiled code,
+          define a structure using <CODE>parse-c-structure</CODE>, and apply it
+          to the relevant variables with <CODE>apply-structure</CODE>.</P>
+
+        </BLOCKQUOTE>
+
+      </BLOCKQUOTE>
+
+      <H2><A name="ProgramPath"></A>Understanding programPath</H2>
+
+      <BLOCKQUOTE>
+
+        <P>Every ReVa tool that operates on a program requires a
+        <CODE>programPath</CODE> parameter. This identifier tells the server
+        which program to act on, since multiple programs may be open
+        simultaneously.</P>
+
+        <H3><A name="ProgramPathFormat"></A>Format</H3>
+
+        <BLOCKQUOTE>
+
+          <P>The <CODE>programPath</CODE> is the Ghidra project pathname of the
+          program. It always begins with a forward slash and corresponds to the
+          program's location in the Ghidra project folder hierarchy.</P>
+
+          <TABLE border="1" cellpadding="4" cellspacing="0">
+            <TR>
+              <TH>Scenario</TH>
+              <TH>programPath</TH>
+            </TR>
+            <TR>
+              <TD>Program at project root</TD>
+              <TD><CODE>/Hatchery.exe</CODE></TD>
+            </TR>
+            <TR>
+              <TD>Program in a folder</TD>
+              <TD><CODE>/malware/sample_001.bin</CODE></TD>
+            </TR>
+            <TR>
+              <TD>Nested folder</TD>
+              <TD><CODE>/project/firmware/bootloader.elf</CODE></TD>
+            </TR>
+          </TABLE>
+
+        </BLOCKQUOTE>
+
+        <H3><A name="ProgramPathDiscovery"></A>Discovering Program Paths</H3>
+
+        <BLOCKQUOTE>
+
+          <P>To find the <CODE>programPath</CODE> for open programs, use
+          either:</P>
+
+          <UL>
+            <LI>The <CODE>list-open-programs</CODE> tool &mdash; returns all
+            open programs with their paths, architectures, and sizes.</LI>
+            <LI>The <CODE>ghidra://programs</CODE> MCP resource &mdash; provides
+            the same information through the resource interface.</LI>
+          </UL>
+
+          <P>The <CODE>programPath</CODE> returned by these tools can be passed
+          directly to any other tool that requires it.</P>
+
+          <BLOCKQUOTE>
+            <P><IMG border="0" src="help/shared/note.png" alt=""> If an incorrect
+            or misspelled <CODE>programPath</CODE> is provided, the error message
+            will include a list of available programs as suggestions.</P>
+          </BLOCKQUOTE>
+
+        </BLOCKQUOTE>
+
+        <H3><A name="ProgramPathSingleProgram"></A>Single Program Shortcut</H3>
+
+        <BLOCKQUOTE>
+
+          <P>When only one program is open, most MCP clients will automatically
+          use the correct <CODE>programPath</CODE> without the analyst needing to
+          specify it. The assistant discovers the path by calling
+          <CODE>list-open-programs</CODE> at the start of the session.</P>
+
+        </BLOCKQUOTE>
+
+      </BLOCKQUOTE>
+
+      <H2><A name="Pagination"></A>Pagination</H2>
+
+      <BLOCKQUOTE>
+
+        <P>Tools that return large result sets use pagination to avoid
+        overwhelming the MCP client with data. This applies to tools such as
+        <CODE>get-functions</CODE>, <CODE>get-strings</CODE>,
+        <CODE>get-symbols</CODE>, and others that can return thousands of
+        results.</P>
+
+        <H3><A name="PaginationParameters"></A>Pagination Parameters</H3>
+
+        <BLOCKQUOTE>
+
+          <P>Paginated tools accept the following parameters:</P>
+
+          <TABLE border="1" cellpadding="4" cellspacing="0">
+            <TR>
+              <TH>Parameter</TH>
+              <TH>Description</TH>
+            </TR>
+            <TR>
+              <TD><CODE>offset</CODE></TD>
+              <TD>The starting index (zero-based). Defaults to 0.</TD>
+            </TR>
+            <TR>
+              <TD><CODE>limit</CODE></TD>
+              <TD>The maximum number of results to return. Tools define
+              sensible defaults (commonly 100).</TD>
+            </TR>
+          </TABLE>
+
+        </BLOCKQUOTE>
+
+        <H3><A name="PaginationResponse"></A>Pagination in Responses</H3>
+
+        <BLOCKQUOTE>
+
+          <P>Paginated responses include metadata indicating the total number
+          of available results and whether more results exist beyond the current
+          page. The AI assistant handles pagination automatically, requesting
+          additional pages when needed to answer a question.</P>
+
+          <BLOCKQUOTE>
+            <P><IMG border="0" src="help/shared/tip.png" alt="" border="0">
+            For large programs with many functions or strings, the assistant
+            may use search and filter parameters to narrow results instead of
+            paginating through the entire list. For example,
+            <CODE>get-strings</CODE> accepts a search term, and
+            <CODE>get-functions</CODE> can filter by name pattern.</P>
+          </BLOCKQUOTE>
+
+        </BLOCKQUOTE>
+
+      </BLOCKQUOTE>
+
+      <H2><A name="EffectivePrompts"></A>Tips for Effective Prompts</H2>
+
+      <BLOCKQUOTE>
+
+        <P>The quality of AI-assisted analysis depends significantly on how
+        questions are framed. The following guidelines help produce better
+        results.</P>
+
+        <H3><A name="TipSpecific"></A>Be Specific About Goals</H3>
+
+        <BLOCKQUOTE>
+
+          <P>Specific questions produce better results than vague ones.
+          Compare:</P>
+
+          <TABLE border="1" cellpadding="4" cellspacing="0">
+            <TR>
+              <TH>Less Effective</TH>
+              <TH>More Effective</TH>
+            </TR>
+            <TR>
+              <TD><I>"Analyze this binary."</I></TD>
+              <TD><I>"Identify the network protocol used by this binary and
+              document the message format."</I></TD>
+            </TR>
+            <TR>
+              <TD><I>"What does this function do?"</I></TD>
+              <TD><I>"What cryptographic algorithm does the function at
+              0x004023A0 implement? Check for known constants."</I></TD>
+            </TR>
+            <TR>
+              <TD><I>"Find vulnerabilities."</I></TD>
+              <TD><I>"Check whether the input buffer at 0x00401200 has proper
+              bounds checking before the memcpy call."</I></TD>
+            </TR>
+          </TABLE>
+
+        </BLOCKQUOTE>
+
+        <H3><A name="TipContext"></A>Provide Context</H3>
+
+        <BLOCKQUOTE>
+
+          <P>Share what is already known about the binary. The assistant
+          cannot read the analyst's mind, but it can use prior knowledge to
+          focus its analysis:</P>
+
+          <UL>
+            <LI><I>"This is a Linux ELF binary from an IoT camera. It appears
+            to implement a custom protocol on port 5000."</I></LI>
+            <LI><I>"I believe the function at 0x00408100 is a hash function
+            based on the constants I see. Can you confirm which algorithm it
+            is?"</I></LI>
+            <LI><I>"This malware sample was caught by our EDR doing DNS
+            tunneling. Help me find the DNS encoding routine."</I></LI>
+          </UL>
+
+        </BLOCKQUOTE>
+
+        <H3><A name="TipIterative"></A>Work Iteratively</H3>
+
+        <BLOCKQUOTE>
+
+          <P>Complex analysis is best done in stages. Start with broad
+          questions to orient, then drill into specific areas of interest:</P>
+
+          <OL>
+            <LI><I>"List the imported functions. What libraries does this use?"</I></LI>
+            <LI><I>"I see it imports OpenSSL. Which functions call SSL_read?"</I></LI>
+            <LI><I>"Decompile the function that calls SSL_read and trace where
+            the received data goes."</I></LI>
+            <LI><I>"Rename the variables in that function based on your analysis
+            and add a summary comment."</I></LI>
+          </OL>
+
+          <P>Each step builds on the previous one, and the assistant maintains
+          context across the conversation.</P>
+
+        </BLOCKQUOTE>
+
+        <H3><A name="TipAnnotate"></A>Annotate as You Go</H3>
+
+        <BLOCKQUOTE>
+
+          <P>Ask the assistant to annotate the database during analysis rather
+          than only at the end. Renamed functions, typed variables, and
+          comments persist in the Ghidra project and improve subsequent
+          analysis &mdash; both for the AI assistant and for human analysts
+          reviewing the work later.</P>
+
+          <BLOCKQUOTE>
+            <P><IMG border="0" src="help/shared/tip.png" alt="" border="0">
+            Ask the assistant to use bookmarks to mark locations of interest
+            during analysis. Bookmarks are searchable and appear in Ghidra's
+            Bookmark window, making them easy to review.</P>
+          </BLOCKQUOTE>
+
+        </BLOCKQUOTE>
+
+        <H3><A name="TipVerify"></A>Verify and Correct</H3>
+
+        <BLOCKQUOTE>
+
+          <P>AI analysis is not infallible. The assistant may misidentify
+          algorithms, misinterpret data structures, or draw incorrect
+          conclusions. Treat the assistant's output as a starting point, not
+          a final answer:</P>
+
+          <UL>
+            <LI>Cross-check decompilation output against the disassembly in
+            the CodeBrowser.</LI>
+            <LI>Verify renamed variables and applied types make sense in
+            context.</LI>
+            <LI>If the assistant makes a mistake, correct it. The correction
+            improves subsequent analysis within the same session.</LI>
+            <LI>Use <B>Edit<IMG alt="" src="help/shared/arrow.gif"
+            border="0">Undo</B> to revert any unwanted changes.</LI>
+          </UL>
+
+        </BLOCKQUOTE>
+
+      </BLOCKQUOTE>
+
+    </BLOCKQUOTE>
+
+    <P class="providedbyplugin">Provided by: <I>ReVa</I></P>
+
+    <P class="relatedtopic">Related Topics</P>
+
+    <UL>
+      <LI><A href="ReVa_overview.html">ReVa Overview</A></LI>
+      <LI><A href="ReVa_installation.html">Installation and Setup</A></LI>
+    </UL>
+
+  </BODY>
+</HTML>

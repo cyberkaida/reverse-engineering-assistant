@@ -1,0 +1,687 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+
+<HTML>
+  <HEAD>
+    <META name="generator" content=
+    "HTML Tidy for Java (vers. 2009-12-01), see jtidy.sourceforge.net">
+    <META http-equiv="Content-Language" content="en-us">
+    <META http-equiv="Content-Type" content="text/html; charset=windows-1252">
+
+    <TITLE>ReVa Function Management Tools</TITLE>
+    <LINK rel="stylesheet" type="text/css" href="help/shared/DefaultStyle.css">
+  </HEAD>
+
+  <BODY>
+
+    <H1 align="center" style="color: navy;"><a name="FunctionTools"></a>ReVa Function
+    Management Tools</H1>
+
+    <P>The ReVa function management tools provide MCP-accessible interfaces for listing,
+    searching, creating, and modifying functions in a Ghidra program. These tools support
+    pagination for large binaries, similarity-based search, prototype editing, tag management,
+    and discovery of undefined function candidates.</P>
+
+    <!-- ======================================================================== -->
+
+    <H2 style="color: brown;"><a name="GetFunctionCount"></a>get-function-count</H2>
+
+    <P>Return the total number of functions in a program. Use this tool before paginating
+    through functions with <CODE>get-functions</CODE> to determine the total result set
+    size.</P>
+
+    <H3 style="color: blue;">Parameters</H3>
+
+    <BLOCKQUOTE>
+      <TABLE border="1" cellpadding="4" cellspacing="0" width="100%">
+        <TR>
+          <TH>Parameter</TH>
+          <TH>Type</TH>
+          <TH>Required</TH>
+          <TH>Default</TH>
+          <TH>Description</TH>
+        </TR>
+        <TR>
+          <TD><CODE>programPath</CODE></TD>
+          <TD>string</TD>
+          <TD>Yes</TD>
+          <TD>&mdash;</TD>
+          <TD>Path in the Ghidra Project to the program.</TD>
+        </TR>
+        <TR>
+          <TD><CODE>filterDefaultNames</CODE></TD>
+          <TD>boolean</TD>
+          <TD>No</TD>
+          <TD>true</TD>
+          <TD>Exclude functions with Ghidra-generated default names (FUN_, DAT_, etc.)
+          from the count.</TD>
+        </TR>
+      </TABLE>
+    </BLOCKQUOTE>
+
+    <H3 style="color: blue;">Return Value</H3>
+
+    <BLOCKQUOTE>
+      <P>Returns a JSON object containing:</P>
+      <UL>
+        <LI><CODE>count</CODE> &mdash; Total number of functions matching the filter
+        criteria.</LI>
+        <LI><CODE>success</CODE> &mdash; Boolean indicating the operation completed.</LI>
+      </UL>
+    </BLOCKQUOTE>
+
+    <P><IMG src="help/shared/note.png" alt="Note"> A warning is logged if this operation takes
+    longer than 5 seconds, which may occur on very large binaries.</P>
+
+    <!-- ======================================================================== -->
+
+    <H2 style="color: brown;"><a name="GetFunctions"></a>get-functions</H2>
+
+    <P>List functions in a program with pagination, filtering, and optional verbose output.
+    In compact mode (default), returns a summary of each function. In verbose mode, returns
+    full details including signatures, parameters, and calling convention.</P>
+
+    <H3 style="color: blue;">Parameters</H3>
+
+    <BLOCKQUOTE>
+      <TABLE border="1" cellpadding="4" cellspacing="0" width="100%">
+        <TR>
+          <TH>Parameter</TH>
+          <TH>Type</TH>
+          <TH>Required</TH>
+          <TH>Default</TH>
+          <TH>Description</TH>
+        </TR>
+        <TR>
+          <TD><CODE>programPath</CODE></TD>
+          <TD>string</TD>
+          <TD>Yes</TD>
+          <TD>&mdash;</TD>
+          <TD>Path in the Ghidra Project to the program.</TD>
+        </TR>
+        <TR>
+          <TD><CODE>filterDefaultNames</CODE></TD>
+          <TD>boolean</TD>
+          <TD>No</TD>
+          <TD>true</TD>
+          <TD>Exclude functions with Ghidra-generated default names.</TD>
+        </TR>
+        <TR>
+          <TD><CODE>filterByTag</CODE></TD>
+          <TD>string</TD>
+          <TD>No</TD>
+          <TD>&mdash;</TD>
+          <TD>Only return functions that have this specific tag. Mutually exclusive with
+          <CODE>untagged</CODE>.</TD>
+        </TR>
+        <TR>
+          <TD><CODE>untagged</CODE></TD>
+          <TD>boolean</TD>
+          <TD>No</TD>
+          <TD>false</TD>
+          <TD>Only return functions that have no tags. Mutually exclusive with
+          <CODE>filterByTag</CODE>.</TD>
+        </TR>
+        <TR>
+          <TD><CODE>verbose</CODE></TD>
+          <TD>boolean</TD>
+          <TD>No</TD>
+          <TD>false</TD>
+          <TD>Return full function details instead of compact summaries.</TD>
+        </TR>
+        <TR>
+          <TD><CODE>startIndex</CODE></TD>
+          <TD>integer</TD>
+          <TD>No</TD>
+          <TD>0</TD>
+          <TD>Pagination start index (0-based).</TD>
+        </TR>
+        <TR>
+          <TD><CODE>maxCount</CODE></TD>
+          <TD>integer</TD>
+          <TD>No</TD>
+          <TD>100</TD>
+          <TD>Maximum number of functions to return per page. Recommended: 100 or
+          fewer.</TD>
+        </TR>
+      </TABLE>
+    </BLOCKQUOTE>
+
+    <H3 style="color: blue;">Return Value</H3>
+
+    <BLOCKQUOTE>
+      <P>Returns a multi-JSON response. The first object is a metadata header:</P>
+      <UL>
+        <LI><CODE>startIndex</CODE>, <CODE>requestedCount</CODE>,
+        <CODE>actualCount</CODE>, <CODE>nextStartIndex</CODE>,
+        <CODE>totalCount</CODE> &mdash; Pagination state.</LI>
+        <LI><CODE>filterDefaultNames</CODE>, <CODE>verbose</CODE> &mdash; Active filter
+        settings.</LI>
+        <LI><CODE>filterByTag</CODE> &mdash; (Present only when filtering by tag.)</LI>
+        <LI><CODE>untagged</CODE> &mdash; (Present only when filtering for untagged
+        functions.)</LI>
+      </UL>
+
+      <P><B>Compact mode</B> (default) function objects contain:</P>
+      <UL>
+        <LI><CODE>name</CODE>, <CODE>address</CODE>, <CODE>sizeInBytes</CODE></LI>
+        <LI><CODE>tags</CODE> &mdash; Alphabetically sorted list of tags.</LI>
+        <LI><CODE>callerCount</CODE>, <CODE>calleeCount</CODE> &mdash; Number of callers
+        and callees. A value of <CODE>-1</CODE> indicates the count timed out.</LI>
+      </UL>
+
+      <P><B>Verbose mode</B> function objects additionally contain:</P>
+      <UL>
+        <LI><CODE>signature</CODE>, <CODE>returnType</CODE>,
+        <CODE>callingConvention</CODE></LI>
+        <LI><CODE>isExternal</CODE>, <CODE>isThunk</CODE>,
+        <CODE>isDefaultName</CODE></LI>
+        <LI><CODE>parameters</CODE> &mdash; Array of parameter objects with
+        <CODE>name</CODE> and <CODE>dataType</CODE>.</LI>
+        <LI><CODE>endAddress</CODE></LI>
+      </UL>
+    </BLOCKQUOTE>
+
+    <H3 style="color: blue;">Caching</H3>
+
+    <BLOCKQUOTE>
+      <P>Function listing results are cached for 10 minutes with a maximum of 10 cached
+      entries (keyed by program path and filter settings). The cache is automatically
+      invalidated when the program is closed or when function tags are modified.</P>
+    </BLOCKQUOTE>
+
+    <!-- ======================================================================== -->
+
+    <H2 style="color: brown;"><a name="GetFunctionsBySimilarity"></a>get-functions-by-similarity</H2>
+
+    <P>List functions sorted by name similarity to a search string. Uses Longest Common
+    Substring (LCS) scoring to find functions with names similar to the search term, even
+    when the exact name is unknown. This is useful for locating functions when you know an
+    approximate name or naming convention.</P>
+
+    <H3 style="color: blue;">Parameters</H3>
+
+    <BLOCKQUOTE>
+      <TABLE border="1" cellpadding="4" cellspacing="0" width="100%">
+        <TR>
+          <TH>Parameter</TH>
+          <TH>Type</TH>
+          <TH>Required</TH>
+          <TH>Default</TH>
+          <TH>Description</TH>
+        </TR>
+        <TR>
+          <TD><CODE>programPath</CODE></TD>
+          <TD>string</TD>
+          <TD>Yes</TD>
+          <TD>&mdash;</TD>
+          <TD>Path in the Ghidra Project to the program.</TD>
+        </TR>
+        <TR>
+          <TD><CODE>searchString</CODE></TD>
+          <TD>string</TD>
+          <TD>Yes</TD>
+          <TD>&mdash;</TD>
+          <TD>The function name or partial name to match against.</TD>
+        </TR>
+        <TR>
+          <TD><CODE>filterDefaultNames</CODE></TD>
+          <TD>boolean</TD>
+          <TD>No</TD>
+          <TD>true</TD>
+          <TD>Exclude functions with Ghidra-generated default names.</TD>
+        </TR>
+        <TR>
+          <TD><CODE>startIndex</CODE></TD>
+          <TD>integer</TD>
+          <TD>No</TD>
+          <TD>0</TD>
+          <TD>Pagination start index (0-based).</TD>
+        </TR>
+        <TR>
+          <TD><CODE>maxCount</CODE></TD>
+          <TD>integer</TD>
+          <TD>No</TD>
+          <TD>100</TD>
+          <TD>Maximum number of functions to return per page.</TD>
+        </TR>
+        <TR>
+          <TD><CODE>verbose</CODE></TD>
+          <TD>boolean</TD>
+          <TD>No</TD>
+          <TD>false</TD>
+          <TD>Return full function details instead of compact summaries.</TD>
+        </TR>
+      </TABLE>
+    </BLOCKQUOTE>
+
+    <H3 style="color: blue;">Return Value</H3>
+
+    <BLOCKQUOTE>
+      <P>Returns a multi-JSON response. The metadata header includes:</P>
+      <UL>
+        <LI><CODE>searchString</CODE> &mdash; The search term used.</LI>
+        <LI><CODE>startIndex</CODE>, <CODE>requestedCount</CODE>,
+        <CODE>actualCount</CODE>, <CODE>nextStartIndex</CODE>,
+        <CODE>totalMatchingFunctions</CODE> &mdash; Pagination state.</LI>
+        <LI><CODE>cacheHit</CODE> &mdash; Whether results were served from cache.</LI>
+        <LI><CODE>resultsTruncated</CODE>, <CODE>maxCachedResults</CODE> &mdash; Present
+        when the result set exceeds the 2,000-entry cache limit.</LI>
+      </UL>
+
+      <P>Each function object includes a <CODE>similarity</CODE> field (0.0 to 1.0, rounded
+      to 2 decimal places) in addition to the standard compact or verbose fields. Functions
+      are sorted by descending similarity score.</P>
+    </BLOCKQUOTE>
+
+    <H3 style="color: blue;">Search Algorithm</H3>
+
+    <BLOCKQUOTE>
+      <P>The similarity search uses a two-phase optimization strategy:</P>
+      <OL>
+        <LI><B>Phase 1 &mdash; Substring pre-filter:</B> Functions whose names contain the
+        search string as a substring are immediately prioritized.</LI>
+        <LI><B>Phase 2 &mdash; LCS sorting:</B> Substring matches are sorted first. If
+        fewer than 1,000 substring matches are found, non-matches are also LCS-sorted and
+        appended.</LI>
+      </OL>
+      <P>Results are cached for 10 minutes (up to 50 cache entries, 2,000 results per
+      search). The search has a 120-second timeout.</P>
+    </BLOCKQUOTE>
+
+    <P><IMG src="help/shared/tip.png" alt="Tip"> If you know part of a function's name but
+    not the exact spelling or prefix, this tool is more effective than
+    <CODE>get-functions</CODE> with manual filtering.</P>
+
+    <!-- ======================================================================== -->
+
+    <H2 style="color: brown;"><a name="SetFunctionPrototype"></a>set-function-prototype</H2>
+
+    <P>Set or update a function's prototype using a C-style signature string. This modifies
+    the function's return type, name, parameters, and optionally its calling convention.</P>
+
+    <H3 style="color: blue;">Parameters</H3>
+
+    <BLOCKQUOTE>
+      <TABLE border="1" cellpadding="4" cellspacing="0" width="100%">
+        <TR>
+          <TH>Parameter</TH>
+          <TH>Type</TH>
+          <TH>Required</TH>
+          <TH>Default</TH>
+          <TH>Description</TH>
+        </TR>
+        <TR>
+          <TD><CODE>programPath</CODE></TD>
+          <TD>string</TD>
+          <TD>Yes</TD>
+          <TD>&mdash;</TD>
+          <TD>Path in the Ghidra Project to the program.</TD>
+        </TR>
+        <TR>
+          <TD><CODE>location</CODE></TD>
+          <TD>string</TD>
+          <TD>Yes</TD>
+          <TD>&mdash;</TD>
+          <TD>Address or symbol name of the function (e.g., "0x401000" or "main").</TD>
+        </TR>
+        <TR>
+          <TD><CODE>signature</CODE></TD>
+          <TD>string</TD>
+          <TD>Yes</TD>
+          <TD>&mdash;</TD>
+          <TD>C-style function signature. Example:
+          <CODE>"int main(int argc, char** argv)"</CODE>. Whitespace around pointer
+          symbols is automatically normalized.</TD>
+        </TR>
+        <TR>
+          <TD><CODE>createIfNotExists</CODE></TD>
+          <TD>boolean</TD>
+          <TD>No</TD>
+          <TD>true</TD>
+          <TD>If no function exists at the address, create one before applying the
+          signature.</TD>
+        </TR>
+      </TABLE>
+    </BLOCKQUOTE>
+
+    <H3 style="color: blue;">Return Value</H3>
+
+    <BLOCKQUOTE>
+      <P>Returns a JSON object containing:</P>
+      <UL>
+        <LI><CODE>success</CODE> &mdash; Boolean indicating the prototype was applied.</LI>
+        <LI><CODE>created</CODE> &mdash; Boolean indicating whether a new function was
+        created.</LI>
+        <LI><CODE>address</CODE> &mdash; Address of the function.</LI>
+        <LI><CODE>parsedSignature</CODE> &mdash; The parsed and normalized signature
+        string.</LI>
+        <LI><CODE>customStorageEnabled</CODE>, <CODE>usingCustomStorage</CODE> &mdash;
+        Whether custom storage was needed (e.g., when modifying auto-parameters like
+        <CODE>this</CODE> in <CODE>__thiscall</CODE>).</LI>
+        <LI><CODE>function</CODE> &mdash; Full function information object.</LI>
+      </UL>
+    </BLOCKQUOTE>
+
+    <H3 style="color: blue;">Error Handling</H3>
+
+    <BLOCKQUOTE>
+      <P>If a data type in the signature cannot be resolved, the error message includes a
+      helpful hint suggesting you use basic types (e.g., <CODE>void*</CODE> instead of
+      <CODE>FILE*</CODE>) or ensure the required data type archive is loaded.</P>
+    </BLOCKQUOTE>
+
+    <P><IMG src="help/shared/note.png" alt="Note"> Whitespace around pointer symbols is
+    automatically normalized (e.g., <CODE>"char *func("</CODE> becomes
+    <CODE>"char* func("</CODE>). You do not need to worry about exact whitespace
+    formatting.</P>
+
+    <!-- ======================================================================== -->
+
+    <H2 style="color: brown;"><a name="GetUndefinedFunctionCandidates"></a>get-undefined-function-candidates</H2>
+
+    <P>Find addresses that are referenced by code (via calls or data references) but have not
+    been defined as functions. These are likely functions that Ghidra's auto-analysis missed.
+    Use this tool to discover additional code for analysis.</P>
+
+    <H3 style="color: blue;">Parameters</H3>
+
+    <BLOCKQUOTE>
+      <TABLE border="1" cellpadding="4" cellspacing="0" width="100%">
+        <TR>
+          <TH>Parameter</TH>
+          <TH>Type</TH>
+          <TH>Required</TH>
+          <TH>Default</TH>
+          <TH>Description</TH>
+        </TR>
+        <TR>
+          <TD><CODE>programPath</CODE></TD>
+          <TD>string</TD>
+          <TD>Yes</TD>
+          <TD>&mdash;</TD>
+          <TD>Path in the Ghidra Project to the program.</TD>
+        </TR>
+        <TR>
+          <TD><CODE>maxCandidates</CODE></TD>
+          <TD>integer</TD>
+          <TD>No</TD>
+          <TD>100</TD>
+          <TD>Maximum number of candidates to return.</TD>
+        </TR>
+        <TR>
+          <TD><CODE>startIndex</CODE></TD>
+          <TD>integer</TD>
+          <TD>No</TD>
+          <TD>0</TD>
+          <TD>Pagination start index (0-based).</TD>
+        </TR>
+        <TR>
+          <TD><CODE>minReferenceCount</CODE></TD>
+          <TD>integer</TD>
+          <TD>No</TD>
+          <TD>1</TD>
+          <TD>Minimum number of references required for an address to be considered a
+          candidate.</TD>
+        </TR>
+      </TABLE>
+    </BLOCKQUOTE>
+
+    <H3 style="color: blue;">Return Value</H3>
+
+    <BLOCKQUOTE>
+      <P>Returns a JSON object containing:</P>
+      <UL>
+        <LI><CODE>candidates</CODE> &mdash; Array of candidate objects, each with:
+          <UL>
+            <LI><CODE>address</CODE> &mdash; The candidate address.</LI>
+            <LI><CODE>referenceCount</CODE> &mdash; How many references point to this
+            address.</LI>
+            <LI><CODE>hasCallReference</CODE> &mdash; Whether any reference is a call.</LI>
+            <LI><CODE>hasDataReference</CODE> &mdash; Whether any reference is a data
+            access.</LI>
+            <LI><CODE>sampleReferences</CODE> &mdash; Up to 5 example callers with
+            function names and addresses.</LI>
+            <LI><CODE>memoryBlock</CODE> &mdash; Name of the memory block containing the
+            address.</LI>
+            <LI><CODE>existingSymbol</CODE> &mdash; (Optional) Name of any existing
+            symbol at the address.</LI>
+          </UL>
+        </LI>
+        <LI><CODE>totalCandidates</CODE> &mdash; Total number of candidates found.</LI>
+        <LI><CODE>referencesScanned</CODE> &mdash; Number of references examined.</LI>
+        <LI><CODE>earlyTermination</CODE> &mdash; (Present if true) Indicates scanning
+        stopped after reaching the 10,000-candidate safety limit.</LI>
+        <LI><CODE>pagination</CODE> &mdash; Object with <CODE>startIndex</CODE>,
+        <CODE>maxCandidates</CODE>, <CODE>returnedCount</CODE>, and
+        <CODE>hasMore</CODE>.</LI>
+      </UL>
+    </BLOCKQUOTE>
+
+    <H3 style="color: blue;">Filtering Criteria</H3>
+
+    <BLOCKQUOTE>
+      <P>The tool scans all CALL and DATA references in the program and excludes addresses
+      that:</P>
+      <UL>
+        <LI>Already have a defined function.</LI>
+        <LI>Are in external memory space.</LI>
+        <LI>Are in non-executable memory.</LI>
+        <LI>Are in linker-related blocks (<CODE>.plt</CODE>, <CODE>.got</CODE>,
+        <CODE>.idata</CODE>, <CODE>.edata</CODE>, <CODE>extern</CODE>,
+        <CODE>external</CODE>).</LI>
+        <LI>Do not contain a valid instruction (indicating unanalyzed data).</LI>
+      </UL>
+    </BLOCKQUOTE>
+
+    <P><IMG src="help/shared/tip.png" alt="Tip"> After identifying candidates, use
+    <CODE>create-function</CODE> to define them as functions, then
+    <CODE>get-decompilation</CODE> to analyze them.</P>
+
+    <!-- ======================================================================== -->
+
+    <H2 style="color: brown;"><a name="CreateFunction"></a>create-function</H2>
+
+    <P>Create a new function at the specified address. Ghidra automatically detects the
+    function boundaries based on code flow analysis. The address must contain a valid
+    instruction in executable memory.</P>
+
+    <H3 style="color: blue;">Parameters</H3>
+
+    <BLOCKQUOTE>
+      <TABLE border="1" cellpadding="4" cellspacing="0" width="100%">
+        <TR>
+          <TH>Parameter</TH>
+          <TH>Type</TH>
+          <TH>Required</TH>
+          <TH>Default</TH>
+          <TH>Description</TH>
+        </TR>
+        <TR>
+          <TD><CODE>programPath</CODE></TD>
+          <TD>string</TD>
+          <TD>Yes</TD>
+          <TD>&mdash;</TD>
+          <TD>Path in the Ghidra Project to the program.</TD>
+        </TR>
+        <TR>
+          <TD><CODE>address</CODE></TD>
+          <TD>string</TD>
+          <TD>Yes</TD>
+          <TD>&mdash;</TD>
+          <TD>Address where the function should start, in hex (e.g., "0x401000").</TD>
+        </TR>
+        <TR>
+          <TD><CODE>name</CODE></TD>
+          <TD>string</TD>
+          <TD>No</TD>
+          <TD>&mdash;</TD>
+          <TD>Custom name for the function. If omitted, Ghidra assigns a default name
+          (e.g., <CODE>FUN_00401000</CODE>).</TD>
+        </TR>
+      </TABLE>
+    </BLOCKQUOTE>
+
+    <H3 style="color: blue;">Return Value</H3>
+
+    <BLOCKQUOTE>
+      <P>Returns a JSON object containing:</P>
+      <UL>
+        <LI><CODE>success</CODE> &mdash; Boolean indicating the function was created.</LI>
+        <LI><CODE>created</CODE> &mdash; Always true on success.</LI>
+        <LI><CODE>address</CODE> &mdash; Address of the created function.</LI>
+        <LI><CODE>nameWasProvided</CODE> &mdash; Whether a custom name was given.</LI>
+        <LI><CODE>function</CODE> &mdash; Full function information object for the newly
+        created function.</LI>
+      </UL>
+    </BLOCKQUOTE>
+
+    <H3 style="color: blue;">Error Conditions</H3>
+
+    <BLOCKQUOTE>
+      <UL>
+        <LI>If a function already exists at the address, the operation fails.</LI>
+        <LI>If no instruction exists at the address, the error suggests running
+        disassembly first.</LI>
+        <LI>The address must be in executable memory.</LI>
+        <LI>If a custom name conflicts with an existing symbol, the function is created
+        with Ghidra's default name and a warning is logged.</LI>
+      </UL>
+    </BLOCKQUOTE>
+
+    <!-- ======================================================================== -->
+
+    <H2 style="color: brown;"><a name="FunctionTags"></a>function-tags</H2>
+
+    <P>Manage function tags for organizing and categorizing functions in a program. Supports
+    five modes of operation: get, set, add, remove, and list.</P>
+
+    <H3 style="color: blue;">Parameters</H3>
+
+    <BLOCKQUOTE>
+      <TABLE border="1" cellpadding="4" cellspacing="0" width="100%">
+        <TR>
+          <TH>Parameter</TH>
+          <TH>Type</TH>
+          <TH>Required</TH>
+          <TH>Default</TH>
+          <TH>Description</TH>
+        </TR>
+        <TR>
+          <TD><CODE>programPath</CODE></TD>
+          <TD>string</TD>
+          <TD>Yes</TD>
+          <TD>&mdash;</TD>
+          <TD>Path in the Ghidra Project to the program.</TD>
+        </TR>
+        <TR>
+          <TD><CODE>mode</CODE></TD>
+          <TD>string</TD>
+          <TD>Yes</TD>
+          <TD>&mdash;</TD>
+          <TD>Operation mode. One of: <CODE>"get"</CODE>, <CODE>"set"</CODE>,
+          <CODE>"add"</CODE>, <CODE>"remove"</CODE>, or <CODE>"list"</CODE>.</TD>
+        </TR>
+        <TR>
+          <TD><CODE>function</CODE></TD>
+          <TD>string</TD>
+          <TD>Conditional</TD>
+          <TD>&mdash;</TD>
+          <TD>Function name or address. Required for all modes except
+          <CODE>"list"</CODE>.</TD>
+        </TR>
+        <TR>
+          <TD><CODE>tags</CODE></TD>
+          <TD>array of strings</TD>
+          <TD>No</TD>
+          <TD>&mdash;</TD>
+          <TD>Tag names to operate on. Used by <CODE>"set"</CODE>, <CODE>"add"</CODE>,
+          and <CODE>"remove"</CODE> modes. Empty or whitespace-only tag names are
+          automatically filtered out.</TD>
+        </TR>
+      </TABLE>
+    </BLOCKQUOTE>
+
+    <H3 style="color: blue;">Modes of Operation</H3>
+
+    <BLOCKQUOTE>
+      <TABLE border="1" cellpadding="4" cellspacing="0" width="100%">
+        <TR>
+          <TH>Mode</TH>
+          <TH>Behavior</TH>
+          <TH>Requires <CODE>function</CODE></TH>
+          <TH>Requires <CODE>tags</CODE></TH>
+        </TR>
+        <TR>
+          <TD><CODE>get</CODE></TD>
+          <TD>Return all tags on the specified function.</TD>
+          <TD>Yes</TD>
+          <TD>No</TD>
+        </TR>
+        <TR>
+          <TD><CODE>set</CODE></TD>
+          <TD>Replace all tags on the function with the specified tags. Pass an empty
+          array to clear all tags.</TD>
+          <TD>Yes</TD>
+          <TD>Yes</TD>
+        </TR>
+        <TR>
+          <TD><CODE>add</CODE></TD>
+          <TD>Add the specified tags to the function's existing tags.</TD>
+          <TD>Yes</TD>
+          <TD>Yes</TD>
+        </TR>
+        <TR>
+          <TD><CODE>remove</CODE></TD>
+          <TD>Remove the specified tags from the function.</TD>
+          <TD>Yes</TD>
+          <TD>Yes</TD>
+        </TR>
+        <TR>
+          <TD><CODE>list</CODE></TD>
+          <TD>List all tags defined in the program with usage counts.</TD>
+          <TD>No</TD>
+          <TD>No</TD>
+        </TR>
+      </TABLE>
+    </BLOCKQUOTE>
+
+    <H3 style="color: blue;">Return Value</H3>
+
+    <BLOCKQUOTE>
+      <P><B>For <CODE>list</CODE> mode:</B></P>
+      <UL>
+        <LI><CODE>tags</CODE> &mdash; Array of tag objects with <CODE>name</CODE>,
+        <CODE>count</CODE> (number of functions using the tag), and optional
+        <CODE>comment</CODE>.</LI>
+        <LI><CODE>totalTags</CODE> &mdash; Total number of distinct tags.</LI>
+      </UL>
+
+      <P><B>For all other modes:</B></P>
+      <UL>
+        <LI><CODE>mode</CODE> &mdash; The mode that was executed.</LI>
+        <LI><CODE>function</CODE> &mdash; Name of the function.</LI>
+        <LI><CODE>address</CODE> &mdash; Address of the function.</LI>
+        <LI><CODE>tags</CODE> &mdash; Alphabetically sorted array of the function's
+        current tags after the operation.</LI>
+      </UL>
+    </BLOCKQUOTE>
+
+    <P><IMG src="help/shared/note.png" alt="Note"> Modifying tags (set, add, remove) clears
+    both the function info cache and the similarity search cache. This ensures subsequent
+    queries reflect the updated tag state.</P>
+
+    <!-- ======================================================================== -->
+
+    <BR>
+    <P style="color: gray; font-size: small;">Provided by: ReVa (Reverse Engineering
+    Assistant)</P>
+
+    <H2 style="color: purple;"><a name="RelatedTopics"></a>Related Topics</H2>
+    <UL>
+      <LI><A href="ReVa_decompiler_tools.html">Decompiler &amp; Code Analysis Tools</A></LI>
+      <LI><A href="ReVa_xref_tools.html">Cross-References &amp; Data Flow Tools</A></LI>
+      <LI><A href="ReVa_callgraph_tools.html">Call Graph Analysis Tools</A></LI>
+    </UL>
+
+  </BODY>
+</HTML>

@@ -1,0 +1,590 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+
+<HTML>
+  <HEAD>
+    <META name="generator" content=
+    "HTML Tidy for Java (vers. 2009-12-01), see jtidy.sourceforge.net">
+    <META http-equiv="Content-Language" content="en-us">
+    <META http-equiv="Content-Type" content="text/html; charset=windows-1252">
+
+    <TITLE>ReVa Architecture &amp; Concepts</TITLE>
+    <LINK rel="stylesheet" type="text/css" href="help/shared/DefaultStyle.css">
+  </HEAD>
+
+  <BODY>
+    <H1><A name="ReVaConcepts"></A><CENTER>ReVa Architecture &amp; Concepts</CENTER></H1>
+
+    <BLOCKQUOTE>
+      <P>This page describes the internal architecture, communication protocols, and key design
+      decisions behind the ReVa (Reverse Engineering Assistant) extension. Understanding these
+      concepts will help you work with ReVa more effectively and troubleshoot any issues that
+      arise.</P>
+    </BLOCKQUOTE>
+
+    <!-- ==================== MCP Protocol ==================== -->
+
+    <H2><A name="McpProtocol"></A>The Model Context Protocol (MCP)</H2>
+
+    <BLOCKQUOTE>
+      <P>ReVa communicates with AI assistants using the
+      <B>Model Context Protocol (MCP)</B>, an open standard for connecting AI models to external
+      tools and data sources. MCP defines how tools are discovered, invoked, and how results are
+      returned, providing a structured interface between the AI assistant and Ghidra's analysis
+      capabilities.</P>
+
+      <H3><A name="McpTransport"></A>Streamable HTTP Transport</H3>
+
+      <BLOCKQUOTE>
+        <P>ReVa uses the <B>Streamable HTTP</B> transport, which provides a modern,
+        session-aware connection over standard HTTP. This is <I>not</I> the older Server-Sent
+        Events (SSE) transport &mdash; ReVa uses a forked version of the MCP SDK's streamable
+        transport provider with fixes for session stability.</P>
+
+        <P>The transport works as follows:</P>
+
+        <OL>
+          <LI>A client sends an HTTP POST request to the MCP endpoint.</LI>
+          <LI>The server processes the request and returns a response, optionally streaming
+          results via chunked transfer encoding.</LI>
+          <LI>Sessions are maintained across requests, allowing the server to track client
+          state.</LI>
+        </OL>
+
+        <P><IMG src="help/shared/note.png" alt="Note"> The default MCP endpoint is
+        <CODE>http://localhost:8080/mcp/message</CODE>. The port and host are configurable
+        through the ReVa plugin options (default host: <CODE>127.0.0.1</CODE>, default port:
+        <CODE>8080</CODE>).</P>
+      </BLOCKQUOTE>
+
+      <H3><A name="McpClients"></A>Multiple Simultaneous Clients</H3>
+
+      <BLOCKQUOTE>
+        <P>The MCP server supports multiple clients connecting simultaneously. Each client
+        establishes its own session, and all clients have access to the same set of tools and
+        programs. This means you can have multiple AI assistants or scripts connected to the same
+        Ghidra instance at once.</P>
+
+        <P><IMG src="help/shared/note.png" alt="Note"> All connected clients see the same
+        programs and share the same Ghidra project state. Changes made by one client (such as
+        renaming a function) are immediately visible to all other clients.</P>
+      </BLOCKQUOTE>
+
+      <H3><A name="McpSecurity"></A>API Key Authentication</H3>
+
+      <BLOCKQUOTE>
+        <P>ReVa supports optional API key authentication to restrict access to the MCP server.
+        When enabled, clients must include a valid API key in their requests. API keys use the
+        format <CODE>ReVa-{UUID}</CODE> and can be configured in the ReVa plugin options.</P>
+
+        <P>By default, API key authentication is <B>disabled</B>, and the server only listens
+        on <CODE>127.0.0.1</CODE> (localhost), so it is not accessible from other machines on
+        the network.</P>
+      </BLOCKQUOTE>
+    </BLOCKQUOTE>
+
+    <!-- ==================== Plugin Architecture ==================== -->
+
+    <H2><A name="PluginArchitecture"></A>Plugin Architecture</H2>
+
+    <BLOCKQUOTE>
+      <P>ReVa consists of two Ghidra plugins that work together to provide MCP functionality
+      throughout the Ghidra session. Understanding how these plugins interact is important for
+      troubleshooting and for understanding when programs become available to AI assistants.</P>
+
+      <H3><A name="ApplicationPlugin"></A>RevaApplicationPlugin (Application-Level)</H3>
+
+      <BLOCKQUOTE>
+        <P>The <B>RevaApplicationPlugin</B> is an application-level plugin that runs in Ghidra's
+        front-end tool. It is loaded once when Ghidra starts and persists for the entire Ghidra
+        session. This plugin:</P>
+
+        <UL>
+          <LI>Owns and manages the MCP server (start, stop, restart)</LI>
+          <LI>Manages the <B>RevaProgramManager</B>, which tracks all open programs across all
+          Ghidra tools</LI>
+          <LI>Provides the <CODE>RevaMcpService</CODE> that tool-level plugins connect to</LI>
+          <LI>Listens for project open/close events</LI>
+        </UL>
+
+        <P><IMG src="help/shared/note.png" alt="Note"> Because this plugin lives at the
+        application level, the MCP server starts when Ghidra starts and remains running even
+        when no CodeBrowser windows are open. The server will be available as long as Ghidra
+        itself is running.</P>
+      </BLOCKQUOTE>
+
+      <H3><A name="ToolPlugin"></A>RevaPlugin (Tool-Level)</H3>
+
+      <BLOCKQUOTE>
+        <P>The <B>RevaPlugin</B> is a tool-level plugin that runs in each CodeBrowser window.
+        Each time you open a new CodeBrowser, a new instance of RevaPlugin is created. This
+        plugin:</P>
+
+        <UL>
+          <LI>Connects to the application-level <CODE>RevaMcpService</CODE></LI>
+          <LI>Registers its CodeBrowser tool with the MCP server</LI>
+          <LI>Notifies the server when programs are opened or closed in its CodeBrowser</LI>
+          <LI>Provides UI components (if any) in the CodeBrowser window</LI>
+        </UL>
+      </BLOCKQUOTE>
+
+      <H3><A name="StartupSequence"></A>Startup Sequence</H3>
+
+      <BLOCKQUOTE>
+        <P>The following sequence occurs when Ghidra starts and a program is opened:</P>
+
+        <OL>
+          <LI><B>Ghidra starts</B> &rarr; RevaApplicationPlugin initializes</LI>
+          <LI><B>MCP server starts</B> &rarr; Listening on configured host and port</LI>
+          <LI><B>CodeBrowser opens</B> &rarr; RevaPlugin initializes, connects to
+          RevaMcpService</LI>
+          <LI><B>Program opens in CodeBrowser</B> &rarr; RevaPlugin notifies server, program
+          becomes available to AI clients</LI>
+        </OL>
+
+        <P>When a program is closed in the last CodeBrowser that had it open, the server notifies
+        all tool providers that the program is no longer available.</P>
+      </BLOCKQUOTE>
+
+      <H3><A name="ToolProviders"></A>Tool Providers</H3>
+
+      <BLOCKQUOTE>
+        <P>The MCP server registers <B>17 specialized tool providers</B>, each exposing a set
+        of related tools to AI clients. The tool providers are organized into categories:</P>
+
+        <TABLE border="1" cellpadding="4" cellspacing="0" width="100%">
+          <TR>
+            <TH>Category</TH>
+            <TH>Tool Providers</TH>
+            <TH>Description</TH>
+          </TR>
+          <TR>
+            <TD><B>Core Analysis</B></TD>
+            <TD>Decompiler, Functions, Strings, Symbols, Cross-References, Memory</TD>
+            <TD>Primary analysis tools for understanding program behavior</TD>
+          </TR>
+          <TR>
+            <TD><B>Data &amp; Types</B></TD>
+            <TD>Data, Data Types, Structures</TD>
+            <TD>Working with program data and type definitions</TD>
+          </TR>
+          <TR>
+            <TD><B>Advanced Analysis</B></TD>
+            <TD>Call Graph, Data Flow, Constants, VTable, Imports/Exports</TD>
+            <TD>Deeper analysis capabilities for complex investigations</TD>
+          </TR>
+          <TR>
+            <TD><B>Annotations</B></TD>
+            <TD>Comments, Bookmarks</TD>
+            <TD>Adding notes and markers to the program database</TD>
+          </TR>
+          <TR>
+            <TD><B>Project Management</B></TD>
+            <TD>Project</TD>
+            <TD>Managing programs, files, and version control</TD>
+          </TR>
+        </TABLE>
+      </BLOCKQUOTE>
+    </BLOCKQUOTE>
+
+    <!-- ==================== Program Identification ==================== -->
+
+    <H2><A name="ProgramIdentification"></A>Program Identification</H2>
+
+    <BLOCKQUOTE>
+      <P>Every tool in ReVa that operates on a program requires a <B>programPath</B> parameter
+      to identify which program to work with. Understanding how program identification works is
+      essential for using ReVa effectively.</P>
+
+      <H3><A name="ProgramPath"></A>What is a programPath?</H3>
+
+      <BLOCKQUOTE>
+        <P>A <CODE>programPath</CODE> is the <B>Ghidra project pathname</B> of a program. It
+        looks like a file system path within the Ghidra project:</P>
+
+        <UL>
+          <LI><CODE>/Hatchery.exe</CODE> &mdash; A program at the root of the project</LI>
+          <LI><CODE>/malware/sample_001.bin</CODE> &mdash; A program in a subfolder</LI>
+          <LI><CODE>/firmware/bootloader.elf</CODE> &mdash; Another nested program</LI>
+        </UL>
+
+        <P><IMG src="help/shared/note.png" alt="Note"> The <CODE>programPath</CODE> is
+        <I>not</I> the file system path where the original binary lives. It is the path within
+        the Ghidra project, as shown in the Ghidra Project Manager window.</P>
+      </BLOCKQUOTE>
+
+      <H3><A name="ObtainingProgramPath"></A>How to Obtain a programPath</H3>
+
+      <BLOCKQUOTE>
+        <P>There are three ways to discover the <CODE>programPath</CODE> for a program:</P>
+
+        <OL>
+          <LI><B><CODE>get-current-program</CODE></B> &mdash; Returns the program currently
+          active in the focused CodeBrowser window (GUI mode only). The response includes the
+          <CODE>programPath</CODE> field.</LI>
+
+          <LI><B><CODE>list-project-files</CODE></B> &mdash; Lists all files and folders in the
+          Ghidra project. Each file entry includes a <CODE>programPath</CODE> field that can be
+          used directly as input to other tools.</LI>
+
+          <LI><B><CODE>list-open-programs</CODE></B> &mdash; Lists all programs currently open
+          across all CodeBrowser windows (GUI mode only).</LI>
+        </OL>
+
+        <P>The <CODE>programPath</CODE> returned by any of these tools can be passed directly to
+        any other ReVa tool that requires it.</P>
+      </BLOCKQUOTE>
+
+      <H3><A name="ProgramResolution"></A>Program Resolution</H3>
+
+      <BLOCKQUOTE>
+        <P>When you provide a <CODE>programPath</CODE> to a tool, ReVa resolves it using a
+        multi-tier lookup strategy:</P>
+
+        <OL>
+          <LI><B>Registered programs</B> &mdash; Programs explicitly registered (test
+          environments)</LI>
+          <LI><B>Program cache</B> &mdash; Programs recently accessed, keyed by canonical domain
+          path</LI>
+          <LI><B>Tool manager lookup</B> &mdash; Active programs in running CodeBrowser
+          tools</LI>
+          <LI><B>Domain file opening</B> &mdash; Opens the program directly from the project
+          files on demand</LI>
+        </OL>
+
+        <P>If the program cannot be found, the error message will include suggestions of
+        available programs to help you correct the path.</P>
+      </BLOCKQUOTE>
+    </BLOCKQUOTE>
+
+    <!-- ==================== Operational Modes ==================== -->
+
+    <H2><A name="OperationalModes"></A>Three Operational Modes</H2>
+
+    <BLOCKQUOTE>
+      <P>ReVa can operate in three distinct modes, each suited to different workflows. All three
+      modes share the same core tool providers and MCP server implementation, ensuring consistent
+      behavior regardless of how you connect.</P>
+
+      <H3><A name="AssistantMode"></A>Assistant Mode (GUI)</H3>
+
+      <BLOCKQUOTE>
+        <P>This is the primary mode when running ReVa as a Ghidra plugin with the full graphical
+        interface. The MCP server starts automatically when Ghidra launches.</P>
+
+        <TABLE border="0" cellpadding="4" cellspacing="0">
+          <TR>
+            <TD><B>Endpoint:</B></TD>
+            <TD><CODE>http://localhost:8080/mcp/message</CODE></TD>
+          </TR>
+          <TR>
+            <TD><B>Transport:</B></TD>
+            <TD>Streamable HTTP</TD>
+          </TR>
+          <TR>
+            <TD><B>Programs:</B></TD>
+            <TD>Any program open in any CodeBrowser window</TD>
+          </TR>
+          <TR>
+            <TD><B>Configuration:</B></TD>
+            <TD>Ghidra Tool Options (persisted in Ghidra settings)</TD>
+          </TR>
+        </TABLE>
+
+        <P>In this mode, you interact with Ghidra normally while an AI assistant connects to the
+        MCP endpoint. You can open and close programs in CodeBrowser windows, and they will
+        automatically become available to (or removed from) the AI assistant.</P>
+      </BLOCKQUOTE>
+
+      <H3><A name="HeadlessMode"></A>Headless Mode</H3>
+
+      <BLOCKQUOTE>
+        <P>Headless mode runs Ghidra without a graphical interface, using PyGhidra to initialize
+        the Ghidra framework. This is useful for scripting, automation, and server deployments.</P>
+
+        <TABLE border="0" cellpadding="4" cellspacing="0">
+          <TR>
+            <TD><B>Endpoint:</B></TD>
+            <TD><CODE>http://localhost:8080/mcp/message</CODE> (configurable)</TD>
+          </TR>
+          <TR>
+            <TD><B>Transport:</B></TD>
+            <TD>Streamable HTTP</TD>
+          </TR>
+          <TR>
+            <TD><B>Programs:</B></TD>
+            <TD>Loaded programmatically or via import tools</TD>
+          </TR>
+          <TR>
+            <TD><B>Configuration:</B></TD>
+            <TD>File-based or in-memory configuration backend</TD>
+          </TR>
+        </TABLE>
+
+        <P>To start headless mode:</P>
+
+        <BLOCKQUOTE>
+          <CODE>python scripts/reva_headless_server.py --wait</CODE>
+        </BLOCKQUOTE>
+
+        <P><IMG src="help/shared/note.png" alt="Note"> Some GUI-only tools
+        (<CODE>get-current-program</CODE>, <CODE>list-open-programs</CODE>) are not available
+        in headless mode, as there is no active CodeBrowser window.</P>
+      </BLOCKQUOTE>
+
+      <H3><A name="StdioMode"></A>CLI/Stdio Mode</H3>
+
+      <BLOCKQUOTE>
+        <P>CLI mode provides a stdio-based MCP transport for direct integration with AI tools
+        like Claude CLI. The <CODE>mcp-reva</CODE> command handles the full lifecycle:
+        initializing PyGhidra, starting a local HTTP server on a random port, and bridging
+        stdio to HTTP.</P>
+
+        <TABLE border="0" cellpadding="4" cellspacing="0">
+          <TR>
+            <TD><B>Command:</B></TD>
+            <TD><CODE>mcp-reva</CODE></TD>
+          </TR>
+          <TR>
+            <TD><B>Transport:</B></TD>
+            <TD>Stdio (bridged to internal HTTP)</TD>
+          </TR>
+          <TR>
+            <TD><B>Programs:</B></TD>
+            <TD>Imported via tools, stored in <CODE>.reva/projects/</CODE></TD>
+          </TR>
+          <TR>
+            <TD><B>Configuration:</B></TD>
+            <TD>Minimal (random port, auto-configured)</TD>
+          </TR>
+        </TABLE>
+
+        <P>To add ReVa to Claude CLI:</P>
+
+        <BLOCKQUOTE>
+          <CODE>claude mcp add ReVa -- mcp-reva</CODE>
+        </BLOCKQUOTE>
+
+        <P>In this mode, temporary Ghidra projects are automatically created and cleaned up.
+        Programs are imported using the <CODE>import-file</CODE> tool and stored in a
+        <CODE>.reva/projects/</CODE> directory.</P>
+      </BLOCKQUOTE>
+    </BLOCKQUOTE>
+
+    <!-- ==================== Read-Before-Modify ==================== -->
+
+    <H2><A name="ReadBeforeModify"></A>The Read-Before-Modify Pattern</H2>
+
+    <BLOCKQUOTE>
+      <P>ReVa enforces a <B>read-before-modify</B> pattern for certain decompiler-based tools.
+      Before an AI assistant can rename variables or change variable data types in a function,
+      it must first read the function's decompilation using the <CODE>get-decompilation</CODE>
+      tool.</P>
+
+      <H3><A name="ReadBeforeModifyRationale"></A>Design Rationale</H3>
+
+      <BLOCKQUOTE>
+        <P>This pattern exists for an important reason: it prevents <B>blind modifications</B>.
+        Without this requirement, an AI assistant could rename variables or change types without
+        having seen the current state of the function. By requiring a read first, ReVa ensures
+        that:</P>
+
+        <UL>
+          <LI>The AI has seen the current variable names, types, and decompiled code</LI>
+          <LI>Modifications are informed by the actual state of the function</LI>
+          <LI>There is a clear audit trail of what was examined before changes were made</LI>
+        </UL>
+      </BLOCKQUOTE>
+
+      <H3><A name="ReadBeforeModifyExpiry"></A>30-Minute Expiry</H3>
+
+      <BLOCKQUOTE>
+        <P>The read tracking has a <B>30-minute expiry window</B>. After reading a function's
+        decompilation, you have 30 minutes to make modifications. After that, you must read the
+        function again before making further changes. This ensures that the AI is always working
+        with reasonably current information.</P>
+
+        <P>The following tools require a prior <CODE>get-decompilation</CODE> call:</P>
+
+        <UL>
+          <LI><CODE>rename-variables</CODE> &mdash; Rename local variables and parameters</LI>
+          <LI><CODE>change-variable-datatypes</CODE> &mdash; Change variable data types</LI>
+        </UL>
+
+        <P><IMG src="help/shared/note.png" alt="Note"> The read tracking is automatically
+        cleared when a program is closed. If a program is closed and reopened, you must read its
+        functions again before modifying them.</P>
+      </BLOCKQUOTE>
+    </BLOCKQUOTE>
+
+    <!-- ==================== Pagination ==================== -->
+
+    <H2><A name="Pagination"></A>Pagination</H2>
+
+    <BLOCKQUOTE>
+      <P>Programs can contain thousands of functions, symbols, strings, and other items. To
+      handle large datasets efficiently, all list-style tools in ReVa support <B>pagination</B>
+      using two standard parameters:</P>
+
+      <TABLE border="1" cellpadding="4" cellspacing="0">
+        <TR>
+          <TH>Parameter</TH>
+          <TH>Type</TH>
+          <TH>Description</TH>
+        </TR>
+        <TR>
+          <TD><CODE>startIndex</CODE></TD>
+          <TD>integer</TD>
+          <TD>The zero-based index to start from (default: 0)</TD>
+        </TR>
+        <TR>
+          <TD><CODE>maxCount</CODE></TD>
+          <TD>integer</TD>
+          <TD>The maximum number of items to return per page</TD>
+        </TR>
+      </TABLE>
+
+      <P>Each paginated response includes metadata indicating the total number of items
+      available, so you can determine how many pages remain. Default page sizes vary by tool
+      (typically 100 items), but can be adjusted using <CODE>maxCount</CODE>.</P>
+
+      <P><IMG src="help/shared/tip.png" alt="Tip"> For large programs with thousands of
+      functions, always use pagination. Requesting all items at once can produce very large
+      responses that may be slow to process.</P>
+    </BLOCKQUOTE>
+
+    <!-- ==================== Error Handling ==================== -->
+
+    <H2><A name="ErrorHandling"></A>Error Handling</H2>
+
+    <BLOCKQUOTE>
+      <P>ReVa tools return structured JSON responses for both success and error cases. When an
+      error occurs, the response will contain an <CODE>error</CODE> field with a descriptive
+      message.</P>
+
+      <H3><A name="CommonErrors"></A>Common Error Types</H3>
+
+      <BLOCKQUOTE>
+        <TABLE border="1" cellpadding="4" cellspacing="0" width="100%">
+          <TR>
+            <TH>Error</TH>
+            <TH>Cause</TH>
+            <TH>Resolution</TH>
+          </TR>
+          <TR>
+            <TD><B>Program not found</B></TD>
+            <TD>The <CODE>programPath</CODE> does not match any open or available program</TD>
+            <TD>Use <CODE>list-project-files</CODE> or <CODE>list-open-programs</CODE> to find
+            the correct path. The error message includes suggestions.</TD>
+          </TR>
+          <TR>
+            <TD><B>Function not found</B></TD>
+            <TD>The specified address does not contain a function</TD>
+            <TD>Use <CODE>list-functions</CODE> to find valid function addresses</TD>
+          </TR>
+          <TR>
+            <TD><B>Read required</B></TD>
+            <TD>Attempting to modify a function without reading it first</TD>
+            <TD>Call <CODE>get-decompilation</CODE> on the function before modifying</TD>
+          </TR>
+          <TR>
+            <TD><B>Decompilation failed</B></TD>
+            <TD>The decompiler could not process the function (timeout or error)</TD>
+            <TD>The function may be too complex. Check the error message for details.</TD>
+          </TR>
+          <TR>
+            <TD><B>Missing parameter</B></TD>
+            <TD>A required parameter was not provided</TD>
+            <TD>Check the tool description for required parameters</TD>
+          </TR>
+        </TABLE>
+      </BLOCKQUOTE>
+
+      <H3><A name="AutomaticErrorWrapping"></A>Automatic Error Wrapping</H3>
+
+      <BLOCKQUOTE>
+        <P>All tool handlers are wrapped with automatic exception handling. Common exceptions
+        like <CODE>IllegalArgumentException</CODE> (missing or invalid parameters) and
+        <CODE>ProgramValidationException</CODE> (program not found) are automatically converted
+        to structured error responses. This ensures that AI clients always receive a parseable
+        response, even when errors occur.</P>
+      </BLOCKQUOTE>
+    </BLOCKQUOTE>
+
+    <!-- ==================== Performance Limits ==================== -->
+
+    <H2><A name="PerformanceLimits"></A>Performance Limits</H2>
+
+    <BLOCKQUOTE>
+      <P>Several tools have built-in limits to prevent excessive computation or overly large
+      responses. Understanding these limits helps you plan your analysis effectively.</P>
+
+      <TABLE border="1" cellpadding="4" cellspacing="0" width="100%">
+        <TR>
+          <TH>Tool</TH>
+          <TH>Limit</TH>
+          <TH>Value</TH>
+          <TH>Notes</TH>
+        </TR>
+        <TR>
+          <TD><B>Call Graph</B></TD>
+          <TD>Max nodes per direction</TD>
+          <TD>250</TD>
+          <TD>Graph view; tree view allows up to 500 nodes. Max depth: 10.</TD>
+        </TR>
+        <TR>
+          <TD><B>Data Flow</B></TD>
+          <TD>Max slice size</TD>
+          <TD>500 SSA operations</TD>
+          <TD>Limits the program slice to prevent excessive analysis</TD>
+        </TR>
+        <TR>
+          <TD><B>Constant Search</B></TD>
+          <TD>Instruction scan limit</TD>
+          <TD>2,000,000 instructions</TD>
+          <TD>Hard cap: 10,000 results. Default: 500 results.</TD>
+        </TR>
+        <TR>
+          <TD><B>Decompiler</B></TD>
+          <TD>Timeout</TD>
+          <TD>10 seconds (configurable)</TD>
+          <TD>Per-function decompilation timeout</TD>
+        </TR>
+        <TR>
+          <TD><B>Import Analysis</B></TD>
+          <TD>Timeout</TD>
+          <TD>600 seconds</TD>
+          <TD>Auto-analysis after import</TD>
+        </TR>
+        <TR>
+          <TD><B>Cross-References</B></TD>
+          <TD>Default page size</TD>
+          <TD>100 (max 1,000)</TD>
+          <TD>Per-request limit for cross-reference queries</TD>
+        </TR>
+        <TR>
+          <TD><B>Decompiler Callers</B></TD>
+          <TD>Per response / total</TD>
+          <TD>50 / 500</TD>
+          <TD>Max callers or callees shown per response; max collected in bulk</TD>
+        </TR>
+      </TABLE>
+
+      <P><IMG src="help/shared/note.png" alt="Note"> The decompiler timeout is configurable
+      through the ReVa plugin options. Increase it for programs with very complex functions.
+      All other limits are fixed safety bounds designed to keep responses fast and
+      manageable.</P>
+    </BLOCKQUOTE>
+
+    <!-- ==================== Footer ==================== -->
+
+    <BR>
+    <P class="providedbyplugin">Provided by: <I>ReVa</I></P>
+
+    <P class="relatedtopic">Related Topics:</P>
+
+    <UL>
+      <LI><A href="ReVa_skills.html">Skills &amp; Analysis Workflows</A></LI>
+      <LI><A href="ReVa_project_tools.html">Project Management Tools</A></LI>
+    </UL>
+  </BODY>
+</HTML>

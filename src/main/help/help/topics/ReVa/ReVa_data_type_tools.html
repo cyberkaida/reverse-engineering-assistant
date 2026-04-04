@@ -1,0 +1,698 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+
+<HTML>
+  <HEAD>
+    <META name="generator" content=
+    "HTML Tidy for Java (vers. 2009-12-01), see jtidy.sourceforge.net">
+    <META http-equiv="Content-Language" content="en-us">
+    <META http-equiv="Content-Type" content="text/html; charset=windows-1252">
+
+    <TITLE>ReVa - Data Type &amp; Structure Tools</TITLE>
+    <LINK rel="stylesheet" type="text/css" href="help/shared/DefaultStyle.css">
+  </HEAD>
+
+  <BODY>
+    <H1 align="center" style="color: navy;"><a name="DataTypeTools"></a>ReVa - Data Type &amp; Structure Tools</H1>
+
+    <P>The Data Type and Structure tools provide comprehensive capabilities for browsing, creating,
+    validating, and managing data types and structures within a Ghidra program. These tools expose
+    Ghidra's data type system through the MCP protocol, enabling AI-assisted type annotation
+    and structure definition.</P>
+
+    <!-- ======================================================================== -->
+    <H2 style="color: brown;"><a name="DataTypeOverview"></a>Data Type Browsing Tools</H2>
+
+    <P>These tools allow you to explore and query the data type archives available to a program,
+    including built-in types, program-defined types, and standalone archives.</P>
+
+    <!-- get-data-type-archives -->
+    <H3 style="color: blue;"><a name="GetDataTypeArchives"></a>get-data-type-archives</H3>
+
+    <P>Retrieves all data type archives available for a specific program. Archives are returned in
+    priority order: built-in types first, then the target program's types, followed by other open
+    programs and standalone archives.</P>
+
+    <BLOCKQUOTE>
+      <H4>Parameters</H4>
+      <TABLE border="1" cellpadding="4" cellspacing="0">
+        <TR><TH>Name</TH><TH>Type</TH><TH>Required</TH><TH>Description</TH></TR>
+        <TR>
+          <TD><CODE>programPath</CODE></TD>
+          <TD>string</TD>
+          <TD>Yes</TD>
+          <TD>Path in the Ghidra Project to the program (e.g., <CODE>"/Hatchery.exe"</CODE>).</TD>
+        </TR>
+      </TABLE>
+
+      <H4>Return Value</H4>
+      <P>A multi-result response. The first object contains metadata:</P>
+      <TABLE border="1" cellpadding="4" cellspacing="0">
+        <TR><TH>Field</TH><TH>Type</TH><TH>Description</TH></TR>
+        <TR><TD><CODE>count</CODE></TD><TD>integer</TD><TD>Total number of archives returned.</TD></TR>
+      </TABLE>
+
+      <P>Subsequent objects each describe one archive:</P>
+      <TABLE border="1" cellpadding="4" cellspacing="0">
+        <TR><TH>Field</TH><TH>Type</TH><TH>Description</TH></TR>
+        <TR><TD><CODE>name</CODE></TD><TD>string</TD><TD>Archive name.</TD></TR>
+        <TR><TD><CODE>type</CODE></TD><TD>string</TD><TD>Archive type: <CODE>"BUILT_IN"</CODE>, <CODE>"PROGRAM"</CODE>, or the manager type.</TD></TR>
+        <TR><TD><CODE>id</CODE></TD><TD>string</TD><TD>Universal ID of the archive (may be null for built-in).</TD></TR>
+        <TR><TD><CODE>dataTypeCount</CODE></TD><TD>integer</TD><TD>Total number of data types in the archive.</TD></TR>
+        <TR><TD><CODE>categoryCount</CODE></TD><TD>integer</TD><TD>Total number of categories.</TD></TR>
+        <TR><TD><CODE>programPath</CODE></TD><TD>string</TD><TD>Present only for <CODE>"PROGRAM"</CODE> type archives.</TD></TR>
+      </TABLE>
+
+      <H4>Archive Priority Order</H4>
+      <OL>
+        <LI><B>Built-in data type manager</B> &mdash; Always included first. Contains fundamental types
+            (int, char, void, etc.).</LI>
+        <LI><B>Target program's data type manager</B> &mdash; Types defined within the program itself.</LI>
+        <LI><B>Other open programs</B> &mdash; Data type managers from other programs currently open in the
+            project (duplicates are skipped).</LI>
+        <LI><B>Standalone archives</B> &mdash; Archives available through Ghidra's DataTypeArchiveService
+            (only available in GUI mode with plugin support).</LI>
+      </OL>
+
+      <P><IMG src="help/shared/note.png"> In headless mode, standalone data type archives from the
+      DataTypeArchiveService may not be available.</P>
+    </BLOCKQUOTE>
+
+    <!-- get-data-types -->
+    <H3 style="color: blue;"><a name="GetDataTypes"></a>get-data-types</H3>
+
+    <P>Browses data types within a specific archive, with support for category navigation,
+    subcategory inclusion, and pagination.</P>
+
+    <BLOCKQUOTE>
+      <H4>Parameters</H4>
+      <TABLE border="1" cellpadding="4" cellspacing="0">
+        <TR><TH>Name</TH><TH>Type</TH><TH>Required</TH><TH>Default</TH><TH>Description</TH></TR>
+        <TR>
+          <TD><CODE>programPath</CODE></TD>
+          <TD>string</TD>
+          <TD>Yes</TD>
+          <TD>&mdash;</TD>
+          <TD>Path in the Ghidra Project to the program.</TD>
+        </TR>
+        <TR>
+          <TD><CODE>archiveName</CODE></TD>
+          <TD>string</TD>
+          <TD>Yes</TD>
+          <TD>&mdash;</TD>
+          <TD>Name of the data type archive to browse (as returned by <CODE>get-data-type-archives</CODE>).</TD>
+        </TR>
+        <TR>
+          <TD><CODE>categoryPath</CODE></TD>
+          <TD>string</TD>
+          <TD>No</TD>
+          <TD><CODE>"/"</CODE></TD>
+          <TD>Category path to list types from (e.g., <CODE>"/Structure"</CODE>). Use <CODE>"/"</CODE> for the root category.</TD>
+        </TR>
+        <TR>
+          <TD><CODE>includeSubcategories</CODE></TD>
+          <TD>boolean</TD>
+          <TD>No</TD>
+          <TD><CODE>false</CODE></TD>
+          <TD>Whether to include data types from subcategories recursively.</TD>
+        </TR>
+        <TR>
+          <TD><CODE>startIndex</CODE></TD>
+          <TD>integer</TD>
+          <TD>No</TD>
+          <TD><CODE>0</CODE></TD>
+          <TD>Starting index for pagination (0-based).</TD>
+        </TR>
+        <TR>
+          <TD><CODE>maxCount</CODE></TD>
+          <TD>integer</TD>
+          <TD>No</TD>
+          <TD><CODE>100</CODE></TD>
+          <TD>Maximum number of data types to return per page.</TD>
+        </TR>
+      </TABLE>
+
+      <H4>Return Value</H4>
+      <P>A multi-result response. The first object contains pagination metadata:</P>
+      <TABLE border="1" cellpadding="4" cellspacing="0">
+        <TR><TH>Field</TH><TH>Type</TH><TH>Description</TH></TR>
+        <TR><TD><CODE>archiveName</CODE></TD><TD>string</TD><TD>The archive being browsed.</TD></TR>
+        <TR><TD><CODE>categoryPath</CODE></TD><TD>string</TD><TD>The category being listed.</TD></TR>
+        <TR><TD><CODE>includeSubcategories</CODE></TD><TD>boolean</TD><TD>Whether subcategories were included.</TD></TR>
+        <TR><TD><CODE>startIndex</CODE></TD><TD>integer</TD><TD>Starting index used.</TD></TR>
+        <TR><TD><CODE>totalCount</CODE></TD><TD>integer</TD><TD>Total matching data types.</TD></TR>
+        <TR><TD><CODE>returnedCount</CODE></TD><TD>integer</TD><TD>Number of items actually returned.</TD></TR>
+      </TABLE>
+
+      <P>Subsequent objects each describe one data type:</P>
+      <TABLE border="1" cellpadding="4" cellspacing="0">
+        <TR><TH>Field</TH><TH>Type</TH><TH>Description</TH></TR>
+        <TR><TD><CODE>name</CODE></TD><TD>string</TD><TD>Simple type name.</TD></TR>
+        <TR><TD><CODE>displayName</CODE></TD><TD>string</TD><TD>Full display name.</TD></TR>
+        <TR><TD><CODE>categoryPath</CODE></TD><TD>string</TD><TD>Category location within the archive.</TD></TR>
+        <TR><TD><CODE>description</CODE></TD><TD>string</TD><TD>Type description.</TD></TR>
+        <TR><TD><CODE>id</CODE></TD><TD>string</TD><TD>Unique identifier.</TD></TR>
+        <TR><TD><CODE>size</CODE></TD><TD>integer</TD><TD>Size in bytes.</TD></TR>
+        <TR><TD><CODE>alignment</CODE></TD><TD>integer</TD><TD>Memory alignment.</TD></TR>
+        <TR><TD><CODE>dataTypeName</CODE></TD><TD>string</TD><TD>Implementation class name.</TD></TR>
+        <TR><TD><CODE>sourceArchiveName</CODE></TD><TD>string</TD><TD>Origin archive name.</TD></TR>
+      </TABLE>
+
+      <P><IMG src="help/shared/note.png"> If the specified archive or category path does not exist,
+      an error is returned. Pagination is bounds-safe &mdash; the end index is automatically
+      adjusted to prevent out-of-bounds access.</P>
+    </BLOCKQUOTE>
+
+    <!-- get-data-type-by-string -->
+    <H3 style="color: blue;"><a name="GetDataTypeByString"></a>get-data-type-by-string</H3>
+
+    <P>Resolves a data type from its string representation. This is the primary way to look up types
+    using familiar C-style syntax, including pointers, arrays, and composite types.</P>
+
+    <BLOCKQUOTE>
+      <H4>Parameters</H4>
+      <TABLE border="1" cellpadding="4" cellspacing="0">
+        <TR><TH>Name</TH><TH>Type</TH><TH>Required</TH><TH>Default</TH><TH>Description</TH></TR>
+        <TR>
+          <TD><CODE>programPath</CODE></TD>
+          <TD>string</TD>
+          <TD>Yes</TD>
+          <TD>&mdash;</TD>
+          <TD>Path in the Ghidra Project to search for data types.</TD>
+        </TR>
+        <TR>
+          <TD><CODE>dataTypeString</CODE></TD>
+          <TD>string</TD>
+          <TD>Yes</TD>
+          <TD>&mdash;</TD>
+          <TD>String representation of the data type.</TD>
+        </TR>
+        <TR>
+          <TD><CODE>archiveName</CODE></TD>
+          <TD>string</TD>
+          <TD>No</TD>
+          <TD><CODE>""</CODE> (all archives)</TD>
+          <TD>Name of a specific archive to search. If empty, all archives are searched.</TD>
+        </TR>
+      </TABLE>
+
+      <H4>Supported String Formats</H4>
+      <UL>
+        <LI><B>Basic types:</B> <CODE>int</CODE>, <CODE>char</CODE>, <CODE>float</CODE>,
+            <CODE>double</CODE>, <CODE>byte</CODE>, <CODE>short</CODE>, <CODE>long</CODE></LI>
+        <LI><B>Pointers:</B> <CODE>char*</CODE>, <CODE>int**</CODE>, <CODE>void*</CODE></LI>
+        <LI><B>Arrays:</B> <CODE>int[10]</CODE>, <CODE>char[256]</CODE></LI>
+        <LI><B>Complex types:</B> Custom structures and typedefs by name</LI>
+      </UL>
+
+      <H4>Return Value</H4>
+      <P>A single JSON object with full data type metadata (same fields as individual items from
+      <CODE>get-data-types</CODE>): <CODE>name</CODE>, <CODE>displayName</CODE>, <CODE>size</CODE>,
+      <CODE>categoryPath</CODE>, <CODE>alignment</CODE>, etc.</P>
+
+      <P><IMG src="help/shared/note.png"> If the type cannot be found or parsed, an error is
+      returned. In headless mode without the plugin, the DataTypeArchiveService may not be available,
+      which limits search scope.</P>
+    </BLOCKQUOTE>
+
+    <!-- ======================================================================== -->
+    <H2 style="color: brown;"><a name="StructureTools"></a>Structure Management Tools</H2>
+
+    <P>These tools provide full lifecycle management for structures and unions: creation from C
+    definitions, validation, inspection, application to memory, listing, and deletion.</P>
+
+    <!-- parse-c-structure -->
+    <H3 style="color: blue;"><a name="ParseCStructure"></a>parse-c-structure</H3>
+
+    <P>Parses a C-style structure or union definition and creates it in the program's data type
+    manager. If a structure with the same name already exists, it is <B>completely replaced</B>
+    &mdash; all existing fields are cleared and rebuilt from the new definition.</P>
+
+    <BLOCKQUOTE>
+      <H4>Parameters</H4>
+      <TABLE border="1" cellpadding="4" cellspacing="0">
+        <TR><TH>Name</TH><TH>Type</TH><TH>Required</TH><TH>Default</TH><TH>Description</TH></TR>
+        <TR>
+          <TD><CODE>programPath</CODE></TD>
+          <TD>string</TD>
+          <TD>Yes</TD>
+          <TD>&mdash;</TD>
+          <TD>Path of the program.</TD>
+        </TR>
+        <TR>
+          <TD><CODE>cDefinition</CODE></TD>
+          <TD>string</TD>
+          <TD>Yes</TD>
+          <TD>&mdash;</TD>
+          <TD>C-style structure definition (e.g., <CODE>"struct MyStruct { int x; char* name; };"</CODE>).</TD>
+        </TR>
+        <TR>
+          <TD><CODE>category</CODE></TD>
+          <TD>string</TD>
+          <TD>No</TD>
+          <TD><CODE>"/"</CODE></TD>
+          <TD>Category path where the structure will be placed.</TD>
+        </TR>
+      </TABLE>
+
+      <H4>Return Value</H4>
+      <TABLE border="1" cellpadding="4" cellspacing="0">
+        <TR><TH>Field</TH><TH>Type</TH><TH>Description</TH></TR>
+        <TR><TD><CODE>message</CODE></TD><TD>string</TD><TD>Success or modification message.</TD></TR>
+        <TR><TD><CODE>numComponents</CODE></TD><TD>integer</TD><TD>Number of fields in the structure.</TD></TR>
+        <TR><TD><CODE>name</CODE></TD><TD>string</TD><TD>Structure name.</TD></TR>
+        <TR><TD><CODE>displayName</CODE></TD><TD>string</TD><TD>Full display name.</TD></TR>
+        <TR><TD><CODE>size</CODE></TD><TD>integer</TD><TD>Total size in bytes.</TD></TR>
+        <TR><TD><CODE>categoryPath</CODE></TD><TD>string</TD><TD>Category location.</TD></TR>
+        <TR><TD><CODE>isUnion</CODE></TD><TD>boolean</TD><TD>Whether the type is a union.</TD></TR>
+        <TR><TD><CODE>isPacked</CODE></TD><TD>boolean</TD><TD>Whether packing is enabled.</TD></TR>
+        <TR><TD><CODE>fields</CODE></TD><TD>array</TD><TD>Detailed field information (for new structures).</TD></TR>
+      </TABLE>
+
+      <H4>Behavior</H4>
+      <UL>
+        <LI><B>Create-or-replace semantics:</B> If a structure with the same name already exists, its
+            fields are completely cleared and rebuilt from the new definition.</LI>
+        <LI><B>Field type resolution:</B> Field types are resolved in the program's DataTypeManager.</LI>
+        <LI><B>Bitfield support:</B> Bitfield components are handled with <CODE>BitFieldDataType</CODE>.</LI>
+        <LI><B>Category creation:</B> The specified category path is created if it does not exist.</LI>
+        <LI><B>Description preservation:</B> Descriptions from the parsed definition are copied to the
+            created structure.</LI>
+      </UL>
+
+      <P><IMG src="help/shared/note.png"> Use <CODE>get-structure-info</CODE> to inspect the
+      current layout before modifying an existing structure. This tool operates within a Ghidra
+      transaction and rolls back automatically on failure.</P>
+    </BLOCKQUOTE>
+
+    <!-- validate-c-structure -->
+    <H3 style="color: blue;"><a name="ValidateCStructure"></a>validate-c-structure</H3>
+
+    <P>Validates a C-style structure definition without creating it in the program. This is useful
+    for checking syntax and semantics before committing changes.</P>
+
+    <BLOCKQUOTE>
+      <H4>Parameters</H4>
+      <TABLE border="1" cellpadding="4" cellspacing="0">
+        <TR><TH>Name</TH><TH>Type</TH><TH>Required</TH><TH>Default</TH><TH>Description</TH></TR>
+        <TR>
+          <TD><CODE>cDefinition</CODE></TD>
+          <TD>string</TD>
+          <TD>Yes</TD>
+          <TD>&mdash;</TD>
+          <TD>C-style structure definition to validate.</TD>
+        </TR>
+      </TABLE>
+
+      <H4>Return Value (Valid)</H4>
+      <TABLE border="1" cellpadding="4" cellspacing="0">
+        <TR><TH>Field</TH><TH>Type</TH><TH>Description</TH></TR>
+        <TR><TD><CODE>valid</CODE></TD><TD>boolean</TD><TD><CODE>true</CODE></TD></TR>
+        <TR><TD><CODE>parsedType</CODE></TD><TD>string</TD><TD>Name of the parsed type.</TD></TR>
+        <TR><TD><CODE>displayName</CODE></TD><TD>string</TD><TD>Full display name.</TD></TR>
+        <TR><TD><CODE>size</CODE></TD><TD>integer</TD><TD>Size in bytes.</TD></TR>
+        <TR><TD><CODE>fieldCount</CODE></TD><TD>integer</TD><TD>Number of fields.</TD></TR>
+        <TR><TD><CODE>isUnion</CODE></TD><TD>boolean</TD><TD>Whether it is a union.</TD></TR>
+      </TABLE>
+
+      <H4>Return Value (Invalid)</H4>
+      <TABLE border="1" cellpadding="4" cellspacing="0">
+        <TR><TH>Field</TH><TH>Type</TH><TH>Description</TH></TR>
+        <TR><TD><CODE>valid</CODE></TD><TD>boolean</TD><TD><CODE>false</CODE></TD></TR>
+        <TR><TD><CODE>error</CODE></TD><TD>string</TD><TD>Description of the parse error.</TD></TR>
+      </TABLE>
+
+      <P><IMG src="help/shared/note.png"> This tool uses a temporary standalone DataTypeManager for
+      validation. No program modifications occur, and no <CODE>programPath</CODE> parameter is
+      required.</P>
+    </BLOCKQUOTE>
+
+    <!-- get-structure-info -->
+    <H3 style="color: blue;"><a name="GetStructureInfo"></a>get-structure-info</H3>
+
+    <P>Retrieves detailed information about a structure or union, including all fields with their
+    offsets, types, and a C-style representation of the layout.</P>
+
+    <BLOCKQUOTE>
+      <H4>Parameters</H4>
+      <TABLE border="1" cellpadding="4" cellspacing="0">
+        <TR><TH>Name</TH><TH>Type</TH><TH>Required</TH><TH>Description</TH></TR>
+        <TR>
+          <TD><CODE>programPath</CODE></TD>
+          <TD>string</TD>
+          <TD>Yes</TD>
+          <TD>Path of the program.</TD>
+        </TR>
+        <TR>
+          <TD><CODE>structureName</CODE></TD>
+          <TD>string</TD>
+          <TD>Yes</TD>
+          <TD>Name of the structure or union to inspect.</TD>
+        </TR>
+      </TABLE>
+
+      <H4>Return Value</H4>
+      <TABLE border="1" cellpadding="4" cellspacing="0">
+        <TR><TH>Field</TH><TH>Type</TH><TH>Description</TH></TR>
+        <TR><TD><CODE>name</CODE></TD><TD>string</TD><TD>Structure name.</TD></TR>
+        <TR><TD><CODE>displayName</CODE></TD><TD>string</TD><TD>Full display name.</TD></TR>
+        <TR><TD><CODE>size</CODE></TD><TD>integer</TD><TD>Total size in bytes.</TD></TR>
+        <TR><TD><CODE>categoryPath</CODE></TD><TD>string</TD><TD>Category location.</TD></TR>
+        <TR><TD><CODE>description</CODE></TD><TD>string</TD><TD>Structure description.</TD></TR>
+        <TR><TD><CODE>isUnion</CODE></TD><TD>boolean</TD><TD>Whether this is a union.</TD></TR>
+        <TR><TD><CODE>numComponents</CODE></TD><TD>integer</TD><TD>Number of fields.</TD></TR>
+        <TR><TD><CODE>isPacked</CODE></TD><TD>boolean</TD><TD>Whether packing is enabled.</TD></TR>
+        <TR><TD><CODE>cRepresentation</CODE></TD><TD>string</TD><TD>C-style text representation of the structure layout.</TD></TR>
+        <TR><TD><CODE>fields</CODE></TD><TD>array</TD><TD>Detailed field information (see below).</TD></TR>
+      </TABLE>
+
+      <H4>Field Object</H4>
+      <TABLE border="1" cellpadding="4" cellspacing="0">
+        <TR><TH>Field</TH><TH>Type</TH><TH>Description</TH></TR>
+        <TR><TD><CODE>ordinal</CODE></TD><TD>integer</TD><TD>Field ordinal number.</TD></TR>
+        <TR><TD><CODE>offset</CODE></TD><TD>integer</TD><TD>Byte offset within the structure.</TD></TR>
+        <TR><TD><CODE>length</CODE></TD><TD>integer</TD><TD>Size in bytes.</TD></TR>
+        <TR><TD><CODE>fieldName</CODE></TD><TD>string</TD><TD>Field name.</TD></TR>
+        <TR><TD><CODE>comment</CODE></TD><TD>string</TD><TD>Field comment (if any).</TD></TR>
+        <TR><TD><CODE>dataType</CODE></TD><TD>string</TD><TD>Data type display name.</TD></TR>
+        <TR><TD><CODE>dataTypeSize</CODE></TD><TD>integer</TD><TD>Data type size.</TD></TR>
+        <TR><TD><CODE>isBitfield</CODE></TD><TD>boolean</TD><TD>Whether this is a bitfield.</TD></TR>
+        <TR><TD><CODE>isCondensed</CODE></TD><TD>boolean</TD><TD>Whether undefined bytes are condensed.</TD></TR>
+      </TABLE>
+
+      <P>Additional fields for bitfield components: <CODE>bitSize</CODE> (integer),
+      <CODE>bitOffset</CODE> (integer), <CODE>baseDataType</CODE> (string).</P>
+
+      <P>Additional fields for condensed entries: <CODE>componentCount</CODE> (integer) indicating
+      the number of undefined components merged into one entry.</P>
+
+      <H4>Undefined Byte Condensing</H4>
+      <P>Consecutive undefined bytes in a structure are merged into a single entry with the name
+      <CODE>&lt;undefined&gt;</CODE>. The entry shows the offset range, total length, and is marked
+      with <CODE>isCondensed: true</CODE>. This produces a cleaner, more readable representation
+      of structures with padding or unanalyzed regions.</P>
+    </BLOCKQUOTE>
+
+    <!-- list-structures -->
+    <H3 style="color: blue;"><a name="ListStructures"></a>list-structures</H3>
+
+    <P>Lists structures and unions in a program with optional filtering by category, name, and
+    pagination support.</P>
+
+    <BLOCKQUOTE>
+      <H4>Parameters</H4>
+      <TABLE border="1" cellpadding="4" cellspacing="0">
+        <TR><TH>Name</TH><TH>Type</TH><TH>Required</TH><TH>Default</TH><TH>Description</TH></TR>
+        <TR>
+          <TD><CODE>programPath</CODE></TD>
+          <TD>string</TD>
+          <TD>Yes</TD>
+          <TD>&mdash;</TD>
+          <TD>Path of the program.</TD>
+        </TR>
+        <TR>
+          <TD><CODE>category</CODE></TD>
+          <TD>string</TD>
+          <TD>No</TD>
+          <TD>&mdash;</TD>
+          <TD>Filter by category path (prefix match).</TD>
+        </TR>
+        <TR>
+          <TD><CODE>nameFilter</CODE></TD>
+          <TD>string</TD>
+          <TD>No</TD>
+          <TD>&mdash;</TD>
+          <TD>Filter by name (case-insensitive substring match).</TD>
+        </TR>
+        <TR>
+          <TD><CODE>includeBuiltIn</CODE></TD>
+          <TD>boolean</TD>
+          <TD>No</TD>
+          <TD><CODE>false</CODE></TD>
+          <TD>Whether to include built-in types from the <CODE>"BuiltInTypes"</CODE> archive.</TD>
+        </TR>
+        <TR>
+          <TD><CODE>startIndex</CODE></TD>
+          <TD>integer</TD>
+          <TD>No</TD>
+          <TD><CODE>0</CODE></TD>
+          <TD>Starting index for pagination (0-based).</TD>
+        </TR>
+        <TR>
+          <TD><CODE>maxCount</CODE></TD>
+          <TD>integer</TD>
+          <TD>No</TD>
+          <TD><CODE>100</CODE></TD>
+          <TD>Maximum number of structures to return per page.</TD>
+        </TR>
+      </TABLE>
+
+      <H4>Return Value</H4>
+      <TABLE border="1" cellpadding="4" cellspacing="0">
+        <TR><TH>Field</TH><TH>Type</TH><TH>Description</TH></TR>
+        <TR><TD><CODE>structures</CODE></TD><TD>array</TD><TD>Array of basic structure info objects (name, displayName, size, categoryPath, etc.).</TD></TR>
+        <TR><TD><CODE>pagination</CODE></TD><TD>object</TD><TD>Pagination details.</TD></TR>
+      </TABLE>
+
+      <P>The <CODE>pagination</CODE> object contains:</P>
+      <TABLE border="1" cellpadding="4" cellspacing="0">
+        <TR><TH>Field</TH><TH>Type</TH><TH>Description</TH></TR>
+        <TR><TD><CODE>startIndex</CODE></TD><TD>integer</TD><TD>Starting index used.</TD></TR>
+        <TR><TD><CODE>requestedCount</CODE></TD><TD>integer</TD><TD>Requested maximum count.</TD></TR>
+        <TR><TD><CODE>returnedCount</CODE></TD><TD>integer</TD><TD>Actual count returned.</TD></TR>
+        <TR><TD><CODE>totalCount</CODE></TD><TD>integer</TD><TD>Total matching structures.</TD></TR>
+        <TR><TD><CODE>nextStartIndex</CODE></TD><TD>integer</TD><TD>Index for fetching the next page.</TD></TR>
+      </TABLE>
+
+      <P><IMG src="help/shared/note.png"> All filters are applied cumulatively (AND logic). The
+      category filter uses prefix matching (e.g., <CODE>"/MyCategory"</CODE> matches
+      <CODE>"/MyCategory/Sub"</CODE>). Results are returned in basic format without individual field
+      details &mdash; use <CODE>get-structure-info</CODE> for full details on a specific structure.</P>
+    </BLOCKQUOTE>
+
+    <!-- apply-structure -->
+    <H3 style="color: blue;"><a name="ApplyStructure"></a>apply-structure</H3>
+
+    <P>Applies a structure data type at a specific memory address. This creates a data instance
+    in the program listing so the structure layout is visible in the disassembly view.</P>
+
+    <BLOCKQUOTE>
+      <H4>Parameters</H4>
+      <TABLE border="1" cellpadding="4" cellspacing="0">
+        <TR><TH>Name</TH><TH>Type</TH><TH>Required</TH><TH>Default</TH><TH>Description</TH></TR>
+        <TR>
+          <TD><CODE>programPath</CODE></TD>
+          <TD>string</TD>
+          <TD>Yes</TD>
+          <TD>&mdash;</TD>
+          <TD>Path of the program.</TD>
+        </TR>
+        <TR>
+          <TD><CODE>structureName</CODE></TD>
+          <TD>string</TD>
+          <TD>Yes</TD>
+          <TD>&mdash;</TD>
+          <TD>Name of the structure to apply.</TD>
+        </TR>
+        <TR>
+          <TD><CODE>addressOrSymbol</CODE></TD>
+          <TD>string</TD>
+          <TD>Yes</TD>
+          <TD>&mdash;</TD>
+          <TD>Address or symbol name where the structure should be applied.</TD>
+        </TR>
+        <TR>
+          <TD><CODE>clearExisting</CODE></TD>
+          <TD>boolean</TD>
+          <TD>No</TD>
+          <TD><CODE>true</CODE></TD>
+          <TD>Whether to clear existing data at the address before applying.</TD>
+        </TR>
+      </TABLE>
+
+      <H4>Return Value</H4>
+      <TABLE border="1" cellpadding="4" cellspacing="0">
+        <TR><TH>Field</TH><TH>Type</TH><TH>Description</TH></TR>
+        <TR><TD><CODE>message</CODE></TD><TD>string</TD><TD>Success message.</TD></TR>
+        <TR><TD><CODE>address</CODE></TD><TD>string</TD><TD>Formatted address where the structure was applied.</TD></TR>
+        <TR><TD><CODE>structureName</CODE></TD><TD>string</TD><TD>Name of the applied structure.</TD></TR>
+        <TR><TD><CODE>size</CODE></TD><TD>integer</TD><TD>Size of the applied structure in bytes.</TD></TR>
+      </TABLE>
+
+      <P><IMG src="help/shared/note.png"> The data type must be a structure or union. The target
+      address must be in valid memory. When <CODE>clearExisting</CODE> is <CODE>true</CODE>
+      (the default), any existing data at the address is cleared before the structure is applied.
+      The operation runs within a Ghidra transaction and rolls back on failure.</P>
+    </BLOCKQUOTE>
+
+    <!-- delete-structure -->
+    <H3 style="color: blue;"><a name="DeleteStructure"></a>delete-structure</H3>
+
+    <P>Deletes a structure from the program's data type manager. Before deletion, the tool checks
+    for references to the structure across function signatures, variables, and memory locations.</P>
+
+    <BLOCKQUOTE>
+      <H4>Parameters</H4>
+      <TABLE border="1" cellpadding="4" cellspacing="0">
+        <TR><TH>Name</TH><TH>Type</TH><TH>Required</TH><TH>Default</TH><TH>Description</TH></TR>
+        <TR>
+          <TD><CODE>programPath</CODE></TD>
+          <TD>string</TD>
+          <TD>Yes</TD>
+          <TD>&mdash;</TD>
+          <TD>Path of the program.</TD>
+        </TR>
+        <TR>
+          <TD><CODE>structureName</CODE></TD>
+          <TD>string</TD>
+          <TD>Yes</TD>
+          <TD>&mdash;</TD>
+          <TD>Name of the structure to delete.</TD>
+        </TR>
+        <TR>
+          <TD><CODE>force</CODE></TD>
+          <TD>boolean</TD>
+          <TD>No</TD>
+          <TD><CODE>false</CODE></TD>
+          <TD>Force deletion even if the structure is referenced elsewhere.</TD>
+        </TR>
+      </TABLE>
+
+      <H4>Return Value (No References or force=true)</H4>
+      <TABLE border="1" cellpadding="4" cellspacing="0">
+        <TR><TH>Field</TH><TH>Type</TH><TH>Description</TH></TR>
+        <TR><TD><CODE>message</CODE></TD><TD>string</TD><TD>Success message.</TD></TR>
+        <TR><TD><CODE>deleted</CODE></TD><TD>boolean</TD><TD><CODE>true</CODE></TD></TR>
+        <TR><TD><CODE>hadReferences</CODE></TD><TD>boolean</TD><TD>Whether the structure had references.</TD></TR>
+        <TR><TD><CODE>referencesCleared</CODE></TD><TD>integer</TD><TD>Number of references that were present.</TD></TR>
+      </TABLE>
+
+      <H4>Return Value (References Found, force=false)</H4>
+      <TABLE border="1" cellpadding="4" cellspacing="0">
+        <TR><TH>Field</TH><TH>Type</TH><TH>Description</TH></TR>
+        <TR><TD><CODE>canDelete</CODE></TD><TD>boolean</TD><TD><CODE>false</CODE></TD></TR>
+        <TR><TD><CODE>deleted</CODE></TD><TD>boolean</TD><TD><CODE>false</CODE></TD></TR>
+        <TR><TD><CODE>warning</CODE></TD><TD>string</TD><TD>Descriptive warning message.</TD></TR>
+        <TR><TD><CODE>references</CODE></TD><TD>object</TD><TD>Details of where the structure is referenced.</TD></TR>
+      </TABLE>
+
+      <P>The <CODE>references</CODE> object contains:</P>
+      <TABLE border="1" cellpadding="4" cellspacing="0">
+        <TR><TH>Field</TH><TH>Type</TH><TH>Description</TH></TR>
+        <TR><TD><CODE>count</CODE></TD><TD>integer</TD><TD>Total reference count.</TD></TR>
+        <TR><TD><CODE>functions</CODE></TD><TD>array</TD><TD>Function references (format: <CODE>"FunctionName (return type|parameter: paramName|variable: varName)"</CODE>).</TD></TR>
+        <TR><TD><CODE>memoryLocations</CODE></TD><TD>array</TD><TD>Addresses where the structure is applied in memory.</TD></TR>
+      </TABLE>
+
+      <H4>Reference Scanning</H4>
+      <P>The tool scans for references in the following locations:</P>
+      <UL>
+        <LI><B>Function return types</B> &mdash; Functions that return this structure type.</LI>
+        <LI><B>Function parameters</B> &mdash; Parameters typed with this structure.</LI>
+        <LI><B>Function local variables</B> &mdash; Local variables using this structure.</LI>
+        <LI><B>Memory instances</B> &mdash; Defined data in memory that uses this structure.</LI>
+      </UL>
+
+      <P><IMG src="help/shared/note.png"> When references are found and <CODE>force</CODE> is
+      <CODE>false</CODE>, the structure is <B>not</B> deleted. Review the reference list and either
+      update the references first or use <CODE>force=true</CODE> to delete regardless.</P>
+    </BLOCKQUOTE>
+
+    <!-- parse-c-header -->
+    <H3 style="color: blue;"><a name="ParseCHeader"></a>parse-c-header</H3>
+
+    <P>Parses an entire C header file and creates all structures and types defined within it.
+    Uses a two-stage parsing strategy for maximum robustness.</P>
+
+    <BLOCKQUOTE>
+      <H4>Parameters</H4>
+      <TABLE border="1" cellpadding="4" cellspacing="0">
+        <TR><TH>Name</TH><TH>Type</TH><TH>Required</TH><TH>Default</TH><TH>Description</TH></TR>
+        <TR>
+          <TD><CODE>programPath</CODE></TD>
+          <TD>string</TD>
+          <TD>Yes</TD>
+          <TD>&mdash;</TD>
+          <TD>Path of the program.</TD>
+        </TR>
+        <TR>
+          <TD><CODE>headerContent</CODE></TD>
+          <TD>string</TD>
+          <TD>Yes</TD>
+          <TD>&mdash;</TD>
+          <TD>The full C header file content as a string.</TD>
+        </TR>
+        <TR>
+          <TD><CODE>category</CODE></TD>
+          <TD>string</TD>
+          <TD>No</TD>
+          <TD><CODE>"/"</CODE></TD>
+          <TD>Category path where created types will be placed.</TD>
+        </TR>
+      </TABLE>
+
+      <H4>Return Value</H4>
+      <TABLE border="1" cellpadding="4" cellspacing="0">
+        <TR><TH>Field</TH><TH>Type</TH><TH>Description</TH></TR>
+        <TR><TD><CODE>message</CODE></TD><TD>string</TD><TD><CODE>"Successfully parsed header file"</CODE></TD></TR>
+        <TR><TD><CODE>createdCount</CODE></TD><TD>integer</TD><TD>Number of types successfully created.</TD></TR>
+        <TR><TD><CODE>createdTypes</CODE></TD><TD>array</TD><TD>Array of structure info objects for each created type.</TD></TR>
+      </TABLE>
+
+      <H4>Two-Stage Parsing Strategy</H4>
+      <OL>
+        <LI><B>Whole file parse</B> &mdash; Attempts to parse the entire header content at once using
+            Ghidra's CParser. This is the preferred path as it handles inter-type dependencies
+            correctly.</LI>
+        <LI><B>Fallback line-by-line</B> &mdash; If the whole file parse fails or returns null, the
+            parser falls back to accumulating lines until a semicolon is found, then parsing each
+            definition individually. Failed definitions are logged as warnings but do not prevent
+            other definitions from being parsed.</LI>
+      </OL>
+
+      <H4>Behavior</H4>
+      <UL>
+        <LI>All parsing and creation occurs within a single Ghidra transaction.</LI>
+        <LI>The specified category path is created if it does not exist.</LI>
+        <LI>Each parsed type is resolved into the program's DataTypeManager using the
+            <CODE>REPLACE_HANDLER</CODE> conflict handler.</LI>
+        <LI>Types are moved to the specified category after resolution.</LI>
+        <LI>The fallback parser is graceful: it creates as many types as possible even when some
+            definitions fail to parse.</LI>
+      </UL>
+
+      <P><IMG src="help/shared/note.png"> This tool is ideal for importing entire header files
+      (e.g., from SDK documentation or reverse-engineered structures). For single structure
+      definitions, <CODE>parse-c-structure</CODE> is more appropriate.</P>
+    </BLOCKQUOTE>
+
+    <!-- ======================================================================== -->
+    <H2 style="color: brown;"><a name="Tips"></a>Tips &amp; Best Practices</H2>
+
+    <UL>
+      <LI>Use <CODE>get-data-type-archives</CODE> first to discover available archives, then
+          <CODE>get-data-types</CODE> to browse their contents.</LI>
+      <LI>Use <CODE>get-data-type-by-string</CODE> when you know the type name and want to
+          quickly resolve it without browsing.</LI>
+      <LI>Always use <CODE>validate-c-structure</CODE> before <CODE>parse-c-structure</CODE> when
+          working with complex or untested definitions.</LI>
+      <LI>Use <CODE>get-structure-info</CODE> to inspect existing structure layouts before
+          replacing them with <CODE>parse-c-structure</CODE>.</LI>
+      <LI>Check <CODE>delete-structure</CODE> without <CODE>force=true</CODE> first to see all
+          references before deciding to proceed with deletion.</LI>
+      <LI>For large header files, check the <CODE>createdCount</CODE> in the
+          <CODE>parse-c-header</CODE> response to verify all expected types were created.</LI>
+      <LI>Paginate through large type lists using <CODE>startIndex</CODE> and
+          <CODE>maxCount</CODE> parameters.</LI>
+    </UL>
+
+    <!-- ======================================================================== -->
+    <BR>
+    <P style="color: gray;">Provided by: <B>ReVa</B> &mdash; Reverse Engineering Assistant</P>
+    <P style="color: purple;"><B>Related Topics:</B></P>
+    <UL>
+      <LI><A href="ReVa_memory_data_tools.html">Memory, Data, Strings &amp; Symbols</A></LI>
+      <LI><A href="ReVa_annotation_tools.html">Comments &amp; Bookmarks</A></LI>
+    </UL>
+
+  </BODY>
+</HTML>

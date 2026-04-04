@@ -1,0 +1,385 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+
+<HTML>
+  <HEAD>
+    <META name="generator" content=
+    "HTML Tidy for Java (vers. 2009-12-01), see jtidy.sourceforge.net">
+    <META http-equiv="Content-Language" content="en-us">
+    <META http-equiv="Content-Type" content="text/html; charset=windows-1252">
+
+    <TITLE>ReVa Call Graph Analysis Tools</TITLE>
+    <LINK rel="stylesheet" type="text/css" href="help/shared/DefaultStyle.css">
+  </HEAD>
+
+  <BODY>
+
+    <H1 align="center" style="color: navy;"><a name="CallGraphTools"></a>ReVa Call Graph
+    Analysis Tools</H1>
+
+    <P>The ReVa call graph tools provide MCP-accessible interfaces for analyzing function
+    calling relationships. These tools support bidirectional graph exploration, hierarchical
+    tree traversal, and identification of common dispatch points. All three tools include
+    cycle detection, depth limiting, and node count caps to prevent runaway analysis on
+    complex binaries.</P>
+
+    <!-- ======================================================================== -->
+
+    <H2 style="color: brown;"><a name="GetCallGraph"></a>get-call-graph</H2>
+
+    <P>Get the call graph around a function, showing both callers (functions that call this
+    one) and callees (functions this one calls) up to a specified depth. This tool provides
+    a quick overview of a function's role in the broader program flow by exploring both
+    directions simultaneously.</P>
+
+    <H3 style="color: blue;">Parameters</H3>
+
+    <BLOCKQUOTE>
+      <TABLE border="1" cellpadding="4" cellspacing="0" width="100%">
+        <TR>
+          <TH>Parameter</TH>
+          <TH>Type</TH>
+          <TH>Required</TH>
+          <TH>Default</TH>
+          <TH>Description</TH>
+        </TR>
+        <TR>
+          <TD><CODE>programPath</CODE></TD>
+          <TD>string</TD>
+          <TD>Yes</TD>
+          <TD>&mdash;</TD>
+          <TD>Path in the Ghidra Project to the program.</TD>
+        </TR>
+        <TR>
+          <TD><CODE>functionAddress</CODE></TD>
+          <TD>string</TD>
+          <TD>Yes</TD>
+          <TD>&mdash;</TD>
+          <TD>Address or name of the center function. Accepts hex addresses (e.g.,
+          "0x401000") or function names (e.g., "main"). If the address is inside a
+          function body, the containing function is used.</TD>
+        </TR>
+        <TR>
+          <TD><CODE>depth</CODE></TD>
+          <TD>integer</TD>
+          <TD>No</TD>
+          <TD>1</TD>
+          <TD>Number of levels of callers and callees to include. Automatically clamped
+          to the range 1&ndash;10.</TD>
+        </TR>
+      </TABLE>
+    </BLOCKQUOTE>
+
+    <H3 style="color: blue;">Return Value</H3>
+
+    <BLOCKQUOTE>
+      <P>Returns a JSON object containing:</P>
+      <UL>
+        <LI><CODE>programPath</CODE> &mdash; Program path.</LI>
+        <LI><CODE>centerFunction</CODE> &mdash; Object with <CODE>name</CODE> and
+        <CODE>address</CODE> of the center function.</LI>
+        <LI><CODE>depth</CODE> &mdash; The depth that was used.</LI>
+        <LI><CODE>callerCount</CODE> &mdash; Number of caller nodes returned.</LI>
+        <LI><CODE>calleeCount</CODE> &mdash; Number of callee nodes returned.</LI>
+        <LI><CODE>callers</CODE> &mdash; Nested array of caller node objects.</LI>
+        <LI><CODE>callees</CODE> &mdash; Nested array of callee node objects.</LI>
+      </UL>
+
+      <P>Each node object contains:</P>
+      <UL>
+        <LI><CODE>name</CODE> &mdash; Function name.</LI>
+        <LI><CODE>address</CODE> &mdash; Function address in hex.</LI>
+        <LI><CODE>cyclic</CODE> &mdash; (Present only if true) Indicates a cycle was
+        detected. The node does not recurse further.</LI>
+        <LI><CODE>callers</CODE> or <CODE>callees</CODE> &mdash; Nested child nodes at
+        the next depth level.</LI>
+      </UL>
+    </BLOCKQUOTE>
+
+    <H3 style="color: blue;">Graph Behavior</H3>
+
+    <BLOCKQUOTE>
+      <UL>
+        <LI><B>Bidirectional:</B> Both caller and callee directions are explored in a
+        single request.</LI>
+        <LI><B>Permanent visited tracking:</B> Each function appears at most once per
+        direction. Once a function is visited in the caller tree, it will not appear
+        again in that tree (but may still appear in the callee tree).</LI>
+        <LI><B>Node cap:</B> Maximum 250 nodes per direction. If the cap is reached,
+        exploration stops at the current depth level.</LI>
+        <LI><B>Cycle detection:</B> Recursive or mutually-recursive functions are
+        marked with <CODE>"cyclic": true</CODE> and are not expanded further.</LI>
+      </UL>
+    </BLOCKQUOTE>
+
+    <P><IMG src="help/shared/tip.png" alt="Tip"> Start with <CODE>depth=1</CODE> (the
+    default) for a quick overview, then increase depth selectively. Higher depths can
+    produce very large result sets on well-connected functions.</P>
+
+    <!-- ======================================================================== -->
+
+    <H2 style="color: brown;"><a name="GetCallTree"></a>get-call-tree</H2>
+
+    <P>Get a hierarchical call tree starting from a function, traversing in a single
+    direction (callers or callees). Unlike <CODE>get-call-graph</CODE>, the tree view
+    allows the same function to appear in different branches, giving a complete picture
+    of all call paths.</P>
+
+    <H3 style="color: blue;">Parameters</H3>
+
+    <BLOCKQUOTE>
+      <TABLE border="1" cellpadding="4" cellspacing="0" width="100%">
+        <TR>
+          <TH>Parameter</TH>
+          <TH>Type</TH>
+          <TH>Required</TH>
+          <TH>Default</TH>
+          <TH>Description</TH>
+        </TR>
+        <TR>
+          <TD><CODE>programPath</CODE></TD>
+          <TD>string</TD>
+          <TD>Yes</TD>
+          <TD>&mdash;</TD>
+          <TD>Path in the Ghidra Project to the program.</TD>
+        </TR>
+        <TR>
+          <TD><CODE>functionAddress</CODE></TD>
+          <TD>string</TD>
+          <TD>Yes</TD>
+          <TD>&mdash;</TD>
+          <TD>Address or name of the root function.</TD>
+        </TR>
+        <TR>
+          <TD><CODE>direction</CODE></TD>
+          <TD>string</TD>
+          <TD>No</TD>
+          <TD>"callees"</TD>
+          <TD>Direction to traverse: <CODE>"callers"</CODE> (upward &mdash; who calls
+          this function) or <CODE>"callees"</CODE> (downward &mdash; what this function
+          calls). Case-insensitive.</TD>
+        </TR>
+        <TR>
+          <TD><CODE>maxDepth</CODE></TD>
+          <TD>integer</TD>
+          <TD>No</TD>
+          <TD>3</TD>
+          <TD>Maximum depth to traverse. Automatically clamped to the range
+          1&ndash;10.</TD>
+        </TR>
+      </TABLE>
+    </BLOCKQUOTE>
+
+    <H3 style="color: blue;">Return Value</H3>
+
+    <BLOCKQUOTE>
+      <P>Returns a JSON object containing:</P>
+      <UL>
+        <LI><CODE>programPath</CODE> &mdash; Program path.</LI>
+        <LI><CODE>direction</CODE> &mdash; The direction traversed ("callers" or
+        "callees").</LI>
+        <LI><CODE>maxDepth</CODE> &mdash; The maximum depth that was used.</LI>
+        <LI><CODE>totalNodes</CODE> &mdash; Total number of nodes in the tree.</LI>
+        <LI><CODE>tree</CODE> &mdash; The root tree node.</LI>
+      </UL>
+
+      <P>Each tree node contains:</P>
+      <UL>
+        <LI><CODE>name</CODE> &mdash; Function name.</LI>
+        <LI><CODE>address</CODE> &mdash; Function address in hex.</LI>
+        <LI><CODE>depth</CODE> &mdash; Current depth in the tree (0 for the root).</LI>
+        <LI><CODE>cyclic</CODE> &mdash; (Present only if true) Indicates a cycle was
+        detected within the current call path. The node is not expanded further.</LI>
+        <LI><CODE>truncated</CODE> &mdash; (Present only if true) Indicates the maximum
+        depth was reached. No children are listed.</LI>
+        <LI><CODE>callers</CODE> or <CODE>callees</CODE> &mdash; Array of child tree
+        nodes (matching the traversal direction).</LI>
+      </UL>
+    </BLOCKQUOTE>
+
+    <H3 style="color: blue;">Tree vs. Graph Behavior</H3>
+
+    <BLOCKQUOTE>
+      <TABLE border="1" cellpadding="4" cellspacing="0" width="100%">
+        <TR>
+          <TH>Aspect</TH>
+          <TH>Graph (<CODE>get-call-graph</CODE>)</TH>
+          <TH>Tree (<CODE>get-call-tree</CODE>)</TH>
+        </TR>
+        <TR>
+          <TD><B>Directions</B></TD>
+          <TD>Both directions simultaneously</TD>
+          <TD>One direction at a time</TD>
+        </TR>
+        <TR>
+          <TD><B>Visited tracking</B></TD>
+          <TD>Permanent (per direction) &mdash; each function appears once</TD>
+          <TD>Per-path with backtracking &mdash; same function can appear in different
+          branches</TD>
+        </TR>
+        <TR>
+          <TD><B>Duplicate nodes</B></TD>
+          <TD>No duplicates within a direction</TD>
+          <TD>Duplicates allowed across branches</TD>
+        </TR>
+        <TR>
+          <TD><B>Node limit</B></TD>
+          <TD>250 per direction</TD>
+          <TD>500 total</TD>
+        </TR>
+        <TR>
+          <TD><B>Best for</B></TD>
+          <TD>Quick overview of a function's context</TD>
+          <TD>Deep call path analysis and hierarchy</TD>
+        </TR>
+      </TABLE>
+    </BLOCKQUOTE>
+
+    <P><IMG src="help/shared/note.png" alt="Note"> Because the tree allows duplicates across
+    branches, it has a higher node limit (500) than the graph view (250 per direction). Cycle
+    detection in tree mode operates per-path: a function is only marked cyclic if it appears
+    in its own ancestor chain, not if it appears elsewhere in the tree.</P>
+
+    <!-- ======================================================================== -->
+
+    <H2 style="color: brown;"><a name="FindCommonCallers"></a>find-common-callers</H2>
+
+    <P>Find functions that call <I>all</I> of a set of specified target functions. This tool
+    identifies shared dispatch points, main loops, or common entry points that orchestrate
+    multiple related functions. It is particularly useful for finding the function that ties
+    together a set of related operations.</P>
+
+    <H3 style="color: blue;">Parameters</H3>
+
+    <BLOCKQUOTE>
+      <TABLE border="1" cellpadding="4" cellspacing="0" width="100%">
+        <TR>
+          <TH>Parameter</TH>
+          <TH>Type</TH>
+          <TH>Required</TH>
+          <TH>Default</TH>
+          <TH>Description</TH>
+        </TR>
+        <TR>
+          <TD><CODE>programPath</CODE></TD>
+          <TD>string</TD>
+          <TD>Yes</TD>
+          <TD>&mdash;</TD>
+          <TD>Path in the Ghidra Project to the program.</TD>
+        </TR>
+        <TR>
+          <TD><CODE>functionAddresses</CODE></TD>
+          <TD>array of strings</TD>
+          <TD>Yes</TD>
+          <TD>&mdash;</TD>
+          <TD>List of function addresses or names to find common callers for. At least
+          one address is required. Example:
+          <CODE>["main", "0x401200", "parse_input"]</CODE></TD>
+        </TR>
+      </TABLE>
+    </BLOCKQUOTE>
+
+    <H3 style="color: blue;">Return Value</H3>
+
+    <BLOCKQUOTE>
+      <P>Returns a JSON object containing:</P>
+      <UL>
+        <LI><CODE>programPath</CODE> &mdash; Program path.</LI>
+        <LI><CODE>targetFunctions</CODE> &mdash; Array of resolved target function
+        objects, each with <CODE>name</CODE> and <CODE>address</CODE>.</LI>
+        <LI><CODE>commonCallerCount</CODE> &mdash; Number of common callers found.</LI>
+        <LI><CODE>commonCallers</CODE> &mdash; Array of common caller objects, each
+        with <CODE>name</CODE> and <CODE>address</CODE>. Sorted by address in
+        ascending order.</LI>
+      </UL>
+    </BLOCKQUOTE>
+
+    <H3 style="color: blue;">Algorithm</H3>
+
+    <BLOCKQUOTE>
+      <P>The tool uses set intersection to find common callers:</P>
+      <OL>
+        <LI>Collect all direct callers of the first target function.</LI>
+        <LI>For each subsequent target function, intersect its callers with the
+        running set.</LI>
+        <LI>If the intersection becomes empty at any point, the operation terminates
+        early and returns an empty result.</LI>
+      </OL>
+      <P>Only <I>direct</I> callers are considered. The tool does not traverse
+      multiple levels of the call graph. To find indirect common callers, combine
+      this tool with <CODE>get-call-tree</CODE> in the "callers" direction.</P>
+    </BLOCKQUOTE>
+
+    <H3 style="color: blue;">Error Conditions</H3>
+
+    <BLOCKQUOTE>
+      <UL>
+        <LI>An empty <CODE>functionAddresses</CODE> array produces the error: "At least
+        one function address is required".</LI>
+        <LI>If an address cannot be resolved, the error includes the unresolvable
+        address string.</LI>
+        <LI>If no function exists at a resolved address, the error includes the
+        address.</LI>
+      </UL>
+    </BLOCKQUOTE>
+
+    <P><IMG src="help/shared/tip.png" alt="Tip"> This tool is especially useful when you
+    have identified several related utility functions (e.g., encryption, networking, file
+    I/O) and want to find the higher-level function that orchestrates them all.</P>
+
+    <!-- ======================================================================== -->
+
+    <H2 style="color: brown;"><a name="GlobalLimits"></a>Global Configuration</H2>
+
+    <P>The following limits and timeouts apply across all call graph tools:</P>
+
+    <BLOCKQUOTE>
+      <TABLE border="1" cellpadding="4" cellspacing="0" width="80%">
+        <TR>
+          <TH>Setting</TH>
+          <TH>Value</TH>
+          <TH>Description</TH>
+        </TR>
+        <TR>
+          <TD>Maximum depth</TD>
+          <TD>10</TD>
+          <TD>Hard cap for <CODE>depth</CODE> and <CODE>maxDepth</CODE> parameters.
+          Values above 10 are clamped.</TD>
+        </TR>
+        <TR>
+          <TD>Graph node cap (per direction)</TD>
+          <TD>250</TD>
+          <TD>Maximum nodes in each direction of <CODE>get-call-graph</CODE>.</TD>
+        </TR>
+        <TR>
+          <TD>Tree node cap (total)</TD>
+          <TD>500</TD>
+          <TD>Maximum total nodes in <CODE>get-call-tree</CODE>.</TD>
+        </TR>
+        <TR>
+          <TD>Operation timeout</TD>
+          <TD>60 seconds</TD>
+          <TD>All call graph operations time out after 60 seconds. The error message
+          is: "Operation cancelled or timed out".</TD>
+        </TR>
+      </TABLE>
+    </BLOCKQUOTE>
+
+    <P><IMG src="help/shared/note.png" alt="Note"> The timeout monitor checks for
+    cancellation before each recursive expansion and before processing each function
+    in a loop. This ensures prompt termination when the time limit is reached.</P>
+
+    <!-- ======================================================================== -->
+
+    <BR>
+    <P style="color: gray; font-size: small;">Provided by: ReVa (Reverse Engineering
+    Assistant)</P>
+
+    <H2 style="color: purple;"><a name="RelatedTopics"></a>Related Topics</H2>
+    <UL>
+      <LI><A href="ReVa_decompiler_tools.html">Decompiler &amp; Code Analysis Tools</A></LI>
+      <LI><A href="ReVa_function_tools.html">Function Management Tools</A></LI>
+      <LI><A href="ReVa_xref_tools.html">Cross-References &amp; Data Flow Tools</A></LI>
+    </UL>
+
+  </BODY>
+</HTML>

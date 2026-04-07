@@ -16,3 +16,4 @@ __pycache__
 
 # ReVa local project directories
 .reva/
+.claude/worktrees

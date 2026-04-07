@@ -120,6 +120,9 @@ jobs:
           gh release upload '${{ github.event.release.tag_name }}' ./dist/*.sigstore* --clobber \
             --repo '${{ github.repository }}'
 
+      - name: Remove sigstore attestation files from dist
+        run: rm -f dist/*.sigstore* dist/*.intoto*
+
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:

@@ -33,115 +33,28 @@
 
                 <tocdef id="ReVa_CLIInstallation"
                         sortgroup="d"
-                        text="CLI Installation"
+                        text="CLI Setup"
                         target="help/topics/ReVa/ReVa_installation.html#CLIInstallation"/>
 
-                <tocdef id="ReVa_HeadlessSetup"
-                        sortgroup="e"
-                        text="Headless Mode Setup"
-                        target="help/topics/ReVa/ReVa_installation.html#HeadlessSetup"/>
-
                 <tocdef id="ReVa_Configuration"
-                        sortgroup="f"
+                        sortgroup="e"
                         text="Configuration Options"
                         target="help/topics/ReVa/ReVa_installation.html#Configuration"/>
 
                 <tocdef id="ReVa_BuildFromSource"
-                        sortgroup="g"
+                        sortgroup="f"
                         text="Build from Source"
                         target="help/topics/ReVa/ReVa_installation.html#BuildFromSource"/>
 
                 <tocdef id="ReVa_Troubleshooting"
-                        sortgroup="h"
+                        sortgroup="g"
                         text="Troubleshooting"
                         target="help/topics/ReVa/ReVa_installation.html#Troubleshooting"/>
 
             </tocdef>
 
-            <tocdef id="ReVa_GettingStarted"
-                    sortgroup="b"
-                    text="Getting Started"
-                    target="help/topics/ReVa/ReVa_getting_started.html">
-
-                <tocdef id="ReVa_FirstSession"
-                        sortgroup="a"
-                        text="Your First Analysis Session"
-                        target="help/topics/ReVa/ReVa_getting_started.html#FirstSession"/>
-
-                <tocdef id="ReVa_ProgramPath"
-                        sortgroup="b"
-                        text="Understanding programPath"
-                        target="help/topics/ReVa/ReVa_getting_started.html#ProgramPath"/>
-
-                <tocdef id="ReVa_Pagination"
-                        sortgroup="c"
-                        text="Pagination"
-                        target="help/topics/ReVa/ReVa_getting_started.html#Pagination"/>
-
-                <tocdef id="ReVa_EffectivePrompts"
-                        sortgroup="d"
-                        text="Tips for Effective Prompts"
-                        target="help/topics/ReVa/ReVa_getting_started.html#EffectivePrompts"/>
-
-            </tocdef>
-
-            <tocdef id="ReVa_DecompilerTools"
-                    sortgroup="c"
-                    text="Decompiler and Code Analysis Tools"
-                    target="help/topics/ReVa/ReVa_decompiler_tools.html"/>
-
-            <tocdef id="ReVa_FunctionTools"
-                    sortgroup="d"
-                    text="Function Management Tools"
-                    target="help/topics/ReVa/ReVa_function_tools.html"/>
-
-            <tocdef id="ReVa_XrefTools"
-                    sortgroup="e"
-                    text="Cross-References and Data Flow Tools"
-                    target="help/topics/ReVa/ReVa_xref_tools.html"/>
-
-            <tocdef id="ReVa_CallGraphTools"
-                    sortgroup="f"
-                    text="Call Graph Analysis Tools"
-                    target="help/topics/ReVa/ReVa_callgraph_tools.html"/>
-
-            <tocdef id="ReVa_DataTypeTools"
-                    sortgroup="g"
-                    text="Data Types and Structures"
-                    target="help/topics/ReVa/ReVa_data_type_tools.html"/>
-
-            <tocdef id="ReVa_MemoryDataTools"
-                    sortgroup="h"
-                    text="Memory, Data, Strings and Symbols"
-                    target="help/topics/ReVa/ReVa_memory_data_tools.html"/>
-
-            <tocdef id="ReVa_ImportExportTools"
-                    sortgroup="i"
-                    text="Import, Export and Thunk Tools"
-                    target="help/topics/ReVa/ReVa_import_export_tools.html"/>
-
-            <tocdef id="ReVa_VtableConstantTools"
-                    sortgroup="j"
-                    text="Virtual Tables and Constants"
-                    target="help/topics/ReVa/ReVa_vtable_constant_tools.html"/>
-
-            <tocdef id="ReVa_AnnotationTools"
-                    sortgroup="k"
-                    text="Comments and Bookmarks"
-                    target="help/topics/ReVa/ReVa_annotation_tools.html"/>
-
-            <tocdef id="ReVa_ProjectTools"
-                    sortgroup="l"
-                    text="Project Management Tools"
-                    target="help/topics/ReVa/ReVa_project_tools.html"/>
-
-            <tocdef id="ReVa_Concepts"
-                    sortgroup="m"
-                    text="Architecture and Concepts"
-                    target="help/topics/ReVa/ReVa_concepts.html"/>
-
             <tocdef id="ReVa_Skills"
-                    sortgroup="n"
+                    sortgroup="b"
                     text="Skills and Analysis Workflows"
                     target="help/topics/ReVa/ReVa_skills.html"/>
 

@@ -30,14 +30,19 @@
     <H2><A name="Installation"></A>Installing Skills</H2>
 
     <BLOCKQUOTE>
-      <P>To install the ReVa skills in Claude Code, run the following command:</P>
+      <P>The ReVa skills are included in the ReVa repository under
+      <CODE>ReVa/skills/</CODE>. When you clone the repository or install
+      the extension, the skills are available as slash commands in Claude Code
+      when working in the project directory.</P>
+
+      <P>To install the skills globally:</P>
 
       <BLOCKQUOTE>
-        <CODE>claude plugin marketplace add cyberkaida/reverse-engineering-assistant</CODE>
+        <CODE>claude skills add /path/to/reverse-engineering-assistant/ReVa/skills</CODE>
       </BLOCKQUOTE>
 
-      <P>Once installed, the skills are available as slash commands in any Claude Code
-      conversation where the ReVa MCP server is connected.</P>
+      <P>Once installed, the skills are available as slash commands in any
+      Claude Code conversation.</P>
     </BLOCKQUOTE>
 
     <!-- ==================== Binary Triage ==================== -->
@@ -527,8 +532,8 @@
     <P class="relatedtopic">Related Topics:</P>
 
     <UL>
-      <LI><A href="ReVa_concepts.html">Architecture &amp; Concepts</A></LI>
-      <LI><A href="ReVa_project_tools.html">Project Management Tools</A></LI>
+      <LI><A href="ReVa_overview.html">ReVa Overview</A></LI>
+      <LI><A href="ReVa_installation.html">Installation and Setup</A></LI>
     </UL>
   </BODY>
 </HTML>

@@ -13,17 +13,24 @@
 
     <BLOCKQUOTE>
 
-      <P>This page covers all methods of installing and configuring ReVa.
-      The most common path is installing the prebuilt extension into Ghidra
-      and connecting an MCP client, but ReVa also supports headless and CLI
-      deployments.</P>
+      <P>This page covers installing ReVa, connecting an AI client, and
+      configuration. The two most common setups are:</P>
+
+      <UL>
+        <LI><B>GUI mode</B> &mdash; Install the plugin into Ghidra, connect
+        an MCP client over HTTP. You work in the CodeBrowser alongside the
+        AI.</LI>
+        <LI><B>CLI mode</B> &mdash; Install the
+        <CODE>reverse-engineering-assistant</CODE> Python package, add it to
+        Claude Code. No need to open Ghidra &mdash; ReVa handles everything.</LI>
+      </UL>
 
       <H2><A name="PluginInstallation"></A>Plugin Installation</H2>
 
       <BLOCKQUOTE>
 
         <P>ReVa is distributed as a standard Ghidra extension archive
-        (<CODE CLASS="path">.zip</CODE> file). To install it:</P>
+        (<CODE CLASS="path">.zip</CODE> file).</P>
 
         <OL>
           <LI>Download the ReVa extension archive matching the installed Ghidra
@@ -33,25 +40,19 @@
           <B>File<IMG alt="" src="help/shared/arrow.gif" border="0">Install
           Extensions</B> from the Project window.</LI>
 
-          <LI>In the <I>Install Extensions</I> dialog, click the
-          <B>+</B> button (top right) to add an extension from the
-          filesystem.</LI>
+          <LI>Click the <B>+</B> button (top right) and select the ReVa
+          <CODE CLASS="path">.zip</CODE> archive.</LI>
 
-          <LI>Select the ReVa <CODE CLASS="path">.zip</CODE> archive and
+          <LI>Ensure the checkbox next to <B>ReVa</B> is checked, then
           click <B>OK</B>.</LI>
-
-          <LI>Ensure the checkbox next to <B>ReVa</B> is checked in the
-          extensions list.</LI>
-
-          <LI>Click <B>OK</B> to close the dialog.</LI>
 
           <LI><B>Restart Ghidra</B> to load the extension.</LI>
         </OL>
 
         <BLOCKQUOTE>
           <P><IMG border="0" src="help/shared/note.png" alt=""> The extension
-          archive must match the Ghidra version it was built against. ReVa
-          requires Ghidra 12.0 or later and Java 21 or later.</P>
+          must match the Ghidra version. ReVa requires Ghidra 12.0+ and
+          Java 21+.</P>
         </BLOCKQUOTE>
 
       </BLOCKQUOTE>
@@ -60,86 +61,51 @@
 
       <BLOCKQUOTE>
 
-        <P>After installation, ReVa requires activation in <B>two</B> separate
-        contexts. This is the most commonly missed step during setup.</P>
+        <P>ReVa has <CODE>STABLE</CODE> status, which means it <B>auto-loads</B>
+        in Ghidra's default tool configurations after installation. If you're
+        using a fresh Ghidra setup, ReVa should already be active after
+        restarting &mdash; look for this message in the log:</P>
 
         <BLOCKQUOTE>
-          <P><IMG border="0" src="help/shared/note.png" alt=""> ReVa's plugins have
-          <CODE>STABLE</CODE> status, which means they <B>auto-load in Ghidra's default
-          tool configurations</B> (the default CodeBrowser and the Project window) after
-          a fresh Ghidra installation with ReVa installed. If you are using a fresh
-          Ghidra setup, ReVa should already be active after restarting Ghidra &mdash;
-          check the log for the server-started message before proceeding.</P>
+          <PRE>Starting MCP server on http://127.0.0.1:8080
+MCP server started successfully</PRE>
         </BLOCKQUOTE>
 
-        <BLOCKQUOTE>
-          <P><IMG border="0" src="help/shared/warning.png" alt=""> Users with
-          <B>existing or customized tool configurations</B> may not pick up the
-          auto-load. In that case, ReVa must be activated manually in <B>both</B>
-          the Project window and the CodeBrowser as described below. Activating it
-          in only one location will result in the server not starting or programs not
-          being visible to MCP clients.</P>
-        </BLOCKQUOTE>
+        <P>If you're using a <B>customized tool configuration</B>, ReVa must be
+        activated manually in two places:</P>
 
-        <H3><A name="ActivateProjectWindow"></A>Step 1: Activate in the Project Window</H3>
+        <H3><A name="ActivateProjectWindow"></A>Step 1: Project Window</H3>
 
         <BLOCKQUOTE>
-
-          <P>The application-level plugin manages the MCP server lifecycle. It must
-          be enabled in the Project window (also called the <I>Front-End Tool</I>):</P>
+          <P>This starts the MCP server.</P>
 
           <OL>
-            <LI>From the Ghidra Project window, select
+            <LI>From the Project window, select
             <B>File<IMG alt="" src="help/shared/arrow.gif" border="0">Configure</B>.</LI>
-
-            <LI>In the <I>Configure Tool</I> dialog, locate the <B>ReVa</B>
-            package (under the <I>Common</I> category or listed by name).</LI>
-
-            <LI>Click the checkbox to enable the <B>ReVa</B> package.</LI>
-
-            <LI>Click <B>OK</B> (or <B>Done</B>) to apply.</LI>
+            <LI>Find the <B>ReVa</B> package and enable it.</LI>
+            <LI>Click <B>OK</B>.</LI>
           </OL>
-
-          <P>Once activated, the ReVa MCP server starts automatically. A log message
-          confirms the server is running:</P>
-
-          <BLOCKQUOTE>
-            <PRE>ReVa MCP server started on http://127.0.0.1:8080/mcp/message</PRE>
-          </BLOCKQUOTE>
-
         </BLOCKQUOTE>
 
-        <H3><A name="ActivateCodeBrowser"></A>Step 2: Activate in the CodeBrowser</H3>
+        <H3><A name="ActivateCodeBrowser"></A>Step 2: CodeBrowser</H3>
 
         <BLOCKQUOTE>
-
-          <P>The tool-level plugin registers open programs with the MCP server. It
-          must be enabled in each CodeBrowser (analysis tool) instance:</P>
+          <P>This makes open programs visible to the AI.</P>
 
           <OL>
             <LI>Open a program in the CodeBrowser.</LI>
-
             <LI>Select
-            <B>File<IMG alt="" src="help/shared/arrow.gif" border="0">Configure</B>
-            from the CodeBrowser menu.</LI>
-
-            <LI>Locate the <B>ReVa</B> package and enable it.</LI>
-
-            <LI>Click <B>OK</B> to apply.</LI>
+            <B>File<IMG alt="" src="help/shared/arrow.gif" border="0">Configure</B>.</LI>
+            <LI>Find the <B>ReVa</B> package and enable it.</LI>
+            <LI>Click <B>OK</B>.</LI>
           </OL>
 
-          <P>Programs opened in a CodeBrowser with ReVa activated become visible
-          to MCP clients. Programs in CodeBrowser instances without ReVa activated
-          remain invisible to the MCP server.</P>
-
           <BLOCKQUOTE>
-            <P><IMG border="0" src="help/shared/tip.png" alt="" border="0"> To
-            avoid repeating this step for every new CodeBrowser, save the tool
-            configuration after activating ReVa. Use
-            <B>File<IMG alt="" src="help/shared/arrow.gif" border="0">Save Tool</B>
-            to persist the setting.</P>
+            <P><IMG border="0" src="help/shared/tip.png" alt=""> Save the tool
+            configuration after activating ReVa
+            (<B>File<IMG alt="" src="help/shared/arrow.gif" border="0">Save
+            Tool</B>) so you don't have to repeat this step.</P>
           </BLOCKQUOTE>
-
         </BLOCKQUOTE>
 
       </BLOCKQUOTE>
@@ -148,51 +114,12 @@
 
       <BLOCKQUOTE>
 
-        <P>Once ReVa is running, an MCP-compatible client must be configured to
-        connect to the server. The connection details depend on the client.</P>
+        <P>Once ReVa is running in Ghidra, connect an MCP client.</P>
 
-        <H3><A name="ClaudeCodeClient"></A>Claude Code</H3>
-
-        <BLOCKQUOTE>
-
-          <P>Claude Code can connect to ReVa in two ways:</P>
-
-          <P><B>Option A: Direct HTTP connection</B> (recommended for GUI mode)</P>
-
-          <BLOCKQUOTE>
-            <P>Add ReVa as an MCP server in Claude Code's configuration, pointing
-            to the HTTP endpoint:</P>
-
-            <PRE>{
-  "mcpServers": {
-    "ReVa": {
-      "url": "http://localhost:8080/mcp/message"
-    }
-  }
-}</PRE>
-          </BLOCKQUOTE>
-
-          <P><B>Option B: Stdio bridge</B> (recommended for CLI-only workflows)</P>
-
-          <BLOCKQUOTE>
-            <P>Register the <CODE>mcp-reva</CODE> CLI tool, which handles server
-            lifecycle automatically:</P>
-
-            <PRE>claude mcp add ReVa -- mcp-reva</PRE>
-
-            <P>This approach starts a dedicated ReVa server instance per Claude Code
-            session, with its own temporary project. See
-            <A href="#CLIInstallation">CLI Installation</A> for setup.</P>
-          </BLOCKQUOTE>
-
-        </BLOCKQUOTE>
-
-        <H3><A name="VSCodeClient"></A>VS Code / Cursor</H3>
+        <H3><A name="ClaudeCodeClient"></A>Claude Code (HTTP)</H3>
 
         <BLOCKQUOTE>
-
-          <P>For VS Code or Cursor with MCP support, add the following to the
-          MCP configuration:</P>
+          <P>Add ReVa to Claude Code's MCP configuration:</P>
 
           <PRE>{
   "mcpServers": {
@@ -201,175 +128,94 @@
     }
   }
 }</PRE>
-
         </BLOCKQUOTE>
 
-        <H3><A name="GenericClient"></A>Generic MCP Clients</H3>
+        <H3><A name="VSCodeClient"></A>VS Code / Cursor</H3>
 
         <BLOCKQUOTE>
+          <P>Add the same configuration to your editor's MCP settings:</P>
 
-          <P>Any MCP client that supports the streamable HTTP transport can connect
-          to ReVa. The connection parameters are:</P>
+          <PRE>{
+  "mcpServers": {
+    "ReVa": {
+      "url": "http://localhost:8080/mcp/message"
+    }
+  }
+}</PRE>
+        </BLOCKQUOTE>
 
-          <TABLE border="1" cellpadding="4" cellspacing="0">
-            <TR>
-              <TH>Parameter</TH>
-              <TH>Default Value</TH>
-            </TR>
-            <TR>
-              <TD>Transport</TD>
-              <TD>Streamable HTTP</TD>
-            </TR>
-            <TR>
-              <TD>Host</TD>
-              <TD><CODE>127.0.0.1</CODE></TD>
-            </TR>
-            <TR>
-              <TD>Port</TD>
-              <TD><CODE>8080</CODE></TD>
-            </TR>
-            <TR>
-              <TD>Endpoint</TD>
-              <TD><CODE>/mcp/message</CODE></TD>
-            </TR>
-            <TR>
-              <TD>Full URL</TD>
-              <TD><CODE>http://localhost:8080/mcp/message</CODE></TD>
-            </TR>
-          </TABLE>
+        <H3><A name="GenericClient"></A>Other MCP Clients</H3>
 
-          <P>If API key authentication is enabled, the client must send the key in
-          the <CODE>X-API-Key</CODE> HTTP header with each request.</P>
-
+        <BLOCKQUOTE>
+          <P>Any client supporting streamable HTTP transport can connect.
+          Default endpoint: <CODE>http://localhost:8080/mcp/message</CODE>.
+          If API key auth is enabled, send the key in the
+          <CODE>X-API-Key</CODE> header.</P>
         </BLOCKQUOTE>
 
       </BLOCKQUOTE>
 
-      <H2><A name="CLIInstallation"></A>CLI Installation</H2>
+      <H2><A name="CLIInstallation"></A>CLI Setup (Claude Code without Ghidra GUI)</H2>
 
       <BLOCKQUOTE>
 
-        <P>The <CODE>mcp-reva</CODE> CLI tool provides stdio transport for
-        integration with command-line AI tools. It requires Python 3.10 or later
-        and PyGhidra.</P>
-
-        <H3><A name="CLIPrerequisites"></A>Prerequisites</H3>
-
-        <BLOCKQUOTE>
-          <UL>
-            <LI>Python 3.10 or later</LI>
-            <LI>A Ghidra installation (12.0 or later)</LI>
-            <LI><CODE>uv</CODE> package manager (recommended) or <CODE>pip</CODE></LI>
-          </UL>
-        </BLOCKQUOTE>
+        <P>ReVa can run entirely from the command line through Claude Code,
+        without opening Ghidra's GUI. The
+        <CODE>reverse-engineering-assistant</CODE> Python package handles
+        everything: it starts Ghidra headlessly, creates a project, and
+        bridges Claude Code to the MCP server.</P>
 
         <H3><A name="CLIInstallSteps"></A>Installation</H3>
 
         <BLOCKQUOTE>
-          <P>Install the CLI tool using <CODE>uv</CODE>:</P>
+          <P>Install the package (requires Python 3.10+ and a Ghidra
+          installation):</P>
 
-          <PRE>uv tool install reva-cli</PRE>
+          <PRE>uv tool install reverse-engineering-assistant</PRE>
 
-          <P>Or install from the repository for development:</P>
+          <P>Or with pip:</P>
 
-          <PRE>uv pip install -e .</PRE>
+          <PRE>pip install reverse-engineering-assistant</PRE>
+        </BLOCKQUOTE>
 
-          <P>Verify the installation:</P>
+        <H3><A name="CLIAddToClaude"></A>Add to Claude Code</H3>
 
-          <PRE>mcp-reva --version</PRE>
+        <BLOCKQUOTE>
+          <PRE>claude mcp add ReVa -- mcp-reva</PRE>
         </BLOCKQUOTE>
 
         <H3><A name="CLIUsage"></A>Usage</H3>
 
         <BLOCKQUOTE>
-          <P>The CLI accepts the following arguments:</P>
+          <P>That's it. Now just run <CODE>claude</CODE> in a directory with
+          a binary and ask the AI to analyze it:</P>
 
-          <TABLE border="1" cellpadding="4" cellspacing="0">
-            <TR>
-              <TH>Argument</TH>
-              <TH>Description</TH>
-            </TR>
-            <TR>
-              <TD><CODE>--config PATH</CODE></TD>
-              <TD>Path to a ReVa configuration file (optional)</TD>
-            </TR>
-            <TR>
-              <TD><CODE>--verbose</CODE>, <CODE>-v</CODE></TD>
-              <TD>Enable verbose logging</TD>
-            </TR>
-            <TR>
-              <TD><CODE>--version</CODE></TD>
-              <TD>Print version and exit</TD>
-            </TR>
-          </TABLE>
+          <BLOCKQUOTE>
+            <P><I>"Import ./firmware.bin and tell me what it does."</I></P>
+          </BLOCKQUOTE>
 
-          <P>When launched, the CLI initializes PyGhidra, creates a temporary
-          Ghidra project, starts the MCP server on a random port, and bridges
-          stdin/stdout to the HTTP server. All temporary files are cleaned up
-          on exit.</P>
+          <P>ReVa automatically creates a temporary Ghidra project, imports the
+          binary, runs analysis, and makes everything available to the AI. The
+          temporary project is cleaned up when the session ends.</P>
+
+          <BLOCKQUOTE>
+            <P><IMG border="0" src="help/shared/note.png" alt=""> The
+            <CODE>GHIDRA_INSTALL_DIR</CODE> environment variable must point to
+            a Ghidra installation for the CLI to work.</P>
+          </BLOCKQUOTE>
         </BLOCKQUOTE>
 
       </BLOCKQUOTE>
 
-      <H2><A name="HeadlessSetup"></A>Headless Mode Setup</H2>
+      <H2><A name="HeadlessSetup"></A>Headless Mode</H2>
 
       <BLOCKQUOTE>
 
-        <P>Headless mode runs ReVa without the Ghidra GUI. This is useful for
-        server deployments, batch processing, and CI/CD pipelines.</P>
-
-        <H3><A name="HeadlessPython"></A>Using the Python Script</H3>
-
-        <BLOCKQUOTE>
-
-          <P>The simplest way to run headless mode is with the provided script:</P>
-
-          <PRE>python scripts/reva_headless_server.py --wait</PRE>
-
-          <P>The <CODE>--wait</CODE> flag keeps the server running until interrupted.</P>
-
-        </BLOCKQUOTE>
-
-        <H3><A name="HeadlessJava"></A>Using the Java API</H3>
-
-        <BLOCKQUOTE>
-
-          <P>For programmatic integration, use the <CODE>RevaHeadlessLauncher</CODE>
-          class directly:</P>
-
-          <PRE>import pyghidra
-pyghidra.start()
-
-from reva.headless import RevaHeadlessLauncher
-
-launcher = RevaHeadlessLauncher(
-    configFile=None,
-    useRandomPort=True
-)
-launcher.start()
-
-if launcher.waitForServer(30000):
-    print(f"Server ready on port {launcher.getPort()}")
-
-# ... use the server ...
-
-launcher.stop()</PRE>
-
-          <P>The launcher supports several constructors for different
-          deployment scenarios:</P>
-
-          <UL>
-            <LI><B>Default</B> &mdash; In-memory configuration, port 8080, no
-            persistent project</LI>
-            <LI><B>With config file</B> &mdash; Load settings from a
-            <CODE>.properties</CODE> file</LI>
-            <LI><B>With random port</B> &mdash; Avoids port conflicts in
-            multi-instance deployments</LI>
-            <LI><B>With persistent project</B> &mdash; Specify a project location
-            and name for data that survives restarts</LI>
-          </UL>
-
-        </BLOCKQUOTE>
+        <P>For automation, scripting, or server deployments, ReVa can run
+        without any GUI using the <CODE>RevaHeadlessLauncher</CODE> Java API
+        via PyGhidra. The CLI mode (<CODE>mcp-reva</CODE>) is the simplest
+        way to run headless &mdash; it handles all the setup automatically.
+        See the project README for advanced headless configuration.</P>
 
       </BLOCKQUOTE>
 
@@ -377,13 +223,12 @@ launcher.stop()</PRE>
 
       <BLOCKQUOTE>
 
-        <P>ReVa's behavior is controlled through configuration options. In GUI mode,
-        these are managed through Ghidra's Tool Options dialog
-        (<B>Edit<IMG alt="" src="help/shared/arrow.gif" border="0">Tool Options</B>,
-        then select <B>ReVa Server Options</B>). In headless mode, they are set in a
-        <CODE>.properties</CODE> configuration file.</P>
+        <P>In GUI mode, configure ReVa through
+        <B>Edit<IMG alt="" src="help/shared/arrow.gif" border="0">Tool
+        Options<IMG alt="" src="help/shared/arrow.gif" border="0">ReVa Server
+        Options</B>.</P>
 
-        <H3><A name="ServerOptions"></A>Server Options</H3>
+        <H3><A name="ServerOptions"></A>Server</H3>
 
         <BLOCKQUOTE>
           <TABLE border="1" cellpadding="4" cellspacing="0">
@@ -400,20 +245,18 @@ launcher.stop()</PRE>
             <TR>
               <TD><B>Server Host</B></TD>
               <TD><CODE>127.0.0.1</CODE></TD>
-              <TD>Network interface to bind. Use <CODE>127.0.0.1</CODE>
-              for localhost only, or <CODE>0.0.0.0</CODE> to accept connections
-              from all interfaces.</TD>
+              <TD>Bind address. Use <CODE>0.0.0.0</CODE> for remote
+              access (enable API key auth first).</TD>
             </TR>
             <TR>
               <TD><B>Server Enabled</B></TD>
               <TD><CODE>true</CODE></TD>
-              <TD>Whether the MCP server is active. Set to <CODE>false</CODE>
-              to install the extension without running the server.</TD>
+              <TD>Set to <CODE>false</CODE> to disable the server.</TD>
             </TR>
           </TABLE>
         </BLOCKQUOTE>
 
-        <H3><A name="SecurityOptions"></A>Security Options</H3>
+        <H3><A name="SecurityOptions"></A>Security</H3>
 
         <BLOCKQUOTE>
           <TABLE border="1" cellpadding="4" cellspacing="0">
@@ -425,20 +268,18 @@ launcher.stop()</PRE>
             <TR>
               <TD><B>API Key Authentication Enabled</B></TD>
               <TD><CODE>false</CODE></TD>
-              <TD>Require an API key for all MCP requests. Recommended when
-              the server host is set to <CODE>0.0.0.0</CODE>.</TD>
+              <TD>Require an API key for all requests.</TD>
             </TR>
             <TR>
               <TD><B>API Key</B></TD>
               <TD><I>(auto-generated)</I></TD>
-              <TD>The API key value. If left empty when authentication is enabled,
-              a key is generated automatically in the format
-              <CODE>ReVa-{UUID}</CODE>.</TD>
+              <TD>The key value. Auto-generated as
+              <CODE>ReVa-{UUID}</CODE> if left empty.</TD>
             </TR>
           </TABLE>
         </BLOCKQUOTE>
 
-        <H3><A name="AnalysisOptions"></A>Analysis Options</H3>
+        <H3><A name="AnalysisOptions"></A>Analysis</H3>
 
         <BLOCKQUOTE>
           <TABLE border="1" cellpadding="4" cellspacing="0">
@@ -450,18 +291,18 @@ launcher.stop()</PRE>
             <TR>
               <TD><B>Decompiler Timeout (seconds)</B></TD>
               <TD><CODE>10</CODE></TD>
-              <TD>Maximum time allowed for each decompilation operation.</TD>
+              <TD>Max time per decompilation. Increase for complex
+              functions.</TD>
             </TR>
             <TR>
               <TD><B>Max Decompiler Search Functions</B></TD>
               <TD><CODE>1000</CODE></TD>
-              <TD>Threshold above which decompiler-based searches warn the
-              client about performance. Does not prevent the search.</TD>
+              <TD>Warns the AI about performance above this threshold.</TD>
             </TR>
           </TABLE>
         </BLOCKQUOTE>
 
-        <H3><A name="ImportOptions"></A>Import Options</H3>
+        <H3><A name="ImportOptions"></A>Import</H3>
 
         <BLOCKQUOTE>
           <TABLE border="1" cellpadding="4" cellspacing="0">
@@ -471,32 +312,24 @@ launcher.stop()</PRE>
               <TH>Description</TH>
             </TR>
             <TR>
-              <TD><B>Import Timeout (seconds)</B></TD>
-              <TD><CODE>120</CODE></TD>
-              <TD>Maximum time for file import operations.</TD>
-            </TR>
-            <TR>
               <TD><B>Import Analysis Timeout (seconds)</B></TD>
               <TD><CODE>600</CODE></TD>
-              <TD>Maximum time for auto-analysis after importing a file
-              (10 minutes).</TD>
+              <TD>Max time for auto-analysis after import (10 min).</TD>
             </TR>
             <TR>
               <TD><B>Wait for Analysis on Import</B></TD>
               <TD><CODE>true</CODE></TD>
-              <TD>Whether to run auto-analysis after importing a file and wait
-              for it to complete before returning.</TD>
+              <TD>Run auto-analysis after importing a file.</TD>
             </TR>
             <TR>
               <TD><B>Import Max Depth</B></TD>
               <TD><CODE>10</CODE></TD>
-              <TD>Maximum recursion depth when importing containers or
-              archives.</TD>
+              <TD>Max depth for importing containers/archives.</TD>
             </TR>
           </TABLE>
         </BLOCKQUOTE>
 
-        <H3><A name="DebugOptions"></A>Debug Options</H3>
+        <H3><A name="DebugOptions"></A>Debug</H3>
 
         <BLOCKQUOTE>
           <TABLE border="1" cellpadding="4" cellspacing="0">
@@ -508,41 +341,15 @@ launcher.stop()</PRE>
             <TR>
               <TD><B>Debug Mode</B></TD>
               <TD><CODE>false</CODE></TD>
-              <TD>Enable debug-level logging.</TD>
+              <TD>Enable debug logging.</TD>
             </TR>
             <TR>
               <TD><B>Request Logging Enabled</B></TD>
               <TD><CODE>false</CODE></TD>
-              <TD>Log all MCP tool requests and responses to
-              <CODE CLASS="path">reva-tools.log</CODE>. Useful for diagnosing
-              client issues.</TD>
+              <TD>Log all MCP requests to
+              <CODE CLASS="path">reva-tools.log</CODE>.</TD>
             </TR>
           </TABLE>
-        </BLOCKQUOTE>
-
-        <H3><A name="ConfigFile"></A>Configuration File Format</H3>
-
-        <BLOCKQUOTE>
-
-          <P>For headless and CLI modes, configuration is loaded from a standard
-          Java <CODE>.properties</CODE> file. Option names are derived from the
-          GUI option names by converting to lowercase and replacing spaces with
-          dots. Example:</P>
-
-          <PRE>reva.server.options.server.port=8080
-reva.server.options.server.host=127.0.0.1
-reva.server.options.server.enabled=true
-reva.server.options.api.key.authentication.enabled=false
-reva.server.options.api.key=ReVa-change-this-to-a-secure-random-key
-reva.server.options.debug.mode=false
-reva.server.options.request.logging.enabled=false
-reva.server.options.decompiler.timeout.seconds=10
-reva.server.options.max.decompiler.search.functions=1000
-reva.server.options.import.timeout.seconds=120
-reva.server.options.import.analysis.timeout.seconds=600
-reva.server.options.wait.for.analysis.on.import=true
-reva.server.options.import.max.depth=10</PRE>
-
         </BLOCKQUOTE>
 
       </BLOCKQUOTE>
@@ -551,63 +358,26 @@ reva.server.options.import.max.depth=10</PRE>
 
       <BLOCKQUOTE>
 
-        <P>To build ReVa from source, the following prerequisites are required:</P>
+        <P>Requirements: Java 21+ (JDK), Gradle 9.x+, Ghidra 12.0+.</P>
 
-        <UL>
-          <LI>Java 21 or later (JDK, not JRE)</LI>
-          <LI>Gradle 9.x or later</LI>
-          <LI>A Ghidra installation (12.0 or later)</LI>
-        </UL>
+        <OL>
+          <LI>Set <CODE>GHIDRA_INSTALL_DIR</CODE>:
+          <PRE>export GHIDRA_INSTALL_DIR=/path/to/ghidra</PRE></LI>
 
-        <H3><A name="BuildSteps"></A>Build Steps</H3>
+          <LI>Build:
+          <PRE>gradle</PRE></LI>
 
-        <BLOCKQUOTE>
-
-          <OL>
-            <LI>Set the <CODE>GHIDRA_INSTALL_DIR</CODE> environment variable to
-            the Ghidra installation directory:
-            <PRE>export GHIDRA_INSTALL_DIR=/path/to/ghidra</PRE></LI>
-
-            <LI>Build the extension:
-            <PRE>gradle</PRE></LI>
-
-            <LI>The extension archive is created in the
-            <CODE CLASS="path">dist/</CODE> directory.</LI>
-          </OL>
-
-          <BLOCKQUOTE>
-            <P><IMG border="0" src="help/shared/note.png" alt=""> Use
-            <CODE>gradle</CODE> directly, not <CODE>./gradlew</CODE>. ReVa does
-            not use the Gradle wrapper.</P>
-          </BLOCKQUOTE>
-
-          <P>To install the extension directly into the Ghidra installation (useful
-          during development):</P>
-
-          <PRE>gradle install</PRE>
-
-        </BLOCKQUOTE>
-
-        <H3><A name="BuildTests"></A>Running Tests</H3>
+          <LI>The extension archive is in <CODE CLASS="path">dist/</CODE>.</LI>
+        </OL>
 
         <BLOCKQUOTE>
-
-          <P>Run unit tests (no Ghidra environment required):</P>
-
-          <PRE>gradle test</PRE>
-
-          <P>Run integration tests (requires a graphical environment):</P>
-
-          <PRE>gradle integrationTest</PRE>
-
-          <BLOCKQUOTE>
-            <P><IMG border="0" src="help/shared/note.png" alt=""> Integration tests
-            require <CODE>java.awt.headless=false</CODE> and run with
-            <CODE>forkEvery=1</CODE> to isolate test state. They cannot run in
-            headless CI environments without a virtual display.</P>
-          </BLOCKQUOTE>
-
+          <P><IMG border="0" src="help/shared/note.png" alt=""> Use
+          <CODE>gradle</CODE> directly, not <CODE>./gradlew</CODE>.</P>
         </BLOCKQUOTE>
+
+        <P>To install directly into Ghidra (for development):</P>
+
+        <PRE>gradle install</PRE>
 
       </BLOCKQUOTE>
 
@@ -619,37 +389,28 @@ reva.server.options.import.max.depth=10</PRE>
 
         <BLOCKQUOTE>
           <UL>
-            <LI><B>Port already in use</B> &mdash; Another process (including a
-            previous Ghidra instance) may be using port 8080. Change the port in
-            <B>Edit<IMG alt="" src="help/shared/arrow.gif" border="0">Tool
-            Options<IMG alt="" src="help/shared/arrow.gif" border="0">ReVa Server
-            Options</B>, or stop the conflicting process.</LI>
+            <LI><B>Port in use</B> &mdash; Another process is using port 8080.
+            Change the port in Tool Options, or stop the other process.</LI>
 
-            <LI><B>Plugin not activated in Project window</B> &mdash; The server is
-            managed by the application-level plugin. Verify activation following the
-            steps in <A href="#PluginActivation">Plugin Activation</A>.</LI>
+            <LI><B>Plugin not activated in Project window</B> &mdash; The server
+            is managed by the application-level plugin. See
+            <A href="#PluginActivation">Plugin Activation</A>.</LI>
 
-            <LI><B>Server disabled in configuration</B> &mdash; Check that
-            <B>Server Enabled</B> is set to <CODE>true</CODE> in the Tool Options.</LI>
+            <LI><B>Server disabled</B> &mdash; Check that <B>Server Enabled</B>
+            is <CODE>true</CODE> in Tool Options.</LI>
           </UL>
         </BLOCKQUOTE>
 
-        <H3><A name="TroubleshootNoProgramsVisible"></A>No Programs Visible to MCP Client</H3>
+        <H3><A name="TroubleshootNoProgramsVisible"></A>No Programs Visible</H3>
 
         <BLOCKQUOTE>
           <UL>
-            <LI><B>Plugin not activated in CodeBrowser</B> &mdash; Each CodeBrowser
-            window must have ReVa activated independently. See
-            <A href="#ActivateCodeBrowser">Step 2: Activate in the CodeBrowser</A>.</LI>
+            <LI><B>Plugin not activated in CodeBrowser</B> &mdash; Each
+            CodeBrowser needs ReVa activated. See
+            <A href="#ActivateCodeBrowser">Step 2</A>.</LI>
 
-            <LI><B>No program open</B> &mdash; A program must be open in the
-            CodeBrowser for it to appear in the MCP server's program list.</LI>
-
-            <LI><B>Wrong programPath</B> &mdash; Verify the program path using the
-            <CODE>list-open-programs</CODE> tool or the
-            <CODE>ghidra://programs</CODE> resource. See
-            <A href="ReVa_getting_started.html#ProgramPath">Understanding
-            programPath</A>.</LI>
+            <LI><B>No program open</B> &mdash; Open a program in the
+            CodeBrowser, or ask the AI to import one.</LI>
           </UL>
         </BLOCKQUOTE>
 
@@ -657,52 +418,36 @@ reva.server.options.import.max.depth=10</PRE>
 
         <BLOCKQUOTE>
           <UL>
-            <LI><B>Wrong URL</B> &mdash; Ensure the client is connecting to
-            <CODE>http://localhost:8080/mcp/message</CODE> (not just
-            <CODE>/mcp</CODE> or the root path).</LI>
+            <LI><B>Wrong URL</B> &mdash; Use
+            <CODE>http://localhost:8080/mcp/message</CODE> (the full path
+            matters).</LI>
 
-            <LI><B>API key required</B> &mdash; If API key authentication is
-            enabled, the client must include the key in the <CODE>X-API-Key</CODE>
-            header.</LI>
-
-            <LI><B>Firewall blocking connection</B> &mdash; On some systems, the
-            firewall may block connections to localhost. Verify the server is
-            reachable with:
-            <PRE>curl http://localhost:8080/mcp/message</PRE></LI>
+            <LI><B>API key required</B> &mdash; Include the key in the
+            <CODE>X-API-Key</CODE> header if auth is enabled.</LI>
           </UL>
         </BLOCKQUOTE>
 
         <H3><A name="TroubleshootJackson"></A>Jackson Library Conflicts</H3>
 
         <BLOCKQUOTE>
-
-          <P>If the extension fails to load with Jackson-related errors, stale
-          library files may be cached in the extension's <CODE CLASS="path">lib/</CODE>
-          directory. To resolve:</P>
-
-          <OL>
-            <LI>Remove cached libraries:
-            <PRE>rm lib/*.jar</PRE></LI>
-            <LI>Rebuild the extension:
-            <PRE>gradle</PRE></LI>
-          </OL>
-
+          <P>If the extension fails to load with Jackson errors:</P>
+          <PRE>rm lib/*.jar
+gradle</PRE>
         </BLOCKQUOTE>
 
-        <H3><A name="TroubleshootCLI"></A>CLI Mode Issues</H3>
+        <H3><A name="TroubleshootCLI"></A>CLI Issues</H3>
 
         <BLOCKQUOTE>
           <UL>
-            <LI><B>PyGhidra initialization fails</B> &mdash; Ensure
-            <CODE>GHIDRA_INSTALL_DIR</CODE> is set and points to a valid Ghidra
-            installation.</LI>
+            <LI><B>PyGhidra fails</B> &mdash; Ensure
+            <CODE>GHIDRA_INSTALL_DIR</CODE> is set correctly.</LI>
 
-            <LI><B>Stdio bridge hangs</B> &mdash; The CLI requires a clean
-            stdin/stdout channel. Ensure no other process is writing to stdout
-            (e.g., shell initialization scripts printing messages).</LI>
+            <LI><B>Stdio bridge hangs</B> &mdash; Make sure nothing else is
+            writing to stdout (e.g., shell init scripts printing
+            messages).</LI>
 
-            <LI><B>Slow startup</B> &mdash; Initial startup takes 4&ndash;7 seconds
-            while PyGhidra and the Ghidra framework initialize. This is normal.</LI>
+            <LI><B>Slow startup</B> &mdash; Initial startup takes 4&ndash;7
+            seconds while Ghidra initializes. This is normal.</LI>
           </UL>
         </BLOCKQUOTE>
 
@@ -716,7 +461,7 @@ reva.server.options.import.max.depth=10</PRE>
 
     <UL>
       <LI><A href="ReVa_overview.html">ReVa Overview</A></LI>
-      <LI><A href="ReVa_getting_started.html">Getting Started</A></LI>
+      <LI><A href="ReVa_skills.html">Skills and Analysis Workflows</A></LI>
     </UL>
 
   </BODY>

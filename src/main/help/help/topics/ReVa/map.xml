@@ -26,70 +26,12 @@
            url="help/topics/ReVa/ReVa_installation.html#ClientConfiguration" />
     <mapID target="ReVa_CLIInstallation"
            url="help/topics/ReVa/ReVa_installation.html#CLIInstallation" />
-    <mapID target="ReVa_HeadlessSetup"
-           url="help/topics/ReVa/ReVa_installation.html#HeadlessSetup" />
     <mapID target="ReVa_Configuration"
            url="help/topics/ReVa/ReVa_installation.html#Configuration" />
     <mapID target="ReVa_BuildFromSource"
            url="help/topics/ReVa/ReVa_installation.html#BuildFromSource" />
     <mapID target="ReVa_Troubleshooting"
            url="help/topics/ReVa/ReVa_installation.html#Troubleshooting" />
-
-    <!-- Getting Started -->
-    <mapID target="ReVa_GettingStarted"
-           url="help/topics/ReVa/ReVa_getting_started.html" />
-    <mapID target="ReVa_FirstSession"
-           url="help/topics/ReVa/ReVa_getting_started.html#FirstSession" />
-    <mapID target="ReVa_ProgramPath"
-           url="help/topics/ReVa/ReVa_getting_started.html#ProgramPath" />
-    <mapID target="ReVa_Pagination"
-           url="help/topics/ReVa/ReVa_getting_started.html#Pagination" />
-    <mapID target="ReVa_EffectivePrompts"
-           url="help/topics/ReVa/ReVa_getting_started.html#EffectivePrompts" />
-
-    <!-- Decompiler and Code Analysis Tools -->
-    <mapID target="ReVa_DecompilerTools"
-           url="help/topics/ReVa/ReVa_decompiler_tools.html" />
-
-    <!-- Function Management Tools -->
-    <mapID target="ReVa_FunctionTools"
-           url="help/topics/ReVa/ReVa_function_tools.html" />
-
-    <!-- Cross-References and Data Flow Tools -->
-    <mapID target="ReVa_XrefTools"
-           url="help/topics/ReVa/ReVa_xref_tools.html" />
-
-    <!-- Call Graph Analysis Tools -->
-    <mapID target="ReVa_CallGraphTools"
-           url="help/topics/ReVa/ReVa_callgraph_tools.html" />
-
-    <!-- Data Types and Structures -->
-    <mapID target="ReVa_DataTypeTools"
-           url="help/topics/ReVa/ReVa_data_type_tools.html" />
-
-    <!-- Memory, Data, Strings and Symbols -->
-    <mapID target="ReVa_MemoryDataTools"
-           url="help/topics/ReVa/ReVa_memory_data_tools.html" />
-
-    <!-- Import, Export and Thunk Tools -->
-    <mapID target="ReVa_ImportExportTools"
-           url="help/topics/ReVa/ReVa_import_export_tools.html" />
-
-    <!-- Virtual Tables and Constants -->
-    <mapID target="ReVa_VtableConstantTools"
-           url="help/topics/ReVa/ReVa_vtable_constant_tools.html" />
-
-    <!-- Comments and Bookmarks -->
-    <mapID target="ReVa_AnnotationTools"
-           url="help/topics/ReVa/ReVa_annotation_tools.html" />
-
-    <!-- Project Management Tools -->
-    <mapID target="ReVa_ProjectTools"
-           url="help/topics/ReVa/ReVa_project_tools.html" />
-
-    <!-- Architecture and Concepts -->
-    <mapID target="ReVa_Concepts"
-           url="help/topics/ReVa/ReVa_concepts.html" />
 
     <!-- Skills and Analysis Workflows -->
     <mapID target="ReVa_Skills"

@@ -13,332 +13,207 @@
 
     <BLOCKQUOTE>
 
-      <P>ReVa (Reverse Engineering Assistant) is a Ghidra extension that connects
-      AI-powered language models to Ghidra through the
-      <A href="https://modelcontextprotocol.io/">Model Context Protocol (MCP)</A>.
-      It exposes Ghidra's analysis capabilities as a structured set of MCP tools and
-      resources, enabling AI assistants to read, query, and modify program databases
-      on behalf of the analyst.</P>
+      <P>ReVa connects AI assistants to Ghidra. You describe what you want to
+      know about a binary in plain language, and the AI uses Ghidra's analysis
+      tools to answer your questions, annotate the database, and help you
+      understand the program.</P>
 
-      <P>Rather than replacing the reverse engineer, ReVa acts as a force multiplier.
-      The AI assistant can decompile functions, trace cross-references, search strings,
-      annotate the database, build call graphs, and perform data flow analysis &mdash;
-      all through the same Ghidra APIs an analyst would use manually, but at the speed
-      and scale of an automated system guided by natural language.</P>
+      <P>ReVa works through the
+      <A href="https://modelcontextprotocol.io/">Model Context Protocol (MCP)</A>,
+      which means it works with any MCP-compatible AI client &mdash; Claude Code,
+      VS Code with Copilot, Cursor, or any other client that supports the
+      protocol.</P>
 
-      <H2><A name="DesignPhilosophy"></A>Design Philosophy</H2>
+      <H2><A name="DesignPhilosophy"></A>How It Works</H2>
 
       <BLOCKQUOTE>
 
-        <P>ReVa follows a <B>tool-driven</B> design philosophy. Instead of providing
-        a single monolithic "analyze this binary" command, ReVa exposes a large set of
-        small, focused tools that each perform one well-defined operation. This
-        approach has several advantages:</P>
+        <P>You talk to the AI assistant in natural language. The assistant
+        translates your questions into Ghidra operations &mdash; decompiling
+        functions, following cross-references, searching strings, tracing data
+        flow &mdash; and synthesizes the results into an answer.</P>
 
-        <UL>
-          <LI><B>Composability</B> &mdash; The AI assistant chains tools together to
-          answer complex questions. A query like "what encryption does this binary use?"
-          might involve searching strings, listing imports, decompiling candidate
-          functions, and tracing data flow &mdash; all as separate tool invocations
-          that the assistant orchestrates.</LI>
-
-          <LI><B>Transparency</B> &mdash; Each tool call is visible to the analyst.
-          The assistant's reasoning process is observable: which functions it examined,
-          what cross-references it followed, and what conclusions it drew. This makes
-          it possible to verify and correct the assistant's work.</LI>
-
-          <LI><B>Precision</B> &mdash; Small tools produce precise, structured output.
-          Rather than generating a wall of unstructured text, each tool returns JSON
-          with well-defined fields that the assistant can reliably parse and act upon.</LI>
-
-          <LI><B>Safety</B> &mdash; Tools that modify the program database (renaming
-          variables, applying data types, setting comments) are clearly separated from
-          read-only tools. All modifications occur within Ghidra transactions and can
-          be undone.</LI>
-        </UL>
-
-        <P>ReVa currently provides <B>78 tools</B> across 19 tool providers, covering
-        the full range of reverse engineering operations from basic navigation to
-        advanced data flow analysis.</P>
+        <P>Every operation the assistant performs is visible to you. You can
+        see which functions it examined, what cross-references it followed, and
+        what changes it made. All modifications to the program database happen
+        through Ghidra transactions and can be undone with
+        <B>Edit<IMG alt="" src="help/shared/arrow.gif" border="0">Undo</B>.</P>
 
       </BLOCKQUOTE>
 
-      <H2><A name="OperationalModes"></A>Operational Modes</H2>
+      <H2><A name="WhatCanYouDo"></A>What Can You Do With ReVa?</H2>
 
       <BLOCKQUOTE>
 
-        <P>ReVa supports three operational modes, each suited to different workflows.
-        All three modes share the same core tool and resource implementations.</P>
-
-        <H3><A name="GUIMode"></A>GUI Mode (Ghidra Plugin)</H3>
-
-        <BLOCKQUOTE>
-
-          <P>In GUI mode, ReVa runs as a standard Ghidra extension inside the
-          graphical environment. The MCP server starts automatically when Ghidra
-          launches and listens for connections over HTTP.</P>
-
-          <UL>
-            <LI>Server runs on <CODE>http://localhost:8080/mcp/message</CODE> by
-            default</LI>
-            <LI>Supports multiple simultaneous programs across CodeBrowser windows</LI>
-            <LI>Configuration managed through Ghidra's
-            <B>Edit<IMG alt="" src="help/shared/arrow.gif" border="0">Tool
-            Options</B> dialog</LI>
-            <LI>Server persists across tool sessions &mdash; closing a CodeBrowser
-            window does not stop the server</LI>
-          </UL>
-
-          <P>This is the recommended mode for interactive analysis, where the analyst
-          works alongside the AI assistant in real time.</P>
-
-        </BLOCKQUOTE>
-
-        <H3><A name="HeadlessMode"></A>Headless Mode</H3>
-
-        <BLOCKQUOTE>
-
-          <P>Headless mode runs ReVa without the Ghidra GUI, using PyGhidra to
-          initialize the Ghidra framework programmatically. This mode is suitable for
-          batch processing, CI/CD pipelines, and server deployments.</P>
-
-          <UL>
-            <LI>Launched via the <CODE>reva_headless_server.py</CODE> script or
-            directly through the Java <CODE>RevaHeadlessLauncher</CODE> API</LI>
-            <LI>Configuration loaded from a <CODE>.properties</CODE> file</LI>
-            <LI>Can create and manage its own Ghidra project</LI>
-            <LI>Supports random port assignment to avoid conflicts</LI>
-          </UL>
-
-        </BLOCKQUOTE>
-
-        <H3><A name="CLIMode"></A>CLI Mode (Stdio Transport)</H3>
-
-        <BLOCKQUOTE>
-
-          <P>CLI mode enables direct integration with command-line AI tools such as
-          Claude Code. The <CODE>mcp-reva</CODE> command acts as a stdio-to-HTTP
-          bridge: it reads MCP messages from standard input, forwards them to a local
-          ReVa HTTP server, and writes responses to standard output.</P>
-
-          <UL>
-            <LI>Installed via <CODE>uv tool install reva-cli</CODE></LI>
-            <LI>Registered with Claude Code using
-            <CODE>claude mcp add ReVa -- mcp-reva</CODE></LI>
-            <LI>Automatically creates a temporary Ghidra project for the session</LI>
-            <LI>Uses a random port to avoid conflicts with other instances</LI>
-            <LI>Cleans up temporary projects on exit</LI>
-          </UL>
-
-        </BLOCKQUOTE>
-
-      </BLOCKQUOTE>
-
-      <H2><A name="Capabilities"></A>Capabilities</H2>
-
-      <BLOCKQUOTE>
-
-        <P>ReVa's tools are organized into six categories. Each category contains
-        one or more tool providers, and each provider registers a set of related
-        tools with the MCP server.</P>
-
-        <H3><A name="CoreAnalysis"></A>Core Analysis</H3>
-
-        <BLOCKQUOTE>
-          <TABLE border="1" cellpadding="4" cellspacing="0">
-            <TR>
-              <TH>Provider</TH>
-              <TH>Description</TH>
-              <TH>Key Tools</TH>
-            </TR>
-            <TR>
-              <TD><B>Decompiler</B></TD>
-              <TD>Decompile functions and work with high-level representations</TD>
-              <TD>get-decompilation, search-decompilation, rename-variables,
-              change-variable-datatypes</TD>
-            </TR>
-            <TR>
-              <TD><B>Functions</B></TD>
-              <TD>List, search, create, and modify functions</TD>
-              <TD>get-functions, set-function-prototype, create-function,
-              get-functions-by-similarity</TD>
-            </TR>
-            <TR>
-              <TD><B>Strings</B></TD>
-              <TD>Find and search string references in the program</TD>
-              <TD>get-strings, get-strings-count</TD>
-            </TR>
-            <TR>
-              <TD><B>Symbols</B></TD>
-              <TD>List and search program symbols</TD>
-              <TD>get-symbols, get-symbols-count</TD>
-            </TR>
-            <TR>
-              <TD><B>Cross-References</B></TD>
-              <TD>Find references to and from addresses</TD>
-              <TD>find-cross-references</TD>
-            </TR>
-            <TR>
-              <TD><B>Memory</B></TD>
-              <TD>Inspect memory blocks and read raw memory</TD>
-              <TD>get-memory-blocks, read-memory</TD>
-            </TR>
-          </TABLE>
-        </BLOCKQUOTE>
-
-        <H3><A name="DataAndTypes"></A>Data and Types</H3>
-
-        <BLOCKQUOTE>
-          <TABLE border="1" cellpadding="4" cellspacing="0">
-            <TR>
-              <TH>Provider</TH>
-              <TH>Description</TH>
-              <TH>Key Tools</TH>
-            </TR>
-            <TR>
-              <TD><B>Data</B></TD>
-              <TD>Read data at addresses and apply data types</TD>
-              <TD>get-data, apply-data-type, create-label</TD>
-            </TR>
-            <TR>
-              <TD><B>Data Types</B></TD>
-              <TD>Browse and search data type archives</TD>
-              <TD>get-data-type-archives, get-data-types, get-data-type-by-string</TD>
-            </TR>
-            <TR>
-              <TD><B>Structures</B></TD>
-              <TD>Parse, create, and apply C structures</TD>
-              <TD>parse-c-structure, apply-structure, parse-c-header</TD>
-            </TR>
-          </TABLE>
-        </BLOCKQUOTE>
-
-        <H3><A name="AdvancedAnalysis"></A>Advanced Analysis</H3>
-
-        <BLOCKQUOTE>
-          <TABLE border="1" cellpadding="4" cellspacing="0">
-            <TR>
-              <TH>Provider</TH>
-              <TH>Description</TH>
-              <TH>Key Tools</TH>
-            </TR>
-            <TR>
-              <TD><B>Call Graph</B></TD>
-              <TD>Build call graphs and find common callers</TD>
-              <TD>get-call-graph, get-call-tree, find-common-callers</TD>
-            </TR>
-            <TR>
-              <TD><B>Data Flow</B></TD>
-              <TD>Trace data flow forward and backward through the program</TD>
-              <TD>trace-data-flow-backward, trace-data-flow-forward,
-              find-variable-accesses</TD>
-            </TR>
-            <TR>
-              <TD><B>Constants</B></TD>
-              <TD>Find and analyze constant values</TD>
-              <TD>find-constant-uses, find-constants-in-range,
-              list-common-constants</TD>
-            </TR>
-            <TR>
-              <TD><B>Vtables</B></TD>
-              <TD>Analyze virtual method tables</TD>
-              <TD>analyze-vtable, find-vtable-callers</TD>
-            </TR>
-            <TR>
-              <TD><B>Imports/Exports</B></TD>
-              <TD>List and analyze imported and exported functions</TD>
-              <TD>list-imports, list-exports, find-import-references,
-              resolve-thunk</TD>
-            </TR>
-          </TABLE>
-        </BLOCKQUOTE>
-
-        <H3><A name="Annotations"></A>Annotations</H3>
-
-        <BLOCKQUOTE>
-          <TABLE border="1" cellpadding="4" cellspacing="0">
-            <TR>
-              <TH>Provider</TH>
-              <TH>Description</TH>
-              <TH>Key Tools</TH>
-            </TR>
-            <TR>
-              <TD><B>Comments</B></TD>
-              <TD>Add, search, and manage comments throughout the program</TD>
-              <TD>set-comment, get-comments, search-comments</TD>
-            </TR>
-            <TR>
-              <TD><B>Bookmarks</B></TD>
-              <TD>Create and manage analysis bookmarks</TD>
-              <TD>set-bookmark, get-bookmarks, search-bookmarks</TD>
-            </TR>
-          </TABLE>
-        </BLOCKQUOTE>
-
-        <H3><A name="ProjectManagement"></A>Project Management</H3>
-
-        <BLOCKQUOTE>
-          <TABLE border="1" cellpadding="4" cellspacing="0">
-            <TR>
-              <TH>Provider</TH>
-              <TH>Description</TH>
-              <TH>Key Tools</TH>
-            </TR>
-            <TR>
-              <TD><B>Project</B></TD>
-              <TD>Manage programs, run analysis, and import files</TD>
-              <TD>list-open-programs, import-file, analyze-program,
-              checkin-program</TD>
-            </TR>
-          </TABLE>
-        </BLOCKQUOTE>
-
-      </BLOCKQUOTE>
-
-      <H2><A name="MCPResources"></A>MCP Resources</H2>
-
-      <BLOCKQUOTE>
-
-        <P>In addition to tools, ReVa exposes MCP resources that provide read-only
-        access to program state. Resources use URI-based addressing and support
-        subscriptions for change notifications.</P>
+        <P>Here are some examples of things you can ask:</P>
 
         <TABLE border="1" cellpadding="4" cellspacing="0">
           <TR>
-            <TH>Resource</TH>
-            <TH>URI</TH>
-            <TH>Description</TH>
+            <TH>Task</TH>
+            <TH>Example Prompt</TH>
           </TR>
           <TR>
-            <TD><B>Open Programs</B></TD>
-            <TD><CODE>ghidra://programs</CODE></TD>
-            <TD>Lists all currently open programs with metadata including
-            architecture, compiler specification, and memory size</TD>
+            <TD><B>Triage a binary</B></TD>
+            <TD><I>"What does this program do? Survey the imports, strings,
+            and key functions."</I></TD>
+          </TR>
+          <TR>
+            <TD><B>Understand a function</B></TD>
+            <TD><I>"Decompile the function at 0x00401000 and explain what
+            it does."</I></TD>
+          </TR>
+          <TR>
+            <TD><B>Trace data flow</B></TD>
+            <TD><I>"Where does the user input from recv() end up? Is there
+            a buffer overflow?"</I></TD>
+          </TR>
+          <TR>
+            <TD><B>Identify algorithms</B></TD>
+            <TD><I>"What cryptographic algorithm does this function implement?
+            Check for known constants."</I></TD>
+          </TR>
+          <TR>
+            <TD><B>Annotate the database</B></TD>
+            <TD><I>"Rename the variables in this function to meaningful
+            names and add a summary comment."</I></TD>
+          </TR>
+          <TR>
+            <TD><B>Define structures</B></TD>
+            <TD><I>"This function parses a network packet. Define a C
+            structure for the packet format."</I></TD>
+          </TR>
+          <TR>
+            <TD><B>Map the call graph</B></TD>
+            <TD><I>"What functions call the encryption routine, and what
+            do they pass as the key?"</I></TD>
+          </TR>
+          <TR>
+            <TD><B>Find vulnerabilities</B></TD>
+            <TD><I>"Check whether the input buffer at 0x00401200 has
+            bounds checking before the memcpy."</I></TD>
+          </TR>
+          <TR>
+            <TD><B>Import and analyze</B></TD>
+            <TD><I>"Import /tmp/firmware.bin and give me an overview."</I></TD>
           </TR>
         </TABLE>
 
       </BLOCKQUOTE>
 
-      <H2><A name="Security"></A>Security Considerations</H2>
+      <H2><A name="OperationalModes"></A>Three Ways to Use ReVa</H2>
 
       <BLOCKQUOTE>
 
-        <P>By default, the ReVa MCP server binds to <CODE>127.0.0.1</CODE> (localhost
-        only) and does not require authentication. This means only processes on the
-        local machine can connect to the server.</P>
+        <H3><A name="GUIMode"></A>GUI Mode (Ghidra Plugin)</H3>
 
         <BLOCKQUOTE>
-          <P><IMG border="0" src="help/shared/warning.png" alt=""> If the server host
-          is changed to <CODE>0.0.0.0</CODE> to accept connections from other machines,
-          <B>API key authentication should be enabled</B> to prevent unauthorized access
-          to the program database. See
-          <A href="ReVa_installation.html#Configuration">Configuration Options</A> for
-          details.</P>
+          <P>Run ReVa alongside Ghidra's graphical interface. The AI assistant
+          connects over HTTP while you work in the CodeBrowser. You see changes
+          as they happen and can undo anything the assistant does.</P>
+
+          <P>This is the recommended mode for interactive analysis.</P>
         </BLOCKQUOTE>
 
-        <P>All program modifications performed through ReVa tools occur within
-        standard Ghidra transactions and can be undone using Ghidra's undo
-        functionality.</P>
+        <H3><A name="CLIMode"></A>CLI Mode (Claude Code)</H3>
+
+        <BLOCKQUOTE>
+          <P>Use the <CODE>mcp-reva</CODE> command to integrate directly with
+          Claude Code or other CLI-based AI tools. ReVa manages its own
+          Ghidra project automatically &mdash; just point it at a binary and
+          start asking questions.</P>
+        </BLOCKQUOTE>
+
+        <H3><A name="HeadlessMode"></A>Headless Mode</H3>
+
+        <BLOCKQUOTE>
+          <P>Run ReVa without the Ghidra GUI for automation, scripting, and
+          CI/CD pipelines. Useful for batch analysis of multiple binaries.</P>
+        </BLOCKQUOTE>
+
+      </BLOCKQUOTE>
+
+      <H2><A name="Capabilities"></A>Capabilities at a Glance</H2>
+
+      <BLOCKQUOTE>
+
+        <TABLE border="1" cellpadding="4" cellspacing="0">
+          <TR>
+            <TH>Area</TH>
+            <TH>What the AI Can Do</TH>
+          </TR>
+          <TR>
+            <TD><B>Decompilation</B></TD>
+            <TD>Decompile functions, search across all decompilations,
+            rename variables, change data types, add comments</TD>
+          </TR>
+          <TR>
+            <TD><B>Functions</B></TD>
+            <TD>List, search, and filter functions; set prototypes and
+            signatures; manage function tags</TD>
+          </TR>
+          <TR>
+            <TD><B>Cross-References</B></TD>
+            <TD>Find all references to/from any address; trace data flow
+            forward and backward</TD>
+          </TR>
+          <TR>
+            <TD><B>Call Graphs</B></TD>
+            <TD>Build call graphs; find common callers of multiple
+            functions; traverse call trees</TD>
+          </TR>
+          <TR>
+            <TD><B>Strings &amp; Symbols</B></TD>
+            <TD>Search and filter strings and symbols with pagination</TD>
+          </TR>
+          <TR>
+            <TD><B>Memory &amp; Data</B></TD>
+            <TD>Read memory, inspect data, apply data types, create
+            labels</TD>
+          </TR>
+          <TR>
+            <TD><B>Data Types</B></TD>
+            <TD>Browse type archives, define C structures from headers,
+            apply structures to addresses</TD>
+          </TR>
+          <TR>
+            <TD><B>Imports &amp; Exports</B></TD>
+            <TD>List imported/exported functions, find import references,
+            resolve thunks</TD>
+          </TR>
+          <TR>
+            <TD><B>C++ Analysis</B></TD>
+            <TD>Analyze vtables, find virtual method callers, search
+            for constants</TD>
+          </TR>
+          <TR>
+            <TD><B>Annotations</B></TD>
+            <TD>Set comments and bookmarks, search annotations</TD>
+          </TR>
+          <TR>
+            <TD><B>Project</B></TD>
+            <TD>Import binaries, run analysis, manage project files</TD>
+          </TR>
+        </TABLE>
+
+      </BLOCKQUOTE>
+
+      <H2><A name="Security"></A>Security</H2>
+
+      <BLOCKQUOTE>
+
+        <P>By default, the MCP server binds to <CODE>127.0.0.1</CODE> (localhost
+        only). Only processes on your machine can connect.</P>
+
+        <BLOCKQUOTE>
+          <P><IMG border="0" src="help/shared/warning.png" alt=""> If you change
+          the server host to <CODE>0.0.0.0</CODE> to accept remote connections,
+          <B>enable API key authentication</B> to prevent unauthorized access.
+          See <A href="ReVa_installation.html#Configuration">Configuration
+          Options</A>.</P>
+        </BLOCKQUOTE>
+
+        <P>All program modifications can be undone using Ghidra's standard
+        undo functionality.</P>
 
       </BLOCKQUOTE>
 
@@ -350,7 +225,7 @@
 
     <UL>
       <LI><A href="ReVa_installation.html">Installation and Setup</A></LI>
-      <LI><A href="ReVa_getting_started.html">Getting Started</A></LI>
+      <LI><A href="ReVa_skills.html">Skills and Analysis Workflows</A></LI>
     </UL>
 
   </BODY>

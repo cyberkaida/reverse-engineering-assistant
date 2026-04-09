@@ -122,7 +122,7 @@ dependencies {
 	implementation "com.fasterxml.jackson.core:jackson-annotations:2.21"
 
 	// Testing dependencies
-	testImplementation "org.mockito:mockito-core:5.22.0"
+	testImplementation "org.mockito:mockito-core:5.23.0"
 	testImplementation "org.mockito:mockito-inline:5.2.0"
 
 	// Ghidra test dependencies

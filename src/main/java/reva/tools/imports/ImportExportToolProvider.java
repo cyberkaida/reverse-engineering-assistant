@@ -258,6 +258,9 @@ public class ImportExportToolProvider extends AbstractToolProvider {
                     AddressUtil.formatAddress(address));
             }
 
+            // Navigate to the start of the thunk chain so the viewer sees what is being followed.
+            followRead(program, address);
+
             List<Map<String, Object>> chain = buildThunkChain(function);
             Map<String, Object> finalTarget = chain.get(chain.size() - 1);
             boolean isResolved = !Boolean.TRUE.equals(finalTarget.get("isThunk"));

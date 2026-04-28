@@ -41,13 +41,18 @@
                         text="Configuration Options"
                         target="help/topics/ReVa/ReVa_installation.html#Configuration"/>
 
-                <tocdef id="ReVa_BuildFromSource"
+                <tocdef id="Follow_Me"
                         sortgroup="f"
+                        text="Follow Me Mode"
+                        target="help/topics/ReVa/ReVa_installation.html#Follow_Me"/>
+
+                <tocdef id="ReVa_BuildFromSource"
+                        sortgroup="g"
                         text="Build from Source"
                         target="help/topics/ReVa/ReVa_installation.html#BuildFromSource"/>
 
                 <tocdef id="ReVa_Troubleshooting"
-                        sortgroup="g"
+                        sortgroup="h"
                         text="Troubleshooting"
                         target="help/topics/ReVa/ReVa_installation.html#Troubleshooting"/>
 

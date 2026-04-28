@@ -58,6 +58,8 @@ public class ConfigManager implements ConfigurationBackendListener {
     public static final String WAIT_FOR_ANALYSIS_ON_IMPORT = "Wait For Analysis On Import";
     public static final String IMPORT_MAX_DEPTH = "Import Max Depth";
     public static final String ANALYSIS_TIMEOUT_SECONDS = "Analysis Timeout Seconds";
+    public static final String FOLLOW_READS = "Follow Reads";
+    public static final String FOLLOW_WRITES = "Follow Writes";
 
     // Default values
     private static final int DEFAULT_PORT = 8080;
@@ -74,6 +76,8 @@ public class ConfigManager implements ConfigurationBackendListener {
     private static final boolean DEFAULT_WAIT_FOR_ANALYSIS_ON_IMPORT = false;
     private static final int DEFAULT_IMPORT_MAX_DEPTH = 10;
     private static final int DEFAULT_ANALYSIS_TIMEOUT_SECONDS = 600;
+    private static final boolean DEFAULT_FOLLOW_READS = true;
+    private static final boolean DEFAULT_FOLLOW_WRITES = true;
 
     private final ConfigurationBackend backend;
     private final Map<String, Object> cachedOptions = new ConcurrentHashMap<>();
@@ -195,6 +199,10 @@ public class ConfigManager implements ConfigurationBackendListener {
             "Maximum depth to recurse into containers/archives when importing (default: 10)");
         toolOptions.registerOption(ANALYSIS_TIMEOUT_SECONDS, DEFAULT_ANALYSIS_TIMEOUT_SECONDS, help,
             "Default timeout in seconds for the analyze-program tool (default: 600). Use -1 to disable the timeout entirely.");
+        toolOptions.registerOption(FOLLOW_READS, DEFAULT_FOLLOW_READS, help,
+            "When 'Follow Me' is on, navigate the listing for tools that read program state (e.g. get-decompilation, find-cross-references)");
+        toolOptions.registerOption(FOLLOW_WRITES, DEFAULT_FOLLOW_WRITES, help,
+            "When 'Follow Me' is on, navigate the listing for tools that modify program state (e.g. set-comment, rename-variables)");
     }
 
     /**
@@ -231,6 +239,10 @@ public class ConfigManager implements ConfigurationBackendListener {
             backend.getInt(SERVER_OPTIONS, IMPORT_MAX_DEPTH, DEFAULT_IMPORT_MAX_DEPTH));
         cachedOptions.put(ANALYSIS_TIMEOUT_SECONDS,
             backend.getInt(SERVER_OPTIONS, ANALYSIS_TIMEOUT_SECONDS, DEFAULT_ANALYSIS_TIMEOUT_SECONDS));
+        cachedOptions.put(FOLLOW_READS,
+            backend.getBoolean(SERVER_OPTIONS, FOLLOW_READS, DEFAULT_FOLLOW_READS));
+        cachedOptions.put(FOLLOW_WRITES,
+            backend.getBoolean(SERVER_OPTIONS, FOLLOW_WRITES, DEFAULT_FOLLOW_WRITES));
 
         Msg.debug(this, "Loaded ReVa configuration settings");
     }
@@ -545,6 +557,40 @@ public class ConfigManager implements ConfigurationBackendListener {
     public void setImportMaxDepth(int depth) {
         backend.setInt(SERVER_OPTIONS, IMPORT_MAX_DEPTH, depth);
         // onConfigurationChanged() will be called automatically
+    }
+
+    /**
+     * Whether the "Follow Me" toolbar toggle should drive navigation for tools
+     * that read program state (e.g. get-decompilation, find-cross-references).
+     * @return True if read-style tools should trigger goTo when follow mode is on
+     */
+    public boolean isFollowReads() {
+        return (Boolean) cachedOptions.getOrDefault(FOLLOW_READS, DEFAULT_FOLLOW_READS);
+    }
+
+    /**
+     * Set whether read-style tools navigate when follow mode is on.
+     * @param follow True to follow read tools
+     */
+    public void setFollowReads(boolean follow) {
+        backend.setBoolean(SERVER_OPTIONS, FOLLOW_READS, follow);
+    }
+
+    /**
+     * Whether the "Follow Me" toolbar toggle should drive navigation for tools
+     * that modify program state (e.g. set-comment, rename-variables).
+     * @return True if write-style tools should trigger goTo when follow mode is on
+     */
+    public boolean isFollowWrites() {
+        return (Boolean) cachedOptions.getOrDefault(FOLLOW_WRITES, DEFAULT_FOLLOW_WRITES);
+    }
+
+    /**
+     * Set whether write-style tools navigate when follow mode is on.
+     * @param follow True to follow write tools
+     */
+    public void setFollowWrites(boolean follow) {
+        backend.setBoolean(SERVER_OPTIONS, FOLLOW_WRITES, follow);
     }
 
     /**

@@ -92,6 +92,9 @@ public class DataFlowToolProvider extends AbstractToolProvider {
                     AddressUtil.formatAddress(address));
             }
 
+            // Navigate to the slice seed so the viewer sees where the trace starts.
+            followRead(program, address);
+
             return traceDataFlow(program, function, address, SliceDirection.BACKWARD);
         });
     }
@@ -125,6 +128,9 @@ public class DataFlowToolProvider extends AbstractToolProvider {
                 return createErrorResult("No function contains address: " +
                     AddressUtil.formatAddress(address));
             }
+
+            // Navigate to the slice seed so the viewer sees where the trace starts.
+            followRead(program, address);
 
             return traceDataFlow(program, function, address, SliceDirection.FORWARD);
         });
@@ -166,6 +172,9 @@ public class DataFlowToolProvider extends AbstractToolProvider {
                 return createErrorResult("No function at address: " +
                     AddressUtil.formatAddress(functionAddress));
             }
+
+            // Navigate to the function so the viewer can see the variable being analyzed.
+            followRead(program, function.getEntryPoint());
 
             return findVariableAccesses(program, function, variableName);
         });

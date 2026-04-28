@@ -28,6 +28,12 @@
            url="help/topics/ReVa/ReVa_installation.html#CLIInstallation" />
     <mapID target="ReVa_Configuration"
            url="help/topics/ReVa/ReVa_installation.html#Configuration" />
+    <mapID target="Follow_Me"
+           url="help/topics/ReVa/ReVa_installation.html#Follow_Me" />
+    <mapID target="Follow_Me_Filters"
+           url="help/topics/ReVa/ReVa_installation.html#Follow_Me_Filters" />
+    <mapID target="Follow_Me_MultiProgram"
+           url="help/topics/ReVa/ReVa_installation.html#Follow_Me_MultiProgram" />
     <mapID target="ReVa_BuildFromSource"
            url="help/topics/ReVa/ReVa_installation.html#BuildFromSource" />
     <mapID target="ReVa_Troubleshooting"

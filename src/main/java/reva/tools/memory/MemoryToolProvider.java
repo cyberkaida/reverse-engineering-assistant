@@ -139,6 +139,9 @@ public class MemoryToolProvider extends AbstractToolProvider {
                 return createErrorResult("Maximum read length is 8192 bytes. Use multiple reads for larger regions.");
             }
 
+            // Navigate to the read address so the viewer sees what ReVa is studying.
+            followRead(program, address);
+
             // Get the format from the request
             String format = getOptionalString(request, "format", "hex");
 

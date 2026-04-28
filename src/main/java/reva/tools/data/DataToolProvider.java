@@ -90,6 +90,9 @@ public class DataToolProvider extends AbstractToolProvider {
             Program program = getProgramFromArgs(request);
             Address address = getAddressFromArgs(request, program, "addressOrSymbol");
 
+            // Navigate first so demo viewers see the cursor land before the read result returns.
+            followRead(program, address);
+
             return getDataAtAddressResult(program, address);
         });
     }
@@ -139,6 +142,9 @@ public class DataToolProvider extends AbstractToolProvider {
             if (dataTypeString.trim().isEmpty()) {
                 return createErrorResult("Data type string cannot be empty");
             }
+
+            // Navigate first so demo viewers see the cursor land before the data type is applied.
+            followWrite(program, targetAddress);
 
             try {
                 // Try to parse the data type from the string and get the actual DataType object
@@ -252,6 +258,9 @@ public class DataToolProvider extends AbstractToolProvider {
             if (labelName.trim().isEmpty()) {
                 return createErrorResult("Label name cannot be empty");
             }
+
+            // Navigate first so demo viewers see the cursor land before the label appears.
+            followWrite(program, address);
 
             // Start a transaction to create the label
             int transactionID = program.startTransaction("Create Label");

@@ -90,6 +90,9 @@ public class CallGraphToolProvider extends AbstractToolProvider {
                     AddressUtil.formatAddress(address));
             }
 
+            // Navigate to the center function so the viewer can see what's being graphed.
+            followRead(program, function.getEntryPoint());
+
             return getCallGraph(program, function, depth);
         });
     }
@@ -144,6 +147,9 @@ public class CallGraphToolProvider extends AbstractToolProvider {
                 return createErrorResult("No function at address: " +
                     AddressUtil.formatAddress(address));
             }
+
+            // Navigate to the root function so the viewer can see what's being walked.
+            followRead(program, function.getEntryPoint());
 
             boolean traverseCallers = "callers".equalsIgnoreCase(direction);
             return getCallTree(program, function, maxDepth, traverseCallers);

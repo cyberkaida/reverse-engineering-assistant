@@ -84,6 +84,9 @@ public class BookmarkToolProvider extends AbstractToolProvider {
             String category = getOptionalString(request, "category", "");
             String comment = getString(request, "comment");
 
+            // Navigate first so demo viewers see the cursor land before the bookmark is set.
+            followWrite(program, address);
+
             try {
                 int transactionId = program.startTransaction("Set Bookmark");
                 try {
@@ -259,6 +262,9 @@ public class BookmarkToolProvider extends AbstractToolProvider {
             Address address = getAddressFromArgs(request, program, "addressOrSymbol");
             String type = getString(request, "type");
             String category = getOptionalString(request, "category", "");
+
+            // Navigate first so demo viewers see the cursor land before the bookmark is removed.
+            followWrite(program, address);
 
             try {
                 int transactionId = program.startTransaction("Remove Bookmark");

@@ -98,6 +98,9 @@ public class CommentToolProvider extends AbstractToolProvider {
                     ". Must be one of: pre, eol, post, plate, repeatable");
             }
 
+            // Navigate first so demo viewers see the cursor land before the comment appears.
+            followWrite(program, address);
+
             try {
                 int transactionId = program.startTransaction("Set Comment");
                 try {
@@ -256,6 +259,9 @@ public class CommentToolProvider extends AbstractToolProvider {
                 return createErrorResult("Invalid comment type: " + commentTypeStr +
                     ". Must be one of: pre, eol, post, plate, repeatable");
             }
+
+            // Navigate first so demo viewers see the cursor land before the comment is removed.
+            followWrite(program, address);
 
             try {
                 int transactionId = program.startTransaction("Remove Comment");

@@ -990,6 +990,9 @@ public class FunctionToolProvider extends AbstractToolProvider {
                     return createErrorResult("Invalid address or symbol: " + location);
                 }
 
+                // Navigate first so demo viewers see the cursor land before the prototype updates.
+                followWrite(program, address);
+
                 FunctionManager functionManager = program.getFunctionManager();
                 Function existingFunction = functionManager.getFunctionAt(address);
 
@@ -1411,6 +1414,9 @@ public class FunctionToolProvider extends AbstractToolProvider {
                     AddressUtil.formatAddress(address) +
                     ". The address may need to be disassembled first.");
             }
+
+            // Navigate first so demo viewers see the cursor land before the function appears.
+            followWrite(program, address);
 
             // Create the function using CreateFunctionCmd
             int txId = program.startTransaction("Create Function");

@@ -122,7 +122,10 @@ public class CrossReferencesToolProvider extends AbstractToolProvider {
                 // Get program and parameters using helper methods
                 Program program = getProgramFromArgs(request);
                 Address address = getAddressFromArgs(request, program, "location");
-                
+
+                // Navigate to the queried location so the viewer sees what ReVa is studying.
+                followRead(program, address);
+
                 // Get parameters
                 String direction = getOptionalString(request, "direction", "both");
                 boolean includeFlow = getOptionalBoolean(request, "includeFlow", true);

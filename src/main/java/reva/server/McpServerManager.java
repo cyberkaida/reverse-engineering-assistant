@@ -44,6 +44,7 @@ import io.modelcontextprotocol.server.McpSyncServer;
 import io.modelcontextprotocol.spec.McpSchema;
 import reva.plugin.ConfigManager;
 import reva.plugin.ConfigChangeListener;
+import reva.plugin.FollowMeService;
 import reva.resources.ResourceProvider;
 import reva.resources.impl.ProgramListResource;
 import reva.services.RevaMcpService;
@@ -96,6 +97,9 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
 
     // Mode tracking - headless mode has no GUI context
     private final boolean headlessMode;
+
+    // Follow Me demo navigation service - GUI mode only
+    private final FollowMeService followMeService;
 
     /**
      * Constructor for GUI mode. Initializes the MCP server with all capabilities.
@@ -151,6 +155,15 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
         // Make server and server manager available via service registry
         RevaInternalServiceRegistry.registerService(McpSyncServer.class, server);
         RevaInternalServiceRegistry.registerService(McpServerManager.class, this);
+
+        // Follow Me demo navigation is GUI-only — not registered in headless mode,
+        // so AbstractToolProvider.followRead/followWrite become no-ops.
+        if (!headlessMode) {
+            followMeService = new FollowMeService(configManager, this);
+            RevaInternalServiceRegistry.registerService(FollowMeService.class, followMeService);
+        } else {
+            followMeService = null;
+        }
 
         // Create and register resource providers
         initializeResourceProviders();
@@ -378,6 +391,24 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
      */
     public boolean isHeadlessMode() {
         return headlessMode;
+    }
+
+    /**
+     * Get the {@link PluginTool} that most recently opened a program — typically
+     * the active CodeBrowser. May be null in headless mode or before any program
+     * has been opened. Used by {@link FollowMeService} to reach the GoToService.
+     * @return the active CodeBrowser tool, or null if none
+     */
+    public PluginTool getActiveTool() {
+        return activeTool;
+    }
+
+    /**
+     * Get the GUI-only Follow Me navigation service.
+     * @return the service in GUI mode, or null in headless mode
+     */
+    public FollowMeService getFollowMeService() {
+        return followMeService;
     }
 
     @Override

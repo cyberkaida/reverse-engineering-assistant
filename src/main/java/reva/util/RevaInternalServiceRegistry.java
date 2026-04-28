@@ -15,15 +15,19 @@
  */
 package reva.util;
 
-import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * A simple service registry to allow components to locate each other at runtime.
  * This is a static registry that provides global access to core services.
+ *
+ * <p>Backed by ConcurrentHashMap because lookups happen on MCP handler threads
+ * (Jetty workers) while registration/clearing happens on the Swing EDT during
+ * plugin lifecycle events.
  */
 public class RevaInternalServiceRegistry {
-    private static final Map<Class<?>, Object> services = new HashMap<>();
+    private static final Map<Class<?>, Object> services = new ConcurrentHashMap<>();
 
     /**
      * Register a service implementation

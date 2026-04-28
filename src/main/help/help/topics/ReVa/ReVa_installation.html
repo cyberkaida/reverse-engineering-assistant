@@ -354,6 +354,77 @@ MCP server started successfully</PRE>
 
       </BLOCKQUOTE>
 
+      <H2><A name="Follow_Me"></A>Follow Me Mode</H2>
+
+      <BLOCKQUOTE>
+
+        <P><B>Follow Me</B> is a GUI-only demo mode that automatically navigates
+        the active CodeBrowser to whichever address the AI is operating on. It
+        is useful for live demos and screen-shares because viewers can watch the
+        listing scroll along with each MCP tool call.</P>
+
+        <P>Toggle Follow Me from the CodeBrowser toolbar (the
+        <B>navigate-on-event</B> arrow icon) or from
+        <B>Tools<IMG alt="" src="help/shared/arrow.gif" border="0">ReVa<IMG alt=""
+        src="help/shared/arrow.gif" border="0">Follow Me</B>. The toggle is
+        <B>off by default</B> and is <B>not persisted</B> &mdash; it resets every
+        Ghidra session, so demos do not accidentally follow tools during normal
+        analysis.</P>
+
+        <P><IMG border="0" src="help/shared/tip.png" alt=""> The toolbar button
+        only appears in CodeBrowser tools. It has no effect in headless mode or
+        when ReVa is driven through the stdio CLI.</P>
+
+        <P>For each tool call, the listing scrolls to the address being read or
+        modified <I>before</I> the tool's work runs &mdash; so during a write,
+        viewers see the cursor land first and the change appear afterwards.
+        Consecutive calls targeting the same address are coalesced (the cursor
+        does not jiggle in place).</P>
+
+        <H3><A name="Follow_Me_Filters"></A>Read / Write Filters</H3>
+
+        <BLOCKQUOTE>
+          <P>The two checkboxes under <B>Edit<IMG alt=""
+          src="help/shared/arrow.gif" border="0">Tool Options<IMG alt=""
+          src="help/shared/arrow.gif" border="0">ReVa Server Options</B>
+          control which kinds of tool calls trigger navigation when Follow Me
+          is on. Both default to <CODE>true</CODE>.</P>
+
+          <TABLE border="1" cellpadding="4" cellspacing="0">
+            <TR>
+              <TH>Option</TH>
+              <TH>Default</TH>
+              <TH>Description</TH>
+            </TR>
+            <TR>
+              <TD><B>Follow Reads</B></TD>
+              <TD><CODE>true</CODE></TD>
+              <TD>Follow tools that inspect program state &mdash; for example
+              <CODE>get-decompilation</CODE>, <CODE>find-cross-references</CODE>,
+              <CODE>read-memory</CODE>, <CODE>get-call-graph</CODE>. Turn off if
+              the AI's exploration is too noisy to watch.</TD>
+            </TR>
+            <TR>
+              <TD><B>Follow Writes</B></TD>
+              <TD><CODE>true</CODE></TD>
+              <TD>Follow tools that modify program state &mdash; for example
+              <CODE>set-comment</CODE>, <CODE>rename-variables</CODE>,
+              <CODE>create-function</CODE>, <CODE>apply-data-type</CODE>.</TD>
+            </TR>
+          </TABLE>
+        </BLOCKQUOTE>
+
+        <H3><A name="Follow_Me_MultiProgram"></A>Multiple Programs</H3>
+
+        <BLOCKQUOTE>
+          <P>If the AI operates on a program that is not the one currently
+          displayed in the active CodeBrowser, the navigation is silently
+          skipped &mdash; Ghidra does not switch programs underneath you.
+          Open the program first if you want the cursor to follow.</P>
+        </BLOCKQUOTE>
+
+      </BLOCKQUOTE>
+
       <H2><A name="BuildFromSource"></A>Build from Source</H2>
 
       <BLOCKQUOTE>

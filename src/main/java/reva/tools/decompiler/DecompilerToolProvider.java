@@ -753,6 +753,9 @@ public class DecompilerToolProvider extends AbstractToolProvider {
                     ". Tried as address/symbol and function name. If this is an undefined address, ensure it's in executable memory with valid instructions.");
             }
 
+            // Navigate first so demo viewers see the cursor land on the function before it decompiles.
+            followRead(program, function.getEntryPoint());
+
             // Mark if this is an undefined/temporary function
             resultData.put("isUndefinedFunction", isUndefinedFunction);
             if (isUndefinedFunction) {
@@ -1046,6 +1049,9 @@ public class DecompilerToolProvider extends AbstractToolProvider {
                     "' using get-decompilation tool before making variable changes. This ensures you understand the current state of the code.");
             }
 
+            // Navigate first so demo viewers see the cursor land before the renames apply.
+            followWrite(program, function.getEntryPoint());
+
             // Initialize the decompiler using helper methods
             final String toolName = "rename-variables";
             logInfo(toolName + ": Starting variable rename for function " + function.getName() + " in " + program.getName());
@@ -1184,6 +1190,9 @@ public class DecompilerToolProvider extends AbstractToolProvider {
                 return createErrorResult("You must read the decompilation for function '" + function.getName() +
                     "' using get-decompilation tool before making datatype changes. This ensures you understand the current state of the code.");
             }
+
+            // Navigate first so demo viewers see the cursor land before the type changes apply.
+            followWrite(program, function.getEntryPoint());
 
             // Initialize the decompiler using helper methods
             final String toolName = "change-variable-datatypes";
@@ -1827,6 +1836,9 @@ public class DecompilerToolProvider extends AbstractToolProvider {
                         " in decompiled function. The line may not correspond to any actual code.");
                 }
 
+                // Navigate first so demo viewers see the cursor land before the comment appears.
+                followWrite(program, targetAddress);
+
                 // Set the comment
                 int transactionId = program.startTransaction("Set Decompilation Comment");
                 try {
@@ -1925,6 +1937,9 @@ public class DecompilerToolProvider extends AbstractToolProvider {
                 return createErrorResult("Function not found: " + e.getMessage() + " in program " + program.getName() +
                     ". Tried as address/symbol and function name.");
             }
+
+            // Navigate to the target so the viewer sees which function ReVa is studying.
+            followRead(program, targetFunction.getEntryPoint());
 
             // Get all references to this function
             ReferenceManager refManager = program.getReferenceManager();
@@ -2088,6 +2103,9 @@ public class DecompilerToolProvider extends AbstractToolProvider {
                 return createErrorResult("Could not resolve address or symbol: " + addressOrSymbol +
                     " in program " + program.getName());
             }
+
+            // Navigate to the target so the viewer sees what ReVa is studying.
+            followRead(program, targetAddress);
 
             // Get all references to this address
             ReferenceManager refManager = program.getReferenceManager();

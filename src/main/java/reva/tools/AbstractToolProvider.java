@@ -30,7 +30,9 @@ import ghidra.program.model.listing.Program;
 import ghidra.program.model.symbol.Symbol;
 import ghidra.program.model.symbol.SymbolTable;
 import ghidra.util.Msg;
+import reva.plugin.FollowMeService;
 import reva.util.AddressUtil;
+import reva.util.RevaInternalServiceRegistry;
 import reva.util.RevaToolLogger;
 import io.modelcontextprotocol.server.McpServerFeatures.SyncToolSpecification;
 import io.modelcontextprotocol.spec.McpSchema.CallToolRequest;
@@ -763,5 +765,36 @@ public abstract class AbstractToolProvider implements ToolProvider {
      */
     protected Address getAddressFromSymbolArgs(Map<String, Object> args, Program program) throws IllegalArgumentException {
         return getAddressFromSymbolArgs(args, program, "symbolName");
+    }
+
+    /**
+     * Hint that the tool is about to read program state at {@code address}. If
+     * the user has Follow Me mode enabled in the GUI, the active CodeBrowser
+     * navigates here. No-op in headless and stdio modes (the service is not
+     * registered).
+     * @param program the program containing the address (may be null — call is skipped)
+     * @param address the address that was read (may be null — call is skipped)
+     */
+    protected void followRead(Program program, Address address) {
+        follow(program, address, FollowMeService.Kind.READ);
+    }
+
+    /**
+     * Hint that the tool is about to modify program state at {@code address}. If
+     * the user has Follow Me mode enabled in the GUI, the active CodeBrowser
+     * navigates here. No-op in headless and stdio modes (the service is not
+     * registered).
+     * @param program the program containing the address (may be null — call is skipped)
+     * @param address the address that was modified (may be null — call is skipped)
+     */
+    protected void followWrite(Program program, Address address) {
+        follow(program, address, FollowMeService.Kind.WRITE);
+    }
+
+    private void follow(Program program, Address address, FollowMeService.Kind kind) {
+        FollowMeService service = RevaInternalServiceRegistry.getService(FollowMeService.class);
+        if (service != null) {
+            service.follow(program, address, kind);
+        }
     }
 }

@@ -112,6 +112,9 @@ public class VtableToolProvider extends AbstractToolProvider {
             Address vtableAddr = getAddressFromArgs(request, program, "vtableAddress");
             int maxEntries = getOptionalInt(request, "maxEntries", DEFAULT_MAX_VTABLE_ENTRIES);
 
+            // Navigate to the vtable so the viewer sees what is being analyzed.
+            followRead(program, vtableAddr);
+
             return analyzeVtable(program, vtableAddr, maxEntries);
         });
     }
@@ -153,6 +156,9 @@ public class VtableToolProvider extends AbstractToolProvider {
             String vtableAddrStr = getOptionalString(request, "vtableAddress", null);
             int maxResults = getOptionalInt(request, "maxResults", DEFAULT_MAX_RESULTS);
 
+            // Navigate to the target function so the viewer sees what's being analyzed.
+            followRead(program, functionAddr);
+
             Address vtableAddr = null;
             if (vtableAddrStr != null && !vtableAddrStr.isEmpty()) {
                 vtableAddr = AddressUtil.resolveAddressOrSymbol(program, vtableAddrStr);
@@ -188,6 +194,9 @@ public class VtableToolProvider extends AbstractToolProvider {
         registerTool(tool, (exchange, request) -> {
             Program program = getProgramFromArgs(request);
             Address functionAddr = getAddressFromArgs(request, program, "functionAddress");
+
+            // Navigate to the target function so the viewer sees what's being analyzed.
+            followRead(program, functionAddr);
 
             return findVtablesContainingFunction(program, functionAddr);
         });

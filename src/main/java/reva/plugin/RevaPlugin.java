@@ -25,7 +25,9 @@ import ghidra.framework.plugintool.util.PluginStatus;
 import ghidra.program.model.listing.Program;
 import ghidra.util.Msg;
 
+import reva.server.McpServerManager;
 import reva.services.RevaMcpService;
+import reva.ui.FollowMeAction;
 import reva.ui.RevaProvider;
 import reva.util.RevaInternalServiceRegistry;
 
@@ -44,6 +46,7 @@ import reva.util.RevaInternalServiceRegistry;
 public class RevaPlugin extends ProgramPlugin {
     private RevaProvider provider;
     private RevaMcpService mcpService;
+    private FollowMeAction followMeAction;
 
     /**
      * Plugin constructor.
@@ -76,6 +79,21 @@ public class RevaPlugin extends ProgramPlugin {
 
         // Register this tool with the MCP server
         mcpService.registerTool(tool);
+
+        // Register the Follow Me toolbar toggle action. The service is GUI-only
+        // and is created by McpServerManager; in test environments without one
+        // this stays null and the action is simply not added.
+        FollowMeService followService = null;
+        if (mcpService instanceof McpServerManager) {
+            followService = ((McpServerManager) mcpService).getFollowMeService();
+        }
+        if (followService == null) {
+            followService = RevaInternalServiceRegistry.getService(FollowMeService.class);
+        }
+        if (followService != null) {
+            followMeAction = new FollowMeAction(getName(), followService);
+            tool.addAction(followMeAction);
+        }
 
         // TODO: Create the UI provider when needed
         // provider = new RevaProvider(this, getName());
@@ -113,6 +131,13 @@ public class RevaPlugin extends ProgramPlugin {
         // Remove the UI provider
         if (provider != null) {
             tool.removeComponentProvider(provider);
+        }
+
+        // Remove and detach the Follow Me action
+        if (followMeAction != null) {
+            tool.removeAction(followMeAction);
+            followMeAction.dispose();
+            followMeAction = null;
         }
 
         // Unregister this tool from the MCP service

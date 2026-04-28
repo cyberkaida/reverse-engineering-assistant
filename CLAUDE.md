@@ -224,6 +224,7 @@ When adding new tools to DecompilerToolProvider:
 - Return structured JSON with success flags and program metadata
 - Exception handling is automatic: `registerTool()` wraps all handlers to catch `IllegalArgumentException` and `ProgramValidationException` and convert them to error responses. Manual try-catch is only needed for custom error handling or resource cleanup (e.g., DecompInterface disposal).
 - Use pagination for large datasets (functions, symbols, strings, etc.)
+- Progress notifications: only emit when client opted in (`request.progressToken() != null` → `exchange.progressNotification(new ProgressNotification(token, progress, total, message))`). Examples: `ProjectToolProvider` import-file, `DecompilerToolProvider` search-decompilation.
 
 ## MCP Server Configuration
 
@@ -262,8 +263,8 @@ Install via: `claude plugin marketplace add cyberkaida/reverse-engineering-assis
 ### Java
 - Ghidra: 12.0+ (source at `../ghidra`)
 - Java: 21+
-- MCP SDK: io.modelcontextprotocol.sdk v0.17.0 (BOM-managed)
-- Jackson: 2.20.x (force-resolved for MCP SDK compatibility)
+- MCP SDK: io.modelcontextprotocol.sdk v1.1.1 (BOM-managed)
+- Jackson: 2.21.x (force-resolved for MCP SDK compatibility)
 - Jetty: 11.0.26 (embedded servlet server)
 
 ### Python
@@ -301,7 +302,7 @@ Install via: `claude plugin marketplace add cyberkaida/reverse-engineering-assis
 - **Testing (Java)**: Integration tests require `java.awt.headless=false`, fork=1
 - **Testing (Python)**: pytest with markers (unit/integration/e2e/cli)
 - **Build**: Use `gradle` directly, NOT `./gradlew`
-- **MCP SDK**: v0.17.0 with forced Jackson 2.20.x for compatibility
+- **MCP SDK**: v1.1.1 with forced Jackson 2.21.x for compatibility
 
 ## Important Notes
 
@@ -313,9 +314,10 @@ Install via: `claude plugin marketplace add cyberkaida/reverse-engineering-assis
 
 ### Common Issues
 - **Jackson conflicts**: `rm lib/*.jar` and rebuild to fix MCP SDK compatibility
-- **Test reports**: Use Read tool or Grep, NOT `open` command
+- **Test reports**: Parse `build/test-results/integrationTest/TEST-*.xml` with Read/Grep — don't trust `BUILD SUCCESSFUL` alone (compileIntegrationTestJava can fail silently in mixed output)
 - **CI logs**: Use Task agent to read (very long logs, context-intensive)
 - **Stdio mode**: Requires clean stdin/stdout - no debug prints to stdout
+- **Help build (`gradle install`)**: JavaHelp validation fails the whole module on any cross-file anchor collision in `src/main/help/help/topics/` or any broken `help/shared/*` reference (note/tip/warning images live in `src/main/resources/help/shared/`, not under `src/main/help/`). See [help/CLAUDE.md](src/main/help/CLAUDE.md).
 
 ### Testing Strategy
 - **Java unit tests**: Fast, no Ghidra environment, test utilities/logic

@@ -6,8 +6,8 @@ This file provides guidance for Claude Code when working with the ReVa source co
 
 | Item | Value |
 |------|-------|
-| **MCP SDK Version** | v0.17.0 |
-| **Jackson Version** | 2.20.x |
+| **MCP SDK Version** | v1.1.1 |
+| **Jackson Version** | 2.21.x |
 | **Jetty Version** | 11.0.26 |
 | **PyGhidra Version** | 3.0.0+ |
 | **JUnit Version** | JUnit 4 (NOT JUnit 5) |

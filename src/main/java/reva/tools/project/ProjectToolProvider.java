@@ -23,12 +23,16 @@ import java.util.Map;
 import java.util.Objects;
 
 import ghidra.app.plugin.core.analysis.AutoAnalysisManager;
+import ghidra.app.plugin.core.analysis.AutoAnalysisManagerListener;
+import ghidra.app.services.Analyzer;
 import ghidra.framework.data.DefaultCheckinHandler;
 import ghidra.framework.model.DomainObject;
 import ghidra.framework.main.AppInfo;
 import ghidra.framework.model.DomainFile;
 import ghidra.framework.model.DomainFolder;
 import ghidra.framework.model.Project;
+import ghidra.framework.options.OptionType;
+import ghidra.framework.options.Options;
 import ghidra.program.model.lang.CompilerSpec;
 import ghidra.program.model.lang.CompilerSpecID;
 import ghidra.program.model.lang.Language;
@@ -38,10 +42,15 @@ import ghidra.program.model.lang.LanguageNotFoundException;
 import ghidra.program.model.lang.LanguageService;
 import ghidra.program.util.DefaultLanguageService;
 import ghidra.program.model.listing.Program;
+import ghidra.program.util.GhidraProgramUtilities;
 import ghidra.util.Msg;
+import ghidra.util.classfinder.ClassSearcher;
 import ghidra.util.task.TaskMonitor;
 import ghidra.util.task.TimeoutTaskMonitor;
+import ghidra.util.task.WrappingTaskMonitor;
+import java.util.LinkedHashMap;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import ghidra.app.util.importer.MessageLog;
 import ghidra.app.util.opinion.LoadResults;
 import ghidra.app.util.opinion.LoadSpec;
@@ -94,6 +103,7 @@ public class ProjectToolProvider extends AbstractToolProvider {
         registerListProjectFilesTool();
         registerCheckinProgramTool();
         registerAnalyzeProgramTool();
+        registerListAnalyzersTool();
         registerChangeProcessorTool();
         registerImportFileTool();
         registerCaptureDebugInfoTool();
@@ -602,59 +612,477 @@ public class ProjectToolProvider extends AbstractToolProvider {
     }
 
     /**
-     * Register a tool to analyze a program with Ghidra's auto-analysis
+     * Register a tool to analyze a program with Ghidra's auto-analysis.
+     * Blocks until analysis completes (or times out), wraps the work in a transaction,
+     * marks the program as analyzed, and reports progress via MCP when the client supplies
+     * a progressToken. Supports per-call analyzer overrides that do not persist.
      */
     private void registerAnalyzeProgramTool() {
-        // Define schema for the tool
         Map<String, Object> properties = new HashMap<>();
         properties.put("programPath", SchemaUtil.stringProperty(
             "Path to the program to analyze (e.g., '/Hatchery.exe')"
         ));
 
+        Map<String, Object> enableProp = new HashMap<>();
+        enableProp.put("type", "array");
+        enableProp.put("items", Map.of("type", "string"));
+        enableProp.put("description",
+            "Names of analyzers to enable for this run only (does not persist). "
+            + "Each name must be a top-level analyzer enable flag (no dots in the name) -- "
+            + "use list-analyzers to discover valid names.");
+        properties.put("enableAnalyzers", enableProp);
+
+        Map<String, Object> disableProp = new HashMap<>();
+        disableProp.put("type", "array");
+        disableProp.put("items", Map.of("type", "string"));
+        disableProp.put("description",
+            "Names of analyzers to disable for this run only (does not persist). "
+            + "Each name must be a top-level analyzer enable flag (no dots in the name) -- "
+            + "use list-analyzers to discover valid names.");
+        properties.put("disableAnalyzers", disableProp);
+
+        Map<String, Object> forceFullProp = new HashMap<>();
+        forceFullProp.put("type", "boolean");
+        forceFullProp.put("description",
+            "Force a full re-analysis even if the program is already marked analyzed (default: false). "
+            + "When false, the first call on a fresh program runs full analysis and subsequent calls are incremental.");
+        forceFullProp.put("default", false);
+        properties.put("forceFullAnalysis", forceFullProp);
+
+        Map<String, Object> timeoutProp = new HashMap<>();
+        timeoutProp.put("type", "integer");
+        timeoutProp.put("description",
+            "Maximum analysis time in seconds. Defaults to the configured analysis timeout. "
+            + "Pass -1 to disable the timeout entirely (analysis runs until done).");
+        properties.put("timeoutSeconds", timeoutProp);
+
         List<String> required = List.of("programPath");
 
-        // Create the tool
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("analyze-program")
             .title("Analyze Program")
-            .description("Run Ghidra's auto-analysis on a program")
+            .description(
+                "Run Ghidra's auto-analysis on a program. Blocks until analysis completes or times out, "
+                + "wraps the work in a transaction, marks the program analyzed, and reports per-analyzer "
+                + "task names and timings. Supports per-call analyzer overrides via enableAnalyzers / "
+                + "disableAnalyzers (use list-analyzers for valid names). After import-file, call this "
+                + "tool to populate functions, strings, and references.")
             .inputSchema(createSchema(properties, required))
             .build();
 
-        // Register the tool with a handler
         registerTool(tool, (exchange, request) -> {
-            // Get the program
-            Program program;
-            try {
-                program = getProgramFromArgs(request);
-            } catch (Exception e) {
-                return createErrorResult(e.getMessage());
-            }
-
+            Program program = getProgramFromArgs(request);
             String programPath = program.getDomainFile().getPathname();
 
+            List<String> enableAnalyzers =
+                getOptionalStringList(request.arguments(), "enableAnalyzers", List.of());
+            List<String> disableAnalyzers =
+                getOptionalStringList(request.arguments(), "disableAnalyzers", List.of());
+            boolean forceFullAnalysis = getOptionalBoolean(request, "forceFullAnalysis", false);
+
+            ConfigManager configManager =
+                RevaInternalServiceRegistry.getService(ConfigManager.class);
+            int defaultTimeout = configManager != null ? configManager.getAnalysisTimeoutSeconds() : 600;
+            int timeoutSeconds = getOptionalInt(request, "timeoutSeconds", defaultTimeout);
+
+            if (timeoutSeconds == 0 || (timeoutSeconds < 0 && timeoutSeconds != -1)) {
+                return createErrorResult(
+                    "timeoutSeconds must be a positive integer or -1 (no timeout); got " + timeoutSeconds);
+            }
+
+            // Get the analysis manager early so its analyzers register their options on the
+            // program before we validate user-supplied override names. Without this, a fresh
+            // program has no entries in ANALYSIS_PROPERTIES and every override would be
+            // rejected as "unknown analyzer".
+            AutoAnalysisManager mgr = AutoAnalysisManager.getAnalysisManager(program);
+            if (mgr == null) {
+                return createErrorResult("Could not get analysis manager for program: " + programPath);
+            }
+            mgr.initializeOptions();
+
+            Options analysisOpts = program.getOptions(Program.ANALYSIS_PROPERTIES);
+
+            // Validate override names: each must name a top-level boolean analyzer enable flag.
+            for (String name : enableAnalyzers) {
+                String err = validateAnalyzerOverride(analysisOpts, name);
+                if (err != null) {
+                    return createErrorResult(err);
+                }
+            }
+            for (String name : disableAnalyzers) {
+                String err = validateAnalyzerOverride(analysisOpts, name);
+                if (err != null) {
+                    return createErrorResult(err);
+                }
+            }
+
+            // Snapshot original values so we can restore after the run (per-call overrides don't persist).
+            Map<String, Boolean> snapshot = new LinkedHashMap<>();
+            if (!enableAnalyzers.isEmpty() || !disableAnalyzers.isEmpty()) {
+                int overrideTx = program.startTransaction("ReVa: Apply analyzer overrides");
+                try {
+                    for (String name : enableAnalyzers) {
+                        snapshot.put(name, analysisOpts.getBoolean(name, true));
+                        analysisOpts.setBoolean(name, true);
+                    }
+                    for (String name : disableAnalyzers) {
+                        snapshot.put(name, analysisOpts.getBoolean(name, true));
+                        analysisOpts.setBoolean(name, false);
+                    }
+                    program.endTransaction(overrideTx, true);
+                } catch (Exception e) {
+                    program.endTransaction(overrideTx, false);
+                    throw e;
+                }
+            }
+
+            Object progressToken = request.progressToken();
+            boolean emitProgress = progressToken != null && exchange != null;
+
+            TaskMonitor baseMonitor = (timeoutSeconds == -1)
+                ? TaskMonitor.DUMMY
+                : TimeoutTaskMonitor.timeoutIn(timeoutSeconds, TimeUnit.SECONDS);
+
+            AnalysisProgressMonitor monitor = new AnalysisProgressMonitor(
+                baseMonitor,
+                emitProgress ? exchange : null,
+                progressToken);
+
+            AtomicBoolean ended = new AtomicBoolean(false);
+            AutoAnalysisManagerListener listener = (m, isCancelled) -> ended.set(true);
+            mgr.addListener(listener);
+
+            long startMs = System.currentTimeMillis();
+            boolean wasFullAnalysis;
+            boolean cancelled;
+            boolean timedOut;
+
+            int analysisTx = program.startTransaction("ReVa: Auto Analysis");
             try {
-                // Get the auto-analysis manager
-                AutoAnalysisManager analysisManager = AutoAnalysisManager.getAnalysisManager(program);
-                if (analysisManager == null) {
-                    return createErrorResult("Could not get analysis manager for program: " + programPath);
+                wasFullAnalysis = forceFullAnalysis || !GhidraProgramUtilities.isAnalyzed(program);
+
+                if (emitProgress) {
+                    exchange.progressNotification(new McpSchema.ProgressNotification(
+                        progressToken, 0.0, 1.0,
+                        wasFullAnalysis
+                            ? "Starting full auto-analysis..."
+                            : "Starting incremental auto-analysis..."));
                 }
 
-                // Start analysis
-                analysisManager.startAnalysis(TaskMonitor.DUMMY);
+                if (wasFullAnalysis) {
+                    mgr.reAnalyzeAll(null);
+                }
+                mgr.startAnalysis(monitor); // blocks until analysis completes or monitor is cancelled
+                cancelled = monitor.isCancelled();
+                timedOut = cancelled && timeoutSeconds != -1;
 
-                Map<String, Object> result = new HashMap<>();
-                result.put("success", true);
-                result.put("programPath", programPath);
-                result.put("message", "Analysis started successfully");
-                result.put("analysisRunning", analysisManager.isAnalyzing());
-
-                return createJsonResult(result);
-
+                if (!cancelled) {
+                    GhidraProgramUtilities.markProgramAnalyzed(program);
+                }
+                program.endTransaction(analysisTx, true);
             } catch (Exception e) {
-                return createErrorResult("Analysis failed: " + e.getMessage());
+                program.endTransaction(analysisTx, false);
+                mgr.removeListener(listener);
+                restoreAnalyzerOptions(program, analysisOpts, snapshot);
+                throw e;
             }
+
+            mgr.removeListener(listener);
+            restoreAnalyzerOptions(program, analysisOpts, snapshot);
+
+            long durationMs = System.currentTimeMillis() - startMs;
+
+            List<Map<String, Object>> analyzersRun = new ArrayList<>();
+            for (String taskName : mgr.getTimedTasks()) {
+                analyzersRun.add(Map.of("name", taskName));
+            }
+
+            List<String> messages = new ArrayList<>();
+            if (mgr.getMessageLog() != null && mgr.getMessageLog().hasMessages()) {
+                for (String line : mgr.getMessageLog().toString().split("\n")) {
+                    if (!line.isBlank()) {
+                        messages.add(line);
+                    }
+                }
+            }
+
+            if (emitProgress) {
+                String finalMsg;
+                if (timedOut) {
+                    finalMsg = "Analysis timed out after " + timeoutSeconds + " seconds";
+                } else if (cancelled) {
+                    finalMsg = "Analysis cancelled";
+                } else {
+                    finalMsg = "Analysis complete (" + analyzersRun.size() + " analyzers ran in "
+                        + durationMs + "ms)";
+                }
+                exchange.progressNotification(new McpSchema.ProgressNotification(
+                    progressToken, 1.0, 1.0, finalMsg));
+            }
+
+            Map<String, Object> result = new HashMap<>();
+            result.put("success", !cancelled);
+            result.put("programPath", programPath);
+            result.put("analyzed", GhidraProgramUtilities.isAnalyzed(program));
+            result.put("wasFullAnalysis", wasFullAnalysis);
+            result.put("durationMs", durationMs);
+            result.put("totalTaskTimeMs", mgr.getTotalTimeInMillis());
+            result.put("cancelled", cancelled);
+            result.put("timedOut", timedOut);
+            result.put("analyzersRun", analyzersRun);
+            if (!messages.isEmpty()) {
+                result.put("messages", messages);
+            }
+            if (timedOut) {
+                result.put("error",
+                    "Analysis timed out after " + timeoutSeconds + " seconds. "
+                        + "Increase timeoutSeconds or pass -1 for unlimited.");
+            }
+
+            return createJsonResult(result);
         });
+    }
+
+    /**
+     * Validate that the given analyzer-override name is a top-level analyzer enable flag
+     * (a boolean entry in the program's analysis options, with no dot separators).
+     * @return null if valid, otherwise a user-facing error message
+     */
+    private String validateAnalyzerOverride(Options analysisOpts, String name) {
+        if (name == null || name.isBlank()) {
+            return "Analyzer override name must be non-empty";
+        }
+        if (name.contains(".")) {
+            return "Analyzer override '" + name
+                + "' looks like a sub-option (contains '.'). Pass the top-level analyzer name only "
+                + "(use list-analyzers to discover valid names).";
+        }
+        if (!analysisOpts.contains(name)) {
+            return "Unknown analyzer '" + name
+                + "'. Use list-analyzers to see analyzers applicable to this program.";
+        }
+        OptionType type = analysisOpts.getType(name);
+        if (type != OptionType.BOOLEAN_TYPE) {
+            return "Analyzer override '" + name + "' is not a boolean enable flag (type=" + type
+                + "). Pass the top-level analyzer name only.";
+        }
+        return null;
+    }
+
+    /**
+     * Restore analyzer options to their pre-run values. No-op if snapshot is empty.
+     */
+    private void restoreAnalyzerOptions(Program program, Options analysisOpts,
+            Map<String, Boolean> snapshot) {
+        if (snapshot.isEmpty()) {
+            return;
+        }
+        int tx = program.startTransaction("ReVa: Restore analyzer overrides");
+        try {
+            for (Map.Entry<String, Boolean> entry : snapshot.entrySet()) {
+                analysisOpts.setBoolean(entry.getKey(), entry.getValue());
+            }
+            program.endTransaction(tx, true);
+        } catch (Exception e) {
+            program.endTransaction(tx, false);
+            Msg.error(this, "Failed to restore analyzer options: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Register a read-only tool that lists analyzers applicable to a program along with
+     * their current enable state, default state, type, priority, and any registered
+     * sub-options. LLMs use this to discover valid names for analyze-program's
+     * enableAnalyzers / disableAnalyzers parameters.
+     */
+    private void registerListAnalyzersTool() {
+        Map<String, Object> properties = new HashMap<>();
+        properties.put("programPath", SchemaUtil.stringProperty(
+            "Path to the program whose analyzers to list (e.g., '/Hatchery.exe')."));
+
+        List<String> required = List.of("programPath");
+
+        McpSchema.Tool tool = McpSchema.Tool.builder()
+            .name("list-analyzers")
+            .title("List Analyzers")
+            .description(
+                "List the auto-analyzers that apply to the given program, including each "
+                + "analyzer's name, description, type, priority, default and current enabled state, "
+                + "and any registered sub-options. Use the returned 'name' field as input to "
+                + "analyze-program's enableAnalyzers / disableAnalyzers parameters.")
+            .inputSchema(createSchema(properties, required))
+            .build();
+
+        registerTool(tool, (exchange, request) -> {
+            Program program = getProgramFromArgs(request);
+            String programPath = program.getDomainFile().getPathname();
+
+            Options analysisOpts = program.getOptions(Program.ANALYSIS_PROPERTIES);
+
+            List<Map<String, Object>> analyzers = new ArrayList<>();
+            for (Analyzer analyzer : ClassSearcher.getInstances(Analyzer.class)) {
+                if (analyzer.isPrototype()) {
+                    continue;
+                }
+                if (!analyzer.canAnalyze(program)) {
+                    continue;
+                }
+
+                String name = analyzer.getName();
+                boolean defaultEnabled = analyzer.getDefaultEnablement(program);
+                boolean currentlyEnabled;
+                if (analysisOpts.contains(name)
+                        && analysisOpts.getType(name) == OptionType.BOOLEAN_TYPE) {
+                    currentlyEnabled = analysisOpts.getBoolean(name, defaultEnabled);
+                } else {
+                    currentlyEnabled = defaultEnabled;
+                }
+
+                Map<String, Object> entry = new LinkedHashMap<>();
+                entry.put("name", name);
+                entry.put("description", analyzer.getDescription());
+                entry.put("type", analyzer.getAnalysisType().toString());
+                entry.put("priority", analyzer.getPriority().priority());
+                entry.put("defaultEnabled", defaultEnabled);
+                entry.put("currentlyEnabled", currentlyEnabled);
+                entry.put("supportsOneTimeAnalysis", analyzer.supportsOneTimeAnalysis());
+
+                List<Map<String, Object>> subOptions = collectAnalyzerSubOptions(analysisOpts, name);
+                if (!subOptions.isEmpty()) {
+                    entry.put("subOptions", subOptions);
+                }
+
+                analyzers.add(entry);
+            }
+
+            // Stable order: by priority then name
+            analyzers.sort((a, b) -> {
+                int pa = (Integer) a.get("priority");
+                int pb = (Integer) b.get("priority");
+                if (pa != pb) {
+                    return Integer.compare(pa, pb);
+                }
+                return ((String) a.get("name")).compareTo((String) b.get("name"));
+            });
+
+            Map<String, Object> result = new HashMap<>();
+            result.put("success", true);
+            result.put("programPath", programPath);
+            result.put("count", analyzers.size());
+            result.put("analyzers", analyzers);
+            return createJsonResult(result);
+        });
+    }
+
+    /**
+     * Read the registered sub-options for an analyzer (the keys nested under the analyzer's
+     * namespace in {@link Program#ANALYSIS_PROPERTIES}). Uses type-aware reads so non-boolean
+     * sub-options surface correctly; falls back to {@code getValueAsString} for unknown types.
+     */
+    private List<Map<String, Object>> collectAnalyzerSubOptions(Options analysisOpts,
+            String analyzerName) {
+        List<Map<String, Object>> subOptions = new ArrayList<>();
+        Options subOpts;
+        try {
+            subOpts = analysisOpts.getOptions(analyzerName);
+        } catch (Exception e) {
+            return subOptions;
+        }
+        if (subOpts == null) {
+            return subOptions;
+        }
+        for (String optName : subOpts.getOptionNames()) {
+            OptionType type;
+            try {
+                type = subOpts.getType(optName);
+            } catch (Exception e) {
+                continue;
+            }
+            Object value;
+            try {
+                switch (type) {
+                    case BOOLEAN_TYPE -> value = subOpts.getBoolean(optName, false);
+                    case INT_TYPE -> value = subOpts.getInt(optName, 0);
+                    case LONG_TYPE -> value = subOpts.getLong(optName, 0L);
+                    case DOUBLE_TYPE -> value = subOpts.getDouble(optName, 0.0);
+                    case FLOAT_TYPE -> value = subOpts.getFloat(optName, 0.0f);
+                    case STRING_TYPE -> value = subOpts.getString(optName, null);
+                    default -> value = subOpts.getValueAsString(optName);
+                }
+            } catch (Exception e) {
+                value = null;
+            }
+
+            String description;
+            try {
+                description = subOpts.getDescription(optName);
+            } catch (Exception e) {
+                description = null;
+            }
+
+            Map<String, Object> entry = new LinkedHashMap<>();
+            entry.put("name", optName);
+            entry.put("type", type.name());
+            entry.put("value", value);
+            if (description != null && !description.isBlank()) {
+                entry.put("description", description);
+            }
+            subOptions.add(entry);
+        }
+        return subOptions;
+    }
+
+    /**
+     * TaskMonitor that wraps a delegate (timeout-aware or DUMMY) and forwards monitor
+     * activity to MCP progress notifications when an exchange and progressToken are
+     * available. Throttled to avoid flooding the channel during chatty analyzers.
+     */
+    private static final class AnalysisProgressMonitor extends WrappingTaskMonitor {
+        private static final long THROTTLE_MS = 250;
+
+        private final McpSyncServerExchange exchange;
+        private final Object progressToken;
+        private long lastEmitMs = 0L;
+        private String lastMessage = "";
+
+        AnalysisProgressMonitor(TaskMonitor delegate, McpSyncServerExchange exchange,
+                Object progressToken) {
+            super(delegate);
+            this.exchange = exchange;
+            this.progressToken = progressToken;
+        }
+
+        private boolean canEmit() {
+            return exchange != null && progressToken != null;
+        }
+
+        private void emit(String message, boolean force) {
+            if (!canEmit()) {
+                return;
+            }
+            long now = System.currentTimeMillis();
+            if (!force && (now - lastEmitMs) < THROTTLE_MS) {
+                return;
+            }
+            lastEmitMs = now;
+            try {
+                // Use a coarse 0..1 scale: AutoAnalysisManager has no global progress signal we can
+                // map to a number, so we lean on the message field for human-readable status.
+                exchange.progressNotification(new McpSchema.ProgressNotification(
+                    progressToken, 0.5, 1.0, message));
+            } catch (Exception e) {
+                // Notification failures must never break analysis.
+            }
+        }
+
+        @Override
+        public void setMessage(String message) {
+            super.setMessage(message);
+            if (message != null && !message.equals(lastMessage)) {
+                lastMessage = message;
+                emit(message, false);
+            }
+        }
     }
 
     /**
@@ -792,7 +1220,10 @@ public class ProjectToolProvider extends AbstractToolProvider {
         // analyzeAfterImport parameter (optional)
         Map<String, Object> analyzeProperty = new HashMap<>();
         analyzeProperty.put("type", "boolean");
-        analyzeProperty.put("description", "Run auto-analysis after import (default: true)");
+        analyzeProperty.put("description",
+            "Run auto-analysis on each imported program before returning (default: false). "
+            + "Prefer leaving this off for LLM-driven workflows and calling analyze-program "
+            + "explicitly so progress is reported and analyzer choices are visible.");
         properties.put("analyzeAfterImport", analyzeProperty);
 
         // stripLeadingPath parameter (optional)
@@ -825,7 +1256,12 @@ public class ProjectToolProvider extends AbstractToolProvider {
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("import-file")
             .title("Import File")
-            .description("Import files, directories, or archives into the Ghidra project using batch import")
+            .description(
+                "Import files, directories, or archives into the Ghidra project using batch import. "
+                + "By default this does NOT run auto-analysis; the response flags imported programs "
+                + "with analyzed=false and analysisRecommended=true so callers know to follow up with "
+                + "the analyze-program tool. Set analyzeAfterImport=true to bundle analysis into "
+                + "the import call (slower, no per-analyzer progress).")
             .inputSchema(createSchema(properties, required))
             .build();
 
@@ -1170,6 +1606,25 @@ public class ProjectToolProvider extends AbstractToolProvider {
                     result.put("analyzedPrograms", analyzedFiles);
                 }
 
+                // Per-program detail with analysis hints so LLMs know what to do next.
+                if (!importedProgramPaths.isEmpty()) {
+                    List<Map<String, Object>> programs = new ArrayList<>();
+                    for (String importedPath : importedProgramPaths) {
+                        Map<String, Object> entry = new LinkedHashMap<>();
+                        entry.put("programPath", importedPath);
+                        boolean wasAnalyzed = analyzedFiles.contains(importedPath);
+                        entry.put("analyzed", wasAnalyzed);
+                        if (!wasAnalyzed) {
+                            entry.put("analysisRecommended", true);
+                            entry.put("nextSteps",
+                                "Call analyze-program with programPath '" + importedPath
+                                + "' to populate functions, strings, and references.");
+                        }
+                        programs.add(entry);
+                    }
+                    result.put("programs", programs);
+                }
+
                 // Include detailed error information
                 if (!detailedErrors.isEmpty()) {
                     result.put("errors", detailedErrors);
@@ -1204,13 +1659,18 @@ public class ProjectToolProvider extends AbstractToolProvider {
                 if (!detailedErrors.isEmpty()) {
                     message += " (" + detailedErrors.size() + " error(s))";
                 }
-                result.put("message", message + ".");
+                message += ".";
+                if (!importedDomainFiles.isEmpty() && !analyzeAfterImport) {
+                    message += " Imported programs are not analyzed yet -- call analyze-program "
+                        + "for each program to populate functions, strings, and references.";
+                }
+                result.put("message", message);
 
                 // Send final progress notification
                 if (exchange != null) {
                     exchange.progressNotification(new McpSchema.ProgressNotification(
                         progressToken, (double) totalFiles, (double) totalFiles,
-                        message + "."));
+                        message));
                 }
 
                 return createJsonResult(result);

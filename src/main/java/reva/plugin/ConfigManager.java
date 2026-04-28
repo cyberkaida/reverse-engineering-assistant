@@ -57,6 +57,7 @@ public class ConfigManager implements ConfigurationBackendListener {
     private static final String IMPORT_TIMEOUT_SECONDS = "Import Timeout (seconds)";
     public static final String WAIT_FOR_ANALYSIS_ON_IMPORT = "Wait For Analysis On Import";
     public static final String IMPORT_MAX_DEPTH = "Import Max Depth";
+    public static final String ANALYSIS_TIMEOUT_SECONDS = "Analysis Timeout Seconds";
 
     // Default values
     private static final int DEFAULT_PORT = 8080;
@@ -70,8 +71,9 @@ public class ConfigManager implements ConfigurationBackendListener {
     private static final int DEFAULT_DECOMPILER_TIMEOUT_SECONDS = 10;
     private static final int DEFAULT_IMPORT_ANALYSIS_TIMEOUT_SECONDS = 600;
     private static final int DEFAULT_IMPORT_TIMEOUT_SECONDS = 120;
-    private static final boolean DEFAULT_WAIT_FOR_ANALYSIS_ON_IMPORT = true;
+    private static final boolean DEFAULT_WAIT_FOR_ANALYSIS_ON_IMPORT = false;
     private static final int DEFAULT_IMPORT_MAX_DEPTH = 10;
+    private static final int DEFAULT_ANALYSIS_TIMEOUT_SECONDS = 600;
 
     private final ConfigurationBackend backend;
     private final Map<String, Object> cachedOptions = new ConcurrentHashMap<>();
@@ -188,9 +190,11 @@ public class ConfigManager implements ConfigurationBackendListener {
         toolOptions.registerOption(IMPORT_TIMEOUT_SECONDS, DEFAULT_IMPORT_TIMEOUT_SECONDS, help,
             "Timeout in seconds for file import operations");
         toolOptions.registerOption(WAIT_FOR_ANALYSIS_ON_IMPORT, DEFAULT_WAIT_FOR_ANALYSIS_ON_IMPORT, help,
-            "Whether to run auto-analysis after file import and wait for it to complete (default: true)");
+            "Whether to run auto-analysis after file import and wait for it to complete (default: false; LLM clients should call analyze-program explicitly)");
         toolOptions.registerOption(IMPORT_MAX_DEPTH, DEFAULT_IMPORT_MAX_DEPTH, help,
             "Maximum depth to recurse into containers/archives when importing (default: 10)");
+        toolOptions.registerOption(ANALYSIS_TIMEOUT_SECONDS, DEFAULT_ANALYSIS_TIMEOUT_SECONDS, help,
+            "Default timeout in seconds for the analyze-program tool (default: 600). Use -1 to disable the timeout entirely.");
     }
 
     /**
@@ -225,6 +229,8 @@ public class ConfigManager implements ConfigurationBackendListener {
             backend.getBoolean(SERVER_OPTIONS, WAIT_FOR_ANALYSIS_ON_IMPORT, DEFAULT_WAIT_FOR_ANALYSIS_ON_IMPORT));
         cachedOptions.put(IMPORT_MAX_DEPTH,
             backend.getInt(SERVER_OPTIONS, IMPORT_MAX_DEPTH, DEFAULT_IMPORT_MAX_DEPTH));
+        cachedOptions.put(ANALYSIS_TIMEOUT_SECONDS,
+            backend.getInt(SERVER_OPTIONS, ANALYSIS_TIMEOUT_SECONDS, DEFAULT_ANALYSIS_TIMEOUT_SECONDS));
 
         Msg.debug(this, "Loaded ReVa configuration settings");
     }
@@ -502,6 +508,25 @@ public class ConfigManager implements ConfigurationBackendListener {
      */
     public void setWaitForAnalysisOnImport(boolean wait) {
         backend.setBoolean(SERVER_OPTIONS, WAIT_FOR_ANALYSIS_ON_IMPORT, wait);
+        // onConfigurationChanged() will be called automatically
+    }
+
+    /**
+     * Get the default timeout for the analyze-program tool, in seconds.
+     * A value of -1 means analysis should run without any timeout.
+     * @return The configured analysis timeout in seconds
+     */
+    public int getAnalysisTimeoutSeconds() {
+        return (Integer) cachedOptions.getOrDefault(ANALYSIS_TIMEOUT_SECONDS, DEFAULT_ANALYSIS_TIMEOUT_SECONDS);
+    }
+
+    /**
+     * Set the default timeout for the analyze-program tool, in seconds.
+     * Pass -1 to disable the timeout entirely.
+     * @param timeoutSeconds The timeout in seconds, or -1 for no timeout
+     */
+    public void setAnalysisTimeoutSeconds(int timeoutSeconds) {
+        backend.setInt(SERVER_OPTIONS, ANALYSIS_TIMEOUT_SECONDS, timeoutSeconds);
         // onConfigurationChanged() will be called automatically
     }
 

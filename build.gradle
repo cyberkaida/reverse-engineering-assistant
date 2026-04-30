@@ -114,7 +114,7 @@ dependencies {
 	implementation "jakarta.servlet:jakarta.servlet-api:6.1.0"
 	// Add Jetty for embedded servlet support
 	implementation "org.eclipse.jetty:jetty-server:12.1.7"
-	implementation "org.eclipse.jetty.ee10:jetty-ee10-servlet:12.1.7"
+	implementation "org.eclipse.jetty.ee10:jetty-ee10-servlet:12.1.8"
 
 	// Force Jackson 2.21.x to be compatible with MCP SDK
 	implementation "com.fasterxml.jackson.core:jackson-core:2.21.1"

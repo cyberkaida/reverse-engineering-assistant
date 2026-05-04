@@ -1895,3 +1895,180 @@ class TestApplyDataType:
         assert check_data.get("length") == 19, (
             f"get-data length should be 19 after applying char[19]; got {check_data!r}"
         )
+
+
+@pytest.mark.skip(
+    reason="get-current-program is GUI-only; ProjectToolProvider.registerTools "
+    "guards it behind `if (!headlessMode)`, so it is not registered in stdio "
+    "mode. Kept for documentation of the intentional limitation."
+)
+class TestGetCurrentProgram:
+    """Verify get-current-program reports the imported program's metadata."""
+
+    async def test_returns_imported_program_info(
+        self, mcp_stdio_client, isolated_workspace
+    ):
+        """After import+analyze, get-current-program must describe the open program.
+
+        Asserts the response carries the documented fields (programPath,
+        language, functionCount, etc.) and that functionCount matches the
+        analysed binary's actual function count from get-function-count.
+        """
+        program_path = await _import_and_analyze(mcp_stdio_client)
+
+        result = await mcp_stdio_client.call_tool(
+            "get-current-program",
+            arguments={},
+        )
+        assert not getattr(result, "isError", False), (
+            f"get-current-program failed: {result.content[0].text if result.content else 'no content'}"
+        )
+        data = json.loads(result.content[0].text)
+
+        for field in ("programPath", "language", "compilerSpec", "functionCount", "symbolCount"):
+            assert field in data, f"get-current-program response missing {field!r}: {data!r}"
+
+        assert data.get("programPath") == program_path, (
+            f"Expected programPath={program_path!r}; got {data.get('programPath')!r}"
+        )
+        # AArch64 Mach-O fixture
+        lang = data.get("language", "").lower()
+        assert "aarch64" in lang or "arm" in lang, (
+            f"Expected ARM64-ish language id; got {data.get('language')!r}"
+        )
+        assert data.get("functionCount", 0) >= 4, (
+            f"Expected >=4 functions; got functionCount={data.get('functionCount')!r}"
+        )
+
+
+@pytest.mark.skip(
+    reason="list-open-programs is GUI-only; ProjectToolProvider.registerTools "
+    "guards it behind `if (!headlessMode)`, so it is not registered in stdio "
+    "mode. Kept for documentation of the intentional limitation."
+)
+class TestListOpenPrograms:
+    """Verify list-open-programs surfaces the freshly-imported program."""
+
+    async def test_imported_program_appears_in_open_list(
+        self, mcp_stdio_client, isolated_workspace
+    ):
+        """After import+analyze, the program must appear in list-open-programs.
+
+        Validates the multi-content response shape (metadata first, then
+        per-program entries) and asserts the imported programPath is among
+        the open entries.
+        """
+        program_path = await _import_and_analyze(mcp_stdio_client)
+
+        result = await mcp_stdio_client.call_tool(
+            "list-open-programs",
+            arguments={},
+        )
+        assert not getattr(result, "isError", False), (
+            f"list-open-programs failed: {result.content[0].text if result.content else 'no content'}"
+        )
+
+        # Multi-content shape: content[0] is metadata, the rest are programs.
+        assert result.content, "Empty response from list-open-programs"
+        metadata = json.loads(result.content[0].text)
+        assert metadata.get("count", 0) >= 1, (
+            f"Expected count>=1 in metadata; got {metadata!r}"
+        )
+
+        programs = []
+        for content in result.content[1:]:
+            try:
+                programs.append(json.loads(content.text))
+            except (json.JSONDecodeError, AttributeError):
+                continue
+
+        program_paths = [p.get("programPath") for p in programs]
+        assert program_path in program_paths, (
+            f"Expected {program_path!r} in open programs list; got {program_paths!r}"
+        )
+
+
+class TestStructureDeletion:
+    """Verify the parse-c-structure / get-structure-info / delete-structure cycle."""
+
+    async def test_create_inspect_delete_struct(
+        self, mcp_stdio_client, isolated_workspace
+    ):
+        """Parse a struct, inspect its layout, delete it, and confirm it's gone.
+
+        Exercises three structure tools (parse-c-structure, get-structure-info,
+        delete-structure) plus list-structures as the post-delete check. The
+        struct is unreferenced (never applied), so delete should succeed
+        without needing force=True.
+        """
+        program_path = await _import_and_analyze(mcp_stdio_client)
+
+        struct_name = "RevaE2EDeletable"
+        c_def = (
+            "struct " + struct_name + " {"
+            "    char tag[4];"
+            "    int size;"
+            "};"
+        )
+
+        # 1. Create
+        parse_result = await mcp_stdio_client.call_tool(
+            "parse-c-structure",
+            arguments={
+                "programPath": program_path,
+                "cDefinition": c_def,
+            },
+        )
+        assert not getattr(parse_result, "isError", False), (
+            f"parse-c-structure failed: {parse_result.content[0].text}"
+        )
+
+        # 2. get-structure-info should report the layout
+        info_result = await mcp_stdio_client.call_tool(
+            "get-structure-info",
+            arguments={
+                "programPath": program_path,
+                "structureName": struct_name,
+            },
+        )
+        assert not getattr(info_result, "isError", False), (
+            f"get-structure-info failed: {info_result.content[0].text}"
+        )
+        info_data = json.loads(info_result.content[0].text)
+        assert info_data.get("name") == struct_name, (
+            f"Expected name={struct_name!r}; got {info_data!r}"
+        )
+        # tag[4] + int = 8 bytes
+        assert info_data.get("size") == 8, (
+            f"Expected size=8 (char[4] + int); got {info_data!r}"
+        )
+        field_names = [f.get("fieldName") for f in info_data.get("fields", [])]
+        assert "tag" in field_names and "size" in field_names, (
+            f"Expected tag,size in fields; got {field_names!r}"
+        )
+
+        # 3. delete-structure (no references -> no force needed)
+        delete_result = await mcp_stdio_client.call_tool(
+            "delete-structure",
+            arguments={
+                "programPath": program_path,
+                "structureName": struct_name,
+            },
+        )
+        assert not getattr(delete_result, "isError", False), (
+            f"delete-structure failed: {delete_result.content[0].text}"
+        )
+
+        # 4. Confirm gone via list-structures with name filter
+        list_result = await mcp_stdio_client.call_tool(
+            "list-structures",
+            arguments={
+                "programPath": program_path,
+                "nameFilter": struct_name,
+            },
+        )
+        list_data = json.loads(list_result.content[0].text)
+        names = [s.get("name") for s in list_data.get("structures", [])]
+        assert struct_name not in names, (
+            f"Struct should be deleted but still appears in list-structures: {names!r}"
+        )

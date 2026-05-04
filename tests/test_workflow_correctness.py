@@ -1129,3 +1129,202 @@ class TestFindVariableAccesses:
         assert "READ" in access_types, (
             f"Expected at least one READ of param_1; got accessTypes={access_types!r}"
         )
+
+
+class TestDataFlowBackward:
+    """Verify trace-data-flow-backward returns a populated slice."""
+
+    async def test_backward_trace_in_add_returns_operations(
+        self, mcp_stdio_client, isolated_workspace
+    ):
+        """Backward slice from inside _add must contain operations and metadata.
+
+        Slicing seeds at 0x100000474 (`add w0, w8, w9` inside _add). The
+        response must report direction=backward, identify the containing
+        function, and list at least one operation with the documented
+        per-op schema (address, opcode, optional inputs/output). We do
+        not assert specific terminator types: PARAMETER terminators
+        require HighParam outputs which Ghidra does not always synthesize
+        for register parameters in this fixture, and the test would be
+        brittle. The op-list assertion is the stronger signal that the
+        slicer ran and produced data.
+        """
+        program_path = await _import_and_analyze(mcp_stdio_client)
+
+        # _add is at 0x100000460; +0x14 = 0x100000474 (the `add w0, w8, w9` op).
+        result = await mcp_stdio_client.call_tool(
+            "trace-data-flow-backward",
+            arguments={
+                "programPath": program_path,
+                "address": "0x100000474",
+            },
+        )
+        assert not getattr(result, "isError", False), (
+            f"trace-data-flow-backward failed: {result.content[0].text if result.content else 'no content'}"
+        )
+        data = json.loads(result.content[0].text)
+
+        assert data.get("direction") == "backward", (
+            f"Expected direction=backward; got {data!r}"
+        )
+        assert data.get("function") in ("_add", "add"), (
+            f"Expected containing function _add/add; got {data!r}"
+        )
+        op_count = data.get("operationCount", 0)
+        operations = data.get("operations", [])
+        assert op_count >= 1, (
+            f"Expected at least one operation in slice; got operationCount={op_count!r}, "
+            f"operations={operations!r}"
+        )
+        assert len(operations) == op_count, (
+            f"operations length should match operationCount; got len={len(operations)} vs {op_count}"
+        )
+
+        # Every op must have address + opcode at minimum.
+        for op in operations:
+            assert "address" in op, f"Operation missing address: {op!r}"
+            assert "opcode" in op, f"Operation missing opcode: {op!r}"
+
+
+class TestChangeVariableDatatypes:
+    """Verify change-variable-datatypes propagates to decompilation."""
+
+    async def test_change_param_1_to_short_visible_in_decomp(
+        self, mcp_stdio_client, isolated_workspace
+    ):
+        """Changing param_1 of _add to 'short' must appear in re-decompilation.
+
+        Sister to TestSetFunctionPrototype but exercises the variable-level
+        type change tool instead of the whole-prototype tool. After the
+        change, the second decompilation must show 'short' as the type
+        of the first parameter.
+        """
+        program_path = await _import_and_analyze(mcp_stdio_client)
+        add_func = await _find_function(mcp_stdio_client, program_path, "add")
+
+        # Read decompilation to satisfy the read-before-modify guard and
+        # confirm 'param_1' is the synthesized name.
+        before = await mcp_stdio_client.call_tool(
+            "get-decompilation",
+            arguments={
+                "programPath": program_path,
+                "functionNameOrAddress": add_func["name"],
+                "limit": 100,
+            },
+        )
+        before_text = json.loads(before.content[0].text).get("decompilation", "")
+        if "param_1" not in before_text:
+            pytest.skip(
+                f"Synthesised name was not 'param_1'; cannot exercise this scenario. "
+                f"Decompilation:\n{before_text}"
+            )
+
+        # Apply the type change
+        change_result = await mcp_stdio_client.call_tool(
+            "change-variable-datatypes",
+            arguments={
+                "programPath": program_path,
+                "functionNameOrAddress": add_func["name"],
+                "datatypeMappings": {"param_1": "short"},
+            },
+        )
+        assert not getattr(change_result, "isError", False), (
+            f"change-variable-datatypes failed: {change_result.content[0].text}"
+        )
+        change_data = json.loads(change_result.content[0].text)
+        assert change_data.get("variablesChanged") is True or change_data.get("changedCount", 0) >= 1, (
+            f"Expected variablesChanged=True or changedCount>=1; got {change_data!r}"
+        )
+
+        # Re-decompile and verify 'short' appears as a type for param_1
+        after = await mcp_stdio_client.call_tool(
+            "get-decompilation",
+            arguments={
+                "programPath": program_path,
+                "functionNameOrAddress": add_func["name"],
+                "limit": 100,
+            },
+        )
+        after_text = json.loads(after.content[0].text).get("decompilation", "")
+        assert "short" in after_text, (
+            f"Expected 'short' in decompilation after type change; got:\n{after_text}"
+        )
+
+
+class TestCommentSearch:
+    """Verify the set-comment / search-comments / remove-comment cycle."""
+
+    async def test_comment_search_and_remove(
+        self, mcp_stdio_client, isolated_workspace
+    ):
+        """Set a unique comment, find it via search-comments, then remove it.
+
+        Complements the test_e2e_workflow lifecycle test (which only
+        verifies set + get-comments) by exercising search-comments and
+        remove-comment, plus confirms removal evicts the comment.
+        """
+        program_path = await _import_and_analyze(mcp_stdio_client)
+        add_func = await _find_function(mcp_stdio_client, program_path, "add")
+
+        sentinel = "ReVa-e2e-comment-sentinel-DEC2025"
+
+        # 1. Set the comment (default eol type)
+        set_result = await mcp_stdio_client.call_tool(
+            "set-comment",
+            arguments={
+                "programPath": program_path,
+                "addressOrSymbol": add_func["address"],
+                "comment": sentinel,
+            },
+        )
+        assert not getattr(set_result, "isError", False), (
+            f"set-comment failed: {set_result.content[0].text}"
+        )
+        set_data = json.loads(set_result.content[0].text)
+        assert set_data.get("success") is True, f"set-comment not success: {set_data!r}"
+
+        # 2. search-comments must surface our sentinel.
+        search_result = await mcp_stdio_client.call_tool(
+            "search-comments",
+            arguments={
+                "programPath": program_path,
+                "searchText": "ReVa-e2e-comment-sentinel",
+                "caseSensitive": False,
+            },
+        )
+        assert not getattr(search_result, "isError", False), (
+            f"search-comments failed: {search_result.content[0].text}"
+        )
+        search_data = json.loads(search_result.content[0].text)
+        # search-comments returns hits under 'results' (consistent with search-bookmarks).
+        results = search_data.get("results", [])
+        assert any(sentinel in r.get("comment", "") for r in results), (
+            f"Expected sentinel comment in search-comments results; got {results!r}"
+        )
+
+        # 3. remove-comment
+        remove_result = await mcp_stdio_client.call_tool(
+            "remove-comment",
+            arguments={
+                "programPath": program_path,
+                "addressOrSymbol": add_func["address"],
+                "commentType": "eol",
+            },
+        )
+        assert not getattr(remove_result, "isError", False), (
+            f"remove-comment failed: {remove_result.content[0].text}"
+        )
+
+        # 4. Verify the comment is gone via search.
+        post_search = await mcp_stdio_client.call_tool(
+            "search-comments",
+            arguments={
+                "programPath": program_path,
+                "searchText": "ReVa-e2e-comment-sentinel",
+            },
+        )
+        post_data = json.loads(post_search.content[0].text)
+        post_results = post_data.get("results", [])
+        assert not any(sentinel in r.get("comment", "") for r in post_results), (
+            f"Comment should be gone after remove; still see {post_results!r}"
+        )

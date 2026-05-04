@@ -86,13 +86,18 @@ class ReVaLauncher:
             print("Starting ReVa MCP server...", file=sys.stderr)
             self.java_launcher.start()
 
-            # Wait for server to be ready
-            if self.java_launcher.waitForServer(30000):
+            # Wait for server to be ready. 60s rather than 30s because under
+            # full-suite load the Jetty bind + initial servlet wiring can
+            # exceed 30s on contended hosts (observed flake in CI-like runs).
+            startup_timeout_ms = 60000
+            if self.java_launcher.waitForServer(startup_timeout_ms):
                 self.port = self.java_launcher.getPort()
                 print(f"ReVa server ready on port {self.port}", file=sys.stderr)
                 return self.port
             else:
-                raise RuntimeError("Server failed to start within timeout")
+                raise RuntimeError(
+                    f"Server failed to start within {startup_timeout_ms / 1000:.0f}s"
+                )
 
         except Exception as e:
             print(f"Error starting ReVa server: {e}", file=sys.stderr)

@@ -1328,3 +1328,126 @@ class TestCommentSearch:
         assert not any(sentinel in r.get("comment", "") for r in post_results), (
             f"Comment should be gone after remove; still see {post_results!r}"
         )
+
+
+class TestCounts:
+    """Verify the *-count tools return non-zero numbers for an analyzed program."""
+
+    async def test_function_symbol_string_counts(
+        self, mcp_stdio_client, isolated_workspace
+    ):
+        """get-function-count, get-symbols-count, get-strings-count all return >=1.
+
+        Each count tool exposes a different facet of the program. After
+        analysis the test_arm64 fixture has at least 4 functions, plenty
+        of symbols (entry/_add/_multiply/_printf/__mh_execute_header...),
+        and at least one defined string (the printf format strings).
+        """
+        program_path = await _import_and_analyze(mcp_stdio_client)
+
+        async def _count(tool: str, args: dict | None = None) -> int:
+            payload = {"programPath": program_path}
+            if args:
+                payload.update(args)
+            res = await mcp_stdio_client.call_tool(tool, arguments=payload)
+            assert not getattr(res, "isError", False), (
+                f"{tool} failed: {res.content[0].text if res.content else 'no content'}"
+            )
+            data = json.loads(res.content[0].text)
+            assert "count" in data, f"{tool} response missing count field: {data!r}"
+            return data["count"]
+
+        function_count = await _count("get-function-count")
+        assert function_count >= 4, (
+            f"Expected >=4 functions in test_arm64; got {function_count}"
+        )
+
+        symbol_count = await _count("get-symbols-count", {"includeExternal": False})
+        assert symbol_count >= 4, (
+            f"Expected >=4 symbols in test_arm64; got {symbol_count}"
+        )
+
+        string_count = await _count("get-strings-count")
+        assert string_count >= 1, (
+            f"Expected >=1 defined string in test_arm64; got {string_count}"
+        )
+
+
+class TestUndefinedFunctionCandidates:
+    """Verify get-undefined-function-candidates responds cleanly."""
+
+    async def test_returns_well_formed_response(
+        self, mcp_stdio_client, isolated_workspace
+    ):
+        """get-undefined-function-candidates must return a valid candidate list.
+
+        After the explicit forceFullAnalysis pass our helper runs, the
+        fixture should have all reachable functions defined, so the
+        candidate list is expected to be empty or very small. The
+        important assertion is that the tool runs without error and
+        returns the documented schema.
+        """
+        program_path = await _import_and_analyze(mcp_stdio_client)
+
+        result = await mcp_stdio_client.call_tool(
+            "get-undefined-function-candidates",
+            arguments={"programPath": program_path},
+        )
+        assert not getattr(result, "isError", False), (
+            f"get-undefined-function-candidates failed: {result.content[0].text if result.content else 'no content'}"
+        )
+        data = json.loads(result.content[0].text)
+
+        # Required top-level fields
+        assert "candidates" in data, f"Missing 'candidates' field: {data!r}"
+        assert isinstance(data["candidates"], list), (
+            f"'candidates' must be a list; got {type(data['candidates']).__name__}"
+        )
+        # Each candidate must carry the documented per-entry schema.
+        for cand in data["candidates"]:
+            assert "address" in cand, f"Candidate missing address: {cand!r}"
+            assert "hasCallReference" in cand or "hasDataReference" in cand, (
+                f"Candidate missing reference flag: {cand!r}"
+            )
+
+
+class TestResolveThunk:
+    """Verify resolve-thunk follows a thunk chain to its target."""
+
+    async def test_resolve_printf_stub(
+        self, mcp_stdio_client, isolated_workspace
+    ):
+        """resolve-thunk on the printf stub must yield _printf as the final target.
+
+        The Mach-O __stubs section contains a thunk for _printf at
+        0x100000524 (visible in otool output as 'symbol stub for: _printf').
+        Resolving the thunk must walk to the external _printf symbol
+        and return isResolved=true.
+        """
+        program_path = await _import_and_analyze(mcp_stdio_client)
+
+        result = await mcp_stdio_client.call_tool(
+            "resolve-thunk",
+            arguments={
+                "programPath": program_path,
+                "address": "0x100000524",
+            },
+        )
+        assert not getattr(result, "isError", False), (
+            f"resolve-thunk failed: {result.content[0].text if result.content else 'no content'}"
+        )
+        data = json.loads(result.content[0].text)
+
+        chain = data.get("chain", [])
+        assert chain, f"Expected non-empty thunk chain; got {data!r}"
+
+        for entry in chain:
+            assert "name" in entry, f"Chain entry missing name: {entry!r}"
+
+        names = [c.get("name") for c in chain]
+        assert any("printf" in (n or "").lower() for n in names), (
+            f"Expected '_printf' in resolved thunk chain; got names={names!r}"
+        )
+        assert data.get("isResolved") is True, (
+            f"Expected isResolved=True for printf stub; got {data!r}"
+        )

@@ -750,3 +750,172 @@ class TestCallGraph:
         assert "_multiply" in callee_names, (
             f"Expected '_multiply' in callees; got {callee_names!r}"
         )
+
+
+class TestListImports:
+    """Verify list-imports surfaces the binary's external symbols."""
+
+    async def test_list_imports_includes_printf(
+        self, mcp_stdio_client, isolated_workspace
+    ):
+        """list-imports must report _printf for the test_arm64 fixture.
+
+        Uses groupByLibrary=False so the response shape is the simpler
+        flat-imports form. Asserts the documented per-import schema
+        (name, library, address) and that _printf is present.
+        """
+        program_path = await _import_and_analyze(mcp_stdio_client)
+
+        result = await mcp_stdio_client.call_tool(
+            "list-imports",
+            arguments={
+                "programPath": program_path,
+                "groupByLibrary": False,
+                "maxResults": 100,
+            },
+        )
+        assert not getattr(result, "isError", False), (
+            f"list-imports failed: {result.content[0].text if result.content else 'no content'}"
+        )
+        data = json.loads(result.content[0].text)
+
+        assert data.get("totalCount", 0) >= 1, (
+            f"Expected at least one import in test_arm64; got totalCount={data.get('totalCount')!r}"
+        )
+        imports = data.get("imports", [])
+        assert imports, f"imports list empty: {data!r}"
+
+        for imp in imports:
+            for field in ("name", "library"):
+                assert field in imp, f"Import missing {field!r}: {imp!r}"
+
+        names = [i.get("name") for i in imports]
+        assert "_printf" in names, (
+            f"Expected '_printf' in imports list; got {names!r}"
+        )
+
+
+class TestFunctionTags:
+    """Verify the function-tags add/list/filter cycle."""
+
+    async def test_tag_round_trip(self, mcp_stdio_client, isolated_workspace):
+        """Tag _add, list tags, then filter get-functions by that tag.
+
+        Exercises three function-tags modes (add, list) plus get-functions'
+        filterByTag parameter -- the canonical LLM workflow for grouping
+        functions by category.
+        """
+        program_path = await _import_and_analyze(mcp_stdio_client)
+        add_func = await _find_function(mcp_stdio_client, program_path, "add")
+
+        tag_name = "reva-e2e-tag"
+
+        # 1. Add tag to _add
+        add_result = await mcp_stdio_client.call_tool(
+            "function-tags",
+            arguments={
+                "programPath": program_path,
+                "function": add_func["name"],
+                "mode": "add",
+                "tags": [tag_name],
+            },
+        )
+        assert not getattr(add_result, "isError", False), (
+            f"function-tags add failed: {add_result.content[0].text}"
+        )
+        add_data = json.loads(add_result.content[0].text)
+        assert add_data.get("success") is True, f"function-tags add not success: {add_data!r}"
+        assert tag_name in add_data.get("tags", []), (
+            f"Tag {tag_name!r} should appear in updated tag list; got {add_data!r}"
+        )
+
+        # 2. List program-wide tags; ours must be present with count >= 1.
+        list_result = await mcp_stdio_client.call_tool(
+            "function-tags",
+            arguments={
+                "programPath": program_path,
+                "mode": "list",
+            },
+        )
+        assert not getattr(list_result, "isError", False), (
+            f"function-tags list failed: {list_result.content[0].text}"
+        )
+        list_data = json.loads(list_result.content[0].text)
+        all_tags = {t.get("name"): t for t in list_data.get("tags", [])}
+        assert tag_name in all_tags, (
+            f"Expected {tag_name!r} in program-wide tag list; got {list(all_tags)!r}"
+        )
+        assert all_tags[tag_name].get("count", 0) >= 1, (
+            f"Tag {tag_name!r} should have count >= 1; got {all_tags[tag_name]!r}"
+        )
+
+        # 3. Use get-functions with filterByTag to find tagged functions.
+        filtered = await mcp_stdio_client.call_tool(
+            "get-functions",
+            arguments={
+                "programPath": program_path,
+                "filterByTag": tag_name,
+                "maxCount": 50,
+            },
+        )
+        assert not getattr(filtered, "isError", False), (
+            f"get-functions with filterByTag failed: {filtered.content[0].text}"
+        )
+        # Multi-content shape: metadata + function entries.
+        filtered_names = []
+        for content in filtered.content[1:]:
+            try:
+                func = json.loads(content.text)
+            except (json.JSONDecodeError, AttributeError):
+                continue
+            filtered_names.append(func.get("name"))
+        assert add_func["name"] in filtered_names, (
+            f"Tagged function {add_func['name']!r} should appear when filtering by tag "
+            f"{tag_name!r}; got {filtered_names!r}"
+        )
+
+
+class TestReadMemory:
+    """Verify read-memory returns the expected bytes for a known string literal."""
+
+    async def test_read_known_string_bytes(
+        self, mcp_stdio_client, isolated_workspace
+    ):
+        """read-memory at the 'ReVa Test Program' literal returns the expected bytes.
+
+        otool shows the literal pool starts at 0x100000530 with the bytes
+        for 'ReVa Test Program\\n\\0'. The hex output must contain the hex
+        encoding of that prefix.
+        """
+        program_path = await _import_and_analyze(mcp_stdio_client)
+
+        result = await mcp_stdio_client.call_tool(
+            "read-memory",
+            arguments={
+                "programPath": program_path,
+                "addressOrSymbol": "0x100000530",
+                "length": 19,  # "ReVa Test Program\n\0"
+                "format": "both",
+            },
+        )
+        assert not getattr(result, "isError", False), (
+            f"read-memory failed: {result.content[0].text if result.content else 'no content'}"
+        )
+        data = json.loads(result.content[0].text)
+
+        assert data.get("length") == 19, f"Expected length=19; got {data!r}"
+
+        # 'R'=0x52 'e'=0x65 'V'=0x56 'a'=0x61 -> "ReVa" in hex prefix.
+        # MemoryUtil.formatHexString separates bytes with spaces.
+        hex_str = data.get("hex", "")
+        assert hex_str.lower().startswith("52 65 56 61"), (
+            f"Expected hex to start with 'ReVa' bytes (52 65 56 61); got {hex_str!r}"
+        )
+
+        # bytes field should reconstruct to the literal text via chr().
+        byte_list = data.get("bytes", [])
+        assert byte_list, f"bytes field missing or empty: {data!r}"
+        text = "".join(chr(b) for b in byte_list if b != 0)
+        assert "ReVa Test Program" in text, (
+            f"Decoded bytes should contain 'ReVa Test Program'; got {text!r}"
+        )

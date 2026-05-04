@@ -545,3 +545,112 @@ class TestSetFunctionPrototype:
         assert "alpha" in after_text and "beta" in after_text, (
             f"Expected 'alpha' and 'beta' in decompilation after prototype set; got:\n{after_text}"
         )
+
+
+class TestStringDiscovery:
+    """Verify get-strings exposes the binary's known literals."""
+
+    async def test_regex_filter_finds_known_literal(
+        self, mcp_stdio_client, isolated_workspace
+    ):
+        """get-strings with regexPattern='ReVa' must return the test program banner.
+
+        The fixture's main() prints "ReVa Test Program\\n" via printf, so a
+        regex filter on the literal must surface that string with non-zero
+        length and the expected content. Verifies the result schema
+        (address, content, length, dataType) at the same time.
+        """
+        program_path = await _import_and_analyze(mcp_stdio_client)
+
+        result = await mcp_stdio_client.call_tool(
+            "get-strings",
+            arguments={
+                "programPath": program_path,
+                "regexPattern": "ReVa",
+                "maxCount": 50,
+            },
+        )
+        assert not getattr(result, "isError", False), (
+            f"get-strings failed: {result.content[0].text if result.content else 'no content'}"
+        )
+
+        # get-strings packs metadata + entries into a single JSON array
+        # in one TextContent (unlike get-functions/get-symbols which use
+        # multiple TextContent items). The first element is pagination
+        # metadata; the rest are string entries.
+        assert result.content and result.content[0].text, "Empty response body"
+        items = json.loads(result.content[0].text)
+        assert isinstance(items, list) and len(items) >= 2, (
+            f"Expected JSON array of [metadata, ...entries]; got {items!r}"
+        )
+
+        metadata, *strings = items
+        assert metadata.get("actualCount", 0) >= 1, (
+            f"Expected at least one string match for 'ReVa'; metadata={metadata!r}"
+        )
+
+        # Every entry must have the documented schema.
+        for s in strings:
+            for field in ("address", "content", "length", "dataType"):
+                assert field in s, f"String entry missing {field!r}: {s!r}"
+
+        # And the banner must be among them.
+        contents = [s.get("content", "") for s in strings]
+        assert any("ReVa Test Program" in c for c in contents), (
+            f"Expected 'ReVa Test Program' banner in get-strings output; got {contents!r}"
+        )
+
+
+class TestCallersDecompiled:
+    """Verify get-callers-decompiled returns decompilation of every known caller."""
+
+    async def test_callers_of_add_includes_entry(
+        self, mcp_stdio_client, isolated_workspace
+    ):
+        """get-callers-decompiled on _add must include entry with its full decompilation.
+
+        In the fixture, only the entry function calls _add. The tool must
+        return entry's decompilation plus the call-site address that
+        targets _add, not just an empty caller list.
+        """
+        program_path = await _import_and_analyze(mcp_stdio_client)
+        add_func = await _find_function(mcp_stdio_client, program_path, "add")
+
+        result = await mcp_stdio_client.call_tool(
+            "get-callers-decompiled",
+            arguments={
+                "programPath": program_path,
+                "functionNameOrAddress": add_func["name"],
+                "maxCallers": 10,
+                "includeCallContext": True,
+            },
+        )
+        assert not getattr(result, "isError", False), (
+            f"get-callers-decompiled failed: {result.content[0].text if result.content else 'no content'}"
+        )
+        data = json.loads(result.content[0].text)
+
+        callers = data.get("callers", [])
+        assert callers, (
+            f"Expected at least one caller of {add_func['name']}; got empty list. "
+            f"Full response: {data!r}"
+        )
+
+        # The entry function must be among them.
+        entry_callers = [c for c in callers if c.get("functionName") == "entry"]
+        assert entry_callers, (
+            f"Expected 'entry' in callers; got functionNames={[c.get('functionName') for c in callers]!r}"
+        )
+
+        entry_caller = entry_callers[0]
+        assert entry_caller.get("success") is True, (
+            f"entry caller decompilation should succeed; got {entry_caller!r}"
+        )
+        decompilation = entry_caller.get("decompilation", "")
+        assert "_add(" in decompilation, (
+            f"entry caller decompilation should contain '_add('; got:\n{decompilation}"
+        )
+        # callLineNumbers requested via includeCallContext=True must be populated.
+        assert entry_caller.get("callLineNumbers"), (
+            f"Expected callLineNumbers populated for entry; got {entry_caller!r}"
+        )

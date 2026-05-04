@@ -52,16 +52,18 @@ def _resolve_workflow_fixture():
 class TestE2EWorkflow:
     """End-to-end workflow tests."""
 
-    async def test_import_change_commit_reopen_workflow(self, mcp_stdio_client, isolated_workspace):
+    async def test_import_change_save_and_reread_workflow(self, mcp_stdio_client, isolated_workspace):
         """
-        Complete workflow: import → open → change → save → reopen → verify
+        Workflow: import -> open -> change -> save -> re-read same session.
 
-        This tests:
-        1. Import binary into project
-        2. Opening program and making changes
-        3. Saving changes (cache release mechanism)
-        4. Reopening program
-        5. Changes persist after reopen
+        This tests that import-file, set-comment, checkin-program, and
+        get-comments work together within a single MCP session. It does
+        NOT verify cross-process persistence: checkin-program with
+        keepCheckedOut=False does not evict the program from ReVa's cache,
+        so the final get-comments reads from the same in-memory program
+        object the comment was written to. A true reopen-from-disk test
+        would need either a "close-program" tool or a two-process setup,
+        neither of which currently exists.
         """
         test_binary = _resolve_workflow_fixture()
 
@@ -159,7 +161,16 @@ class TestE2EWorkflow:
         print(f"Checkin response: {json.dumps(checkin_data, indent=2)}")
 
         assert checkin_data.get("success") is True
-        assert checkin_data.get("action") in ["saved", "checked_in", "added_to_version_control"]
+        # The CLI's stdio project is repo-backed, so the file is not yet
+        # versioned at this point and checkin-program promotes it via
+        # addToVersionControl. Assert the exact deterministic action so a
+        # regression (e.g., tool returning a stale "saved" without writing)
+        # surfaces. If the project setup ever changes to non-repo, update
+        # this to == "saved".
+        assert checkin_data.get("action") == "added_to_version_control", (
+            f"Expected action=added_to_version_control on first checkin in "
+            f"a repo-backed project; got {checkin_data!r}"
+        )
         print("✓ Successfully saved changes")
 
         print("\n=== STEP 5: Reopen program and verify changes ===")
@@ -195,14 +206,15 @@ class TestE2EWorkflow:
 
         print("\n=== SUCCESS: Complete workflow verified ===")
 
-    async def test_auto_checkout_on_first_open(self, mcp_stdio_client, isolated_workspace):
+    async def test_label_creation_persists_in_symbol_table(self, mcp_stdio_client, isolated_workspace):
         """
-        Test that opening a program allows modifications.
+        Verify create-label actually creates a queryable symbol.
 
-        This tests:
-        1. Importing a binary
-        2. Opening the program
-        3. Making modifications (should succeed)
+        Earlier this test was named test_auto_checkout_on_first_open and
+        asserted only that label_data["success"] is True. With
+        enableVersionControl=False there is nothing to "auto-checkout";
+        what the call actually exercises is whether create-label both
+        succeeds and produces a symbol that get-symbols can find.
         """
         test_binary = _resolve_workflow_fixture()
 
@@ -236,33 +248,56 @@ class TestE2EWorkflow:
         program_path = import_data["importedPrograms"][0]
         print(f"Imported program: {program_path}")
 
-        print("\n=== Attempt to modify ===")
-        # Try to set a label - this requires write access
+        print("\n=== Create label ===")
+        label_name = "reva_e2e_label_creation_test"
         label_result = await mcp_stdio_client.call_tool(
             "create-label",
             arguments={
                 "programPath": program_path,
                 "addressOrSymbol": "entry",
-                "labelName": "auto_checkout_test_label"
-            }
+                "labelName": label_name,
+            },
         )
 
         label_data = json.loads(label_result.content[0].text)
         print(f"Create label response: {json.dumps(label_data, indent=2)}")
+        assert label_data.get("success") is True, f"create-label failed: {label_data}"
 
-        # Verify modification succeeded
-        assert label_data.get("success") is True
-        print("✓ Successfully created label - program is writable")
+        print("\n=== Verify label appears in symbol table ===")
+        symbols_result = await mcp_stdio_client.call_tool(
+            "get-symbols",
+            arguments={
+                "programPath": program_path,
+                "maxCount": 500,
+            },
+        )
+        assert not getattr(symbols_result, "isError", False), (
+            f"get-symbols failed: {symbols_result.content[0].text if symbols_result.content else 'no content'}"
+        )
 
-    async def test_cache_release_during_checkin(self, mcp_stdio_client, isolated_workspace):
+        symbol_names = []
+        for content in symbols_result.content[1:]:
+            try:
+                sym = json.loads(content.text)
+            except (json.JSONDecodeError, AttributeError):
+                continue
+            symbol_names.append(sym.get("name"))
+
+        assert label_name in symbol_names, (
+            f"Label {label_name!r} created successfully but not found in get-symbols output. "
+            f"Symbols (first 20): {symbol_names[:20]}"
+        )
+        print(f"✓ Label {label_name!r} present in symbol table")
+
+    async def test_checkin_with_keep_checked_out_succeeds(self, mcp_stdio_client, isolated_workspace):
         """
-        Test that saving properly handles the program cache.
+        Verify checkin-program with keepCheckedOut=True returns success.
 
-        This tests:
-        1. Opening a program (caches it)
-        2. Making changes
-        3. Saving (should handle cache correctly)
-        4. Verifying save succeeded
+        Earlier this test was named test_cache_release_during_checkin and
+        claimed to verify cache handling. In stdio mode the program stays
+        in the in-memory cache regardless of keepCheckedOut, so the test
+        cannot verify cache release. What it actually exercises is that
+        modify-then-checkin with keepCheckedOut=True does not error.
         """
         test_binary = _resolve_workflow_fixture()
 

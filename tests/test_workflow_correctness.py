@@ -919,3 +919,213 @@ class TestReadMemory:
         assert "ReVa Test Program" in text, (
             f"Decoded bytes should contain 'ReVa Test Program'; got {text!r}"
         )
+
+
+class TestBookmarkWorkflow:
+    """Verify set-bookmark / get-bookmarks / search-bookmarks / remove-bookmark cycle."""
+
+    async def test_full_bookmark_lifecycle(
+        self, mcp_stdio_client, isolated_workspace
+    ):
+        """Set, query, search, and remove a bookmark on _add.
+
+        Exercises four bookmark tools in one workflow -- the canonical
+        navigation/annotation cycle an LLM would use to mark interesting
+        addresses for follow-up.
+        """
+        program_path = await _import_and_analyze(mcp_stdio_client)
+        add_func = await _find_function(mcp_stdio_client, program_path, "add")
+
+        bookmark_comment = "ReVa e2e bookmark sentinel"
+
+        # 1. Set bookmark
+        set_result = await mcp_stdio_client.call_tool(
+            "set-bookmark",
+            arguments={
+                "programPath": program_path,
+                "addressOrSymbol": add_func["address"],
+                "type": "Note",
+                "category": "e2e",
+                "comment": bookmark_comment,
+            },
+        )
+        assert not getattr(set_result, "isError", False), (
+            f"set-bookmark failed: {set_result.content[0].text}"
+        )
+        set_data = json.loads(set_result.content[0].text)
+        assert set_data.get("success") is True, f"set-bookmark not success: {set_data!r}"
+        assert set_data.get("comment") == bookmark_comment, (
+            f"Bookmark comment should round-trip; got {set_data!r}"
+        )
+        bookmark_id = set_data.get("id")
+        assert bookmark_id is not None, f"Bookmark response missing id: {set_data!r}"
+
+        # 2. get-bookmarks at the address must return our entry
+        get_result = await mcp_stdio_client.call_tool(
+            "get-bookmarks",
+            arguments={
+                "programPath": program_path,
+                "addressOrSymbol": add_func["address"],
+            },
+        )
+        assert not getattr(get_result, "isError", False), (
+            f"get-bookmarks failed: {get_result.content[0].text}"
+        )
+        get_data = json.loads(get_result.content[0].text)
+        comments = [b.get("comment") for b in get_data.get("bookmarks", [])]
+        assert bookmark_comment in comments, (
+            f"Expected our bookmark comment in get-bookmarks; got {comments!r}"
+        )
+
+        # 3. search-bookmarks by comment text must find it.
+        # Note: search-bookmarks returns the entries under 'results',
+        # whereas get-bookmarks uses 'bookmarks'. Inconsistent on the
+        # server side but stable, so the test pins the actual key.
+        search_result = await mcp_stdio_client.call_tool(
+            "search-bookmarks",
+            arguments={
+                "programPath": program_path,
+                "searchText": "ReVa e2e bookmark",
+            },
+        )
+        assert not getattr(search_result, "isError", False), (
+            f"search-bookmarks failed: {search_result.content[0].text}"
+        )
+        search_data = json.loads(search_result.content[0].text)
+        search_comments = [b.get("comment") for b in search_data.get("results", [])]
+        assert bookmark_comment in search_comments, (
+            f"search-bookmarks should find our bookmark by text; got {search_comments!r}"
+        )
+
+        # 4. remove-bookmark
+        remove_result = await mcp_stdio_client.call_tool(
+            "remove-bookmark",
+            arguments={
+                "programPath": program_path,
+                "addressOrSymbol": add_func["address"],
+                "type": "Note",
+                "category": "e2e",
+            },
+        )
+        assert not getattr(remove_result, "isError", False), (
+            f"remove-bookmark failed: {remove_result.content[0].text}"
+        )
+
+        # 5. After remove, the bookmark is gone.
+        post_remove = await mcp_stdio_client.call_tool(
+            "get-bookmarks",
+            arguments={
+                "programPath": program_path,
+                "addressOrSymbol": add_func["address"],
+            },
+        )
+        post_data = json.loads(post_remove.content[0].text)
+        post_comments = [b.get("comment") for b in post_data.get("bookmarks", [])]
+        assert bookmark_comment not in post_comments, (
+            f"Bookmark should be gone after remove; still see {post_comments!r}"
+        )
+
+
+class TestCallTree:
+    """Verify get-call-tree traverses callees recursively from a root."""
+
+    async def test_callee_tree_from_entry(
+        self, mcp_stdio_client, isolated_workspace
+    ):
+        """get-call-tree direction=callees from entry must include the helpers.
+
+        Unlike get-call-graph (which goes both directions to a fixed depth),
+        get-call-tree walks one direction with cycle marking. From entry,
+        depth=2 callees should include _printf, _add, _multiply.
+        """
+        program_path = await _import_and_analyze(mcp_stdio_client)
+        entry_func = await _find_function(mcp_stdio_client, program_path, "entry")
+
+        result = await mcp_stdio_client.call_tool(
+            "get-call-tree",
+            arguments={
+                "programPath": program_path,
+                "functionAddress": entry_func["address"],
+                "direction": "callees",
+                "maxDepth": 2,
+            },
+        )
+        assert not getattr(result, "isError", False), (
+            f"get-call-tree failed: {result.content[0].text if result.content else 'no content'}"
+        )
+        data = json.loads(result.content[0].text)
+        assert data.get("direction") == "callees", (
+            f"Expected direction=callees; got {data!r}"
+        )
+
+        tree = data.get("tree") or {}
+        assert tree.get("name") == "entry", (
+            f"Tree root should be entry; got {tree!r}"
+        )
+
+        # Walk the tree's immediate callees (depth 1 from root).
+        immediate = tree.get("callees", [])
+        immediate_names = [c.get("name") for c in immediate]
+        for expected in ("_printf", "_add", "_multiply"):
+            assert expected in immediate_names, (
+                f"Expected {expected!r} in entry's immediate callees; got {immediate_names!r}"
+            )
+
+
+class TestFindVariableAccesses:
+    """Verify find-variable-accesses lists reads/writes of a known parameter."""
+
+    async def test_param_1_accesses_in_add(
+        self, mcp_stdio_client, isolated_workspace
+    ):
+        """find-variable-accesses on param_1 of _add must report at least one READ.
+
+        _add(int a, int b) decompiles with synthesized name 'param_1' for
+        the first argument. Ghidra's HighFunction may model parameter
+        instances as input-only (no WRITE pcode op corresponding to the
+        synthetic def), so we don't require a WRITE entry; what we do
+        require is that the access list is non-empty, every entry has
+        the documented schema, and at least one access is a READ.
+        """
+        program_path = await _import_and_analyze(mcp_stdio_client)
+        add_func = await _find_function(mcp_stdio_client, program_path, "add")
+
+        # Confirm param_1 is the synthesized name in the unmodified decompilation.
+        decomp = await mcp_stdio_client.call_tool(
+            "get-decompilation",
+            arguments={
+                "programPath": program_path,
+                "functionNameOrAddress": add_func["name"],
+                "limit": 100,
+            },
+        )
+        decomp_text = json.loads(decomp.content[0].text).get("decompilation", "")
+        if "param_1" not in decomp_text:
+            pytest.skip(
+                f"Ghidra synthesised a different parameter name; cannot verify accesses. "
+                f"Decompilation:\n{decomp_text}"
+            )
+
+        result = await mcp_stdio_client.call_tool(
+            "find-variable-accesses",
+            arguments={
+                "programPath": program_path,
+                "functionAddress": add_func["address"],
+                "variableName": "param_1",
+            },
+        )
+        assert not getattr(result, "isError", False), (
+            f"find-variable-accesses failed: {result.content[0].text if result.content else 'no content'}"
+        )
+        data = json.loads(result.content[0].text)
+
+        accesses = data.get("accesses", [])
+        assert accesses, f"Expected at least one access of param_1; got {data!r}"
+        for a in accesses:
+            for field in ("address", "accessType"):
+                assert field in a, f"Access entry missing {field!r}: {a!r}"
+
+        access_types = {a.get("accessType") for a in accesses}
+        assert "READ" in access_types, (
+            f"Expected at least one READ of param_1; got accessTypes={access_types!r}"
+        )

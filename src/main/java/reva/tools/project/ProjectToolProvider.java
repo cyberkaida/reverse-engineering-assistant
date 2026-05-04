@@ -457,6 +457,42 @@ public class ProjectToolProvider extends AbstractToolProvider {
     }
 
     /**
+     * Run a full auto-analysis on a freshly-imported program. Mirrors analyze-program's
+     * full-analysis flow so analyzeAfterImport produces the same result as an explicit
+     * analyze-program call with forceFullAnalysis=true on a fresh program.
+     *
+     * Without this (just calling startAnalysis on a fresh program), only addresses
+     * already on the analyzer's queue get analyzed -- typically just the entry point
+     * and import thunks -- so non-entry functions named in the symbol table are
+     * never created.
+     *
+     * @return true if analysis completed (not cancelled/timed out)
+     */
+    private boolean runFullAnalysisAfterImport(Program program, TaskMonitor monitor) {
+        AutoAnalysisManager mgr = AutoAnalysisManager.getAnalysisManager(program);
+        if (mgr == null) {
+            return false;
+        }
+        mgr.initializeOptions();
+        int tx = program.startTransaction("ReVa: Auto Analysis (post-import)");
+        try {
+            if (!GhidraProgramUtilities.isAnalyzed(program)) {
+                mgr.reAnalyzeAll(null);
+            }
+            mgr.startAnalysis(monitor);
+            boolean cancelled = monitor.isCancelled();
+            if (!cancelled) {
+                GhidraProgramUtilities.markProgramAnalyzed(program);
+            }
+            program.endTransaction(tx, true);
+            return !cancelled;
+        } catch (Exception e) {
+            program.endTransaction(tx, false);
+            throw e;
+        }
+    }
+
+    /**
      * Collect imported files, optionally analyze them, and add them to version control
      * @param destFolder The destination folder where files were imported
      * @param importedBaseName The base name of the imported file/directory
@@ -486,29 +522,16 @@ public class ProjectToolProvider extends AbstractToolProvider {
                         if (domainObject instanceof Program) {
                             Program program = (Program) domainObject;
                             try {
-                                // Get analysis manager
-                                AutoAnalysisManager analysisManager = AutoAnalysisManager.getAnalysisManager(program);
-                                if (analysisManager != null) {
-                                    // Create timeout monitor for analysis
-                                    TaskMonitor analysisMonitor = TimeoutTaskMonitor.timeoutIn(analysisTimeoutSeconds, TimeUnit.SECONDS);
-
-                                    // Start analysis (async)
-                                    analysisManager.startAnalysis(analysisMonitor);
-
-                                    // Wait for completion with timeout
-                                    analysisManager.waitForAnalysis(null, analysisMonitor);
-
-                                    if (analysisMonitor.isCancelled()) {
-                                        errors.add("Analysis timed out for " + file.getPathname() +
-                                            " after " + analysisTimeoutSeconds + " seconds");
-                                    } else {
-                                        // Save program after analysis
-                                        program.save("Auto-analysis complete", monitor);
-                                        analyzedFiles.add(file.getPathname());
-                                        wasAnalyzed = true;
-                                    }
+                                TaskMonitor analysisMonitor =
+                                    TimeoutTaskMonitor.timeoutIn(analysisTimeoutSeconds, TimeUnit.SECONDS);
+                                boolean completed = runFullAnalysisAfterImport(program, analysisMonitor);
+                                if (!completed) {
+                                    errors.add("Analysis timed out for " + file.getPathname() +
+                                        " after " + analysisTimeoutSeconds + " seconds");
                                 } else {
-                                    errors.add("Could not get analysis manager for " + file.getPathname());
+                                    program.save("Auto-analysis complete", monitor);
+                                    analyzedFiles.add(file.getPathname());
+                                    wasAnalyzed = true;
                                 }
                             } finally {
                                 // Release program
@@ -1538,23 +1561,20 @@ public class ProjectToolProvider extends AbstractToolProvider {
                                     // returns null for programs that aren't already open, silently skipping analysis.
                                     domainObject = domainFile.getDomainObject(this, false, true, postMonitor);
                                     if (domainObject instanceof Program program) {
-                                        AutoAnalysisManager analysisManager = AutoAnalysisManager.getAnalysisManager(program);
-                                        if (analysisManager != null) {
-                                            TaskMonitor analysisMonitor = TimeoutTaskMonitor.timeoutIn(analysisTimeoutSeconds, TimeUnit.SECONDS);
-                                            analysisManager.startAnalysis(analysisMonitor);
-                                            analysisManager.waitForAnalysis(null, analysisMonitor);
-
-                                            if (!analysisMonitor.isCancelled()) {
-                                                program.save("Analysis completed via ReVa import", postMonitor);
-                                                analyzedFiles.add(domainFile.getPathname());
-                                            } else {
-                                                detailedErrors.add(Map.of(
-                                                    "stage", "analysis",
-                                                    "programPath", domainFile.getPathname(),
-                                                    "error", "Analysis timed out",
-                                                    "errorType", "TimeoutError"
-                                                ));
-                                            }
+                                        TaskMonitor analysisMonitor =
+                                            TimeoutTaskMonitor.timeoutIn(analysisTimeoutSeconds, TimeUnit.SECONDS);
+                                        boolean completed =
+                                            runFullAnalysisAfterImport(program, analysisMonitor);
+                                        if (completed) {
+                                            program.save("Analysis completed via ReVa import", postMonitor);
+                                            analyzedFiles.add(domainFile.getPathname());
+                                        } else {
+                                            detailedErrors.add(Map.of(
+                                                "stage", "analysis",
+                                                "programPath", domainFile.getPathname(),
+                                                "error", "Analysis timed out",
+                                                "errorType", "TimeoutError"
+                                            ));
                                         }
                                     }
                                 } finally {

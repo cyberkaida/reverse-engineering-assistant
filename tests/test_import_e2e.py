@@ -458,11 +458,33 @@ class TestImportWithAnalysis:
                 addr = func.get("address", "unknown")
                 print(f"  - {name} @ {addr}")
 
-        # The test binaries should have at least one function (entry point)
-        assert function_count > 0, \
-            f"Analysis should discover at least one function, got {function_count}"
+        # test_arm64 is built from add+multiply+main+printf. A full Ghidra analysis
+        # discovers all four (Mach-O preserves leading underscores: _add, _multiply;
+        # main collapses into the entry-point function). analyzeAfterImport=true
+        # must match what an explicit analyze-program forceFullAnalysis pass would
+        # produce -- otherwise the import path is silently doing a partial analysis.
+        function_names = [f.get("name") for f in functions]
+        assert function_count >= 4, (
+            f"Analysis should discover at least entry, _printf, _add, _multiply "
+            f"in {binary_path}; got count={function_count}, names={function_names}"
+        )
+        assert any(n == "entry" for n in function_names), (
+            f"Expected 'entry' function in {binary_path}; got names={function_names}"
+        )
+        assert any("printf" in (n or "") for n in function_names), (
+            f"Expected a printf-related function (import thunk) in {binary_path}; "
+            f"got names={function_names}"
+        )
+        assert any(n == "_add" for n in function_names), (
+            f"Expected '_add' function in {binary_path}; got names={function_names}. "
+            "If only entry/printf appear, the import-time analysis is not running a full "
+            "pass (likely missing initializeOptions/reAnalyzeAll)."
+        )
+        assert any(n == "_multiply" for n in function_names), (
+            f"Expected '_multiply' function in {binary_path}; got names={function_names}"
+        )
 
-        print(f"\n✓ Analysis correctly discovered {function_count} functions")
+        print(f"\n✓ Analysis correctly discovered {function_count} functions: {function_names}")
 
     async def test_fat_binary_analysis_discovers_functions_in_both_slices(
         self, mcp_stdio_client, isolated_workspace

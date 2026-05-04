@@ -654,3 +654,99 @@ class TestCallersDecompiled:
         assert entry_caller.get("callLineNumbers"), (
             f"Expected callLineNumbers populated for entry; got {entry_caller!r}"
         )
+
+
+class TestImportReferences:
+    """Verify find-import-references discovers all use sites of an external symbol."""
+
+    async def test_printf_references_include_entry(
+        self, mcp_stdio_client, isolated_workspace
+    ):
+        """find-import-references on '_printf' must find the calls inside entry.
+
+        The fixture's main() (analysed as entry) calls printf three times.
+        Even after Ghidra collapses adjacent calls, at least one reference
+        from inside entry must show up.
+        """
+        program_path = await _import_and_analyze(mcp_stdio_client)
+
+        # Mach-O imports keep the leading underscore: '_printf'.
+        result = await mcp_stdio_client.call_tool(
+            "find-import-references",
+            arguments={
+                "programPath": program_path,
+                "importName": "_printf",
+                "maxResults": 100,
+            },
+        )
+        assert not getattr(result, "isError", False), (
+            f"find-import-references failed: {result.content[0].text if result.content else 'no content'}"
+        )
+        data = json.loads(result.content[0].text)
+
+        assert data.get("matchedImports"), (
+            f"Expected to find at least one import named '_printf'; got {data!r}"
+        )
+        assert data.get("referenceCount", 0) >= 1, (
+            f"Expected at least 1 reference to _printf; got {data!r}"
+        )
+
+        references = data.get("references", [])
+        # Each reference must carry the documented schema.
+        for ref in references:
+            for field in ("fromAddress", "referenceType", "isCall"):
+                assert field in ref, f"Reference missing {field!r}: {ref!r}"
+
+        # At least one reference must originate from inside the entry function.
+        entry_refs = [r for r in references if r.get("function") == "entry"]
+        assert entry_refs, (
+            f"Expected entry among functions referencing _printf; got "
+            f"{[r.get('function') for r in references]!r}"
+        )
+
+
+class TestCallGraph:
+    """Verify get-call-graph reports the known direct callees of a function."""
+
+    async def test_entry_callees_include_printf_add_multiply(
+        self, mcp_stdio_client, isolated_workspace
+    ):
+        """get-call-graph on entry must list the three known callees.
+
+        The fixture's entry calls printf, add, and multiply directly. With
+        depth=1 the callees field must include all three by name.
+        """
+        program_path = await _import_and_analyze(mcp_stdio_client)
+        entry_func = await _find_function(mcp_stdio_client, program_path, "entry")
+
+        result = await mcp_stdio_client.call_tool(
+            "get-call-graph",
+            arguments={
+                "programPath": program_path,
+                "functionAddress": entry_func["address"],
+                "depth": 1,
+            },
+        )
+        assert not getattr(result, "isError", False), (
+            f"get-call-graph failed: {result.content[0].text if result.content else 'no content'}"
+        )
+        data = json.loads(result.content[0].text)
+
+        center = data.get("centerFunction") or {}
+        assert center.get("name") == "entry", (
+            f"centerFunction.name should be 'entry'; got {center!r}"
+        )
+        assert data.get("calleeCount", 0) >= 3, (
+            f"Expected calleeCount >= 3 (printf + add + multiply); got {data!r}"
+        )
+
+        callee_names = [c.get("name") for c in data.get("callees", [])]
+        assert "_printf" in callee_names, (
+            f"Expected '_printf' in callees; got {callee_names!r}"
+        )
+        assert "_add" in callee_names, (
+            f"Expected '_add' in callees; got {callee_names!r}"
+        )
+        assert "_multiply" in callee_names, (
+            f"Expected '_multiply' in callees; got {callee_names!r}"
+        )

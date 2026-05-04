@@ -661,7 +661,14 @@ class TestImportErrorHandling:
     """Tests for import error handling."""
 
     async def test_import_nonexistent_file(self, mcp_stdio_client, isolated_workspace):
-        """Verify proper error response for non-existent file."""
+        """Verify proper error response for non-existent file.
+
+        The server must signal failure unambiguously: either isError=True with
+        a non-empty message, or success=False JSON, or a non-JSON error text
+        body. The one outcome we reject is a JSON success=True response,
+        which would indicate the import silently succeeded for a path that
+        does not exist.
+        """
         result = await mcp_stdio_client.call_tool(
             "import-file",
             arguments={
@@ -670,39 +677,29 @@ class TestImportErrorHandling:
             }
         )
 
-        assert result is not None
+        assert result is not None, "Server returned no result"
+        assert result.content and result.content[0].text, (
+            f"Error response must include a non-empty content body; got {result}"
+        )
+        body = result.content[0].text
 
-        # Check if it's an MCP error response
-        if hasattr(result, 'isError') and result.isError:
-            # Error response - check content for error message
-            if result.content and len(result.content) > 0:
-                error_text = result.content[0].text if result.content[0].text else "Error with no message"
-                print(f"✓ Tool returned error: {error_text}")
-            else:
-                print("✓ Tool returned error (no message)")
+        if getattr(result, "isError", False):
+            # MCP error response is acceptable; the body is the error message.
             return
 
-        # Check for content
-        if not result.content or len(result.content) == 0:
-            print("✓ Tool returned empty content (implicit error)")
-            return
-
-        content_text = result.content[0].text
-        if not content_text:
-            print("✓ Tool returned empty text (implicit error)")
-            return
-
-        # Try to parse as JSON
+        # Non-error response: must be JSON success=False, NOT success=True.
         try:
-            data = json.loads(content_text)
-            # Tool might return success=false with error message
-            if not data.get("success"):
-                print(f"✓ Import correctly failed for non-existent file: {data.get('message', 'no message')}")
-            else:
-                pytest.fail("Import should fail for non-existent file")
+            data = json.loads(body)
         except json.JSONDecodeError:
-            # Non-JSON error message
-            print(f"✓ Tool returned error message: {content_text}")
+            # Non-JSON error text from the tool is also acceptable as a
+            # "this clearly didn't succeed" signal; just confirm it isn't
+            # an empty placeholder.
+            assert body.strip(), "Non-JSON error body must not be whitespace-only"
+            return
+        assert data.get("success") is False, (
+            f"Import of nonexistent file must fail; got success={data.get('success')!r}, "
+            f"data={data}"
+        )
 
 
 class TestImportProgressMessages:
@@ -732,11 +729,16 @@ class TestImportProgressMessages:
         assert "message" in data, "Response should include 'message' field"
         message = data["message"]
 
-        # Message should mention the import completion and file counts
+        # Message should mention the import completion and the actual counts.
+        # Don't accept "any digit in message" -- file paths in CI contain digits
+        # (e.g. python3.14, /tmp/pytest-of-X/pytest-1/...), so the old assertion
+        # would pass on a message that omitted the counts entirely.
         assert "Import completed" in message or "imported" in message.lower(), \
             f"Message should mention import completion: {message}"
-        assert any(char.isdigit() for char in message), \
-            f"Message should include file counts: {message}"
+        files_imported = data.get("filesImported", 0)
+        assert str(files_imported) in message, (
+            f"Message should reference filesImported={files_imported}: {message}"
+        )
 
         print(f"✓ Import message: {message}")
 

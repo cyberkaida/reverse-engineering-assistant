@@ -344,16 +344,23 @@ public class DecompilerToolProvider extends AbstractToolProvider {
     }
 
     /**
-     * Finds the address corresponding to a line number in decompiled code.
+     * Finds the address corresponding to a display line number in decompiled code.
+     *
+     * Display line numbers come from the decompilation text returned by get-decompilation
+     * (i.e., indices into fullDecompCode.split("\n"), 1-based). The Ghidra decompiler
+     * always emits a leading newline before the function body, so ClangLine N has
+     * getLineNumber() == N and corresponds to display line N+1. In other words:
+     *   display line D  →  ClangLine with getLineNumber() == D - 1
      *
      * @param program The program
      * @param clangLines The decompiled code lines
-     * @param lineNumber The line number to find (1-based)
+     * @param displayLineNumber The display line number (1-based, from get-decompilation output)
      * @return The address for the line, or null if not found
      */
-    private Address findAddressForLine(Program program, List<ClangLine> clangLines, int lineNumber) {
+    private Address findAddressForLine(Program program, List<ClangLine> clangLines, int displayLineNumber) {
+        int clangLineNumber = displayLineNumber - 1; // adjust for leading blank line in decompiler output
         for (ClangLine clangLine : clangLines) {
-            if (clangLine.getLineNumber() == lineNumber) {
+            if (clangLine.getLineNumber() == clangLineNumber) {
                 List<ClangToken> tokens = clangLine.getAllTokens();
 
                 // Find the first address on this line
@@ -1396,8 +1403,9 @@ public class DecompilerToolProvider extends AbstractToolProvider {
      * @param lineNumber The line number (1-based)
      * @return List of assembly instruction strings
      */
-    private List<String> getAssemblyForDecompLine(Program program, List<ClangLine> clangLines, int lineNumber) {
+    private List<String> getAssemblyForDecompLine(Program program, List<ClangLine> clangLines, int displayLineNumber) {
         List<String> assemblyLines = new ArrayList<>();
+        int lineNumber = displayLineNumber - 1; // adjust for leading blank line in decompiler output
 
         try {
             // Find the ClangLine for this line number
@@ -1635,8 +1643,9 @@ public class DecompilerToolProvider extends AbstractToolProvider {
      * @param lineNumber The line number (1-based)
      * @return List of comment objects
      */
-    private List<Map<String, Object>> getCommentsForDecompLine(Program program, List<ClangLine> clangLines, int lineNumber) {
+    private List<Map<String, Object>> getCommentsForDecompLine(Program program, List<ClangLine> clangLines, int displayLineNumber) {
         List<Map<String, Object>> comments = new ArrayList<>();
+        int lineNumber = displayLineNumber - 1; // adjust for leading blank line in decompiler output
 
         try {
             // Find the ClangLine for this line number

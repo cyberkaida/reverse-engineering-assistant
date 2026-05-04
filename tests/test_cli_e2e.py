@@ -193,10 +193,13 @@ class TestBinaryImportRoundTrip:
             except (json.JSONDecodeError, AttributeError):
                 continue
 
-        # Locate the imported program by programPath in the listing
+        # Locate the imported program by programPath in the listing.
+        # Filter out None paths before the endswith fallback -- otherwise
+        # `endswith("")` is always True and the assertion is vacuous.
         listed_paths = [e.get("programPath") or e.get("path") for e in entries]
+        non_null_paths = [p for p in listed_paths if p]
         assert program_path in listed_paths or any(
-            program_path.endswith(p or "") for p in listed_paths
+            program_path.endswith(p) for p in non_null_paths
         ), (
             f"Imported program {program_path!r} not found in listing. "
             f"itemCount={metadata.get('itemCount')}, entries={entries}"

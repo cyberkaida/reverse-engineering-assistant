@@ -157,16 +157,17 @@ class TestDecompilationCorrectness:
         assert decompilation, f"Empty decompilation in response: {data}"
 
         # Decompilation should reference printf and the two helper functions.
-        # Mach-O preserves leading underscores: _add, _multiply, _printf.
-        text = decompilation.lower()
-        assert "printf" in text, (
-            f"Expected 'printf' call in entry decompilation; got:\n{decompilation}"
+        # Mach-O preserves leading underscores: _add, _multiply, _printf. Match
+        # on the call form ("_name(") to avoid the substring "add" hitting
+        # "address" or "loaded" in the surrounding C output.
+        assert "_printf(" in decompilation, (
+            f"Expected '_printf(' call in entry decompilation; got:\n{decompilation}"
         )
-        assert "add" in text, (
-            f"Expected reference to 'add' in entry decompilation; got:\n{decompilation}"
+        assert "_add(" in decompilation, (
+            f"Expected '_add(' call in entry decompilation; got:\n{decompilation}"
         )
-        assert "multiply" in text, (
-            f"Expected reference to 'multiply' in entry decompilation; got:\n{decompilation}"
+        assert "_multiply(" in decompilation, (
+            f"Expected '_multiply(' call in entry decompilation; got:\n{decompilation}"
         )
 
 
@@ -325,4 +326,97 @@ class TestVariableRenamePersistence:
         assert new_name in second_text, (
             f"Renamed variable {new_name!r} did not persist after save/reopen.\n"
             f"Reloaded decompilation:\n{second_text}"
+        )
+
+
+class TestStructureWorkflow:
+    """Verify the parse-c-structure -> list-structures -> apply-structure cycle."""
+
+    async def test_struct_create_apply_and_query(
+        self, mcp_stdio_client, isolated_workspace
+    ):
+        """End-to-end struct workflow:
+
+        1. parse-c-structure to create a named struct with known fields
+        2. list-structures to confirm the struct is present with the
+           expected component count
+        3. apply-structure at a data address (the literal pool referenced
+           from main) and confirm the response carries the matching
+           structure name and a non-zero size
+
+        This exercises three packages in one workflow: structures, data,
+        and (transitively) the data-type manager. None of these tools
+        had real e2e coverage before this test.
+        """
+        program_path = await _import_and_analyze(mcp_stdio_client)
+
+        struct_name = "RevaE2EStruct"
+        c_def = (
+            "struct " + struct_name + " {"
+            "    int magic;"
+            "    int version;"
+            "    int flags;"
+            "    int padding;"
+            "};"
+        )
+
+        # 1. Create the struct
+        parse_result = await mcp_stdio_client.call_tool(
+            "parse-c-structure",
+            arguments={
+                "programPath": program_path,
+                "cDefinition": c_def,
+            },
+        )
+        assert not getattr(parse_result, "isError", False), (
+            f"parse-c-structure failed: {parse_result.content[0].text if parse_result.content else 'no content'}"
+        )
+        parse_data = json.loads(parse_result.content[0].text)
+        assert parse_data.get("name") == struct_name, (
+            f"Expected struct name {struct_name!r}, got {parse_data!r}"
+        )
+        assert parse_data.get("size") == 16, (
+            f"Expected size 16 (4 ints x 4 bytes), got size={parse_data.get('size')!r} "
+            f"in response {parse_data!r}"
+        )
+
+        # 2. Confirm via list-structures with name filter
+        list_result = await mcp_stdio_client.call_tool(
+            "list-structures",
+            arguments={
+                "programPath": program_path,
+                "nameFilter": struct_name,
+            },
+        )
+        assert not getattr(list_result, "isError", False), (
+            f"list-structures failed: {list_result.content[0].text if list_result.content else 'no content'}"
+        )
+        list_data = json.loads(list_result.content[0].text)
+        struct_names = [s.get("name") for s in list_data.get("structures", [])]
+        assert struct_name in struct_names, (
+            f"Expected {struct_name!r} in list-structures output; got {struct_names!r}, "
+            f"full response: {list_data!r}"
+        )
+
+        # 3. Apply the struct at a known data address (the literal pool
+        #    referenced from main; otool shows strings starting at 0x100000530).
+        target_addr = "0x100000530"
+        apply_result = await mcp_stdio_client.call_tool(
+            "apply-structure",
+            arguments={
+                "programPath": program_path,
+                "structureName": struct_name,
+                "addressOrSymbol": target_addr,
+                "clearExisting": True,
+            },
+        )
+        assert not getattr(apply_result, "isError", False), (
+            f"apply-structure failed: {apply_result.content[0].text if apply_result.content else 'no content'}"
+        )
+        apply_data = json.loads(apply_result.content[0].text)
+        assert apply_data.get("structureName") == struct_name, (
+            f"apply-structure should report structureName={struct_name!r}; got {apply_data!r}"
+        )
+        assert apply_data.get("size") == 16, (
+            f"apply-structure should report size=16 for our 4-int struct; got {apply_data!r}"
         )

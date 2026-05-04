@@ -18,7 +18,7 @@ These tests verify:
 
 import pytest
 import json
-import os
+from pathlib import Path
 
 # Mark all tests in this file
 pytestmark = [
@@ -27,6 +27,26 @@ pytestmark = [
     pytest.mark.asyncio,
     pytest.mark.timeout(240)  # 4 minutes for full workflow
 ]
+
+FIXTURES_DIR = Path(__file__).parent / "fixtures"
+
+
+def _resolve_workflow_fixture():
+    """Return path to the deterministic workflow fixture, skipping if missing/LFS pointer."""
+    fixture_path = FIXTURES_DIR / "test_arm64"
+    if not fixture_path.exists():
+        pytest.skip(f"Test fixture not found: {fixture_path}")
+    if fixture_path.stat().st_size < 200:
+        try:
+            content = fixture_path.read_text()
+        except UnicodeDecodeError:
+            return str(fixture_path)
+        if content.startswith("version https://git-lfs.github.com"):
+            pytest.fail(
+                f"Test fixture {fixture_path.name} is a Git LFS pointer, not the actual file. "
+                "Run 'git lfs pull' locally or enable LFS in CI checkout."
+            )
+    return str(fixture_path)
 
 
 class TestE2EWorkflow:
@@ -43,10 +63,7 @@ class TestE2EWorkflow:
         4. Reopening program
         5. Changes persist after reopen
         """
-        # Use /bin/ls as test binary (available on Unix systems)
-        test_binary = "/bin/ls"
-        if not os.path.exists(test_binary):
-            pytest.skip("Test binary /bin/ls not found")
+        test_binary = _resolve_workflow_fixture()
 
         print("\n=== STEP 1: Import binary ===")
         import_result = await mcp_stdio_client.call_tool(
@@ -71,8 +88,10 @@ class TestE2EWorkflow:
         content_text = import_result.content[0].text
         print(f"Content text ({len(content_text)} chars): {content_text[:200]}...")
 
-        if not content_text:
-            pytest.skip("Import returned empty content - may not be supported in this environment")
+        assert content_text, (
+            "Import returned empty content. The installed ReVa extension may be outdated; "
+            "run 'gradle install' to install the development version."
+        )
 
         import_data = json.loads(content_text)
         print(f"Import response: {json.dumps(import_data, indent=2)}")
@@ -185,9 +204,7 @@ class TestE2EWorkflow:
         2. Opening the program
         3. Making modifications (should succeed)
         """
-        test_binary = "/bin/ls"
-        if not os.path.exists(test_binary):
-            pytest.skip("Test binary /bin/ls not found")
+        test_binary = _resolve_workflow_fixture()
 
         print("\n=== Import binary ===")
         import_result = await mcp_stdio_client.call_tool(
@@ -208,9 +225,10 @@ class TestE2EWorkflow:
             pytest.fail(f"Import failed: {error_text}")
 
         content_text = import_result.content[0].text
-        print(f"Content text length: {len(content_text)}, repr: {repr(content_text[:100]) if content_text else 'EMPTY'}")
-        if not content_text:
-            pytest.skip("Import returned empty content")
+        assert content_text, (
+            "Import returned empty content. The installed ReVa extension may be outdated; "
+            "run 'gradle install' to install the development version."
+        )
 
         import_data = json.loads(content_text)
         assert import_data.get("success") is True
@@ -246,9 +264,7 @@ class TestE2EWorkflow:
         3. Saving (should handle cache correctly)
         4. Verifying save succeeded
         """
-        test_binary = "/bin/ls"
-        if not os.path.exists(test_binary):
-            pytest.skip("Test binary /bin/ls not found")
+        test_binary = _resolve_workflow_fixture()
 
         print("\n=== Import and open program ===")
         import_result = await mcp_stdio_client.call_tool(
@@ -266,9 +282,10 @@ class TestE2EWorkflow:
             pytest.fail(f"Import failed: {import_result.content[0].text}")
 
         content_text = import_result.content[0].text
-        print(f"Content text length: {len(content_text)}, repr: {repr(content_text[:100]) if content_text else 'EMPTY'}")
-        if not content_text:
-            pytest.skip("Import returned empty content")
+        assert content_text, (
+            "Import returned empty content. The installed ReVa extension may be outdated; "
+            "run 'gradle install' to install the development version."
+        )
 
         import_data = json.loads(content_text)
         program_path = import_data["importedPrograms"][0]

@@ -12,6 +12,8 @@ These tests verify that the CLI can:
 All tests use real PyGhidra and Ghidra integration.
 """
 
+import json
+
 import pytest
 
 # Mark all tests in this file
@@ -134,62 +136,138 @@ class TestProjectCreation:
         assert not reva_dir.exists(), ".reva directory should still not exist after CLI is running"
 
 
-class TestBinaryAutoImport:
-    """Test automatic binary import functionality."""
+class TestBinaryImportRoundTrip:
+    """Verify a CLI-initiated import round-trips through list-project-files.
 
-    async def test_imports_test_binary(self, mcp_stdio_client, test_binary, ghidra_initialized):
-        """CLI auto-imports binaries from current directory"""
-        # The test_binary fixture creates a minimal ELF
-        # ProjectManager should attempt to import it
+    The 'auto-import from cwd' behavior the previous test asserted does not exist
+    in stdio mode (see test_does_not_create_reva_directory, which proves
+    ProjectManager.import_binary() is never called). Instead we exercise the
+    real CLI path: explicit import-file then list-project-files.
+    """
 
-        # Give it time to import
-        import asyncio
-        await asyncio.sleep(5)
+    async def test_explicit_import_appears_in_listing(
+        self, mcp_stdio_client, isolated_workspace, ghidra_initialized
+    ):
+        """import-file followed by list-project-files reflects the imported program."""
+        from pathlib import Path
 
-        # Try to list files in project
-        result = await mcp_stdio_client.call_tool(
-            "list-project-files",
-            arguments={"folderPath": "/"}
+        fixture = Path(__file__).parent / "fixtures" / "test_arm64"
+        if not fixture.exists():
+            pytest.skip(f"Test fixture not found: {fixture}")
+
+        import_result = await mcp_stdio_client.call_tool(
+            "import-file",
+            arguments={
+                "path": str(fixture),
+                "enableVersionControl": False,
+                "analyzeAfterImport": False,
+            },
         )
 
-        # Ideally we'd check if the binary was imported, but that requires
-        # the import to succeed, which might fail for minimal test binaries
-        # At minimum, the tool call should work
-        assert result is not None
+        assert import_result is not None
+        assert not getattr(import_result, "isError", False), (
+            f"Import failed: {import_result.content[0].text if import_result.content else 'no content'}"
+        )
+
+        import_data = json.loads(import_result.content[0].text)
+        assert import_data.get("success") is True
+        imported = import_data.get("importedPrograms", [])
+        assert len(imported) == 1, f"Expected 1 imported program, got {imported}"
+        program_path = imported[0]
+
+        list_result = await mcp_stdio_client.call_tool(
+            "list-project-files",
+            arguments={"folderPath": "/", "recursive": True},
+        )
+
+        assert list_result is not None
+        assert not getattr(list_result, "isError", False)
+        assert len(list_result.content) > 0
+
+        # Parse the multi-content response: metadata + entries
+        metadata = json.loads(list_result.content[0].text)
+        entries = []
+        for content in list_result.content[1:]:
+            try:
+                entries.append(json.loads(content.text))
+            except (json.JSONDecodeError, AttributeError):
+                continue
+
+        # Locate the imported program by programPath in the listing
+        listed_paths = [e.get("programPath") or e.get("path") for e in entries]
+        assert program_path in listed_paths or any(
+            program_path.endswith(p or "") for p in listed_paths
+        ), (
+            f"Imported program {program_path!r} not found in listing. "
+            f"itemCount={metadata.get('itemCount')}, entries={entries}"
+        )
+
+
+def _result_error_text(result) -> str:
+    """Concatenate text content from a CallToolResult, or empty string."""
+    if not getattr(result, "content", None):
+        return ""
+    parts = []
+    for item in result.content:
+        text = getattr(item, "text", None)
+        if text:
+            parts.append(text)
+    return "\n".join(parts)
 
 
 class TestErrorHandling:
-    """Test error handling in CLI."""
+    """Test error handling in CLI.
+
+    Server must signal failure either by raising an MCP exception (e.g., McpError)
+    or by returning a CallToolResult with isError=True. A silent success on a
+    nonexistent tool or missing required args would be a regression.
+    """
 
     async def test_handles_unknown_tool(self, mcp_stdio_client):
-        """CLI returns error for unknown tool"""
-        # MCP SDK may or may not raise an exception for unknown tools
-        # depending on SDK version and server implementation
-        # Just verify the call completes without crashing
+        """Unknown tool name surfaces as isError or McpError, never silent success."""
+        from mcp.shared.exceptions import McpError
+
         try:
             result = await mcp_stdio_client.call_tool(
                 "nonexistent-tool",
                 arguments={}
             )
-            # If it doesn't raise, that's also acceptable
-            # The server may return an error result instead
-            assert result is not None
-        except Exception:
-            # Exception is also acceptable for unknown tools
-            pass
+        except McpError as exc:
+            # Acceptable: SDK surfaced server-side method/tool-not-found
+            assert "nonexistent-tool" in str(exc) or "tool" in str(exc).lower(), (
+                f"McpError did not mention the unknown tool: {exc}"
+            )
+            return
+
+        assert result is not None, "Server must respond, even for unknown tools"
+        assert getattr(result, "isError", False) is True, (
+            f"Unknown tool must return isError=True, got result={result}"
+        )
+        error_text = _result_error_text(result)
+        assert error_text, "Error result must include human-readable error text"
 
     async def test_handles_invalid_tool_arguments(self, mcp_stdio_client):
-        """CLI validates tool arguments"""
-        # Try to call a tool with wrong arguments
-        # This might raise or return an error depending on the tool
+        """Calling get-functions without required programPath surfaces a clear error."""
+        from mcp.shared.exceptions import McpError
+
         try:
             result = await mcp_stdio_client.call_tool(
-                "get-functions",  # Current tool name
-                arguments={"invalid_param": "value"}
+                "get-functions",
+                arguments={}  # missing required programPath
             )
-            # If it doesn't raise, check for error in result
-            if hasattr(result, 'isError'):
-                assert result.isError
-        except Exception:
-            # Exception is also acceptable for invalid arguments
-            pass
+        except McpError as exc:
+            # Acceptable: SDK surfaced schema-validation rejection
+            assert "programPath" in str(exc) or "required" in str(exc).lower(), (
+                f"McpError must mention the missing argument: {exc}"
+            )
+            return
+
+        assert result is not None
+        assert getattr(result, "isError", False) is True, (
+            f"Missing required programPath must return isError=True, got result={result}"
+        )
+        error_text = _result_error_text(result)
+        assert error_text, "Validation error must include text content"
+        assert "programPath" in error_text or "required" in error_text.lower(), (
+            f"Validation error should mention programPath or 'required': {error_text}"
+        )

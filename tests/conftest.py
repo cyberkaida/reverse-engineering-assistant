@@ -406,19 +406,19 @@ async def mcp_stdio_client(isolated_workspace):
             await session.__aenter__()
 
             try:
-                print("[Fixture] Subprocess started, waiting for initialization to complete...")
+                print("[Fixture] Subprocess started; initializing MCP session...")
 
-                # Give subprocess time to complete blocking initialization
-                # (PyGhidra, project, server startup happens before stdio bridge starts)
-                await asyncio.sleep(2)
-
-                print("[Fixture] Initializing MCP session...")
-
-                # Initialize the session with timeout
+                # No artificial delay before initialize. mcp-reva does its blocking
+                # PyGhidra/project/server startup before the stdio bridge starts
+                # reading stdin, so any initialize request we send queues in the
+                # OS pipe buffer until the bridge is ready. The 60-second
+                # asyncio.wait_for covers that whole startup, which can be
+                # 10-30 seconds on CI. The previous 2s sleep was both unnecessary
+                # on fast hosts and insufficient as a safety net on slow ones.
                 try:
                     init_result = await asyncio.wait_for(
                         session.initialize(),
-                        timeout=60.0  # Initialization is fast, but allow buffer for CI overhead
+                        timeout=60.0
                     )
                     print(f"[Fixture] MCP session initialized: {init_result.serverInfo.name} v{init_result.serverInfo.version}")
                 except asyncio.TimeoutError:

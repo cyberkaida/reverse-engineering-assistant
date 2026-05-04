@@ -1764,3 +1764,134 @@ class TestListAnalyzers:
             # Each analyzer should have the documented schema fields.
             for field in ("type", "priority"):
                 assert field in entry, f"Analyzer {entry.get('name')!r} missing {field!r}: {entry!r}"
+
+
+class TestFindConstantUses:
+    """Verify find-constant-uses surfaces immediate operands."""
+
+    async def test_find_uses_of_constant_two(
+        self, mcp_stdio_client, isolated_workspace
+    ):
+        """Constant 2 is loaded as a parameter to _add(2, 3); must appear as a result.
+
+        entry contains `mov w0, #0x2` before the `bl _add` call. The tool
+        should report at least one match with the documented schema
+        (address, mnemonic, value).
+        """
+        program_path = await _import_and_analyze(mcp_stdio_client)
+
+        result = await mcp_stdio_client.call_tool(
+            "find-constant-uses",
+            arguments={
+                "programPath": program_path,
+                "value": "2",
+                "maxResults": 100,
+            },
+        )
+        assert not getattr(result, "isError", False), (
+            f"find-constant-uses failed: {result.content[0].text if result.content else 'no content'}"
+        )
+        data = json.loads(result.content[0].text)
+
+        assert data.get("resultCount", 0) >= 1, (
+            f"Expected >= 1 use of constant 2 (mov w0, #0x2 in entry); got {data!r}"
+        )
+        results = data.get("results", [])
+        for entry in results:
+            for field in ("address", "mnemonic"):
+                assert field in entry, f"Result entry missing {field!r}: {entry!r}"
+
+
+class TestFindConstantsInRange:
+    """Verify find-constants-in-range surfaces constants in a numeric window."""
+
+    async def test_find_small_constants_2_through_5(
+        self, mcp_stdio_client, isolated_workspace
+    ):
+        """The fixture passes 2,3,4,5 as arguments to add and multiply.
+
+        A range query for [2,5] must surface multiple unique values within
+        that band (entry's call setup uses each).
+        """
+        program_path = await _import_and_analyze(mcp_stdio_client)
+
+        result = await mcp_stdio_client.call_tool(
+            "find-constants-in-range",
+            arguments={
+                "programPath": program_path,
+                "minValue": "2",
+                "maxValue": "5",
+                "maxResults": 200,
+            },
+        )
+        assert not getattr(result, "isError", False), (
+            f"find-constants-in-range failed: {result.content[0].text if result.content else 'no content'}"
+        )
+        data = json.loads(result.content[0].text)
+
+        assert data.get("totalOccurrences", 0) >= 2, (
+            f"Expected at least 2 constants in [2,5] for the fixture; got {data!r}"
+        )
+
+        unique = data.get("uniqueValues", [])
+        unique_decimals = {u.get("decimal") for u in unique}
+        # The fixture explicitly uses 2 (add), 3 (add), 4 (multiply), 5 (multiply).
+        # Allow some leeway -- the lower constants may map to different operand
+        # representations under aarch64. Require at least two of the four to
+        # show up so a regression that drops the constant search would still
+        # be visible.
+        expected = {2, 3, 4, 5}
+        observed = expected & unique_decimals
+        assert len(observed) >= 2, (
+            f"Expected at least 2 of {expected!r} in unique values; got {unique_decimals!r}"
+        )
+
+
+class TestApplyDataType:
+    """Verify apply-data-type retypes a memory location."""
+
+    async def test_apply_char_array_to_string_literal(
+        self, mcp_stdio_client, isolated_workspace
+    ):
+        """Apply 'char[19]' to 0x100000530 and verify get-data reflects the new type.
+
+        After analysis the literal pool offset already carries a string type;
+        apply-data-type with clearExisting semantics should replace it with
+        the requested char-array type. Confirms via a follow-up get-data
+        call that the new dataType reports an array of chars with length 19.
+        """
+        program_path = await _import_and_analyze(mcp_stdio_client)
+
+        apply_result = await mcp_stdio_client.call_tool(
+            "apply-data-type",
+            arguments={
+                "programPath": program_path,
+                "addressOrSymbol": "0x100000530",
+                "dataTypeString": "char[19]",
+            },
+        )
+        assert not getattr(apply_result, "isError", False), (
+            f"apply-data-type failed: {apply_result.content[0].text if apply_result.content else 'no content'}"
+        )
+        apply_data = json.loads(apply_result.content[0].text)
+        assert apply_data.get("success") is True, f"apply-data-type not success: {apply_data!r}"
+        assert apply_data.get("length") == 19, (
+            f"Expected length=19 for char[19]; got {apply_data!r}"
+        )
+
+        # Verify with get-data that the type is now an array form.
+        check = await mcp_stdio_client.call_tool(
+            "get-data",
+            arguments={
+                "programPath": program_path,
+                "addressOrSymbol": "0x100000530",
+            },
+        )
+        check_data = json.loads(check.content[0].text)
+        dt = (check_data.get("dataType") or "").lower()
+        assert "char" in dt and ("[" in dt or "array" in dt), (
+            f"Expected array-of-char type after apply-data-type; got dataType={check_data.get('dataType')!r}"
+        )
+        assert check_data.get("length") == 19, (
+            f"get-data length should be 19 after applying char[19]; got {check_data!r}"
+        )

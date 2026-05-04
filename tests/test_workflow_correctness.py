@@ -420,3 +420,128 @@ class TestStructureWorkflow:
         assert apply_data.get("size") == 16, (
             f"apply-structure should report size=16 for our 4-int struct; got {apply_data!r}"
         )
+
+
+class TestSearchDecompilation:
+    """Verify search-decompilation finds known patterns across functions."""
+
+    async def test_search_finds_printf_call_in_entry(
+        self, mcp_stdio_client, isolated_workspace
+    ):
+        """search-decompilation for '_printf(' should hit the entry function.
+
+        The fixture's entry function makes three printf calls. A regex
+        search across decompilations must find at least one match and
+        report the function name and line number for it.
+        """
+        program_path = await _import_and_analyze(mcp_stdio_client)
+
+        result = await mcp_stdio_client.call_tool(
+            "search-decompilation",
+            arguments={
+                "programPath": program_path,
+                "pattern": r"_printf\(",
+                "maxResults": 50,
+                "caseSensitive": True,
+            },
+        )
+        assert not getattr(result, "isError", False), (
+            f"search-decompilation failed: {result.content[0].text if result.content else 'no content'}"
+        )
+        data = json.loads(result.content[0].text)
+
+        results = data.get("results", [])
+        assert results, (
+            f"Expected at least one match for '_printf('; "
+            f"got resultsCount={data.get('resultsCount')}, full response={data!r}"
+        )
+
+        # Each result must include functionName, functionAddress, lineNumber, lineContent.
+        for entry in results:
+            for field in ("functionName", "functionAddress", "lineNumber", "lineContent"):
+                assert field in entry, (
+                    f"Search result missing required field {field!r}: {entry!r}"
+                )
+
+        # At least one match must be in the entry function (which calls printf).
+        callers = {r.get("functionName") for r in results}
+        assert "entry" in callers, (
+            f"Expected 'entry' among functions matching '_printf('; got callers={callers!r}"
+        )
+
+        # And the matched line content must actually contain the pattern.
+        entry_lines = [r["lineContent"] for r in results if r.get("functionName") == "entry"]
+        assert any("_printf(" in line for line in entry_lines), (
+            f"Match lines for entry must contain '_printf('; got {entry_lines!r}"
+        )
+
+
+class TestSetFunctionPrototype:
+    """Verify set-function-prototype updates parameter names visible in decompilation."""
+
+    async def test_prototype_update_changes_parameter_names(
+        self, mcp_stdio_client, isolated_workspace
+    ):
+        """Setting an explicit prototype on _add propagates to decompilation.
+
+        After analysis _add decompiles with synthesized parameter names
+        like param_1 / param_2. Calling set-function-prototype with
+        named parameters (alpha, beta) and re-decompiling must show
+        those exact names in the new C output.
+        """
+        program_path = await _import_and_analyze(mcp_stdio_client)
+        add_func = await _find_function(mcp_stdio_client, program_path, "add")
+
+        # Read the original decompilation so the read-before-modify guard
+        # (used by other decompiler-modifying tools) is satisfied. Also
+        # gives us a "before" snapshot for the assertion.
+        before = await mcp_stdio_client.call_tool(
+            "get-decompilation",
+            arguments={
+                "programPath": program_path,
+                "functionNameOrAddress": add_func["name"],
+                "limit": 100,
+            },
+        )
+        assert not getattr(before, "isError", False), (
+            f"Initial get-decompilation failed: {before.content[0].text}"
+        )
+        before_text = json.loads(before.content[0].text).get("decompilation", "")
+        assert "alpha" not in before_text and "beta" not in before_text, (
+            f"Sanity check failed: 'alpha'/'beta' already in unmodified decompilation:\n{before_text}"
+        )
+
+        # Apply the new prototype.
+        prototype = "int _add(int alpha, int beta)"
+        proto_result = await mcp_stdio_client.call_tool(
+            "set-function-prototype",
+            arguments={
+                "programPath": program_path,
+                "location": add_func["address"],
+                "signature": prototype,
+            },
+        )
+        assert not getattr(proto_result, "isError", False), (
+            f"set-function-prototype failed: {proto_result.content[0].text if proto_result.content else 'no content'}"
+        )
+        proto_data = json.loads(proto_result.content[0].text)
+        assert proto_data.get("success") is True, (
+            f"set-function-prototype should report success=True; got {proto_data!r}"
+        )
+
+        # Re-decompile and assert the new parameter names appear.
+        after = await mcp_stdio_client.call_tool(
+            "get-decompilation",
+            arguments={
+                "programPath": program_path,
+                "functionNameOrAddress": add_func["name"],
+                "limit": 100,
+            },
+        )
+        assert not getattr(after, "isError", False), (
+            f"Post-prototype get-decompilation failed: {after.content[0].text}"
+        )
+        after_text = json.loads(after.content[0].text).get("decompilation", "")
+        assert "alpha" in after_text and "beta" in after_text, (
+            f"Expected 'alpha' and 'beta' in decompilation after prototype set; got:\n{after_text}"
+        )

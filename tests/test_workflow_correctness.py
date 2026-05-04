@@ -1499,12 +1499,6 @@ class TestGetData:
         )
 
 
-@pytest.mark.skip(
-    reason="set-decompilation-comment returns empty content for this call shape; "
-    "follow-up investigation pending. The empty content trips json.loads with "
-    "JSONDecodeError. Skipped so suite stays green; reproducible by removing "
-    "this skip mark."
-)
 class TestSetDecompilationComment:
     """Verify set-decompilation-comment attaches a comment that survives re-decompile."""
 
@@ -1514,7 +1508,11 @@ class TestSetDecompilationComment:
         program_path = await _import_and_analyze(mcp_stdio_client)
         add_func = await _find_function(mcp_stdio_client, program_path, "add")
 
-        _ = await mcp_stdio_client.call_tool(
+        # Read decompilation first (required by the read-before-modify guard).
+        # Also use the line count to pick a valid body line: line 1 is the
+        # function signature and has no code address, so we target the last
+        # line of the function body instead.
+        decomp_read = await mcp_stdio_client.call_tool(
             "get-decompilation",
             arguments={
                 "programPath": program_path,
@@ -1522,6 +1520,37 @@ class TestSetDecompilationComment:
                 "limit": 100,
             },
         )
+        assert decomp_read.content and decomp_read.content[0].text, (
+            f"get-decompilation returned no content: {decomp_read!r}"
+        )
+        decomp_read_data = json.loads(decomp_read.content[0].text)
+        # Pick the first code body line.  The decompiler output is:
+        #   line 1: (blank)  line 2: signature  line 3: (blank)  line 4: {
+        #   line 5+: body statements  line N: }
+        # Lines 1-4 have no code address; we need line 5 or later.
+        decompilation_text = decomp_read_data.get("decompilation", "")
+        display_lines = decompilation_text.split("\n")
+        target_line = None
+        for raw_line in display_lines:
+            # Each line is formatted as "   N\tcontent"
+            if "\t" in raw_line:
+                parts = raw_line.split("\t", 1)
+                try:
+                    ln = int(parts[0].strip())
+                except ValueError:
+                    continue
+                content = parts[1].strip() if len(parts) > 1 else ""
+                # Skip blank, signature (contains '('), braces
+                if content and content not in ("{", "}") and "(" not in content:
+                    target_line = ln
+                    break
+                # Accept lines with '(' if they look like code (contain '=' or 'return')
+                if content and ("return" in content or "=" in content):
+                    target_line = ln
+                    break
+        if target_line is None:
+            # Last resort: use line 5 (first likely body line for most functions)
+            target_line = 5
 
         sentinel = "ReVa-e2e-decomp-line-sentinel"
         set_result = await mcp_stdio_client.call_tool(
@@ -1529,20 +1558,23 @@ class TestSetDecompilationComment:
             arguments={
                 "programPath": program_path,
                 "functionNameOrAddress": add_func["name"],
-                "lineNumber": 1,
+                "lineNumber": target_line,
                 "comment": sentinel,
             },
         )
-        if getattr(set_result, "isError", False):
-            pytest.fail(
-                f"set-decompilation-comment returned isError. Content: "
-                f"{[(getattr(c, 'text', None) or repr(c)) for c in (set_result.content or [])]!r}"
-            )
         assert set_result.content and set_result.content[0].text, (
-            f"set-decompilation-comment returned empty content: "
-            f"{[(getattr(c, 'text', None) or repr(c)) for c in (set_result.content or [])]!r}"
+            f"set-decompilation-comment returned no content"
         )
-        set_data = json.loads(set_result.content[0].text)
+        set_text = set_result.content[0].text
+        # The server may return a plain error string (not JSON) when isError
+        # propagation is unreliable across the HTTP bridge; detect that early.
+        try:
+            set_data = json.loads(set_text)
+        except json.JSONDecodeError:
+            pytest.fail(
+                f"set-decompilation-comment returned non-JSON content "
+                f"(likely a server error): {set_text!r}"
+            )
         assert set_data.get("success") is True, f"set not success: {set_data!r}"
 
         decomp = await mcp_stdio_client.call_tool(
@@ -1619,3 +1651,116 @@ class TestFunctionsBySimilarity:
             f"Expected '_add' near the top of similarity results; ranked at index {add_idx} "
             f"in {names!r}"
         )
+
+
+class TestValidateCStructure:
+    """Verify validate-c-structure parses-without-creating, and rejects bad input."""
+
+    async def test_valid_struct_returns_metadata(self, mcp_stdio_client):
+        """A well-formed C struct definition validates and reports its metadata.
+
+        validate-c-structure parses against a temporary standalone DTM and
+        does not require a programPath -- the schema explicitly omits it.
+        """
+        c_def = "struct ValidProbe { int a; int b; char c; };"
+        result = await mcp_stdio_client.call_tool(
+            "validate-c-structure",
+            arguments={
+                "cDefinition": c_def,
+            },
+        )
+        assert not getattr(result, "isError", False), (
+            f"validate-c-structure failed: {result.content[0].text if result.content else 'no content'}"
+        )
+        data = json.loads(result.content[0].text)
+        assert data.get("valid") is True, f"Expected valid=True for well-formed struct; got {data!r}"
+        assert data.get("parsedType") == "ValidProbe", (
+            f"Expected parsedType=ValidProbe; got {data!r}"
+        )
+        assert data.get("fieldCount") >= 3, (
+            f"Expected fieldCount>=3 (a,b,c); got {data!r}"
+        )
+
+    async def test_invalid_struct_returns_validation_error(self, mcp_stdio_client):
+        """Garbage input must not pretend to be valid; expect valid=False or isError."""
+        result = await mcp_stdio_client.call_tool(
+            "validate-c-structure",
+            arguments={
+                "cDefinition": "this is not C at all },,, ,",
+            },
+        )
+        # Tool may return isError=True OR valid=False JSON. Both are acceptable;
+        # the unacceptable outcome is a JSON body with valid=True.
+        if getattr(result, "isError", False):
+            return
+        data = json.loads(result.content[0].text)
+        assert data.get("valid") is False, (
+            f"Garbage struct must be reported invalid; got {data!r}"
+        )
+
+
+class TestFindCommonCallers:
+    """Verify find-common-callers identifies functions that call multiple targets."""
+
+    async def test_entry_is_common_caller_of_add_and_multiply(
+        self, mcp_stdio_client, isolated_workspace
+    ):
+        """Entry calls both _add and _multiply, so it must be the common caller.
+
+        The fixture's main (surfaced as 'entry' for this Mach-O) calls
+        _add(2,3) and _multiply(4,5). find-common-callers on those two
+        functions must return 'entry' in the common-caller list.
+        """
+        program_path = await _import_and_analyze(mcp_stdio_client)
+
+        result = await mcp_stdio_client.call_tool(
+            "find-common-callers",
+            arguments={
+                "programPath": program_path,
+                "functionAddresses": ["_add", "_multiply"],
+            },
+        )
+        assert not getattr(result, "isError", False), (
+            f"find-common-callers failed: {result.content[0].text if result.content else 'no content'}"
+        )
+        data = json.loads(result.content[0].text)
+
+        common = data.get("commonCallers", [])
+        common_names = [c.get("name") for c in common]
+        assert "entry" in common_names, (
+            f"Expected 'entry' as common caller of _add and _multiply; got {common_names!r}, "
+            f"full response: {data!r}"
+        )
+
+
+class TestListAnalyzers:
+    """Verify list-analyzers returns the configured analyzer set."""
+
+    async def test_list_includes_known_analyzer(
+        self, mcp_stdio_client, isolated_workspace
+    ):
+        """list-analyzers must report at least one analyzer with required fields.
+
+        Ghidra ships with many analyzers (DWARF, Demangler, function start
+        identification, etc.). The exact set is processor-specific, but
+        a populated response is the minimum guarantee.
+        """
+        program_path = await _import_and_analyze(mcp_stdio_client)
+
+        result = await mcp_stdio_client.call_tool(
+            "list-analyzers",
+            arguments={"programPath": program_path},
+        )
+        assert not getattr(result, "isError", False), (
+            f"list-analyzers failed: {result.content[0].text if result.content else 'no content'}"
+        )
+        data = json.loads(result.content[0].text)
+
+        analyzers = data.get("analyzers", [])
+        assert analyzers, f"Expected non-empty analyzer list; got {data!r}"
+
+        for entry in analyzers:
+            assert "name" in entry, f"Analyzer entry missing name: {entry!r}"
+            # Each analyzer should have the documented schema fields.
+            for field in ("type", "priority"):
+                assert field in entry, f"Analyzer {entry.get('name')!r} missing {field!r}: {entry!r}"

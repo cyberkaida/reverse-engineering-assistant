@@ -1566,14 +1566,20 @@ class TestSetDecompilationComment:
             f"set-decompilation-comment returned no content"
         )
         set_text = set_result.content[0].text
-        # The server may return a plain error string (not JSON) when isError
-        # propagation is unreliable across the HTTP bridge; detect that early.
+        # set-decompilation-comment now falls back to the nearest addressable
+        # line (LineAddressMatch in DecompilerToolProvider), so it should
+        # almost always return a JSON success body. A plain-text error here
+        # would mean the function has no addressable code at all, which is
+        # a real failure — surface it explicitly rather than masking it.
+        if getattr(set_result, "isError", False):
+            pytest.fail(
+                f"set-decompilation-comment returned isError=True: {set_text!r}"
+            )
         try:
             set_data = json.loads(set_text)
         except json.JSONDecodeError:
             pytest.fail(
-                f"set-decompilation-comment returned non-JSON content "
-                f"(likely a server error): {set_text!r}"
+                f"set-decompilation-comment returned non-JSON content: {set_text!r}"
             )
         assert set_data.get("success") is True, f"set not success: {set_data!r}"
 

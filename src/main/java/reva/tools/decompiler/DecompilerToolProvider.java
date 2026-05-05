@@ -382,6 +382,48 @@ public class DecompilerToolProvider extends AbstractToolProvider {
     }
 
     /**
+     * Result of a fuzzy line-to-address lookup: the resolved address plus the
+     * actual display line number whose tokens produced it (which may differ
+     * from the requested line when the request landed on a brace, blank, or
+     * other line with no address mapping).
+     */
+    private record LineAddressMatch(Address address, int matchedDisplayLineNumber) {}
+
+    /**
+     * Like {@link #findAddressForLine}, but falls back to the nearest line
+     * with an address when the requested line has none. Walks outward
+     * symmetrically (line+1, line-1, line+2, line-2, ...) so a callerwho
+     * picked a brace, blank, or signature line still gets a sensible
+     * placement instead of an error.
+     *
+     * Used by set-decompilation-comment, which is meant to be forgiving
+     * about line guessing. Strict per-line metadata lookups
+     * (getAssemblyForDecompLine, getCommentsForDecompLine) deliberately
+     * keep the exact-match {@link #findAddressForLine} so they don't
+     * misattribute output to unrelated lines.
+     *
+     * @return the match, or null if no line in the function maps to any address
+     */
+    private LineAddressMatch findNearbyAddressForLine(Program program, List<ClangLine> clangLines, int displayLineNumber) {
+        Address direct = findAddressForLine(program, clangLines, displayLineNumber);
+        if (direct != null) {
+            return new LineAddressMatch(direct, displayLineNumber);
+        }
+        int maxRadius = clangLines.size();
+        for (int radius = 1; radius <= maxRadius; radius++) {
+            Address forward = findAddressForLine(program, clangLines, displayLineNumber + radius);
+            if (forward != null) {
+                return new LineAddressMatch(forward, displayLineNumber + radius);
+            }
+            Address backward = findAddressForLine(program, clangLines, displayLineNumber - radius);
+            if (backward != null) {
+                return new LineAddressMatch(backward, displayLineNumber - radius);
+            }
+        }
+        return null;
+    }
+
+    /**
      * Processes variable data type changes for all variables in a high function.
      * This method handles the specific logic for data type changes including error collection.
      *
@@ -1837,13 +1879,18 @@ public class DecompilerToolProvider extends AbstractToolProvider {
                 ClangTokenGroup markup = attempt.results().getCCodeMarkup();
                 List<ClangLine> clangLines = DecompilerUtils.toLines(markup);
 
-                // Find the address for the specified line number
-                Address targetAddress = findAddressForLine(program, clangLines, lineNumber);
+                // Find the address for the specified line, falling back to the
+                // nearest addressable line if the request landed on a brace,
+                // blank, or signature line. This matches ReVa's "be forgiving
+                // to AI callers" stance: the AI guesses a line, we land the
+                // comment on the closest meaningful one and tell it where.
+                LineAddressMatch match = findNearbyAddressForLine(program, clangLines, lineNumber);
 
-                if (targetAddress == null) {
-                    return createErrorResult("Could not find an address for line " + lineNumber +
-                        " in decompiled function. The line may not correspond to any actual code.");
+                if (match == null) {
+                    return createErrorResult("Could not find any addressable line in decompiled " +
+                        "function. The function may have no executable code mapped to its lines.");
                 }
+                Address targetAddress = match.address();
 
                 // Navigate first so demo viewers see the cursor land before the comment appears.
                 followWrite(program, targetAddress);
@@ -1857,14 +1904,20 @@ public class DecompilerToolProvider extends AbstractToolProvider {
                     Map<String, Object> result = new HashMap<>();
                     result.put("success", true);
                     result.put("functionName", function.getName());
-                    result.put("lineNumber", lineNumber);
+                    result.put("requestedLineNumber", lineNumber);
+                    result.put("lineNumber", match.matchedDisplayLineNumber());
                     result.put("address", AddressUtil.formatAddress(targetAddress));
                     result.put("commentType", commentTypeStr);
                     result.put("comment", comment);
+                    if (match.matchedDisplayLineNumber() != lineNumber) {
+                        result.put("note", "Line " + lineNumber + " has no address mapping; comment " +
+                            "placed at nearest addressable line " + match.matchedDisplayLineNumber() + ".");
+                    }
 
                     program.endTransaction(transactionId, true);
 
-                    logInfo(toolName + ": Successfully set comment at " + targetAddress);
+                    logInfo(toolName + ": Successfully set comment at " + targetAddress +
+                        " (requested line " + lineNumber + ", matched " + match.matchedDisplayLineNumber() + ")");
                     return createJsonResult(result);
                 } catch (Exception e) {
                     program.endTransaction(transactionId, false);

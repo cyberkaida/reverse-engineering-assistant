@@ -56,14 +56,20 @@ class TestE2EWorkflow:
         """
         Workflow: import -> open -> change -> save -> re-read same session.
 
-        This tests that import-file, set-comment, checkin-program, and
-        get-comments work together within a single MCP session. It does
-        NOT verify cross-process persistence: checkin-program with
-        keepCheckedOut=False does not evict the program from ReVa's cache,
-        so the final get-comments reads from the same in-memory program
-        object the comment was written to. A true reopen-from-disk test
-        would need either a "close-program" tool or a two-process setup,
-        neither of which currently exists.
+        Tests that import-file, set-comment, checkin-program, and
+        get-comments work together within a single MCP session. With
+        keepCheckedOut=False, checkin-program calls
+        RevaProgramManager.releaseProgramFromCache(program) — so the
+        final get-comments has to re-open the program (Ghidra reloads
+        the domain file's listing), which means it really is reading
+        the comment back from the saved-to-disk state, not from the
+        in-memory object the comment was written to.
+
+        What this test does NOT verify: cross-process persistence. The
+        whole flow runs against a single mcp-reva subprocess, so a fresh
+        process opening the same project independently would need either
+        a close-program tool or a two-process harness — neither exists
+        today.
         """
         test_binary = _resolve_workflow_fixture()
 

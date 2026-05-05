@@ -154,6 +154,22 @@ class TestBinaryImportRoundTrip:
         fixture = Path(__file__).parent / "fixtures" / "test_arm64"
         if not fixture.exists():
             pytest.skip(f"Test fixture not found: {fixture}")
+        # Detect Git LFS pointer files (when checkout did not pull LFS objects).
+        # A real test_arm64 is ~33KB Mach-O; a pointer is ~140 bytes of text
+        # starting with "version https://git-lfs.github.com". Without this,
+        # import-file fails inside the JVM with a confusing error.
+        if fixture.stat().st_size < 200:
+            try:
+                head = fixture.read_text()
+            except UnicodeDecodeError:
+                pass  # actually a small binary; treat as real
+            else:
+                if head.startswith("version https://git-lfs.github.com"):
+                    pytest.fail(
+                        f"Test fixture {fixture.name} is a Git LFS pointer, not the "
+                        "actual file. Run 'git lfs pull' locally or enable LFS in "
+                        "CI checkout."
+                    )
 
         import_result = await mcp_stdio_client.call_tool(
             "import-file",
@@ -228,7 +244,7 @@ class TestErrorHandling:
 
     async def test_handles_unknown_tool(self, mcp_stdio_client):
         """Unknown tool name surfaces as isError or McpError, never silent success."""
-        from mcp.shared.exceptions import McpError
+        from mcp import McpError  # canonical import path used elsewhere in repo
 
         try:
             result = await mcp_stdio_client.call_tool(
@@ -251,7 +267,7 @@ class TestErrorHandling:
 
     async def test_handles_invalid_tool_arguments(self, mcp_stdio_client):
         """Calling get-functions without required programPath surfaces a clear error."""
-        from mcp.shared.exceptions import McpError
+        from mcp import McpError  # canonical import path used elsewhere in repo
 
         try:
             result = await mcp_stdio_client.call_tool(

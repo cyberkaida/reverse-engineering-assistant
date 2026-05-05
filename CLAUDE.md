@@ -318,6 +318,7 @@ Install via: `claude plugin marketplace add cyberkaida/reverse-engineering-assis
 - **CI logs**: Use Task agent to read (very long logs, context-intensive)
 - **Stdio mode**: Requires clean stdin/stdout - no debug prints to stdout
 - **Help build (`gradle install`)**: JavaHelp validation fails the whole module on any cross-file anchor collision in `src/main/help/help/topics/` or any broken `help/shared/*` reference (note/tip/warning images live in `src/main/resources/help/shared/`, not under `src/main/help/`). See [help/CLAUDE.md](src/main/help/CLAUDE.md).
+- **Test fixtures (binaries)**: All binary fixtures under `tests/fixtures/` MUST be tracked via git-lfs. Before `git add`-ing a new binary, register it in `.gitattributes` with `filter=lfs diff=lfs merge=lfs -text` (per-file or via glob like `tests/fixtures/test_cpp_*`). Verify the staged form is a 3-line LFS pointer (`version https://git-lfs.github.com/...`), not raw bytes — `git diff --cached <path>` should show ~3 insertions, not thousands. If a binary slipped into a commit as raw bytes, fix with `git reset --soft HEAD~1`, update `.gitattributes`, `git rm --cached <binary>`, then re-add (the LFS clean filter runs on add). CI's `actions/checkout@v6` is configured with `lfs: true` so pointers resolve to real binaries on remote runners.
 
 ### Testing Strategy
 - **Java unit tests**: Fast, no Ghidra environment, test utilities/logic

@@ -43,6 +43,23 @@ def _validate_fixture(name: str) -> str:
     return str(fixture_path)
 
 
+def _result_text(result) -> str:
+    """Safely render a CallToolResult's first text content for error messages.
+
+    Many assertion-failure messages want to show the tool's body, but the
+    natural form (`result.content[0].text`) raises AttributeError if the
+    result is None or its content list is empty — masking the real
+    assertion failure with a confusing chained exception. Use this helper
+    whenever building an assertion-failure message that mentions a result.
+    """
+    if result is None:
+        return "(no result)"
+    content = getattr(result, "content", None) or []
+    if not content:
+        return "(empty content)"
+    return getattr(content[0], "text", None) or "(no text)"
+
+
 async def _import_and_analyze(client, fixture_name: str = "test_arm64") -> str:
     """Import the fixture and run a full analysis, returning the program path.
 
@@ -60,8 +77,9 @@ async def _import_and_analyze(client, fixture_name: str = "test_arm64") -> str:
             "analyzeAfterImport": False,
         },
     )
-    assert result is not None and not getattr(result, "isError", False), (
-        f"Import failed: {result.content[0].text if result.content else 'no content'}"
+    assert result is not None, "import-file returned None — server unreachable?"
+    assert not getattr(result, "isError", False), (
+        f"Import failed: {_result_text(result)}"
     )
     data = json.loads(result.content[0].text)
     assert data.get("success") is True, f"Import unsuccessful: {data}"
@@ -76,8 +94,9 @@ async def _import_and_analyze(client, fixture_name: str = "test_arm64") -> str:
             "forceFullAnalysis": True,
         },
     )
-    assert analyze_result is not None and not getattr(analyze_result, "isError", False), (
-        f"analyze-program failed: {analyze_result.content[0].text if analyze_result.content else 'no content'}"
+    assert analyze_result is not None, "analyze-program returned None — server unreachable?"
+    assert not getattr(analyze_result, "isError", False), (
+        f"analyze-program failed: {_result_text(analyze_result)}"
     )
     return program_path
 
@@ -103,8 +122,9 @@ async def _find_function(client, program_path: str, name_substr: str) -> dict:
                 "filterDefaultNames": filter_default,
             },
         )
-        assert result is not None and not getattr(result, "isError", False), (
-            f"get-functions failed: {result.content[0].text if result.content else 'no content'}"
+        assert result is not None, "get-functions returned None — server unreachable?"
+        assert not getattr(result, "isError", False), (
+            f"get-functions failed: {_result_text(result)}"
         )
         funcs_this_round = []
         for content in result.content[1:]:

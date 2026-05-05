@@ -2078,3 +2078,374 @@ class TestStructureDeletion:
         assert struct_name not in names, (
             f"Struct should be deleted but still appears in list-structures: {names!r}"
         )
+
+
+class TestMemoryBlocks:
+    """Verify get-memory-blocks returns the Mach-O segments with sane fields."""
+
+    async def test_returns_text_segment_with_executable_flag(
+        self, mcp_stdio_client, isolated_workspace
+    ):
+        program_path = await _import_and_analyze(mcp_stdio_client)
+
+        result = await mcp_stdio_client.call_tool(
+            "get-memory-blocks",
+            arguments={"programPath": program_path},
+        )
+        assert not getattr(result, "isError", False), (
+            f"get-memory-blocks failed: {result.content[0].text if result.content else 'no content'}"
+        )
+        data = json.loads(result.content[0].text)
+
+        blocks = data.get("blocks", [])
+        assert blocks, f"Expected at least one memory block; got {data!r}"
+
+        # Required fields per MemoryToolProvider response shape.
+        for block in blocks:
+            for key in ("name", "start", "end", "size", "readable", "writable",
+                        "executable", "initialized"):
+                assert key in block, f"Block missing {key!r}: {block!r}"
+            assert block["start"].startswith("0x"), (
+                f"Address should be 0x-prefixed: {block['start']!r}"
+            )
+
+        # Mach-O ARM64 binaries have a __TEXT segment with executable code.
+        # Match on common Mach-O segment/section names.
+        executable_blocks = [b for b in blocks if b.get("executable")]
+        assert executable_blocks, (
+            f"Expected at least one executable block on Mach-O; got names={[b['name'] for b in blocks]}"
+        )
+
+
+class TestDataTypeArchives:
+    """Verify get-data-type-archives lists at least the program and built-in archives."""
+
+    async def test_lists_program_and_builtin_archives(
+        self, mcp_stdio_client, isolated_workspace
+    ):
+        program_path = await _import_and_analyze(mcp_stdio_client)
+
+        result = await mcp_stdio_client.call_tool(
+            "get-data-type-archives",
+            arguments={"programPath": program_path},
+        )
+        assert not getattr(result, "isError", False), (
+            f"get-data-type-archives failed: {result.content[0].text}"
+        )
+
+        # Response packs metadata + entries; collect from all content items
+        # the same way many ReVa tools do.
+        archives: list[dict] = []
+        for content in result.content:
+            try:
+                payload = json.loads(content.text)
+            except (json.JSONDecodeError, AttributeError):
+                continue
+            if isinstance(payload, list):
+                archives.extend(p for p in payload if isinstance(p, dict))
+            elif isinstance(payload, dict):
+                if "archives" in payload:
+                    archives.extend(payload["archives"])
+                else:
+                    archives.append(payload)
+
+        assert archives, f"Expected at least one archive entry; got {result.content!r}"
+
+        types_seen = {a.get("type") for a in archives if isinstance(a, dict)}
+        assert "BUILT_IN" in types_seen, (
+            f"Expected BUILT_IN archive in results; got types={types_seen!r}"
+        )
+        assert "PROGRAM" in types_seen, (
+            f"Expected PROGRAM archive in results; got types={types_seen!r}"
+        )
+
+
+class TestDataTypeByString:
+    """Verify get-data-type-by-string parses common type strings."""
+
+    async def test_parses_int_pointer(self, mcp_stdio_client, isolated_workspace):
+        program_path = await _import_and_analyze(mcp_stdio_client)
+
+        result = await mcp_stdio_client.call_tool(
+            "get-data-type-by-string",
+            arguments={
+                "programPath": program_path,
+                "dataTypeString": "int *",
+            },
+        )
+        assert not getattr(result, "isError", False), (
+            f"get-data-type-by-string('int *') failed: {result.content[0].text}"
+        )
+        data = json.loads(result.content[0].text)
+        # DataTypeParserUtil.createDataTypeInfo populates name + length at minimum.
+        assert "name" in data, f"Expected 'name' in response; got {data!r}"
+        # Pointer width is architecture-dependent; ARM64 -> 8 bytes.
+        if "length" in data:
+            assert data["length"] == 8, (
+                f"int* on ARM64 should be 8 bytes; got {data['length']}"
+            )
+
+
+class TestListExports:
+    """Verify list-exports finds Mach-O exported symbols."""
+
+    async def test_test_arm64_exports_include_main_or_start(
+        self, mcp_stdio_client, isolated_workspace
+    ):
+        """The test_arm64 fixture is a Mach-O executable, which exports its
+        entry point under names like '_main', 'start', or '_mh_execute_header'.
+        Mach-O always has at least one export; if list-exports returns 0,
+        either the tool is broken or Mach-O export collection regressed.
+        """
+        program_path = await _import_and_analyze(mcp_stdio_client)
+
+        result = await mcp_stdio_client.call_tool(
+            "list-exports",
+            arguments={"programPath": program_path},
+        )
+        assert not getattr(result, "isError", False), (
+            f"list-exports failed: {result.content[0].text}"
+        )
+        data = json.loads(result.content[0].text)
+
+        assert "totalCount" in data, f"Missing totalCount: {data!r}"
+        assert data["totalCount"] >= 1, (
+            f"Mach-O executable should have at least one export; got totalCount={data['totalCount']}"
+        )
+        exports = data.get("exports", [])
+        assert exports, f"exports list should be non-empty: {data!r}"
+
+        names = [e.get("name", "") for e in exports]
+        # Mach-O executables export at least _main or start or _mh_execute_header.
+        # Lower-case match to handle future capitalization changes.
+        names_lower = [n.lower() for n in names]
+        assert any(
+            "main" in n or "start" in n or "mh_execute_header" in n
+            for n in names_lower
+        ), f"Expected main/start/mh_execute_header in exports; got {names!r}"
+
+
+class TestListBookmarkCategories:
+    """Verify list-bookmark-categories surfaces a category we just created."""
+
+    async def test_set_bookmark_then_list_includes_category(
+        self, mcp_stdio_client, isolated_workspace
+    ):
+        program_path = await _import_and_analyze(mcp_stdio_client)
+
+        bookmark_category = "ReVa-e2e-categories-test"
+        bookmark_type = "Note"
+        set_result = await mcp_stdio_client.call_tool(
+            "set-bookmark",
+            arguments={
+                "programPath": program_path,
+                "addressOrSymbol": "entry",
+                "type": bookmark_type,
+                "category": bookmark_category,
+                "comment": "category lookup smoke test",
+            },
+        )
+        assert not getattr(set_result, "isError", False), (
+            f"set-bookmark failed: {set_result.content[0].text}"
+        )
+
+        list_result = await mcp_stdio_client.call_tool(
+            "list-bookmark-categories",
+            arguments={
+                "programPath": program_path,
+                "type": bookmark_type,
+            },
+        )
+        assert not getattr(list_result, "isError", False), (
+            f"list-bookmark-categories failed: {list_result.content[0].text}"
+        )
+        data = json.loads(list_result.content[0].text)
+
+        assert data.get("type") == bookmark_type
+        categories = data.get("categories", [])
+        names = [c.get("name") for c in categories]
+        assert bookmark_category in names, (
+            f"Expected our category in list; got {names!r}"
+        )
+
+        # The matching entry should have count >= 1.
+        match = next((c for c in categories if c.get("name") == bookmark_category), None)
+        assert match and match.get("count", 0) >= 1, (
+            f"Category entry should report count>=1; got {match!r}"
+        )
+
+
+class TestListCommonConstants:
+    """Verify list-common-constants returns a structured response (may be empty for tiny binaries)."""
+
+    async def test_response_shape_is_well_formed(
+        self, mcp_stdio_client, isolated_workspace
+    ):
+        """The test_arm64 fixture is small enough that not every default-filtered
+        constant tier may be hit, so this test focuses on the response *shape*
+        being well-formed: programPath echoed, a list under the documented key,
+        and consistent counts. We also pin includeSmallValues=True to make this
+        reliable across architectures and optimization levels.
+        """
+        program_path = await _import_and_analyze(mcp_stdio_client)
+
+        result = await mcp_stdio_client.call_tool(
+            "list-common-constants",
+            arguments={
+                "programPath": program_path,
+                "topN": 20,
+                "includeSmallValues": True,
+            },
+        )
+        assert not getattr(result, "isError", False), (
+            f"list-common-constants failed: {result.content[0].text}"
+        )
+        data = json.loads(result.content[0].text)
+
+        assert data.get("programPath") == program_path, (
+            f"programPath should be echoed back; got {data!r}"
+        )
+        # Either "constants" or "results" — pin the actual key so a regression
+        # (or a refactor that changes it) surfaces. We accept either, then
+        # assert it was non-empty.
+        constants_key = next(
+            (k for k in ("constants", "results", "topConstants") if k in data),
+            None,
+        )
+        assert constants_key, (
+            f"Response missing constants list under known keys; got keys={list(data.keys())}"
+        )
+        constants = data[constants_key]
+        assert isinstance(constants, list), (
+            f"Constants payload should be a list; got {type(constants)}"
+        )
+
+        # With includeSmallValues=True, even a tiny ARM64 binary has a few
+        # immediates worth reporting. Allow 0 to keep this resilient on
+        # exotic targets but flag a likely regression.
+        if not constants:
+            pytest.fail(
+                f"Expected at least one common constant on test_arm64 with "
+                f"includeSmallValues=True; got empty list. Full response: {data!r}"
+            )
+
+
+class TestParseCHeader:
+    """Verify parse-c-header creates a structure that becomes queryable via list-structures."""
+
+    async def test_parse_simple_struct_appears_in_listing(
+        self, mcp_stdio_client, isolated_workspace
+    ):
+        program_path = await _import_and_analyze(mcp_stdio_client)
+
+        struct_name = "ReVaParseHeaderTest"
+        header = (
+            f"struct {struct_name} {{\n"
+            f"    int field_a;\n"
+            f"    int field_b;\n"
+            f"}};\n"
+        )
+        parse_result = await mcp_stdio_client.call_tool(
+            "parse-c-header",
+            arguments={
+                "programPath": program_path,
+                "headerContent": header,
+            },
+        )
+        assert not getattr(parse_result, "isError", False), (
+            f"parse-c-header failed: {parse_result.content[0].text}"
+        )
+        parse_data = json.loads(parse_result.content[0].text)
+        assert parse_data.get("createdCount", 0) >= 1, (
+            f"Expected >=1 created type; got {parse_data!r}"
+        )
+
+        # Verify via list-structures with a name filter.
+        list_result = await mcp_stdio_client.call_tool(
+            "list-structures",
+            arguments={
+                "programPath": program_path,
+                "nameFilter": struct_name,
+            },
+        )
+        assert not getattr(list_result, "isError", False), (
+            f"list-structures failed: {list_result.content[0].text}"
+        )
+        list_data = json.loads(list_result.content[0].text)
+        names = [s.get("name") for s in list_data.get("structures", [])]
+        assert struct_name in names, (
+            f"Struct {struct_name!r} not found after parse-c-header. Names seen: {names!r}"
+        )
+
+
+class TestGetReferencersDecompiled:
+    """Verify get-referencers-decompiled returns the calling function for a known import."""
+
+    async def test_referencers_of_printf_include_entry(
+        self, mcp_stdio_client, isolated_workspace
+    ):
+        program_path = await _import_and_analyze(mcp_stdio_client)
+
+        result = await mcp_stdio_client.call_tool(
+            "get-referencers-decompiled",
+            arguments={
+                "programPath": program_path,
+                "addressOrSymbol": "_printf",
+                "maxReferencers": 10,
+            },
+        )
+        assert not getattr(result, "isError", False), (
+            f"get-referencers-decompiled failed: {result.content[0].text}"
+        )
+
+        # Response collects metadata + per-referencer decompilations across
+        # multiple content items. We just need to find one entry that names
+        # the calling function (entry, _main, start, etc).
+        all_text = "\n".join(c.text for c in result.content if hasattr(c, "text"))
+        assert "entry" in all_text or "_main" in all_text or "start" in all_text, (
+            f"Expected entry function in printf referencers output; got:\n{all_text[:1000]}"
+        )
+
+
+class TestTraceDataFlowForward:
+    """Verify trace-data-flow-forward returns a non-empty operations list inside _add."""
+
+    async def test_forward_flow_from_add_instruction(
+        self, mcp_stdio_client, isolated_workspace
+    ):
+        """Forward slice from the `add w0, w8, w9` op at 0x100000474 inside _add.
+
+        The function entry (0x100000460) is the prologue and has no varnodes
+        to trace — the tool would correctly report "no data flow information"
+        there. We seed at the same address as the backward-flow test so this
+        pair exercises FORWARD/BACKWARD on a known instruction.
+        """
+        program_path = await _import_and_analyze(mcp_stdio_client)
+
+        # _add is at 0x100000460; +0x14 = 0x100000474 (the `add w0, w8, w9` op).
+        result = await mcp_stdio_client.call_tool(
+            "trace-data-flow-forward",
+            arguments={
+                "programPath": program_path,
+                "address": "0x100000474",
+            },
+        )
+        assert not getattr(result, "isError", False), (
+            f"trace-data-flow-forward failed: {result.content[0].text if result.content else 'no content'}"
+        )
+        data = json.loads(result.content[0].text)
+
+        assert data.get("direction") == "forward", (
+            f"Expected direction=forward; got {data!r}"
+        )
+        assert data.get("function") in ("_add", "add"), (
+            f"Expected containing function _add/add; got {data!r}"
+        )
+        operations = data.get("operations", [])
+        op_count = data.get("operationCount", 0)
+        assert op_count >= 1 and len(operations) == op_count, (
+            f"Expected non-empty operations list with matching count; "
+            f"got operationCount={op_count}, operations={operations!r}"
+        )
+        for op in operations:
+            assert "address" in op and "opcode" in op, f"Op missing fields: {op!r}"

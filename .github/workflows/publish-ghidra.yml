@@ -33,7 +33,7 @@ jobs:
         java-version: "21"
         distribution: "microsoft"
     - name: Install Ghidra 🐉
-      uses: antoniovazquezblanco/setup-ghidra@v2.1.0
+      uses: antoniovazquezblanco/setup-ghidra@v2.1.1
       with:
         version: ${{ matrix.ghidra-version }}
         auth_token: ${{ secrets.GITHUB_TOKEN }}

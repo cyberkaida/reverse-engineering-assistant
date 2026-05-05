@@ -24,6 +24,7 @@ from mcp.types import (
     TextContent,
     ImageContent,
     EmbeddedResource,
+    CallToolResult,
 )
 
 
@@ -155,13 +156,19 @@ class ReVaStdioBridge:
             return result.tools
 
         @self.server.call_tool()
-        async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent | ImageContent | EmbeddedResource]:
-            """Forward call_tool request to ReVa backend."""
+        async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
+            """Forward call_tool request to ReVa backend.
+
+            Returns the full CallToolResult — content + isError + structuredContent
+            — so that errors raised via createErrorResult on the Java side propagate
+            with their isError=True flag intact. Returning only .content here would
+            cause the SDK to wrap the list with a default isError=False, masking
+            tool-level errors as successful responses with error text in body.
+            """
             if not self.backend:
                 raise RuntimeError("Backend not initialized")
 
-            result = await self.backend.forward("call_tool", name, arguments)
-            return result.content
+            return await self.backend.forward("call_tool", name, arguments)
 
         @self.server.list_resources()
         async def list_resources() -> list[Resource]:

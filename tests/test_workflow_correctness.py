@@ -2882,3 +2882,635 @@ class TestTraceDataFlowForward:
         )
         for op in operations:
             assert "address" in op and "opcode" in op, f"Op missing fields: {op!r}"
+
+
+async def _import_two_and_analyze(client, fixture_a: str, fixture_b: str) -> tuple[str, str]:
+    """Import two distinct fixtures into the same MCP session and analyze each.
+
+    Returns (path_a, path_b). Used by multi-program isolation tests to
+    verify that operations on one program never leak into the other —
+    the canonical multi-program workflow ReVa is designed for.
+    """
+    path_a = await _import_and_analyze(client, fixture_a)
+    path_b = await _import_and_analyze(client, fixture_b)
+    assert path_a != path_b, (
+        f"Both imports produced identical programPath {path_a!r}; "
+        f"the project may have collapsed them into one program."
+    )
+    return path_a, path_b
+
+
+class TestMultiProgramIsolation:
+    """Verify operations are correctly scoped to programPath when multiple
+    programs share the same MCP session.
+
+    Picks two fixtures with overlapping symbol names (entry, _printf in
+    test_arm64 vs test_x86_64) so naming alone can't disambiguate — only
+    a real per-program lookup keeps them straight.
+    """
+
+    async def test_decompilation_returns_per_program_addresses(
+        self, mcp_stdio_client, isolated_workspace
+    ):
+        """get-decompilation of `entry` in two programs must return distinct
+        addresses and bodies. If the tool ever caches by symbol name without
+        the programPath as part of the key, this test catches it.
+        """
+        path_a, path_b = await _import_two_and_analyze(
+            mcp_stdio_client, "test_arm64", "test_x86_64"
+        )
+
+        async def decomp(path):
+            r = await mcp_stdio_client.call_tool(
+                "get-decompilation",
+                arguments={"programPath": path, "functionNameOrAddress": "entry", "limit": 50},
+            )
+            assert not getattr(r, "isError", False), (
+                f"get-decompilation failed on {path}: {r.content[0].text}"
+            )
+            return json.loads(r.content[0].text)
+
+        a, b = await decomp(path_a), await decomp(path_b)
+        assert a.get("address") != b.get("address"), (
+            f"`entry` in two distinct programs returned identical address — "
+            f"programPath was probably ignored. a={a.get('address')!r} "
+            f"b={b.get('address')!r}"
+        )
+        # ARM64 and x86_64 produce decidedly different decompiled bodies
+        # (different parameter shapes, different printf-call sites, etc).
+        # If the tool returned the SAME body for both, that's a clear leak.
+        body_a = a.get("decompilation", "")
+        body_b = b.get("decompilation", "")
+        assert body_a != body_b, (
+            "Decompiled bodies of `entry` are identical across architectures — "
+            "tool likely returned a cached result for the wrong program."
+        )
+
+    async def test_comments_do_not_bleed_across_programs(
+        self, mcp_stdio_client, isolated_workspace
+    ):
+        """Setting a comment on program A's `entry` must not change comments
+        on program B's `entry`. ReVa's comment storage is in Ghidra's listing
+        per-program, so this should hold — but if any layer ever caches by
+        symbol or address without programPath qualification, this fails.
+        """
+        path_a, path_b = await _import_two_and_analyze(
+            mcp_stdio_client, "test_arm64", "test_x86_64"
+        )
+
+        sentinel = "ReVa-isolation-test-comment-{0}".format(id(self))
+
+        # Set comment in A only.
+        set_r = await mcp_stdio_client.call_tool(
+            "set-comment",
+            arguments={
+                "programPath": path_a,
+                "addressOrSymbol": "entry",
+                "comment": sentinel,
+            },
+        )
+        assert not getattr(set_r, "isError", False), (
+            f"set-comment failed on {path_a}: {set_r.content[0].text}"
+        )
+
+        # Comment should be present in A.
+        comments_a = await mcp_stdio_client.call_tool(
+            "get-comments",
+            arguments={"programPath": path_a, "addressOrSymbol": "entry"},
+        )
+        a_data = json.loads(comments_a.content[0].text)
+        a_strs = [c.get("comment", "") for c in a_data.get("comments", [])]
+        assert any(sentinel in s for s in a_strs), (
+            f"Comment did not appear in A after set-comment; got {a_strs!r}"
+        )
+
+        # Comment must NOT be present in B.
+        comments_b = await mcp_stdio_client.call_tool(
+            "get-comments",
+            arguments={"programPath": path_b, "addressOrSymbol": "entry"},
+        )
+        b_data = json.loads(comments_b.content[0].text)
+        b_strs = [c.get("comment", "") for c in b_data.get("comments", [])]
+        assert not any(sentinel in s for s in b_strs), (
+            f"Comment from program A leaked into program B's `entry` "
+            f"comments: {b_strs!r}"
+        )
+
+    async def test_bookmarks_do_not_bleed_across_programs(
+        self, mcp_stdio_client, isolated_workspace
+    ):
+        """Bookmark created on program A must not appear in program B's
+        bookmark search. Bookmark categories live in Ghidra's per-program
+        BookmarkManager, but exercise it explicitly.
+        """
+        path_a, path_b = await _import_two_and_analyze(
+            mcp_stdio_client, "test_arm64", "test_x86_64"
+        )
+
+        category = "ReVa-isolation-bookmarks"
+
+        set_r = await mcp_stdio_client.call_tool(
+            "set-bookmark",
+            arguments={
+                "programPath": path_a,
+                "addressOrSymbol": "entry",
+                "type": "Note",
+                "category": category,
+                "comment": "isolation canary",
+            },
+        )
+        assert not getattr(set_r, "isError", False), (
+            f"set-bookmark failed: {set_r.content[0].text}"
+        )
+
+        # Category must show up in A.
+        a_cats = await mcp_stdio_client.call_tool(
+            "list-bookmark-categories",
+            arguments={"programPath": path_a, "type": "Note"},
+        )
+        a_data = json.loads(a_cats.content[0].text)
+        a_names = [c.get("name") for c in a_data.get("categories", [])]
+        assert category in a_names, f"Category not in A: {a_names!r}"
+
+        # Category must NOT show up in B.
+        b_cats = await mcp_stdio_client.call_tool(
+            "list-bookmark-categories",
+            arguments={"programPath": path_b, "type": "Note"},
+        )
+        b_data = json.loads(b_cats.content[0].text)
+        b_names = [c.get("name") for c in b_data.get("categories", [])]
+        assert category not in b_names, (
+            f"Bookmark category from A leaked into B: {b_names!r}"
+        )
+
+    async def test_read_before_modify_tracker_per_program(
+        self, mcp_stdio_client, isolated_workspace
+    ):
+        """The decompiler's read-before-modify guard tracks reads keyed by
+        `programPath:address`. Reading function X in program A must NOT
+        let you modify the same-named function in program B without first
+        reading B's copy.
+        """
+        path_a, path_b = await _import_two_and_analyze(
+            mcp_stdio_client, "test_arm64", "test_x86_64"
+        )
+
+        # Read A's `entry` decompilation. This stamps the tracker for A.
+        r_a = await mcp_stdio_client.call_tool(
+            "get-decompilation",
+            arguments={"programPath": path_a, "functionNameOrAddress": "entry", "limit": 50},
+        )
+        assert not getattr(r_a, "isError", False), (
+            f"get-decompilation A failed: {r_a.content[0].text}"
+        )
+
+        # Try to rename a variable in B's `entry` WITHOUT reading B first.
+        # The guard must reject this even though we read program A.
+        rename_r = await mcp_stdio_client.call_tool(
+            "rename-variables",
+            arguments={
+                "programPath": path_b,
+                "functionNameOrAddress": "entry",
+                "variableMappings": {"_does_not_exist_": "_renamed_"},
+            },
+        )
+        assert getattr(rename_r, "isError", False), (
+            f"rename on B should have been rejected (B never read), "
+            f"but got isError=False with body: "
+            f"{rename_r.content[0].text if rename_r.content else 'no content'}"
+        )
+        msg = (rename_r.content[0].text if rename_r.content else "").lower()
+        assert "read" in msg or "decompilation" in msg, (
+            f"Error should mention read-before-modify; got {msg!r}"
+        )
+
+
+class TestRoundTripIntegrity:
+    """Verify state-modifying tools return exactly what was written.
+
+    These tests catch silent-truncation / silent-overwrite / silent-duplicate
+    bugs where the tool reports success but the on-disk representation
+    diverges from the input. Substring matches in earlier tests would miss
+    these — these pin exact strings, ids, and counts.
+    """
+
+    async def test_set_comment_exact_text_round_trip(
+        self, mcp_stdio_client, isolated_workspace
+    ):
+        """Set a comment containing punctuation, unicode, and a newline; the
+        retrieved comment must match byte-for-byte. Most existing tests use
+        substring matches, which would miss truncation, escaping bugs, or
+        normalization-on-write.
+        """
+        program_path = await _import_and_analyze(mcp_stdio_client)
+
+        # Tricky payload: ASCII + UTF-8 + literal newline + escaped chars.
+        # Avoiding the JSON-RPC framing characters {"} but exercising the
+        # MCP transport layer's round-trip fidelity.
+        payload = "Round-trip: alpha=α, β=β, line1\nline2 — em-dash, tab\there."
+
+        set_r = await mcp_stdio_client.call_tool(
+            "set-comment",
+            arguments={
+                "programPath": program_path,
+                "addressOrSymbol": "entry",
+                "comment": payload,
+            },
+        )
+        assert not getattr(set_r, "isError", False), (
+            f"set-comment failed: {set_r.content[0].text}"
+        )
+
+        get_r = await mcp_stdio_client.call_tool(
+            "get-comments",
+            arguments={"programPath": program_path, "addressOrSymbol": "entry"},
+        )
+        data = json.loads(get_r.content[0].text)
+        comments = [c.get("comment", "") for c in data.get("comments", [])]
+        assert payload in comments, (
+            f"Comment did not round-trip exactly. Wrote {payload!r}, "
+            f"got back {comments!r}"
+        )
+
+    async def test_set_comment_twice_overwrites(
+        self, mcp_stdio_client, isolated_workspace
+    ):
+        """Setting two comments at the same address with the same commentType
+        must overwrite, not accumulate. The Ghidra Listing.setComment API
+        replaces the comment at that (address, type) pair; verify the tool
+        does not accidentally bypass that by appending.
+
+        Defaults: set-comment uses commentType=PRE if not specified — so two
+        sequential calls hit the same slot and the second wins.
+        """
+        program_path = await _import_and_analyze(mcp_stdio_client)
+
+        first = "ReVa-roundtrip-first"
+        second = "ReVa-roundtrip-second-overwrite"
+
+        for text in (first, second):
+            r = await mcp_stdio_client.call_tool(
+                "set-comment",
+                arguments={
+                    "programPath": program_path,
+                    "addressOrSymbol": "entry",
+                    "comment": text,
+                },
+            )
+            assert not getattr(r, "isError", False), (
+                f"set-comment({text!r}) failed: {r.content[0].text}"
+            )
+
+        get_r = await mcp_stdio_client.call_tool(
+            "get-comments",
+            arguments={"programPath": program_path, "addressOrSymbol": "entry"},
+        )
+        comments = [
+            c.get("comment", "")
+            for c in json.loads(get_r.content[0].text).get("comments", [])
+        ]
+        assert second in comments, (
+            f"Second comment missing after overwrite: {comments!r}"
+        )
+        # First comment must NOT linger. Either the slot was overwritten (no
+        # `first` anywhere) or the tool incorrectly appended (both visible).
+        assert first not in comments, (
+            f"First comment still present after second set-comment — "
+            f"tool is appending instead of overwriting. comments={comments!r}"
+        )
+
+    async def test_remove_bookmark_then_remove_again(
+        self, mcp_stdio_client, isolated_workspace
+    ):
+        """Removing a bookmark by (address, type, category) must succeed once;
+        a second remove with the same args must return an error (the bookmark
+        is gone). The tool keys removal on the lookup tuple — there's no
+        bookmark id parameter — so the second call must surface "not found"
+        rather than silently succeed.
+        """
+        program_path = await _import_and_analyze(mcp_stdio_client)
+
+        category = "ReVa-roundtrip-remove"
+        bookmark_args = {
+            "programPath": program_path,
+            "addressOrSymbol": "entry",
+            "type": "Note",
+            "category": category,
+        }
+
+        # Create the bookmark.
+        set_r = await mcp_stdio_client.call_tool(
+            "set-bookmark",
+            arguments={**bookmark_args, "comment": "to be removed"},
+        )
+        assert not getattr(set_r, "isError", False), (
+            f"set-bookmark failed: {set_r.content[0].text}"
+        )
+
+        # First remove succeeds.
+        rm1 = await mcp_stdio_client.call_tool(
+            "remove-bookmark", arguments=bookmark_args
+        )
+        assert not getattr(rm1, "isError", False), (
+            f"first remove-bookmark failed: {rm1.content[0].text}"
+        )
+
+        # Second remove must surface failure (isError=True). Silently
+        # succeeding would mask state drift between the tool and Ghidra's
+        # listing.
+        rm2 = await mcp_stdio_client.call_tool(
+            "remove-bookmark", arguments=bookmark_args
+        )
+        assert getattr(rm2, "isError", False), (
+            f"Second remove-bookmark on a removed bookmark should error; "
+            f"got isError=False with body: "
+            f"{rm2.content[0].text if rm2.content else 'no content'}"
+        )
+        msg = (rm2.content[0].text if rm2.content else "").lower()
+        assert "no bookmark" in msg or "not found" in msg, (
+            f"Error should mention bookmark not found; got {msg!r}"
+        )
+
+
+class TestPaginationEdgeCases:
+    """Verify pagination tools handle out-of-range and degenerate inputs.
+
+    Most pagination bugs hide at boundaries — startIndex == totalCount,
+    startIndex past the end, maxCount=0, maxCount > totalCount. These
+    rarely surface in normal use but are common AI-generated args (the
+    model picks a number, doesn't always check bounds).
+    """
+
+    async def test_get_functions_start_index_past_end(
+        self, mcp_stdio_client, isolated_workspace
+    ):
+        """startIndex larger than totalCount must produce a clean empty page,
+        not an error and not a wrap-around. The tool should still report
+        totalCount accurately so the caller knows pagination is exhausted.
+        """
+        program_path = await _import_and_analyze(mcp_stdio_client)
+
+        # Capture totalCount on a normal call first.
+        baseline = await mcp_stdio_client.call_tool(
+            "get-functions",
+            arguments={"programPath": program_path, "maxCount": 500},
+        )
+        assert not getattr(baseline, "isError", False), (
+            f"baseline get-functions failed: {baseline.content[0].text}"
+        )
+        meta = json.loads(baseline.content[0].text)
+        total = meta.get("totalCount") or meta.get("total") or 0
+        assert total > 0, f"Fixture should have functions; got meta={meta!r}"
+
+        # Now ask for a page well past the end.
+        far_past = total + 10_000
+        result = await mcp_stdio_client.call_tool(
+            "get-functions",
+            arguments={
+                "programPath": program_path,
+                "startIndex": far_past,
+                "maxCount": 50,
+            },
+        )
+        assert not getattr(result, "isError", False), (
+            f"get-functions with startIndex past end should NOT error; got "
+            f"isError=True with body: {result.content[0].text}"
+        )
+
+        # Metadata is content[0]; entries (if any) are content[1:].
+        m2 = json.loads(result.content[0].text)
+        assert m2.get("totalCount") == total or m2.get("total") == total, (
+            f"totalCount should be stable across pagination; baseline={total}, "
+            f"far-past={m2!r}"
+        )
+        # Either there are no entry items (preferred) or the metadata
+        # explicitly reports zero results.
+        entry_count = sum(
+            1 for c in result.content[1:]
+            if hasattr(c, "text") and c.text and c.text.strip().startswith("{")
+        )
+        reported = m2.get("returnedCount", entry_count)
+        assert reported == 0, (
+            f"Expected 0 returned items past end; got reported={reported}, "
+            f"actual entries={entry_count}, meta={m2!r}"
+        )
+
+    async def test_get_functions_max_count_one_returns_exactly_one(
+        self, mcp_stdio_client, isolated_workspace
+    ):
+        """Boundary: maxCount=1 must return exactly one function entry, not
+        zero (off-by-one in the loop bound) and not all of them (forgotten
+        clamp).
+        """
+        program_path = await _import_and_analyze(mcp_stdio_client)
+
+        result = await mcp_stdio_client.call_tool(
+            "get-functions",
+            arguments={"programPath": program_path, "maxCount": 1},
+        )
+        assert not getattr(result, "isError", False), (
+            f"get-functions maxCount=1 failed: {result.content[0].text}"
+        )
+
+        # Count actual function entries (not the metadata content[0]).
+        entry_count = 0
+        for content in result.content[1:]:
+            try:
+                entry = json.loads(content.text)
+            except (json.JSONDecodeError, AttributeError):
+                continue
+            if isinstance(entry, dict) and "name" in entry:
+                entry_count += 1
+        assert entry_count == 1, (
+            f"maxCount=1 should yield exactly one function entry; got {entry_count}"
+        )
+
+    async def test_get_strings_pagination_partition_matches_full_listing(
+        self, mcp_stdio_client, isolated_workspace
+    ):
+        """Pagination must be a strict partition of the full listing: when we
+        slice the strings list into two halves via startIndex+maxCount and
+        concatenate, we should recover (at least as a multiset) what a single
+        large maxCount call returned. Catches duplication, skipped items,
+        and stable-sort regressions.
+        """
+        program_path = await _import_and_analyze(mcp_stdio_client)
+
+        full_r = await mcp_stdio_client.call_tool(
+            "get-strings",
+            arguments={"programPath": program_path, "maxCount": 1000},
+        )
+        assert not getattr(full_r, "isError", False), (
+            f"get-strings full failed: {full_r.content[0].text}"
+        )
+        # get-strings packs metadata + entries into a single JSON list in
+        # content[0].text per the existing TestStringDiscovery pattern.
+        full_payload = json.loads(full_r.content[0].text)
+        if isinstance(full_payload, list):
+            # First entry is metadata; rest are strings.
+            full_strings = [
+                e for e in full_payload[1:]
+                if isinstance(e, dict) and "content" in e
+            ]
+        else:
+            full_strings = full_payload.get("strings", [])
+
+        if len(full_strings) < 2:
+            pytest.skip(
+                f"Fixture has only {len(full_strings)} strings; partition test "
+                "needs at least 2 to be meaningful."
+            )
+
+        midpoint = len(full_strings) // 2
+
+        async def page(start, count):
+            r = await mcp_stdio_client.call_tool(
+                "get-strings",
+                arguments={
+                    "programPath": program_path,
+                    "startIndex": start,
+                    "maxCount": count,
+                },
+            )
+            assert not getattr(r, "isError", False), (
+                f"get-strings(start={start}, count={count}) failed: "
+                f"{r.content[0].text}"
+            )
+            payload = json.loads(r.content[0].text)
+            if isinstance(payload, list):
+                return [
+                    e for e in payload[1:]
+                    if isinstance(e, dict) and "content" in e
+                ]
+            return payload.get("strings", [])
+
+        page_a = await page(0, midpoint)
+        page_b = await page(midpoint, len(full_strings) - midpoint)
+
+        # Concatenated pages must cover the full listing (as a multiset on
+        # the `content` + `address` pair, which uniquely identifies a string).
+        def key(s):
+            return (s.get("address"), s.get("content"))
+
+        full_keys = sorted(key(s) for s in full_strings)
+        paged_keys = sorted(key(s) for s in (page_a + page_b))
+        assert full_keys == paged_keys, (
+            f"Pagination partition does not match full listing.\n"
+            f"full ({len(full_keys)}): {full_keys[:5]}...\n"
+            f"paged ({len(paged_keys)}): {paged_keys[:5]}...\n"
+            f"missing from paged: {set(full_keys) - set(paged_keys)}\n"
+            f"extras in paged: {set(paged_keys) - set(full_keys)}"
+        )
+
+
+class TestInputValidation:
+    """Verify tools reject malformed input cleanly via isError=True.
+
+    With the stdio bridge now propagating isError correctly, tools that
+    used to "appear to succeed" with error text in body now properly
+    surface validation failures. These tests pin that contract for the
+    most common AI-generated mistakes: empty/nonexistent programPath,
+    unknown function name, missing required parameter.
+    """
+
+    async def test_nonexistent_program_path_returns_helpful_error(
+        self, mcp_stdio_client, isolated_workspace
+    ):
+        """Per CLAUDE.md: 'When a program cannot be found, the error message
+        will include suggestions of available programs.' Pin that contract.
+        Imports a real program first so 'available programs' is non-empty.
+        """
+        program_path = await _import_and_analyze(mcp_stdio_client)
+        assert program_path  # imported, but we won't use this path
+
+        bogus = "/this/program/definitely/does/not/exist"
+        result = await mcp_stdio_client.call_tool(
+            "get-functions",
+            arguments={"programPath": bogus, "maxCount": 10},
+        )
+        assert getattr(result, "isError", False), (
+            f"get-functions on a nonexistent programPath should return isError=True; "
+            f"got isError=False with body: "
+            f"{result.content[0].text if result.content else 'no content'}"
+        )
+        msg = (result.content[0].text if result.content else "").lower()
+        assert "not found" in msg or "no program" in msg or bogus.lower() in msg, (
+            f"Error should name the missing path or say 'not found'; got {msg!r}"
+        )
+        # CLAUDE.md promises suggestions of available programs are included.
+        # The just-imported program's basename should appear in the body.
+        basename = program_path.lstrip("/").lower()
+        assert basename in msg, (
+            f"Error message should suggest the available program {basename!r}; "
+            f"got {msg!r}"
+        )
+
+    async def test_get_decompilation_unknown_function_returns_error(
+        self, mcp_stdio_client, isolated_workspace
+    ):
+        """A clearly-bogus function name should produce isError=True with a
+        message that names the missing function (so an AI caller can correct
+        course rather than silently accept a default).
+        """
+        program_path = await _import_and_analyze(mcp_stdio_client)
+
+        bogus = "_this_function_does_not_exist_zzz"
+        result = await mcp_stdio_client.call_tool(
+            "get-decompilation",
+            arguments={
+                "programPath": program_path,
+                "functionNameOrAddress": bogus,
+                "limit": 10,
+            },
+        )
+        assert getattr(result, "isError", False), (
+            f"get-decompilation on bogus function should error; got isError=False "
+            f"with body: {result.content[0].text if result.content else 'no content'}"
+        )
+        msg = (result.content[0].text if result.content else "").lower()
+        assert bogus.lower() in msg or "not found" in msg, (
+            f"Error should name the missing function; got {msg!r}"
+        )
+
+    async def test_set_comment_missing_required_parameter_rejected(
+        self, mcp_stdio_client, isolated_workspace
+    ):
+        """Omitting `addressOrSymbol` (required) must trip the input
+        validator and return isError=True. The MCP SDK's jsonschema check
+        runs before the handler, so the error names the missing field.
+        """
+        program_path = await _import_and_analyze(mcp_stdio_client)
+
+        result = await mcp_stdio_client.call_tool(
+            "set-comment",
+            arguments={
+                "programPath": program_path,
+                # addressOrSymbol intentionally omitted.
+                "comment": "should never land",
+            },
+        )
+        assert getattr(result, "isError", False), (
+            f"set-comment without addressOrSymbol should error; got isError=False "
+            f"with body: {result.content[0].text if result.content else 'no content'}"
+        )
+        msg = (result.content[0].text if result.content else "").lower()
+        assert "addressorsymbol" in msg or "required" in msg, (
+            f"Error should mention the missing required field; got {msg!r}"
+        )
+
+    async def test_get_functions_empty_program_path_rejected(
+        self, mcp_stdio_client, isolated_workspace
+    ):
+        """An empty-string programPath is functionally a missing parameter —
+        it can't resolve to a program. Tool must reject, not silently
+        operate on the first program in the cache.
+        """
+        # No need to import; empty-string lookup must fail regardless.
+        result = await mcp_stdio_client.call_tool(
+            "get-functions",
+            arguments={"programPath": "", "maxCount": 10},
+        )
+        assert getattr(result, "isError", False), (
+            f"get-functions with empty programPath should error; got isError=False "
+            f"with body: {result.content[0].text if result.content else 'no content'}"
+        )

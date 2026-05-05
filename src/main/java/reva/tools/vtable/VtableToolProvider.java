@@ -7,9 +7,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
-
 import ghidra.program.model.address.Address;
 import ghidra.program.model.data.DataType;
 import ghidra.program.model.data.DataTypeComponent;
@@ -24,6 +21,8 @@ import ghidra.program.model.listing.Listing;
 import ghidra.program.model.listing.Program;
 import ghidra.program.model.mem.Memory;
 import ghidra.program.model.mem.MemoryAccessException;
+import ghidra.program.model.pcode.PcodeOp;
+import ghidra.program.model.pcode.Varnode;
 import ghidra.program.model.symbol.FlowType;
 import ghidra.program.model.symbol.Reference;
 import ghidra.program.model.symbol.ReferenceIterator;
@@ -55,13 +54,13 @@ public class VtableToolProvider extends AbstractToolProvider {
     private static final int VTABLE_PROBE_ENTRIES = 5;      // Number of entries to check when probing for vtable
     private static final int MIN_VTABLE_FUNCTION_POINTERS = 2;  // Minimum function pointers to consider it a vtable
 
-    // Patterns for extracting offsets from operand representations (x86/x64 instruction formats)
-    // Matches: [RAX + 0x20], [RBX+0x10], [ECX + 0x8]
-    private static final Pattern HEX_OFFSET_PATTERN = Pattern.compile("\\+\\s*0x([0-9a-fA-F]+)\\s*\\]");
-    // Matches: [RAX + 32], [RBX+16], [ECX + 8]
-    private static final Pattern DEC_OFFSET_PATTERN = Pattern.compile("\\+\\s*(\\d+)\\s*\\]");
-    // Matches: [RAX], [RBX], [ECX] (zero offset indirect calls)
-    private static final Pattern ZERO_OFFSET_PATTERN = Pattern.compile("\\[\\s*[A-Za-z]+\\s*\\]");
+    // Maximum number of preceding instructions to walk when tracing a call's
+    // function-pointer register back to its defining LOAD. Sized for ARM64
+    // patterns where ldr/blr can be separated by a few instructions in the
+    // same basic block; x86/x64's typical inline `call [reg+offset]` pcode
+    // resolves within the call instruction itself, so the lookback only
+    // matters for split-load architectures.
+    private static final int OFFSET_LOOKBACK_INSTRUCTIONS = 32;
 
     /**
      * Creates a new VtableToolProvider.
@@ -702,15 +701,20 @@ public class VtableToolProvider extends AbstractToolProvider {
                 continue;
             }
 
-            // Extract offset from operand
-            String operandRep = instr.getDefaultOperandRepresentation(0);
-            Integer offset = extractOffsetFromOperand(operandRep);
+            // Extract the call's vtable-slot offset by walking the call's
+            // function-pointer varnode back through pcode to the LOAD that
+            // defined it. Architecture-agnostic: handles inline forms like
+            // x86/x64's `call qword ptr [rax + 0x10]` (LOAD + CALLIND in
+            // one instruction's pcode) as well as split forms like ARM64's
+            // `ldr x8, [x9, #0x10]` / `blr x8` (LOAD in a preceding
+            // instruction within the same basic block).
+            Integer offset = extractOffsetFromIndirectCallPcode(instr);
 
             if (offset != null && targetOffsets.contains(offset)) {
                 Map<String, Object> caller = new HashMap<>();
                 caller.put("address", AddressUtil.formatAddress(instr.getAddress()));
                 caller.put("instruction", instr.toString());
-                caller.put("operand", operandRep);
+                caller.put("operand", instr.getDefaultOperandRepresentation(0));
                 caller.put("offset", String.format("0x%x", offset));
 
                 Function func = program.getFunctionManager().getFunctionContaining(instr.getAddress());
@@ -726,37 +730,159 @@ public class VtableToolProvider extends AbstractToolProvider {
         return results;
     }
 
-    private Integer extractOffsetFromOperand(String operandRep) {
-        if (operandRep == null) {
+    /**
+     * Extract the byte offset of a vtable slot from an indirect-call instruction
+     * by following pcode definitions back to the LOAD that produced the call's
+     * function-pointer varnode. Architecture-agnostic.
+     *
+     * Pattern catalog this resolves:
+     *   x86/x64:   `call qword ptr [rax + 0x10]`
+     *              pcode: tmp = INT_ADD rax, 0x10; tmp2 = LOAD ram, tmp; CALLIND tmp2
+     *   ARM64:     `ldr x8, [x9, #0x10]; blr x8`
+     *              pcode (1st instr): tmp = INT_ADD x9, 0x10; x8 = LOAD ram, tmp
+     *              pcode (2nd instr): CALLIND x8
+     *   With COPY-through-temp chains as some lifters emit them.
+     *
+     * Returns null when the def chain can't be resolved within the lookback
+     * window or doesn't fit a `LOAD(reg [+ const])` shape. Callers treat
+     * null as "not a vtable-style indirect call".
+     */
+    private Integer extractOffsetFromIndirectCallPcode(Instruction callInstr) {
+        PcodeOp[] callOps = callInstr.getPcode();
+        for (PcodeOp op : callOps) {
+            if (op.getOpcode() == PcodeOp.CALLIND) {
+                return offsetOfVarnode(op.getInput(0), callOps, callInstr, 0);
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Trace `v` back through pcode definitions (within `currentOps` and, if
+     * needed, prior instructions in the same basic block) looking for the LOAD
+     * that produced it. Returns the LOAD's address offset, or null if the chain
+     * doesn't fit a vtable-dispatch pattern.
+     *
+     * `depth` bounds COPY chasing so we can't infinite-loop on pathological
+     * pcode.
+     */
+    private Integer offsetOfVarnode(Varnode v, PcodeOp[] currentOps,
+            Instruction currentInstr, int depth) {
+        if (v == null || depth > 4) {
             return null;
         }
 
-        // Check for [REG] pattern (offset 0)
-        if (ZERO_OFFSET_PATTERN.matcher(operandRep).matches()) {
-            return 0;
-        }
-
-        // Check for hex offset pattern like [RAX + 0x20]
-        Matcher hexMatcher = HEX_OFFSET_PATTERN.matcher(operandRep);
-        if (hexMatcher.find()) {
-            try {
-                return Integer.parseInt(hexMatcher.group(1), 16);
-            } catch (NumberFormatException e) {
-                return null;
+        // Step 1: scan currentOps for an op that writes `v`. Walk in reverse
+        // so the latest write within the instruction wins (matters for
+        // pcode that updates a register multiple times).
+        for (int i = currentOps.length - 1; i >= 0; i--) {
+            PcodeOp op = currentOps[i];
+            Varnode out = op.getOutput();
+            if (out == null || !varnodesMatch(out, v)) {
+                continue;
+            }
+            switch (op.getOpcode()) {
+                case PcodeOp.LOAD:
+                    return resolveAddressOffset(op.getInput(1), currentOps);
+                case PcodeOp.COPY:
+                    return offsetOfVarnode(op.getInput(0), currentOps,
+                            currentInstr, depth + 1);
+                default:
+                    // Any other defining op (INT_ADD, INT_OR, MULTIEQUAL, ...)
+                    // means this isn't a simple `LOAD(reg [+ const])` form.
+                    return null;
             }
         }
 
-        // Check for decimal offset pattern like [RAX + 32]
-        Matcher decMatcher = DEC_OFFSET_PATTERN.matcher(operandRep);
-        if (decMatcher.find()) {
-            try {
-                return Integer.parseInt(decMatcher.group(1));
-            } catch (NumberFormatException e) {
-                return null;
+        // Step 2: no definition in this instruction. `v` must be a value
+        // produced by a prior instruction (typically a register on
+        // architectures that split LDR and BL/BLR/BR). Walk back through the
+        // basic block.
+        Instruction prev = currentInstr.getPrevious();
+        int steps = 0;
+        while (prev != null && steps < OFFSET_LOOKBACK_INSTRUCTIONS) {
+            // A control-flow instruction in our trail means we've crossed a
+            // basic-block boundary; values defined further back may not
+            // reach the call. Stop conservatively.
+            FlowType flow = prev.getFlowType();
+            if (flow.isCall() || flow.isJump() || flow.isTerminal()) {
+                break;
             }
+            PcodeOp[] prevOps = prev.getPcode();
+            for (int i = prevOps.length - 1; i >= 0; i--) {
+                PcodeOp op = prevOps[i];
+                Varnode out = op.getOutput();
+                if (out == null || !varnodesMatch(out, v)) {
+                    continue;
+                }
+                switch (op.getOpcode()) {
+                    case PcodeOp.LOAD:
+                        return resolveAddressOffset(op.getInput(1), prevOps);
+                    case PcodeOp.COPY:
+                        return offsetOfVarnode(op.getInput(0), prevOps,
+                                prev, depth + 1);
+                    default:
+                        return null;
+                }
+            }
+            prev = prev.getPrevious();
+            steps++;
         }
-
         return null;
+    }
+
+    /**
+     * Given a varnode used as the address of a LOAD, return the constant offset
+     * if it's `INT_ADD(reg, const)` (or `INT_ADD(const, reg)`), or 0 if it's a
+     * plain register / no INT_ADD modification. Returns null only when the
+     * address is something we can't classify as a simple `reg [+ const]` form.
+     */
+    private Integer resolveAddressOffset(Varnode addr, PcodeOp[] ops) {
+        if (addr == null) {
+            return null;
+        }
+        // Look for the op that defines this varnode within the same pcode list.
+        for (PcodeOp op : ops) {
+            Varnode out = op.getOutput();
+            if (out == null || !varnodesMatch(out, addr)) {
+                continue;
+            }
+            if (op.getOpcode() == PcodeOp.INT_ADD) {
+                for (int i = 0; i < op.getNumInputs(); i++) {
+                    Varnode in = op.getInput(i);
+                    if (in.isConstant()) {
+                        // Pcode constants are stored as Address offsets, which
+                        // are unsigned long. Slot offsets fit comfortably in int.
+                        return (int) in.getOffset();
+                    }
+                }
+                return null;
+            }
+            if (op.getOpcode() == PcodeOp.COPY) {
+                return resolveAddressOffset(op.getInput(0), ops);
+            }
+            // Some other defining op (e.g., PTRSUB, PTRADD) — bail rather
+            // than risk misattribution. Could be extended later if real
+            // patterns demand it.
+            return null;
+        }
+        // Address is a plain register/global with no in-instruction
+        // modification — call is `LOAD(reg)`, offset is 0.
+        return 0;
+    }
+
+    /**
+     * Two pcode varnodes refer to the same storage location.
+     *
+     * Within a single pcode list (one instruction's ops), Varnode.equals()
+     * works for register and "unique" varnodes alike (each unique is
+     * deterministically named within its instruction). Across instructions
+     * unique varnodes are not comparable, so callers only chase across
+     * instructions for register varnodes — which compare correctly via
+     * address+size equality.
+     */
+    private boolean varnodesMatch(Varnode a, Varnode b) {
+        return a == b || a.equals(b);
     }
 
     private String guessClassNameFromVtable(Program program, Address vtableAddr) {

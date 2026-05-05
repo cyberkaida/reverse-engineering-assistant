@@ -2407,6 +2407,253 @@ class TestGetReferencersDecompiled:
         )
 
 
+async def _find_symbol_matching(client, program_path: str, needle: str, max_count: int = 1500) -> dict | None:
+    """Return the first symbol whose name contains needle (case-insensitive).
+
+    Helper for tests that need to look up addresses for symbols Ghidra
+    auto-creates (e.g. demangled C++ vtable / typeinfo names) without
+    knowing the exact mangled or demangled form up-front.
+    """
+    needle_l = needle.lower()
+    result = await client.call_tool(
+        "get-symbols",
+        arguments={"programPath": program_path, "maxCount": max_count},
+    )
+    if getattr(result, "isError", False):
+        return None
+    for content in result.content[1:]:
+        try:
+            sym = json.loads(content.text)
+        except (json.JSONDecodeError, AttributeError):
+            continue
+        name = (sym.get("name") or "").lower()
+        if needle_l in name:
+            return sym
+    return None
+
+
+class TestVtablesOnCppFixture:
+    """Verify vtable tools work on a real C++ binary (test_cpp_arm64).
+
+    The fixture is built from tests/fixtures/test_cpp_program.cpp:
+    Animal (abstract) <- Dog, Cat, with an indirect dispatch helper.
+    Compiled with clang++ -O0 -fno-inline -arch arm64.
+    """
+
+    async def test_analyze_dog_vtable_lists_virtual_methods(
+        self, mcp_stdio_client, isolated_workspace
+    ):
+        """analyze-vtable returns entries naming Dog's virtual method overrides.
+
+        The Itanium C++ ABI vtable layout begins with a top-offset
+        (signed integer, 8 bytes on 64-bit) followed by a typeinfo
+        pointer; the function pointer block starts 0x10 bytes after the
+        symbol address Ghidra exports for "_ZTV3Dog" / "vtable for Dog".
+        analyze-vtable's heuristic walks raw memory and gives up after a
+        couple of non-function pointers, so calling it at the symbol
+        address yields just the top-offset slot. Probe both the symbol
+        address and symbol+0x10 and accept whichever gives us entries
+        with real function names — that way the test stays valid even if
+        a future Ghidra version exports the function-pointer block as
+        the primary vtable symbol.
+        """
+        program_path = await _import_and_analyze(mcp_stdio_client, "test_cpp_arm64")
+
+        sym = await _find_symbol_matching(mcp_stdio_client, program_path, "vtable for Dog")
+        if sym is None:
+            # Mangled Itanium form. Ghidra emits this with double
+            # underscore on Mach-O ("__ZTV3Dog"); substring match
+            # on "_ZTV3Dog" finds either form.
+            sym = await _find_symbol_matching(mcp_stdio_client, program_path, "_ZTV3Dog")
+        assert sym is not None, (
+            "Could not find Dog vtable symbol. Either Ghidra's RTTI/demangler "
+            "analysis did not run, or the fixture changed."
+        )
+
+        # Try the symbol address and symbol+0x10 (post top-offset + typeinfo).
+        symbol_addr = int(sym["address"], 16)
+        candidates = [
+            sym["address"],
+            f"0x{symbol_addr + 0x10:x}",
+        ]
+        names: list[str] = []
+        for addr in candidates:
+            result = await mcp_stdio_client.call_tool(
+                "analyze-vtable",
+                arguments={
+                    "programPath": program_path,
+                    "vtableAddress": addr,
+                    "maxEntries": 50,
+                },
+            )
+            assert not getattr(result, "isError", False), (
+                f"analyze-vtable @ {addr} failed: {result.content[0].text}"
+            )
+            data = json.loads(result.content[0].text)
+            entries = data.get("entries", [])
+            names = [
+                (e.get("functionName") or "").lower()
+                for e in entries
+                if e.get("functionName")
+            ]
+            if names:
+                break
+
+        assert any("legs" in n for n in names), (
+            f"Expected Dog::legs in vtable entries from one of {candidates!r}; "
+            f"got names={names!r}"
+        )
+        assert any("speak" in n for n in names), (
+            f"Expected Dog::speak in vtable entries from one of {candidates!r}; "
+            f"got names={names!r}"
+        )
+
+    async def test_find_vtables_containing_dog_legs(
+        self, mcp_stdio_client, isolated_workspace
+    ):
+        """Dog::legs() is a virtual override; find-vtables-containing-function
+        called on its address must find at least Dog's vtable.
+        """
+        program_path = await _import_and_analyze(mcp_stdio_client, "test_cpp_arm64")
+
+        # Find Dog::legs by name. Ghidra's demangler produces names like
+        # "Dog::legs" (or "Dog::legs(void) const" depending on version).
+        sym = await _find_symbol_matching(mcp_stdio_client, program_path, "Dog::legs")
+        if sym is None:
+            sym = await _find_symbol_matching(mcp_stdio_client, program_path, "_ZNK3Dog4legsEv")
+        assert sym is not None, (
+            "Could not find Dog::legs symbol (demangled or mangled). Re-build fixture."
+        )
+
+        result = await mcp_stdio_client.call_tool(
+            "find-vtables-containing-function",
+            arguments={
+                "programPath": program_path,
+                "functionAddress": sym["address"],
+            },
+        )
+        assert not getattr(result, "isError", False), (
+            f"find-vtables-containing-function failed: {result.content[0].text}"
+        )
+        data = json.loads(result.content[0].text)
+
+        vtables = data.get("vtables", [])
+        assert vtables, (
+            f"Expected at least one vtable containing Dog::legs; got {data!r}"
+        )
+        # Each entry must carry the documented schema: vtableAddress + slotIndex.
+        for vt in vtables:
+            assert "vtableAddress" in vt and "slotIndex" in vt, (
+                f"Vtable entry missing required fields: {vt!r}"
+            )
+
+    @pytest.mark.parametrize(
+        "fixture_name",
+        ["test_cpp_arm64", "test_cpp_x86_64"],
+        ids=["arm64", "x86_64"],
+    )
+    async def test_find_vtable_callers_finds_dispatch_site(
+        self, mcp_stdio_client, isolated_workspace, fixture_name
+    ):
+        """find-vtable-callers on Dog::legs must find the dispatch() site
+        on both ARM64 and x86_64.
+
+        The fixture's dispatch() function calls a->legs() through an
+        Animal* base pointer — the canonical vtable indirect call. The
+        instruction patterns differ by ISA:
+
+          ARM64:   ldr x8, [x9, #0x10]  ; load slot from vtable
+                   blr x8               ; indirect call
+          x86_64:  call qword ptr [rax + 0x10]   ; load+call inline
+
+        Pcode-based offset extraction handles both: it walks the call's
+        function-pointer varnode back through pcode (within the call
+        instruction for x86/x64's inline form, across instructions in the
+        same basic block for ARM64's split form) until it finds the LOAD
+        whose address is `register [+ const]` and extracts that const.
+        Running the same assertion across both fixtures is the canary
+        that the extraction stays architecture-agnostic.
+        """
+        program_path = await _import_and_analyze(mcp_stdio_client, fixture_name)
+
+        sym = await _find_symbol_matching(mcp_stdio_client, program_path, "Dog::legs")
+        if sym is None:
+            sym = await _find_symbol_matching(mcp_stdio_client, program_path, "_ZNK3Dog4legsEv")
+        assert sym is not None, f"Could not find Dog::legs symbol in {fixture_name}"
+
+        result = await mcp_stdio_client.call_tool(
+            "find-vtable-callers",
+            arguments={
+                "programPath": program_path,
+                "functionAddress": sym["address"],
+                "maxResults": 50,
+            },
+        )
+        assert not getattr(result, "isError", False), (
+            f"find-vtable-callers failed on {fixture_name}: {result.content[0].text}"
+        )
+        data = json.loads(result.content[0].text)
+
+        assert data.get("programPath") == program_path
+        assert "vtables" in data and data["vtables"], (
+            f"Expected at least one vtable for Dog::legs on {fixture_name}; got {data!r}"
+        )
+        callers = data.get("potentialCallers", [])
+        assert callers, (
+            f"Expected at least one potential caller on {fixture_name} "
+            f"(dispatch() calls a->legs() indirectly through the Animal vtable); "
+            f"got potentialCallers={callers!r}, full response: {data!r}"
+        )
+
+        caller_funcs = {c.get("function", "") for c in callers}
+        assert any("dispatch" in (f or "") for f in caller_funcs), (
+            f"Expected 'dispatch' among caller functions on {fixture_name}; "
+            f"got {caller_funcs!r}"
+        )
+
+
+class TestCaptureRevaDebugInfo:
+    """Verify capture-reva-debug-info produces a debug zip and reports its path."""
+
+    async def test_returns_debug_zip_path(
+        self, mcp_stdio_client, isolated_workspace
+    ):
+        """The tool writes a zip to disk and reports the absolute path.
+        We don't assert specific zip contents (those depend on environment)
+        but we do require the path exists, points to a non-empty zip file,
+        and the response carries the documented schema.
+        """
+        # No need to import a program; the tool captures global ReVa state.
+        result = await mcp_stdio_client.call_tool(
+            "capture-reva-debug-info",
+            arguments={"message": "e2e characterization run"},
+        )
+        assert not getattr(result, "isError", False), (
+            f"capture-reva-debug-info failed: {result.content[0].text}"
+        )
+        data = json.loads(result.content[0].text)
+
+        assert data.get("success") is True, f"success=True expected; got {data!r}"
+        zip_path = data.get("debugZipPath")
+        assert zip_path, f"debugZipPath should be present; got {data!r}"
+
+        path_obj = Path(zip_path)
+        assert path_obj.exists(), f"Reported debug zip does not exist on disk: {zip_path}"
+        assert path_obj.is_file(), f"Debug zip path is not a file: {zip_path}"
+        assert path_obj.stat().st_size > 0, f"Debug zip is empty: {zip_path}"
+
+        # The response also carries a human-readable message we can sanity-check.
+        assert "captured" in (data.get("message") or "").lower(), (
+            f"Expected 'captured' in message; got {data!r}"
+        )
+
+        # Best-effort cleanup so tests don't accumulate zips on disk.
+        try:
+            path_obj.unlink()
+        except OSError:
+            pass
+
+
 class TestGetDataTypes:
     """Verify get-data-types lists fundamental built-in types."""
 

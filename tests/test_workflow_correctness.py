@@ -20,7 +20,7 @@ pytestmark = [
     pytest.mark.e2e,
     pytest.mark.slow,
     pytest.mark.asyncio,
-    pytest.mark.timeout(480),
+    pytest.mark.timeout(240),
 ]
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"

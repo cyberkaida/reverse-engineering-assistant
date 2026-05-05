@@ -19,7 +19,7 @@ pytestmark = [
     pytest.mark.e2e,
     pytest.mark.slow,
     pytest.mark.asyncio,
-    pytest.mark.timeout(480)  # 8 minutes for full workflow
+    pytest.mark.timeout(240)  # 4 minutes for full workflow
 ]
 
 # Path to test fixtures directory

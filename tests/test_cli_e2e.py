@@ -23,7 +23,7 @@ pytestmark = [
     pytest.mark.e2e,
     pytest.mark.slow,
     pytest.mark.asyncio,
-    pytest.mark.timeout(360)  # 6 minutes for full subprocess + PyGhidra + server startup
+    pytest.mark.timeout(180)  # 3 minutes for full subprocess + PyGhidra + server startup
 ]
 
 

@@ -33,7 +33,7 @@ import json
 pytestmark = [
     pytest.mark.integration,
     pytest.mark.asyncio,
-    pytest.mark.timeout(240)
+    pytest.mark.timeout(120)
 ]
 
 

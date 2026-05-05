@@ -466,12 +466,19 @@ public class ProjectToolProvider extends AbstractToolProvider {
      * and import thunks -- so non-entry functions named in the symbol table are
      * never created.
      *
-     * @return true if analysis completed (not cancelled/timed out)
+     * @return true if analysis completed; false if the user/timeout cancelled the
+     *         monitor mid-run. Distinct from environmental "no AutoAnalysisManager
+     *         available" — that throws IllegalStateException so callers can label
+     *         it as an internal failure rather than mis-reporting it as a timeout.
+     * @throws IllegalStateException if Ghidra has no AutoAnalysisManager for this
+     *         program (an unexpected internal state).
      */
     private boolean runFullAnalysisAfterImport(Program program, TaskMonitor monitor) {
         AutoAnalysisManager mgr = AutoAnalysisManager.getAnalysisManager(program);
         if (mgr == null) {
-            return false;
+            throw new IllegalStateException(
+                "No AutoAnalysisManager available for " + program.getDomainFile().getPathname() +
+                ". Ghidra is in an unexpected state — analysis cannot proceed.");
         }
         mgr.initializeOptions();
         int tx = program.startTransaction("ReVa: Auto Analysis (post-import)");
@@ -524,14 +531,22 @@ public class ProjectToolProvider extends AbstractToolProvider {
                             try {
                                 TaskMonitor analysisMonitor =
                                     TimeoutTaskMonitor.timeoutIn(analysisTimeoutSeconds, TimeUnit.SECONDS);
-                                boolean completed = runFullAnalysisAfterImport(program, analysisMonitor);
-                                if (!completed) {
-                                    errors.add("Analysis timed out for " + file.getPathname() +
-                                        " after " + analysisTimeoutSeconds + " seconds");
-                                } else {
-                                    program.save("Auto-analysis complete", monitor);
-                                    analyzedFiles.add(file.getPathname());
-                                    wasAnalyzed = true;
+                                try {
+                                    boolean completed = runFullAnalysisAfterImport(program, analysisMonitor);
+                                    if (!completed) {
+                                        errors.add("Analysis timed out for " + file.getPathname() +
+                                            " after " + analysisTimeoutSeconds + " seconds");
+                                    } else {
+                                        program.save("Auto-analysis complete", monitor);
+                                        analyzedFiles.add(file.getPathname());
+                                        wasAnalyzed = true;
+                                    }
+                                } catch (IllegalStateException e) {
+                                    // Distinct from a timeout: AutoAnalysisManager unavailable
+                                    // for this program. Report verbatim so the caller doesn't
+                                    // see this as "analysis timed out".
+                                    errors.add("Analysis setup failed for " + file.getPathname() +
+                                        ": " + e.getMessage());
                                 }
                             } finally {
                                 // Release program
@@ -1563,17 +1578,27 @@ public class ProjectToolProvider extends AbstractToolProvider {
                                     if (domainObject instanceof Program program) {
                                         TaskMonitor analysisMonitor =
                                             TimeoutTaskMonitor.timeoutIn(analysisTimeoutSeconds, TimeUnit.SECONDS);
-                                        boolean completed =
-                                            runFullAnalysisAfterImport(program, analysisMonitor);
-                                        if (completed) {
-                                            program.save("Analysis completed via ReVa import", postMonitor);
-                                            analyzedFiles.add(domainFile.getPathname());
-                                        } else {
+                                        try {
+                                            boolean completed =
+                                                runFullAnalysisAfterImport(program, analysisMonitor);
+                                            if (completed) {
+                                                program.save("Analysis completed via ReVa import", postMonitor);
+                                                analyzedFiles.add(domainFile.getPathname());
+                                            } else {
+                                                detailedErrors.add(Map.of(
+                                                    "stage", "analysis",
+                                                    "programPath", domainFile.getPathname(),
+                                                    "error", "Analysis timed out",
+                                                    "errorType", "TimeoutError"
+                                                ));
+                                            }
+                                        } catch (IllegalStateException e) {
+                                            // AutoAnalysisManager unavailable; distinct from timeout.
                                             detailedErrors.add(Map.of(
                                                 "stage", "analysis",
                                                 "programPath", domainFile.getPathname(),
-                                                "error", "Analysis timed out",
-                                                "errorType", "TimeoutError"
+                                                "error", e.getMessage(),
+                                                "errorType", "AnalysisSetupError"
                                             ));
                                         }
                                     }

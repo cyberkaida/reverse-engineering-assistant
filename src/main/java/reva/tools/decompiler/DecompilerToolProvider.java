@@ -392,7 +392,7 @@ public class DecompilerToolProvider extends AbstractToolProvider {
     /**
      * Like {@link #findAddressForLine}, but falls back to the nearest line
      * with an address when the requested line has none. Walks outward
-     * symmetrically (line+1, line-1, line+2, line-2, ...) so a callerwho
+     * symmetrically (line+1, line-1, line+2, line-2, ...) so a caller who
      * picked a brace, blank, or signature line still gets a sensible
      * placement instead of an error.
      *
@@ -1439,10 +1439,14 @@ public class DecompilerToolProvider extends AbstractToolProvider {
     }
 
     /**
-     * Get assembly instructions corresponding to a decompiled line
+     * Get assembly instructions corresponding to a decompiled line.
+     *
      * @param program The program
      * @param clangLines List of ClangLine objects
-     * @param lineNumber The line number (1-based)
+     * @param displayLineNumber The display line number (1-based, from get-decompilation
+     *        output; the decompiler's leading blank line is accounted for internally
+     *        via {@link #findAddressForLine}, so callers pass the same number a user
+     *        would see in the formatted decompilation text).
      * @return List of assembly instruction strings
      */
     private List<String> getAssemblyForDecompLine(Program program, List<ClangLine> clangLines, int displayLineNumber) {
@@ -1679,10 +1683,14 @@ public class DecompilerToolProvider extends AbstractToolProvider {
     }
 
     /**
-     * Get comments associated with a specific decompilation line
+     * Get comments associated with a specific decompilation line.
+     *
      * @param program The program
      * @param clangLines List of ClangLine objects
-     * @param lineNumber The line number (1-based)
+     * @param displayLineNumber The display line number (1-based, from get-decompilation
+     *        output; the decompiler's leading blank line is accounted for internally
+     *        via {@link #findAddressForLine}, so callers pass the same number a user
+     *        would see in the formatted decompilation text).
      * @return List of comment objects
      */
     private List<Map<String, Object>> getCommentsForDecompLine(Program program, List<ClangLine> clangLines, int displayLineNumber) {

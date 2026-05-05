@@ -1,0 +1,91 @@
+name: Copilot Setup Steps
+
+# Provisions the environment for the GitHub Copilot coding agent.
+# Mirrors the toolchain used by test-ghidra.yml and test-headless.yml so the
+# agent can build the extension, run Java unit + integration tests, and
+# exercise the Python CLI / PyGhidra paths without further setup.
+#
+# Schema constraints (see GitHub Copilot docs):
+#   - Job MUST be named `copilot-setup-steps`.
+#   - Only `steps`, `permissions`, `runs-on`, `services`, `snapshot`,
+#     and `timeout-minutes` (max 59) may be set on the job.
+#   - actions/checkout fetch-depth is overridden by the system.
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/copilot-setup-steps.yml
+  pull_request:
+    paths:
+      - .github/workflows/copilot-setup-steps.yml
+
+jobs:
+  copilot-setup-steps:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          lfs: true
+
+      - name: Install C/C++ toolchain and Xvfb
+        # build-essential covers gcc/g++/make for rebuilding tests/fixtures
+        # sources. clang is handy for cross-checks. xvfb lets the agent run
+        # Ghidra integration tests (which require a display) on demand.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            clang \
+            xvfb \
+            unzip
+          gcc --version
+          clang --version
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v5
+        with:
+          java-version: "21"
+          distribution: "microsoft"
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.10"
+
+      - name: Install Ghidra
+        # Sets GHIDRA_INSTALL_DIR for subsequent steps and the agent session.
+        uses: antoniovazquezblanco/setup-ghidra@v2.1.1
+        with:
+          version: "latest"
+          auth_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-version: "8.14"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Sync Python dependencies
+        run: uv sync --prerelease=allow
+
+      - name: Install PyGhidra from local Ghidra
+        run: uv pip install "${GHIDRA_INSTALL_DIR}/Ghidra/Features/PyGhidra/pypkg"
+
+      - name: Verify PyGhidra installation
+        run: |
+          uv run python -c "import pyghidra; print(f'PyGhidra version: {pyghidra.__version__}')"
+
+      - name: Pre-warm Gradle dependency cache
+        # Resolve Java deps and compile sources so the agent's first build
+        # is fast. Skipping `buildExtension` keeps setup under the timeout
+        # while still pulling every dependency the build graph needs.
+        run: gradle --no-daemon compileJava compileTestJava compileIntegrationTestJava

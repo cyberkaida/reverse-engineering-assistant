@@ -91,7 +91,12 @@ jobs:
         echo "::group::Running headless integration tests"
         uv run pytest tests/ -v --timeout=180 --tb=short --junitxml=test-results.xml
         echo "::endgroup::"
-      timeout-minutes: 30
+      # macos-latest (arm64) hosted runners pay PyGhidra/JVM startup per
+      # subprocess test, making the e2e suite ~5x slower than Linux. With
+      # the workflow_correctness suite the full run takes ~45 min on macOS
+      # vs <10 min on Linux. Keep headroom above the observed 43 min worst
+      # case so the step doesn't kill the run before tests finish.
+      timeout-minutes: 60
       env:
         GHIDRA_INSTALL_DIR: ${{ env.GHIDRA_INSTALL_DIR }}
 

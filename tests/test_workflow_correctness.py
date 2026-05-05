@@ -2552,6 +2552,66 @@ class TestVtablesOnCppFixture:
         ["test_cpp_arm64", "test_cpp_x86_64"],
         ids=["arm64", "x86_64"],
     )
+    async def test_dispatch_decompilation_shows_both_virtual_calls(
+        self, mcp_stdio_client, isolated_workspace, fixture_name
+    ):
+        """get-decompilation of dispatch() must produce a function body that
+        renders both vtable indirect calls. Canonical Ghidra output for
+        Itanium ABI vtable dispatch on this fixture is:
+
+            iVar1 = (**(code **)(*(long *)param_1 + 0x10))();   // legs
+            iVar2 = (**(code **)(*(long *)param_1 + 0x18))();   // speak
+
+        We assert both vtable slot offsets (0x10 and 0x18) appear in the
+        body — that's the strongest single-test signal that:
+          * the decompiler ran without erroring
+          * it identified the parameter as a pointer-to-vtable
+          * it resolved both call sites at distinct slot offsets
+        Skipping any of these would fail this assertion.
+        """
+        program_path = await _import_and_analyze(mcp_stdio_client, fixture_name)
+
+        result = await mcp_stdio_client.call_tool(
+            "get-decompilation",
+            arguments={
+                "programPath": program_path,
+                "functionNameOrAddress": "dispatch",
+                "limit": 100,
+            },
+        )
+        assert not getattr(result, "isError", False), (
+            f"get-decompilation failed on {fixture_name}: "
+            f"{result.content[0].text if result.content else 'no content'}"
+        )
+        data = json.loads(result.content[0].text)
+
+        body = data.get("decompilation", "")
+        assert body, f"Empty decompilation for dispatch on {fixture_name}: {data!r}"
+
+        # Both slot offsets must appear in the body. The decompiler may
+        # render them as `0x10`/`0x18` or via decimal/struct-field syntax
+        # depending on Ghidra version, so accept either notation.
+        for offset_hex, offset_dec in [("0x10", "16"), ("0x18", "24")]:
+            assert (offset_hex in body) or (offset_dec in body), (
+                f"Expected slot offset {offset_hex} ({offset_dec}) to appear "
+                f"in dispatch body on {fixture_name}; full body:\n{body}"
+            )
+
+        # The two distinct offsets imply two distinct call sites — match a
+        # range of indirect-call rendering styles Ghidra emits.
+        indirect_call_markers = ("(**(code", "(**(", "->", "(*pvt")
+        marker_hits = sum(body.count(m) for m in indirect_call_markers)
+        assert marker_hits >= 2, (
+            f"Expected at least 2 indirect-call markers in dispatch body on "
+            f"{fixture_name} (one per virtual method); got marker_hits={marker_hits} "
+            f"in body:\n{body}"
+        )
+
+    @pytest.mark.parametrize(
+        "fixture_name",
+        ["test_cpp_arm64", "test_cpp_x86_64"],
+        ids=["arm64", "x86_64"],
+    )
     async def test_find_vtable_callers_finds_dispatch_site(
         self, mcp_stdio_client, isolated_workspace, fixture_name
     ):
@@ -2610,6 +2670,44 @@ class TestVtablesOnCppFixture:
             f"Expected 'dispatch' among caller functions on {fixture_name}; "
             f"got {caller_funcs!r}"
         )
+
+
+class TestChangeProcessorValidation:
+    """Verify change-processor rejects an unknown languageId without altering state.
+
+    Calling change-processor with a real, working language would mutate the
+    fixture's analysis. Exercising the error path (invalid languageId) covers
+    the parameter-validation and language-lookup branches without ever
+    swapping the program's language out from under us.
+    """
+
+    async def test_rejects_unknown_language_id(
+        self, mcp_stdio_client, isolated_workspace
+    ):
+        program_path = await _import_and_analyze(mcp_stdio_client)
+
+        result = await mcp_stdio_client.call_tool(
+            "change-processor",
+            arguments={
+                "programPath": program_path,
+                "languageId": "NONEXISTENT:LE:64:default",
+            },
+        )
+        assert getattr(result, "isError", False), (
+            f"change-processor with bogus languageId should return isError=True; "
+            f"got isError=False with body: "
+            f"{result.content[0].text if result.content else 'no content'}"
+        )
+
+        # Sanity check: error message names something meaningful — the bogus id,
+        # the word 'language', or 'not found'-style language-lookup failure.
+        msg = (result.content[0].text if result.content else "").lower()
+        assert (
+            "nonexistent" in msg
+            or "language" in msg
+            or "not found" in msg
+            or "invalid" in msg
+        ), f"Error message should mention language/lookup failure; got {msg!r}"
 
 
 class TestCaptureRevaDebugInfo:

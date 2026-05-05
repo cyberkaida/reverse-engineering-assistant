@@ -2407,6 +2407,94 @@ class TestGetReferencersDecompiled:
         )
 
 
+class TestGetDataTypes:
+    """Verify get-data-types lists fundamental built-in types."""
+
+    async def test_builtin_archive_includes_int_and_char(
+        self, mcp_stdio_client, isolated_workspace
+    ):
+        """The BUILT_IN data type manager must always have at least 'int' and
+        'char' — these are sentinel types every Ghidra build ships with.
+        Response is multi-JSON: metadata first, then per-type entries.
+        """
+        program_path = await _import_and_analyze(mcp_stdio_client)
+
+        result = await mcp_stdio_client.call_tool(
+            "get-data-types",
+            arguments={
+                "programPath": program_path,
+                "archiveName": "BuiltInTypes",  # Built-in archive name
+                "categoryPath": "/",
+                "includeSubcategories": True,
+                "maxCount": 500,
+            },
+        )
+        assert not getattr(result, "isError", False), (
+            f"get-data-types failed: {result.content[0].text if result.content else 'no content'}"
+        )
+
+        # First content item is metadata, rest are per-type entries.
+        assert len(result.content) >= 2, (
+            f"Expected metadata + at least one type; got {len(result.content)} items"
+        )
+        meta = json.loads(result.content[0].text)
+        assert meta.get("archiveName") == "BuiltInTypes"
+        assert meta.get("totalCount", 0) > 0, (
+            f"BUILT_IN archive should have non-zero totalCount; got {meta!r}"
+        )
+
+        names = []
+        for content in result.content[1:]:
+            try:
+                entry = json.loads(content.text)
+            except (json.JSONDecodeError, AttributeError):
+                continue
+            if isinstance(entry, dict):
+                names.append(entry.get("name", ""))
+
+        # Built-in archive always carries fundamental scalar types.
+        names_lower = [n.lower() for n in names]
+        assert any("int" == n for n in names_lower) or any("int" in n for n in names_lower), (
+            f"Expected 'int' in built-in types; got first 30: {names[:30]!r}"
+        )
+        assert any("char" == n for n in names_lower) or any("char" in n for n in names_lower), (
+            f"Expected 'char' in built-in types; got first 30: {names[:30]!r}"
+        )
+
+
+class TestCreateFunctionValidation:
+    """Verify create-function rejects requests at addresses where a function already exists."""
+
+    async def test_rejects_existing_function_address(
+        self, mcp_stdio_client, isolated_workspace
+    ):
+        """Calling create-function on the entry point of an analyzed function
+        must error with a clear message naming the existing function. This
+        exercises the "function already exists" guard in
+        FunctionToolProvider.registerCreateFunctionTool.
+        """
+        program_path = await _import_and_analyze(mcp_stdio_client)
+        add_func = await _find_function(mcp_stdio_client, program_path, "add")
+
+        result = await mcp_stdio_client.call_tool(
+            "create-function",
+            arguments={
+                "programPath": program_path,
+                "address": add_func["address"],
+            },
+        )
+        # Expecting an error path. With MCP isError convention the body is
+        # plain text, so we only need to check isError + the error message.
+        assert getattr(result, "isError", False), (
+            f"create-function on an existing function should error; "
+            f"got isError=False with body: {result.content[0].text if result.content else 'no content'}"
+        )
+        msg = result.content[0].text if result.content else ""
+        assert "already exists" in msg.lower(), (
+            f"Error should mention 'already exists'; got {msg!r}"
+        )
+
+
 class TestTraceDataFlowForward:
     """Verify trace-data-flow-forward returns a non-empty operations list inside _add."""
 

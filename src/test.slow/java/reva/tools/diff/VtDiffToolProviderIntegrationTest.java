@@ -471,6 +471,60 @@ public class VtDiffToolProviderIntegrationTest extends BinaryDiffTestBase {
         throw new AssertionError("No substantial function found in " + p.getName());
     }
 
+    /**
+     * Regression test for the HIGH-severity basename-collision bug found in Phase 6 review.
+     * If two programs in different folders share a basename (e.g. /v1/decoder and /v2/decoder),
+     * the deterministic session name {@code decoder__vs__decoder} would collide. The fix opens
+     * the candidate session, validates source/destination paths against the request, and falls
+     * through to {@code createSession} (which appends {@code -2}) on mismatch.
+     */
+    @Test
+    public void compareProgramsHandlesBasenameCollisionByCreatingSecondSession() throws Exception {
+        // Same basename "samenamedll" in two different folders for the destination side.
+        // The source program is the test's existing source. With both pairs producing the same
+        // deterministic session name, the second compare call must NOT reuse the first session.
+        ClassicSampleX86ProgramBuilder otherDstBuilder =
+            new ClassicSampleX86ProgramBuilder("dst_" + getName(), false, this);
+        builders.add(otherDstBuilder);
+        Program otherDst = otherDstBuilder.getProgram();
+
+        // Save into a different folder so its pathname is /coll_<test>/dst_<test> rather than
+        // /dst_<test>. Same basename but different folders => collision-prone session name.
+        String folderName = "coll_" + getName();
+        env.getProject().getProjectData().getRootFolder().createFolder(folderName)
+            .createFile("dst_" + getName(), otherDst, TaskMonitor.DUMMY);
+        if (serverManager != null) {
+            serverManager.programOpened(otherDst, tool);
+        }
+        RevaProgramManager.registerProgram(otherDst);
+        String otherDstPath = otherDst.getDomainFile().getPathname();
+
+        // First pair → seeds /VTSessions/dst_<test>__vs__dst_<test>
+        JsonNode first = parseJsonContent(callMcpTool("compare-programs", Map.of(
+            "sourceProgramPath", sourcePath,
+            "destinationProgramPath", destPath
+        )));
+        String firstSessionPath = first.path("sessionPath").asText();
+
+        // Second pair shares the same basename pair → collision
+        JsonNode second = parseJsonContent(callMcpTool("compare-programs", Map.of(
+            "sourceProgramPath", sourcePath,
+            "destinationProgramPath", otherDstPath
+        )));
+        String secondSessionPath = second.path("sessionPath").asText();
+
+        // Behavior: second session must NOT reuse the first (different (src,dst) pair).
+        assertTrue("Second compare-programs must create a new session, not reuse the first. "
+            + "First: " + firstSessionPath + ", second: " + secondSessionPath,
+            !firstSessionPath.equals(secondSessionPath));
+        assertEquals("Second call should report status=created, not reused",
+            "created", second.path("status").asText());
+
+        // Behavior: both sessions exist in the project and are distinct.
+        assertNotNull(env.getProject().getProjectData().getFile(firstSessionPath));
+        assertNotNull(env.getProject().getProjectData().getFile(secondSessionPath));
+    }
+
     private String buildExpectedSessionName() {
         return "src_" + getName() + "__vs__" + "dst_" + getName();
     }

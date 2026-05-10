@@ -59,6 +59,7 @@ import ghidra.program.model.listing.Program;
 import ghidra.util.task.TaskMonitor;
 import io.modelcontextprotocol.server.McpSyncServer;
 import io.modelcontextprotocol.spec.McpSchema;
+import reva.plugin.ConfigManager;
 import reva.services.BinaryDiffService;
 import reva.tools.AbstractToolProvider;
 import reva.tools.ProgramValidationException;
@@ -157,10 +158,26 @@ public class VtDiffToolProvider extends AbstractToolProvider {
             try {
                 if (reused) {
                     session = service.openSession(existing.get(), this);
-                } else {
-                    if (existing.isPresent()) {
-                        // Caller wants a fresh run on top of an existing session.
-                        // Delete the old one first to avoid name collision suffixing.
+                    // Basename-collision guard: two programs in different folders can produce the
+                    // same deterministic session name. Validate the opened session actually maps
+                    // to this (source, destination) pair; if not, fall through to create a new one
+                    // (createSession's uniqueSessionName picks the -2 suffix).
+                    String openedSrc = session.getSourceProgram().getDomainFile().getPathname();
+                    String openedDst = session.getDestinationProgram().getDomainFile().getPathname();
+                    String wantedSrc = source.getDomainFile().getPathname();
+                    String wantedDst = destination.getDomainFile().getPathname();
+                    if (!openedSrc.equals(wantedSrc) || !openedDst.equals(wantedDst)) {
+                        service.closeSession(session, this);
+                        session = null;
+                        reused = false;
+                    }
+                }
+                if (!reused) {
+                    if (existing.isPresent() && !reuseExisting) {
+                        // Caller explicitly wants a fresh run; delete the old session first to
+                        // avoid name-collision suffixing. (When reused was reset to false by the
+                        // basename-collision guard above, reuseExisting is still true — leave the
+                        // existing session alone, it belongs to a different program pair.)
                         service.deleteSession(projectData, existing.get().getPathname());
                     }
                     session = service.createSession(projectData, source, destination, this);
@@ -444,18 +461,17 @@ public class VtDiffToolProvider extends AbstractToolProvider {
                 Program source = session.getSourceProgram();
                 Program destination = session.getDestinationProgram();
 
-                Address srcAddr = AddressUtil.resolveAddressOrSymbol(source, sourceAddrStr);
-                if (srcAddr == null) {
-                    throw new IllegalArgumentException(
-                        "Could not resolve source address: " + sourceAddrStr);
-                }
+                Address srcAddr = getAddressFromArgs(request.arguments(), source, "sourceAddress");
 
                 VTAssociationManager am = session.getAssociationManager();
                 Collection<VTAssociation> related = am.getRelatedAssociationsBySourceAddress(srcAddr);
-                VTAssociation chosen = pickAcceptedFunctionAssociation(related);
+                // get-function-diff uses the permissive picker — AVAILABLE matches are still
+                // useful to inspect; the response's match.status field tells the LLM whether
+                // the match was accepted by AutoVT or is a lower-confidence candidate.
+                VTAssociation chosen = pickAnyFunctionAssociation(related);
                 if (chosen == null) {
                     throw new IllegalArgumentException(
-                        "No accepted function association at source address " + sourceAddrStr
+                        "No function association at source address " + sourceAddrStr
                         + ". Use list-changed-functions to find matched pairs.");
                 }
 
@@ -488,16 +504,40 @@ public class VtDiffToolProvider extends AbstractToolProvider {
         });
     }
 
-    private VTAssociation pickAcceptedFunctionAssociation(Collection<VTAssociation> candidates) {
+    /**
+     * Used by {@code get-function-diff}: prefer ACCEPTED, fall back to any FUNCTION
+     * association (e.g., AVAILABLE) so the LLM can still inspect a candidate match.
+     * The caller's response includes the actual {@code status} so the LLM can see
+     * whether the match was accepted.
+     */
+    private VTAssociation pickAnyFunctionAssociation(Collection<VTAssociation> candidates) {
         for (VTAssociation a : candidates) {
             if (a.getType() == VTAssociationType.FUNCTION
                     && a.getStatus() == VTAssociationStatus.ACCEPTED) {
                 return a;
             }
         }
-        // Fallback: any FUNCTION association (e.g., AVAILABLE) — gives the LLM something to work with.
         for (VTAssociation a : candidates) {
             if (a.getType() == VTAssociationType.FUNCTION) {
+                return a;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Used by {@code migrate-function-analysis}: only ACCEPTED or AVAILABLE.
+     * Rejecting BLOCKED/REJECTED associations is correct — the migration tool
+     * accepts AVAILABLE (and applies markup) but should never silently revive
+     * a previously rejected match.
+     */
+    private VTAssociation pickMigrationFunctionAssociation(Collection<VTAssociation> candidates) {
+        for (VTAssociation a : candidates) {
+            if (a.getType() != VTAssociationType.FUNCTION) {
+                continue;
+            }
+            VTAssociationStatus s = a.getStatus();
+            if (s == VTAssociationStatus.ACCEPTED || s == VTAssociationStatus.AVAILABLE) {
                 return a;
             }
         }
@@ -591,10 +631,14 @@ public class VtDiffToolProvider extends AbstractToolProvider {
     private Map<String, Object> decompilationSlice(Program program, Function fn, int offset, int limit) {
         Map<String, Object> result = new LinkedHashMap<>();
         DecompInterface decompiler = new DecompInterface();
+        // Honour the project-wide decompiler timeout from ConfigManager (matches the convention
+        // used by DecompilerToolProvider and others). Fall back to 30s if the service is absent.
+        ConfigManager config = RevaInternalServiceRegistry.getService(ConfigManager.class);
+        int timeoutSeconds = (config != null) ? config.getDecompilerTimeoutSeconds() : 30;
         try {
             decompiler.openProgram(program);
-            DecompileResults dr = decompiler.decompileFunction(fn, 30,
-                TimeoutTaskMonitor.timeoutIn(30, TimeUnit.SECONDS));
+            DecompileResults dr = decompiler.decompileFunction(fn, timeoutSeconds,
+                TimeoutTaskMonitor.timeoutIn(timeoutSeconds, TimeUnit.SECONDS));
             if (!dr.decompileCompleted()) {
                 result.put("error", "decompilation failed: " + dr.getErrorMessage());
                 return result;
@@ -756,21 +800,22 @@ public class VtDiffToolProvider extends AbstractToolProvider {
             try {
                 session = service.openSession(sessionFile, this);
                 Program source = session.getSourceProgram();
-                Address srcAddr = AddressUtil.resolveAddressOrSymbol(source, sourceAddrStr);
-                if (srcAddr == null) {
-                    throw new IllegalArgumentException(
-                        "Could not resolve source address: " + sourceAddrStr);
-                }
+                Address srcAddr = getAddressFromArgs(request.arguments(), source, "sourceAddress");
 
                 Collection<VTAssociation> related =
                     session.getAssociationManager().getRelatedAssociationsBySourceAddress(srcAddr);
-                VTAssociation assoc = pickAcceptedFunctionAssociation(related);
+                // migrate-function-analysis uses the strict picker — never silently revives
+                // a BLOCKED or REJECTED association. AVAILABLE is acceptable; setAccepted()
+                // is called inside migrateAssociation.
+                VTAssociation assoc = pickMigrationFunctionAssociation(related);
                 if (assoc == null) {
                     throw new IllegalArgumentException(
-                        "No function association at source address " + sourceAddrStr);
+                        "No function association at source address " + sourceAddrStr
+                        + " in ACCEPTED or AVAILABLE state. Use list-migration-candidates.");
                 }
 
                 MigrationResult mr = migrateAssociation(session, assoc);
+                session.save();
                 Map<String, Object> result = new LinkedHashMap<>();
                 result.put("success", true);
                 result.put("sessionPath", sessionPath);
@@ -866,6 +911,10 @@ public class VtDiffToolProvider extends AbstractToolProvider {
                     }
                 }
 
+                // Persist association-status and markup-status changes to the session DB.
+                // Without this, accept() and apply() bookkeeping is lost on closeSession.
+                session.save();
+
                 Map<String, Object> result = new LinkedHashMap<>();
                 result.put("success", true);
                 result.put("sessionPath", sessionPath);
@@ -934,11 +983,21 @@ public class VtDiffToolProvider extends AbstractToolProvider {
                 ApplyMarkupItemTask task = new ApplyMarkupItemTask(session, unapplied,
                     new VTOptions("ReVa migrate"));
                 task.run(TaskMonitor.DUMMY);
-                mr.applied += unapplied.size();
-                if (task.hasErrors()) {
-                    // Some items in the batch failed; the count above is best-effort.
-                    mr.failed++;
+                // Recount by post-apply status — the task's hasErrors() flag tells us
+                // SOME failed but not how many, and a subset of items may have applied
+                // before the failure point. Inspect each item's final status instead.
+                int appliedCount = 0;
+                int failedCount = 0;
+                for (VTMarkupItem item : unapplied) {
+                    VTMarkupItemStatus s = item.getStatus();
+                    if (s == VTMarkupItemStatus.UNAPPLIED) {
+                        failedCount++;
+                    } else {
+                        appliedCount++;
+                    }
                 }
+                mr.applied += appliedCount;
+                mr.failed += failedCount;
             }
             ok = true;
             return mr;

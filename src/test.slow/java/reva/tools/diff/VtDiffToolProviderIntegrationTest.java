@@ -165,15 +165,24 @@ public class VtDiffToolProviderIntegrationTest extends BinaryDiffTestBase {
         ));
         String sessionPath = "/VTSessions/" + buildExpectedSessionName();
 
+        // Precondition: pagination is only meaningfully tested if there are enough matches.
+        JsonNode all = parseJsonContent(callMcpTool("list-changed-functions", Map.of(
+            "sessionPath", sessionPath,
+            "category", "matched"
+        )));
+        int total = all.path("totalCount").asInt(0);
+        assertTrue("Pagination test needs at least 3 matches to assert truncation; got " + total,
+            total >= 3);
+
         JsonNode page = parseJsonContent(callMcpTool("list-changed-functions", Map.of(
             "sessionPath", sessionPath,
             "category", "matched",
             "startIndex", 0,
             "maxCount", 2
         )));
-        assertTrue("Page should have at most 2 entries",
-            page.path("functions").size() <= 2);
-        assertEquals(2, page.path("returnedCount").asInt(0));
+        assertEquals("Pagination must truncate at maxCount=2", 2, page.path("returnedCount").asInt(0));
+        assertEquals("functions array must contain exactly 2 entries", 2, page.path("functions").size());
+        assertTrue("hasMore must be true when more entries remain", page.path("hasMore").asBoolean(false));
     }
 
     // ----------------------------- list-changed-data

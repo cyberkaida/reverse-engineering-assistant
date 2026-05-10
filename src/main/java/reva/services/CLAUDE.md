@@ -414,6 +414,40 @@ public class PluginUnitTest {
 - **Two Registries**: Support both Ghidra's service registry (primary) and internal registry (testing/headless)
 - **Comprehensive Logging**: Log registration, unregistration, and program lifecycle events
 
+## Domain Services
+
+In addition to `RevaMcpService` (the plugin-bridge interface above), this package now hosts
+domain services — concrete classes registered in `RevaInternalServiceRegistry` and consumed
+by tool providers.
+
+### BinaryDiffService
+
+Owns Version Tracking session lifecycle (create / open / release / find / list / delete) and
+the AutoVT pipeline. Used by `VtDiffToolProvider`.
+
+| Method | Returns | Purpose |
+|---|---|---|
+| `findSession(projectData, source, destination)` | `Optional<DomainFile>` | Deterministic lookup at `/VTSessions/<srcBasename>__vs__<destBasename>` |
+| `createSession(projectData, source, destination, consumer)` | `VTSession` | New persistent session, saved to project, with `-2`/`-3`/... collision suffix |
+| `openSession(domainFile, consumer)` | `VTSession` | Open existing session for read/write |
+| `closeSession(session, consumer)` | `void` | Releases consumer; when refcount→0 the session closes and `release(this)` is called on both source and destination programs (`VTSessionDB.release` symmetry verified) |
+| `runAutoVt(session, options, monitor)` | `void` | Wraps `AutoVersionTrackingTask` |
+| `defaultAutoVtOptions(aggressive)` | `ToolOptions` | Build the `ToolOptions` AutoVT needs |
+| `buildAutoVtOptions(aggressive, overrides)` | `ToolOptions` | Apply caller-supplied raw overrides on top of defaults |
+| `deleteSession(projectData, sessionPath)` | `boolean` | Remove a session domain file |
+| `listSessions(projectData)` | `List<DomainFile>` | Enumerate `/VTSessions/` |
+
+**Per-call open/close convention**: every tool that uses a session must `openSession` at the
+start of the handler and `closeSession` in finally. This keeps the synchronized write-lock
+(`addSynchronizedDomainObject(destinationProgram)` invoked by `VTSessionDB`'s constructor)
+scoped to one tool call. Long-lived sessions would block other ReVa tools that mutate the
+destination program.
+
+Registered in `McpServerManager`'s constructor:
+```java
+RevaInternalServiceRegistry.registerService(BinaryDiffService.class, new BinaryDiffService());
+```
+
 ## Related Documentation
 
 - `/src/main/java/reva/server/CLAUDE.md` - MCP server implementation, provider registration

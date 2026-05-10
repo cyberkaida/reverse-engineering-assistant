@@ -49,7 +49,10 @@ import reva.resources.ResourceProvider;
 import reva.resources.impl.ProgramListResource;
 import reva.services.RevaMcpService;
 import reva.tools.ToolProvider;
+import reva.services.BinaryDiffService;
+import reva.tools.cheapdiff.CheapDiffToolProvider;
 import reva.tools.data.DataToolProvider;
+import reva.tools.vtdiff.VtDiffToolProvider;
 import reva.tools.datatypes.DataTypeToolProvider;
 import reva.tools.decompiler.DecompilerToolProvider;
 import reva.tools.functions.FunctionToolProvider;
@@ -155,6 +158,7 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
         // Make server and server manager available via service registry
         RevaInternalServiceRegistry.registerService(McpSyncServer.class, server);
         RevaInternalServiceRegistry.registerService(McpServerManager.class, this);
+        RevaInternalServiceRegistry.registerService(BinaryDiffService.class, new BinaryDiffService());
 
         // Follow Me demo navigation is GUI-only — not registered in headless mode,
         // so AbstractToolProvider.followRead/followWrite become no-ops.
@@ -206,6 +210,8 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
         toolProviders.add(new CallGraphToolProvider(server));
         toolProviders.add(new ConstantSearchToolProvider(server));
         toolProviders.add(new VtableToolProvider(server));
+        toolProviders.add(new CheapDiffToolProvider(server));
+        toolProviders.add(new VtDiffToolProvider(server));
 
         // Register all tools with the server
         // Note: As of MCP SDK v0.14.0, tool registration is idempotent and replaces duplicates

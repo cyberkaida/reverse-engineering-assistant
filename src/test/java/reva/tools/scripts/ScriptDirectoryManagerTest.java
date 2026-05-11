@@ -224,6 +224,20 @@ public class ScriptDirectoryManagerTest {
         assertEquals(userDir.resolve("plain.py"), hit.get());
     }
 
+    @Test
+    public void findScriptByNameRejectsSymlinkToOutsideFile() throws IOException {
+        Path outsideScript = outsideDir.resolve("outside.py");
+        Files.writeString(outsideScript, "# off-limits");
+        Path symlink = userDir.resolve("linked.py");
+        try {
+            Files.createSymbolicLink(symlink, outsideScript);
+        } catch (UnsupportedOperationException | java.nio.file.FileSystemException e) {
+            org.junit.Assume.assumeNoException(
+                "Filesystem doesn't support symlinks; skipping", e);
+        }
+        assertEquals(Optional.empty(), mgr.findScriptByName("linked.py"));
+    }
+
     /**
      * Symlink-traversal hardening for write/edit paths. {@code
      * isInsideWriteableDirectory} relies on lexical {@code startsWith} after

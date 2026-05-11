@@ -128,6 +128,39 @@ public class ScriptToolProviderTest {
             properties.containsKey("overwrite"));
     }
 
+    @Test
+    public void validatePaginationArgsRejectsInvalidValues() {
+        ScriptToolProvider.validatePaginationArgs(0, 1);
+        try {
+            ScriptToolProvider.validatePaginationArgs(-1, 1);
+            fail("Expected IllegalArgumentException for negative startIndex");
+        } catch (IllegalArgumentException expected) {
+            assertTrue(expected.getMessage().contains("startIndex"));
+        }
+        try {
+            ScriptToolProvider.validatePaginationArgs(0, 0);
+            fail("Expected IllegalArgumentException for maxCount < 1");
+        } catch (IllegalArgumentException expected) {
+            assertTrue(expected.getMessage().contains("maxCount"));
+        }
+    }
+
+    @Test
+    public void editScriptSchemaDescribesDefaultWriteDirectoryForScriptName() throws Exception {
+        provider.registerTools();
+        Tool editScript = findTool(provider, "edit-script");
+        assertNotNull(editScript);
+        @SuppressWarnings("unchecked")
+        java.util.Map<String, Object> properties =
+            (java.util.Map<String, Object>) editScript.inputSchema().properties();
+        @SuppressWarnings("unchecked")
+        java.util.Map<String, Object> scriptNameProperty =
+            (java.util.Map<String, Object>) properties.get("scriptName");
+        assertNotNull(scriptNameProperty);
+        String description = (String) scriptNameProperty.get("description");
+        assertTrue(description.contains("default writeable scripts directory"));
+    }
+
     /**
      * Pins the exact PyGhidra traceback marker. If PyGhidra ever changes the
      * prefix, this test flips loudly instead of {@code success=true} silently

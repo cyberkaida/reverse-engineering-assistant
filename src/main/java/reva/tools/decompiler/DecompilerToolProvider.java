@@ -28,6 +28,7 @@ import java.util.regex.PatternSyntaxException;
 import java.util.regex.Matcher;
 
 import ghidra.app.decompiler.DecompInterface;
+import ghidra.app.decompiler.DecompileOptions;
 import ghidra.app.decompiler.DecompileResults;
 import ghidra.app.decompiler.DecompiledFunction;
 import ghidra.app.decompiler.ClangTokenGroup;
@@ -213,6 +214,10 @@ public class DecompilerToolProvider extends AbstractToolProvider {
         decompiler.toggleCCode(true);
         decompiler.toggleSyntaxTree(true);
         decompiler.setSimplificationStyle("decompile");
+
+        DecompileOptions options = new DecompileOptions();
+        options.setEliminateUnreachable(false);
+        decompiler.setOptions(options);
 
         if (!decompiler.openProgram(program)) {
             logError(toolName + ": Failed to initialize decompiler for " + program.getName());

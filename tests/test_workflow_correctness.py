@@ -126,13 +126,8 @@ async def _find_function(client, program_path: str, name_substr: str) -> dict:
         assert not getattr(result, "isError", False), (
             f"get-functions failed: {_result_text(result)}"
         )
-        funcs_this_round = []
-        for content in result.content[1:]:
-            try:
-                func = json.loads(content.text)
-            except (json.JSONDecodeError, AttributeError):
-                continue
-            funcs_this_round.append(func)
+        funcs_this_round = json.loads(result.content[0].text).get("functions", [])
+        for func in funcs_this_round:
             name = (func.get("name") or "").lower()
             if needle in name:
                 return func
@@ -881,14 +876,10 @@ class TestFunctionTags:
         assert not getattr(filtered, "isError", False), (
             f"get-functions with filterByTag failed: {filtered.content[0].text}"
         )
-        # Multi-content shape: metadata + function entries.
-        filtered_names = []
-        for content in filtered.content[1:]:
-            try:
-                func = json.loads(content.text)
-            except (json.JSONDecodeError, AttributeError):
-                continue
-            filtered_names.append(func.get("name"))
+        filtered_names = [
+            f.get("name")
+            for f in json.loads(filtered.content[0].text).get("functions", [])
+        ]
         assert add_func["name"] in filtered_names, (
             f"Tagged function {add_func['name']!r} should appear when filtering by tag "
             f"{tag_name!r}; got {filtered_names!r}"
@@ -1653,14 +1644,7 @@ class TestFunctionsBySimilarity:
             f"get-functions-by-similarity failed: {result.content[0].text if result.content else 'no content'}"
         )
 
-        # Multi-content: metadata + per-function entries.
-        funcs = []
-        for content in result.content[1:]:
-            try:
-                func = json.loads(content.text)
-            except (json.JSONDecodeError, AttributeError):
-                continue
-            funcs.append(func)
+        funcs = json.loads(result.content[0].text).get("functions", [])
         assert funcs, f"Expected at least one similarity result; got {result.content!r}"
 
         for f in funcs:
@@ -1994,20 +1978,13 @@ class TestListOpenPrograms:
             f"list-open-programs failed: {result.content[0].text if result.content else 'no content'}"
         )
 
-        # Multi-content shape: content[0] is metadata, the rest are programs.
         assert result.content, "Empty response from list-open-programs"
-        metadata = json.loads(result.content[0].text)
-        assert metadata.get("count", 0) >= 1, (
-            f"Expected count>=1 in metadata; got {metadata!r}"
+        payload = json.loads(result.content[0].text)
+        assert payload.get("count", 0) >= 1, (
+            f"Expected count>=1 in payload; got {payload!r}"
         )
 
-        programs = []
-        for content in result.content[1:]:
-            try:
-                programs.append(json.loads(content.text))
-            except (json.JSONDecodeError, AttributeError):
-                continue
-
+        programs = payload.get("programs", [])
         program_paths = [p.get("programPath") for p in programs]
         assert program_path in program_paths, (
             f"Expected {program_path!r} in open programs list; got {program_paths!r}"
@@ -2441,11 +2418,7 @@ async def _find_symbol_matching(client, program_path: str, needle: str, max_coun
     )
     if getattr(result, "isError", False):
         return None
-    for content in result.content[1:]:
-        try:
-            sym = json.loads(content.text)
-        except (json.JSONDecodeError, AttributeError):
-            continue
+    for sym in json.loads(result.content[0].text).get("symbols", []):
         name = (sym.get("name") or "").lower()
         if needle_l in name:
             return sym
@@ -2798,24 +2771,17 @@ class TestGetDataTypes:
             f"get-data-types failed: {result.content[0].text if result.content else 'no content'}"
         )
 
-        # First content item is metadata, rest are per-type entries.
-        assert len(result.content) >= 2, (
-            f"Expected metadata + at least one type; got {len(result.content)} items"
-        )
-        meta = json.loads(result.content[0].text)
-        assert meta.get("archiveName") == "BuiltInTypes"
-        assert meta.get("totalCount", 0) > 0, (
-            f"BUILT_IN archive should have non-zero totalCount; got {meta!r}"
+        payload = json.loads(result.content[0].text)
+        assert payload.get("archiveName") == "BuiltInTypes"
+        assert payload.get("totalCount", 0) > 0, (
+            f"BUILT_IN archive should have non-zero totalCount; got {payload!r}"
         )
 
-        names = []
-        for content in result.content[1:]:
-            try:
-                entry = json.loads(content.text)
-            except (json.JSONDecodeError, AttributeError):
-                continue
-            if isinstance(entry, dict):
-                names.append(entry.get("name", ""))
+        names = [
+            entry.get("name", "")
+            for entry in payload.get("dataTypes", [])
+            if isinstance(entry, dict)
+        ]
 
         # Built-in archive always carries fundamental scalar types.
         names_lower = [n.lower() for n in names]
@@ -3297,20 +3263,15 @@ class TestPaginationEdgeCases:
             f"isError=True with body: {result.content[0].text}"
         )
 
-        # Metadata is content[0]; entries (if any) are content[1:].
         m2 = json.loads(result.content[0].text)
         assert m2.get("totalCount") == total or m2.get("total") == total, (
             f"totalCount should be stable across pagination; baseline={total}, "
             f"far-past={m2!r}"
         )
-        # Either there are no entry items (preferred) or the metadata
-        # explicitly reports zero results.
-        entry_count = sum(
-            1 for c in result.content[1:]
-            if hasattr(c, "text") and c.text and c.text.strip().startswith("{")
-        )
+        # No entries past the end, and the metadata's returnedCount must agree.
+        entry_count = len(m2.get("functions", []))
         reported = m2.get("returnedCount", entry_count)
-        assert reported == 0, (
+        assert entry_count == 0 and reported == 0, (
             f"Expected 0 returned items past end; got reported={reported}, "
             f"actual entries={entry_count}, meta={m2!r}"
         )
@@ -3332,15 +3293,10 @@ class TestPaginationEdgeCases:
             f"get-functions maxCount=1 failed: {result.content[0].text}"
         )
 
-        # Count actual function entries (not the metadata content[0]).
-        entry_count = 0
-        for content in result.content[1:]:
-            try:
-                entry = json.loads(content.text)
-            except (json.JSONDecodeError, AttributeError):
-                continue
-            if isinstance(entry, dict) and "name" in entry:
-                entry_count += 1
+        funcs = json.loads(result.content[0].text).get("functions", [])
+        entry_count = sum(
+            1 for entry in funcs if isinstance(entry, dict) and "name" in entry
+        )
         assert entry_count == 1, (
             f"maxCount=1 should yield exactly one function entry; got {entry_count}"
         )

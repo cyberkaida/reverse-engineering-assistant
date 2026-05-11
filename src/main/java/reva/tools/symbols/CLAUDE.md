@@ -217,27 +217,27 @@ while (current != null && !current.isGlobal()) {
 
 ### Symbol List Response with Pagination
 ```json
-[
-  {
-    "startIndex": 0,
-    "requestedCount": 200,
-    "actualCount": 200,
-    "nextStartIndex": 200,
-    "totalProcessed": 1250,
-    "includeExternal": false,
-    "filterDefaultNames": true
-  },
-  {
-    "name": "main",
-    "address": "0x00401000",
-    "namespace": "Global",
-    "id": 12345,
-    "symbolType": "Function",
-    "isPrimary": true,
-    "isExternal": false,
-    "isFunction": true
-  }
-]
+{
+  "startIndex": 0,
+  "requestedCount": 200,
+  "actualCount": 200,
+  "nextStartIndex": 200,
+  "totalProcessed": 1250,
+  "includeExternal": false,
+  "filterDefaultNames": true,
+  "symbols": [
+    {
+      "name": "main",
+      "address": "0x00401000",
+      "namespace": "Global",
+      "id": 12345,
+      "symbolType": "Function",
+      "isPrimary": true,
+      "isExternal": false,
+      "isFunction": true
+    }
+  ]
+}
 ```
 
 ### Label Creation Response

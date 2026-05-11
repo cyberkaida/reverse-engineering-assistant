@@ -281,13 +281,8 @@ class TestE2EWorkflow:
             f"get-symbols failed: {symbols_result.content[0].text if symbols_result.content else 'no content'}"
         )
 
-        symbol_names = []
-        for content in symbols_result.content[1:]:
-            try:
-                sym = json.loads(content.text)
-            except (json.JSONDecodeError, AttributeError):
-                continue
-            symbol_names.append(sym.get("name"))
+        symbols_payload = json.loads(symbols_result.content[0].text)
+        symbol_names = [s.get("name") for s in symbols_payload.get("symbols", [])]
 
         assert label_name in symbol_names, (
             f"Label {label_name!r} created successfully but not found in get-symbols output. "

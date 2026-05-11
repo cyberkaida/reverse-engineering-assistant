@@ -209,12 +209,8 @@ public class SymbolToolProvider extends AbstractToolProvider {
             paginationInfo.put("includeExternal", includeExternal);
             paginationInfo.put("filterDefaultNames", filterDefaultNames);
 
-            // Create result with metadata and symbols
-            List<Object> resultData = new ArrayList<>();
-            resultData.add(paginationInfo);
-            resultData.addAll(symbolData);
-
-            return createMultiJsonResult(resultData);
+            paginationInfo.put("symbols", symbolData);
+            return createJsonResult(paginationInfo);
         });
     }
 

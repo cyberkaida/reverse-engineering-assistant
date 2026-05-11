@@ -343,9 +343,8 @@ class TestRunScriptGhidraAPI:
             f"old={old_entry!r} stdout={vdata['stdout']!r}"
         )
 
-        # Cross-check via get-functions. createMultiJsonResult emits
-        # content[0]=metadata and content[1..n]=one function per item,
-        # so we parse the rest of content/, not a "functions" field.
+        # Cross-check via get-functions. After the wire-format standardisation
+        # the response is a single content item with a `functions` field.
         listing = await mcp_stdio_client.call_tool(
             "get-functions",
             arguments={
@@ -354,9 +353,8 @@ class TestRunScriptGhidraAPI:
                 "maxCount": 500,
             },
         )
-        names = [
-            json.loads(item.text).get("name") for item in listing.content[1:]
-        ]
+        listing_payload = json.loads(listing.content[0].text)
+        names = [f.get("name") for f in listing_payload.get("functions", [])]
         assert new_name in names, (
             f"get-functions didn't surface rename; names={names}"
         )

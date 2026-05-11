@@ -200,14 +200,8 @@ class TestBinaryImportRoundTrip:
         assert not getattr(list_result, "isError", False)
         assert len(list_result.content) > 0
 
-        # Parse the multi-content response: metadata + entries
         metadata = json.loads(list_result.content[0].text)
-        entries = []
-        for content in list_result.content[1:]:
-            try:
-                entries.append(json.loads(content.text))
-            except (json.JSONDecodeError, AttributeError):
-                continue
+        entries = metadata.get("items", [])
 
         # Locate the imported program by programPath in the listing.
         # Filter out None paths before the endswith fallback -- otherwise

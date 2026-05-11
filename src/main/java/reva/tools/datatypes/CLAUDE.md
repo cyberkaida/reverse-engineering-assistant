@@ -20,7 +20,7 @@ Lists all available data type archives for a program.
 **Parameters:**
 - `programPath` (required): Path in the Ghidra Project
 
-**Returns:** Multi-JSON result with metadata and archive information including:
+**Returns:** Single JSON object: `{count, archives: [...]}`. Each entry covers
 - Built-in data type manager (always first)
 - Target program's data type manager
 - Other open programs' data type managers
@@ -163,14 +163,13 @@ info.put("dataTypeName", dt.getClass().getSimpleName()); // Implementation class
 info.put("sourceArchiveName", dt.getSourceArchive().getName()); // Origin archive
 ```
 
-### Multi-JSON Result Pattern
+### List Result Pattern
 
 ```java
-// Metadata first, then data items
-List<Object> resultData = new ArrayList<>();
-resultData.add(metadataInfo);  // Count, pagination, search criteria
-resultData.addAll(dataItems);  // Actual data type information
-return createMultiJsonResult(resultData);
+// Embed the list directly in the result map under a descriptive field.
+Map<String, Object> result = new HashMap<>(metadataInfo);
+result.put("dataTypes", dataItems);  // or "archives", "items", etc.
+return createJsonResult(result);
 ```
 
 ## Data Type Validation and Error Handling

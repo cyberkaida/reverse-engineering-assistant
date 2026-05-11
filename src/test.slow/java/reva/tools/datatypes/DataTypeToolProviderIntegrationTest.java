@@ -61,27 +61,18 @@ public class DataTypeToolProviderIntegrationTest extends RevaIntegrationTestBase
                 assertFalse("Tool call should succeed", result.isError());
                 assertNotNull("Should have content", result.content());
                 
-                // Get all content blocks - createMultiJsonResult returns multiple text blocks
-                StringBuilder fullResultText = new StringBuilder();
-                for (int i = 0; i < result.content().size(); i++) {
-                    String contentText = ((TextContent) result.content().get(i)).text();
-                    fullResultText.append(contentText);
-                    if (i < result.content().size() - 1) {
-                        fullResultText.append(" ");
-                    }
-                }
-                String resultText = fullResultText.toString();
-                
+                String resultText = ((TextContent) result.content().get(0)).text();
+
                 // Should not return an error
-                assertFalse("Tool should not fail with 'RevaPlugin is not available'", 
+                assertFalse("Tool should not fail with 'RevaPlugin is not available'",
                            resultText.contains("RevaPlugin is not available"));
-                
+
                 // Should contain built-in data types archive
-                assertTrue("Should contain built-in data types. Actual response: " + resultText, 
+                assertTrue("Should contain built-in data types. Actual response: " + resultText,
                           resultText.contains("BuiltInTypes") || resultText.contains("BUILT_IN"));
-                
+
                 // Should have at least one archive
-                assertTrue("Should have at least one data type archive available", 
+                assertTrue("Should have at least one data type archive available",
                           resultText.contains("\"count\":") && !resultText.contains("\"count\":0"));
             } catch (Exception e) {
                 fail("Test failed with exception: " + e.getMessage());
@@ -245,17 +236,8 @@ public class DataTypeToolProviderIntegrationTest extends RevaIntegrationTestBase
                     
                 assertFalse("get-data-types should succeed", typesResult.isError());
                 
-                // Get all content blocks - createMultiJsonResult returns multiple text blocks
-                StringBuilder fullTypesText = new StringBuilder();
-                for (int i = 0; i < typesResult.content().size(); i++) {
-                    String contentText = ((TextContent) typesResult.content().get(i)).text();
-                    fullTypesText.append(contentText);
-                    if (i < typesResult.content().size() - 1) {
-                        fullTypesText.append(" ");
-                    }
-                }
-                String typesText = fullTypesText.toString();
-                
+                String typesText = ((TextContent) typesResult.content().get(0)).text();
+
                 // Should contain basic types - this proves the headless functionality works
                 assertTrue("Should contain basic data types. Actual response: " + typesText,
                           typesText.contains("int") || typesText.contains("char") || typesText.contains("byte"));
@@ -289,26 +271,14 @@ public class DataTypeToolProviderIntegrationTest extends RevaIntegrationTestBase
                 CallToolResult result = client.callTool(new CallToolRequest("get-data-type-archives", 
                     Map.of("programPath", programPath)));
                 
-                // Get all content blocks - createMultiJsonResult returns multiple text blocks
-                StringBuilder fullResultText = new StringBuilder();
-                for (int i = 0; i < result.content().size(); i++) {
-                    String contentText = ((TextContent) result.content().get(i)).text();
-                    fullResultText.append(contentText);
-                    if (i < result.content().size() - 1) {
-                        fullResultText.append(" ");
-                    }
-                }
-                String resultText = fullResultText.toString();
-                
-                // Debug: Print the actual response to see what we're getting
-                // System.out.println("DEBUG: get-data-type-archives (with program) response: " + resultText);
-                
+                String resultText = ((TextContent) result.content().get(0)).text();
+
                 // Should always show built-in types (this is the core fix for issue #142)
-                assertTrue("Should show built-in types. Actual response: " + resultText, 
+                assertTrue("Should show built-in types. Actual response: " + resultText,
                           resultText.contains("BUILT_IN") || resultText.contains("BuiltInTypes"));
-                          
+
                 // Should have at least one archive (the built-in one)
-                assertTrue("Should have at least one data type archive available", 
+                assertTrue("Should have at least one data type archive available",
                           resultText.contains("\"count\":") && !resultText.contains("\"count\":0"));
                           
                 // In test environment, program may not be accessible through normal channels,

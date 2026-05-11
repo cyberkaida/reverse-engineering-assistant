@@ -224,13 +224,8 @@ public class ProjectToolProvider extends AbstractToolProvider {
             }
 
             metadataInfo.put("itemCount", filesList.size());
-
-            // Create combined result
-            List<Object> resultData = new ArrayList<>();
-            resultData.add(metadataInfo);
-            resultData.addAll(filesList);
-
-            return createMultiJsonResult(resultData);
+            metadataInfo.put("items", filesList);
+            return createJsonResult(metadataInfo);
         });
     }
 
@@ -276,16 +271,10 @@ public class ProjectToolProvider extends AbstractToolProvider {
                 programsData.add(programInfo);
             }
 
-            // Create metadata
-            Map<String, Object> metadataInfo = new HashMap<>();
-            metadataInfo.put("count", programsData.size());
-
-            // Create combined result
-            List<Object> resultData = new ArrayList<>();
-            resultData.add(metadataInfo);
-            resultData.addAll(programsData);
-
-            return createMultiJsonResult(resultData);
+            Map<String, Object> result = new HashMap<>();
+            result.put("count", programsData.size());
+            result.put("programs", programsData);
+            return createJsonResult(result);
         });
     }
 

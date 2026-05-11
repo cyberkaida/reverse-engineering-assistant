@@ -17,3 +17,6 @@ __pycache__
 # ReVa local project directories
 .reva/
 .claude/worktrees
+
+# Local superpowers spec workspace
+docs/superpowers/

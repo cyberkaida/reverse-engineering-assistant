@@ -531,11 +531,8 @@ public class FunctionToolProvider extends AbstractToolProvider {
                 metadataInfo.put("untagged", true);
             }
 
-            // Create combined result
-            List<Object> resultData = new ArrayList<>();
-            resultData.add(metadataInfo);
-            resultData.addAll(functionData);
-            return createMultiJsonResult(resultData);
+            metadataInfo.put("functions", functionData);
+            return createJsonResult(metadataInfo);
         });
     }
 
@@ -753,11 +750,8 @@ public class FunctionToolProvider extends AbstractToolProvider {
                 paginationInfo.put("maxCachedResults", MAX_CACHED_RESULTS_PER_SEARCH);
             }
 
-            // Create combined result
-            List<Object> resultData = new ArrayList<>();
-            resultData.add(paginationInfo);
-            resultData.addAll(transformedResults);
-            return createMultiJsonResult(resultData);
+            paginationInfo.put("functions", transformedResults);
+            return createJsonResult(paginationInfo);
         });
     }
 

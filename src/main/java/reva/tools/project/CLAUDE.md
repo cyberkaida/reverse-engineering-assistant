@@ -235,13 +235,8 @@ metadataInfo.put("folderPath", folderPath);
 metadataInfo.put("folderName", folder.getName());
 metadataInfo.put("isRecursive", recursive);
 metadataInfo.put("itemCount", filesList.size());
-
-// Create combined result with metadata first
-List<Object> resultData = new ArrayList<>();
-resultData.add(metadataInfo);
-resultData.addAll(filesList);
-
-return createMultiJsonResult(resultData);
+metadataInfo.put("items", filesList);
+return createJsonResult(metadataInfo);
 ```
 
 ### Program List Response Pattern
@@ -256,14 +251,10 @@ for (Program program : openPrograms) {
     programsData.add(programInfo);
 }
 
-Map<String, Object> metadataInfo = new HashMap<>();
-metadataInfo.put("count", programsData.size());
-
-List<Object> resultData = new ArrayList<>();
-resultData.add(metadataInfo);
-resultData.addAll(programsData);
-
-return createMultiJsonResult(resultData);
+Map<String, Object> result = new HashMap<>();
+result.put("count", programsData.size());
+result.put("programs", programsData);
+return createJsonResult(result);
 ```
 
 ## Error Handling Patterns

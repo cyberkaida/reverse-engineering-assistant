@@ -160,16 +160,10 @@ public class DataTypeToolProvider extends AbstractToolProvider {
                 }
             }
 
-            // Create metadata about the result
-            Map<String, Object> metadataInfo = new HashMap<>();
-            metadataInfo.put("count", archivesData.size());
-
-            // Create combined result
-            List<Object> resultData = new ArrayList<>();
-            resultData.add(metadataInfo);
-            resultData.addAll(archivesData);
-
-            return createMultiJsonResult(resultData);
+            Map<String, Object> result = new HashMap<>();
+            result.put("count", archivesData.size());
+            result.put("archives", archivesData);
+            return createJsonResult(result);
         });
     }
 
@@ -282,21 +276,15 @@ public class DataTypeToolProvider extends AbstractToolProvider {
                 }
             }
 
-            // Create metadata about the result
-            Map<String, Object> metadataInfo = new HashMap<>();
-            metadataInfo.put("archiveName", archiveName);
-            metadataInfo.put("categoryPath", categoryPath);
-            metadataInfo.put("includeSubcategories", includeSubcategories);
-            metadataInfo.put("startIndex", startIndex);
-            metadataInfo.put("totalCount", dataTypes.size());
-            metadataInfo.put("returnedCount", dataTypesData.size());
-
-            // Create combined result
-            List<Object> resultData = new ArrayList<>();
-            resultData.add(metadataInfo);
-            resultData.addAll(dataTypesData);
-
-            return createMultiJsonResult(resultData);
+            Map<String, Object> result = new HashMap<>();
+            result.put("archiveName", archiveName);
+            result.put("categoryPath", categoryPath);
+            result.put("includeSubcategories", includeSubcategories);
+            result.put("startIndex", startIndex);
+            result.put("totalCount", dataTypes.size());
+            result.put("returnedCount", dataTypesData.size());
+            result.put("dataTypes", dataTypesData);
+            return createJsonResult(result);
         });
     }
 

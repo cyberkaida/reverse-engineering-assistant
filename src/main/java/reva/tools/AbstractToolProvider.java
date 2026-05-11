@@ -40,7 +40,6 @@ import reva.plugin.RevaProgramManager;
 import reva.util.ProgramLookupUtil;
 import io.modelcontextprotocol.server.McpSyncServer;
 import io.modelcontextprotocol.spec.McpSchema;
-import io.modelcontextprotocol.spec.McpSchema.Content;
 import io.modelcontextprotocol.spec.McpSchema.TextContent;
 import io.modelcontextprotocol.spec.McpSchema.Tool;
 import io.modelcontextprotocol.spec.McpSchema.JsonSchema;
@@ -112,26 +111,6 @@ public abstract class AbstractToolProvider implements ToolProvider {
                 .build();
         } catch (JsonProcessingException e) {
             return createErrorResult("Error serializing result to JSON: " + e.getMessage());
-        }
-    }
-
-    /**
-     * Helper method to create a success result with multiple JSON contents
-     * @param dataList List of objects to serialize as separate JSON contents
-     * @return CallToolResult with success flag set
-     */
-    protected McpSchema.CallToolResult createMultiJsonResult(List<Object> dataList) {
-        try {
-            List<Content> contents = new ArrayList<>();
-            for (Object data : dataList) {
-                contents.add(new TextContent(JSON.writeValueAsString(data)));
-            }
-            return McpSchema.CallToolResult.builder()
-                .content(contents)
-                .isError(false)
-                .build();
-        } catch (JsonProcessingException e) {
-            return createErrorResult("Error serializing results to JSON: " + e.getMessage());
         }
     }
 

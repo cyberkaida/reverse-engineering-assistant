@@ -176,11 +176,12 @@ return createJsonResult(result);
 
 // Error response
 return createErrorResult("Description of what went wrong");
-
-// Multiple JSON responses
-List<Object> results = List.of(result1, result2, result3);
-return createMultiJsonResult(results);
 ```
+
+For list responses, embed the list in the result map under a descriptive
+field (`functions`, `symbols`, `items`, etc.) so the whole response is a
+single JSON content item — never a metadata-then-entries multi-content
+shape.
 
 ### Address Formatting
 

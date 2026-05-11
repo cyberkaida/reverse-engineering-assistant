@@ -220,28 +220,16 @@ class TestImportedFilesInProject:
         assert list_result is not None
         assert hasattr(list_result, 'content'), "list-project-files should return content"
 
-        # list-project-files returns multiple content items:
-        # - First item is metadata: {folderPath, folderName, isRecursive, itemCount}
-        # - Subsequent items are file/folder info
+        # list-project-files returns one JSON content item with:
+        #   {folderPath, folderName, isRecursive, itemCount, items: [...]}
         print(f"\n=== Project files response ===")
-        print(f"Number of content items: {len(list_result.content)}")
-
-        # Parse metadata from first item
         metadata = json.loads(list_result.content[0].text)
         item_count = metadata.get("itemCount", 0)
-        print(f"Metadata: {json.dumps(metadata, indent=2)}")
+        file_entries = metadata.get("items", [])
+        print(f"Metadata: {json.dumps({k: v for k, v in metadata.items() if k != 'items'}, indent=2)}")
         print(f"Item count from metadata: {item_count}")
-
-        # Parse file entries from remaining items
-        file_entries = []
-        for i, content in enumerate(list_result.content[1:], 1):
-            try:
-                entry = json.loads(content.text)
-                file_entries.append(entry)
-                print(f"  [{i}] {entry}")
-            except (json.JSONDecodeError, AttributeError):
-                # Skip non-JSON content items (e.g., progress messages or malformed entries)
-                pass
+        for i, entry in enumerate(file_entries, 1):
+            print(f"  [{i}] {entry}")
 
         # Verify we got files matching the import count
         assert item_count >= len(imported_programs), \
@@ -286,27 +274,20 @@ class TestImportedFilesInProject:
 
         assert list_result is not None
 
-        # list-project-files returns multiple content items:
-        # - First item is metadata with itemCount
-        # - Subsequent items are file/folder info
+        # list-project-files returns one JSON content item with itemCount + items.
         metadata = json.loads(list_result.content[0].text)
         item_count = metadata.get("itemCount", 0)
+        entries = metadata.get("items", [])
 
         print(f"\n=== Project files after fat binary import ===")
-        print(f"Metadata: {json.dumps(metadata, indent=2)}")
+        print(f"Metadata: {json.dumps({k: v for k, v in metadata.items() if k != 'items'}, indent=2)}")
         print(f"Item count: {item_count}")
 
         # Verify we have 2 files (one per architecture)
         assert item_count >= 2, f"Should have at least 2 files (one per arch), got {item_count}"
 
-        # Parse and display file entries
-        for i, content in enumerate(list_result.content[1:], 1):
-            try:
-                entry = json.loads(content.text)
-                print(f"  [{i}] {entry}")
-            except (json.JSONDecodeError, AttributeError):
-                # Skip non-JSON content items (e.g., progress messages or malformed entries)
-                pass
+        for i, entry in enumerate(entries, 1):
+            print(f"  [{i}] {entry}")
 
         print(f"\n✓ Fat binary slices appear in project ({item_count} items)")
 
@@ -438,17 +419,10 @@ class TestImportWithAnalysis:
         assert functions_result is not None
         assert hasattr(functions_result, 'content'), "get-functions should return content"
 
-        # Parse functions response - multi-part format:
-        # content[0] = metadata (totalCount, actualCount, etc.)
-        # content[1+] = individual function objects
-        metadata = json.loads(functions_result.content[0].text)
-        function_count = metadata.get("totalCount", metadata.get("actualCount", 0))
-
-        # Parse individual function objects from remaining content items
-        functions = []
-        for i in range(1, len(functions_result.content)):
-            func = json.loads(functions_result.content[i].text)
-            functions.append(func)
+        # Single JSON content item: {totalCount, actualCount, ..., functions: [...]}
+        payload = json.loads(functions_result.content[0].text)
+        function_count = payload.get("totalCount", payload.get("actualCount", 0))
+        functions = payload.get("functions", [])
 
         print(f"Functions discovered: {function_count}")
         if functions:
@@ -529,15 +503,9 @@ class TestImportWithAnalysis:
 
             assert functions_result is not None
 
-            # Parse multi-part response: metadata + function objects
-            metadata = json.loads(functions_result.content[0].text)
-            function_count = metadata.get("totalCount", metadata.get("actualCount", 0))
-
-            # Parse individual function objects
-            functions = []
-            for i in range(1, len(functions_result.content)):
-                func = json.loads(functions_result.content[i].text)
-                functions.append(func)
+            payload = json.loads(functions_result.content[0].text)
+            function_count = payload.get("totalCount", payload.get("actualCount", 0))
+            functions = payload.get("functions", [])
 
             print(f"  Functions in {program_path}: {function_count}")
             if functions:

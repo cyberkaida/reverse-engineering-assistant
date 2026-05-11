@@ -800,5 +800,108 @@ public class DecompilerToolProviderIntegrationTest extends RevaIntegrationTestBa
         });
     }
 
+    /**
+     * Verifies that get-decompilation invokes the follow service twice and that the
+     * post-decompilation call uses an address derived from the requested offset, not
+     * always the function entry. This is what makes the CodeBrowser track the LLM's
+     * scroll position when follow mode is enabled.
+     */
+    @Test
+    public void testGetDecompilationRefinesFollowToRequestedLine() throws Exception {
+        // Build a function with several real instructions so distinct decompilation
+        // lines map to distinct addresses. An empty test function would let a broken
+        // implementation that always navigates to entry-point still pass this test.
+        Address funcAddr = program.getAddressFactory().getDefaultAddressSpace().getAddress(0x01000400);
+        int txId = program.startTransaction("Create scroll-follow test function");
+        try {
+            // x86 sequence: 5 single-byte instructions ending in RET. Each disassembles
+            // to a distinct address, giving the decompiler something with body lines
+            // that have token-bearing addresses past the entry.
+            byte[] bytes = {(byte) 0x90, (byte) 0x90, (byte) 0x90, (byte) 0x90, (byte) 0xc3};
+            program.getMemory().setBytes(funcAddr, bytes);
+
+            ghidra.app.cmd.disassemble.DisassembleCommand cmd =
+                new ghidra.app.cmd.disassemble.DisassembleCommand(funcAddr, null, true);
+            cmd.applyTo(program, ghidra.util.task.TaskMonitor.DUMMY);
+
+            ghidra.program.model.address.AddressSet body =
+                new ghidra.program.model.address.AddressSet(funcAddr, funcAddr.add(4));
+            program.getFunctionManager().createFunction(
+                "scrollFollowFn", funcAddr, body,
+                ghidra.program.model.symbol.SourceType.USER_DEFINED);
+        } finally {
+            program.endTransaction(txId, true);
+        }
+
+        java.util.List<Address> captured = new java.util.concurrent.CopyOnWriteArrayList<>();
+        reva.plugin.FollowMeService recordingService =
+            new reva.plugin.FollowMeService(configManager, serverManager) {
+                @Override
+                public void follow(ghidra.program.model.listing.Program p, Address a, Kind kind) {
+                    if (isEnabled() && p != null && a != null) {
+                        captured.add(a);
+                    }
+                }
+            };
+        recordingService.setEnabled(true);
+
+        reva.plugin.FollowMeService existing =
+            reva.util.RevaInternalServiceRegistry.getService(reva.plugin.FollowMeService.class);
+        reva.util.RevaInternalServiceRegistry.registerService(
+            reva.plugin.FollowMeService.class, recordingService);
+
+        try {
+            withMcpClient(createMcpTransport(), client -> {
+                client.initialize();
+
+                // First request the function from line 1 to learn how many lines it has,
+                // then re-request with a body-line offset so the per-line follow has a
+                // target that won't coalesce with the entry-point follow.
+                Map<String, Object> probeArgs = new HashMap<>();
+                probeArgs.put("programPath", programPath);
+                probeArgs.put("functionNameOrAddress", "scrollFollowFn");
+                CallToolResult probe = client.callTool(new CallToolRequest("get-decompilation", probeArgs));
+                assertMcpResultNotError(probe, "probe decompilation should succeed");
+                TextContent probeContent = (TextContent) probe.content().get(0);
+                JsonNode probeJson = parseJsonContent(probeContent.text());
+                int totalLines = probeJson.get("totalLines").asInt();
+                assertTrue("function should decompile to >= 3 lines, got " + totalLines, totalLines >= 3);
+
+                captured.clear();
+                int bodyOffset = totalLines; // last line is typically the closing brace
+                Map<String, Object> args = new HashMap<>();
+                args.put("programPath", programPath);
+                args.put("functionNameOrAddress", "scrollFollowFn");
+                args.put("offset", bodyOffset);
+                CallToolResult result = client.callTool(new CallToolRequest("get-decompilation", args));
+                assertMcpResultNotError(result, "get-decompilation should succeed");
+
+                assertTrue("Expected eager + per-line follow calls, got " + captured.size() +
+                    " (" + captured + ")", captured.size() >= 2);
+                assertEquals("First follow should target function entry for immediate feedback",
+                    funcAddr, captured.get(0));
+
+                // After decompilation, at least one captured address must differ from
+                // the entry — otherwise the implementation isn't actually using the
+                // requested line, which is the whole point of this feature.
+                boolean refined = captured.stream().skip(1).anyMatch(a -> !a.equals(funcAddr));
+                assertTrue("Per-line follow should resolve to a body address distinct from entry, got "
+                    + captured, refined);
+
+                ghidra.program.model.address.AddressSetView fullBody =
+                    program.getFunctionManager().getFunctionAt(funcAddr).getBody();
+                for (Address addr : captured) {
+                    assertTrue("Follow address " + addr + " should fall in the function body",
+                        fullBody.contains(addr));
+                }
+            });
+        } finally {
+            reva.util.RevaInternalServiceRegistry.unregisterService(reva.plugin.FollowMeService.class);
+            if (existing != null) {
+                reva.util.RevaInternalServiceRegistry.registerService(
+                    reva.plugin.FollowMeService.class, existing);
+            }
+        }
+    }
 
 }

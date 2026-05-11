@@ -931,6 +931,17 @@ public class DecompilerToolProvider extends AbstractToolProvider {
                 // Add content to results
                 resultData.putAll(syncedContent);
 
+                // Refine follow to the requested line so the CodeBrowser scrolls with the
+                // LLM. The earlier followRead landed the cursor on the function entry for
+                // immediate feedback before decompilation; this call retargets to the
+                // line being read. Coalescing in FollowMeService suppresses the no-op
+                // case where the offset resolves back to the entry address.
+                List<ClangLine> followClangLines = DecompilerUtils.toLines(markup);
+                LineAddressMatch lineMatch = findNearbyAddressForLine(program, followClangLines, offset);
+                if (lineMatch != null) {
+                    followRead(program, lineMatch.address());
+                }
+
                 // Get additional details like high-level function signature
                 resultData.put("decompSignature", decompiledFunction.getSignature());
 

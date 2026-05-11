@@ -156,7 +156,7 @@ public class ScriptDirectoryManager {
         }
         for (Path dir : readableDirectories) {
             Path candidate = dir.resolve(name);
-            if (Files.isRegularFile(candidate)) {
+            if (Files.isRegularFile(candidate) && isInsideReadableDirectory(candidate)) {
                 return Optional.of(candidate);
             }
         }

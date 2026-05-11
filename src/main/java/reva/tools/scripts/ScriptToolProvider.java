@@ -323,6 +323,7 @@ public class ScriptToolProvider extends AbstractToolProvider {
             String nameFilter = getOptionalString(request, "nameFilter", "");
             int startIndex = getOptionalInt(request, "startIndex", 0);
             int maxCount = getOptionalInt(request, "maxCount", 100);
+            validatePaginationArgs(startIndex, maxCount);
 
             List<Path> all = dirManager.listAllScripts();
             List<Map<String, Object>> matching = new ArrayList<>();
@@ -340,7 +341,7 @@ public class ScriptToolProvider extends AbstractToolProvider {
             }
 
             int total = matching.size();
-            int end = Math.min(total, startIndex + maxCount);
+            int end = (int) Math.min((long) total, (long) startIndex + (long) maxCount);
             List<Map<String, Object>> page = (startIndex < total)
                 ? matching.subList(startIndex, end)
                 : List.of();
@@ -352,6 +353,15 @@ public class ScriptToolProvider extends AbstractToolProvider {
             response.put("returned", page.size());
             return createJsonResult(response);
         });
+    }
+
+    static void validatePaginationArgs(int startIndex, int maxCount) {
+        if (startIndex < 0) {
+            throw new IllegalArgumentException("startIndex must be >= 0");
+        }
+        if (maxCount < 1) {
+            throw new IllegalArgumentException("maxCount must be >= 1");
+        }
     }
 
     // -------- read-script --------
@@ -500,7 +510,8 @@ public class ScriptToolProvider extends AbstractToolProvider {
     private void registerEditScriptTool() {
         Map<String, Object> properties = new HashMap<>();
         properties.put("scriptName", SchemaUtil.stringProperty(
-            "Script file name resolved across registered script directories."));
+            "Script file name resolved under the default writeable scripts "
+            + "directory."));
         properties.put("scriptPath", SchemaUtil.stringProperty(
             "Absolute path to the script to edit (must be writeable)."));
         properties.put("old_string", SchemaUtil.stringProperty(

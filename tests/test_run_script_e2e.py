@@ -342,12 +342,24 @@ class TestRunScriptGhidraAPI:
             f"rename moved the function unexpectedly: "
             f"old={old_entry!r} stdout={vdata['stdout']!r}"
         )
-        # The two-script round-trip is sufficient evidence the rename
-        # committed: Script 2 ran in a fresh GhidraState built from
-        # currentProgram, so any cache between the two calls would have to
-        # invalidate on commit — which it does. A cross-check via
-        # get-functions would also be useful but the function-info cache
-        # paths differ in CLI mode and aren't the path under test here.
+
+        # Cross-check via get-functions. createMultiJsonResult emits
+        # content[0]=metadata and content[1..n]=one function per item,
+        # so we parse the rest of content/, not a "functions" field.
+        listing = await mcp_stdio_client.call_tool(
+            "get-functions",
+            arguments={
+                "programPath": program_path,
+                "filterDefaultNames": False,
+                "maxCount": 500,
+            },
+        )
+        names = [
+            json.loads(item.text).get("name") for item in listing.content[1:]
+        ]
+        assert new_name in names, (
+            f"get-functions didn't surface rename; names={names}"
+        )
 
     async def test_set_and_read_plate_comment_round_trip(
         self, mcp_stdio_client, isolated_workspace

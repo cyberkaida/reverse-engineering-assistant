@@ -43,7 +43,7 @@ The `reva.server` package contains the core MCP (Model Context Protocol) server 
 │                    McpSyncServer                                │
 │  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐ │
 │  │ Tool Providers  │  │Resource Providers│  │   Prompts      │ │
-│  │     (17)        │  │      (1+)       │  │   (future)     │ │
+│  │     (18)        │  │      (1+)       │  │   (future)     │ │
 │  └─────────────────┘  └─────────────────┘  └─────────────────┘ │
 └─────────────────────────────────────────────────────────────────┘
                               │
@@ -75,7 +75,7 @@ The central orchestrator for the entire MCP server infrastructure. Implements `R
 |----------------|-------------|
 | Server Lifecycle | Start, stop, restart with graceful handling |
 | Transport Config | Jetty server setup with streamable HTTP |
-| Provider Registration | 17 tool providers + resource providers |
+| Provider Registration | 18 tool providers + resource providers |
 | Multi-Tool Coordination | Track programs across Ghidra tool instances |
 | Configuration | Dynamic response to config changes |
 | Security | Optional API key authentication |
@@ -155,7 +155,7 @@ currentTransportProvider = HttpServletStreamableServerTransportProvider.builder(
 2. **Host/Port Binding** - Configure ServerConnector with host and port
 3. **Security Setup** - Add ApiKeyAuthFilter if authentication is enabled
 4. **Transport Initialization** - Configure streamable HTTP transport
-5. **Provider Registration** - Register all 17 tool providers and resource providers
+5. **Provider Registration** - Register all 18 tool providers and resource providers
 6. **Server Launch** - Start Jetty server in background GThreadPool thread
 7. **Readiness Check** - Wait up to 10 seconds for server to be ready
 

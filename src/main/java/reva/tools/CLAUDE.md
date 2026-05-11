@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with th
 
 ## Package Overview
 
-The `reva.tools` package implements MCP (Model Context Protocol) tool providers that expose Ghidra's reverse engineering capabilities to AI models. The package contains 17 specialized tool providers organized into five categories: Core Analysis, Data & Types, Advanced Analysis, Annotations, and Project Management. Each tool provider focuses on a specific domain and follows consistent patterns for parameter handling, error management, and JSON response formatting.
+The `reva.tools` package implements MCP (Model Context Protocol) tool providers that expose Ghidra's reverse engineering capabilities to AI models. The package contains 18 specialized tool providers organized into five categories: Core Analysis, Data & Types, Advanced Analysis, Annotations, and Project Management. Each tool provider focuses on a specific domain and follows consistent patterns for parameter handling, error management, and JSON response formatting.
 
 ## Architecture Patterns
 
@@ -434,7 +434,7 @@ if (monitor.isCancelled()) {
 
 ## Tool Categories
 
-### Current Tool Providers (17 Total)
+### Current Tool Providers (18 Total)
 
 **Core Analysis** (6 providers):
 - **decompiler/** - Decompilation and variable manipulation
@@ -462,6 +462,9 @@ if (monitor.isCancelled()) {
 
 **Project Management** (1 provider):
 - **project/** - Program listing and project management
+
+**Scripting** (1 provider):
+- **scripts/** - Python script run/list/read/write/edit (requires PyGhidra)
 
 ### Tool Naming Conventions
 - Use kebab-case for tool names

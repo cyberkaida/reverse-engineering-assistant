@@ -101,3 +101,36 @@ public class MyToolIntegrationTest extends RevaIntegrationTestBase {
 - **Transaction leaks**: Always close transactions in finally blocks
 - **Program not found**: Ensure `env.open(program)` is called if tools can't find the program
 - **JSON parsing**: Use helper methods, don't parse manually
+
+## Worktree → Ghidra Install Collisions (`gradle install`)
+
+`gradle install` packages the extension using the gradle project directory's
+**name** as the archive base name. When you run from a git worktree, the
+worktree directory name (e.g. `lively-splashing-teapot`) becomes the
+extension's installed directory name in `$GHIDRA_INSTALL_DIR/Ghidra/Extensions/`.
+
+This means **two consequences you must handle**:
+
+1. **Stale extensions accumulate.** Repeated installs from different worktrees
+   leave behind directories like `lively-splashing-teapot/`,
+   `peaceful-doodling-stream/`, and `reverse-engineering-assistant/`. Ghidra
+   tries to load them all; class duplication or version skew can cause flaky
+   behavior. After installing from a worktree, **delete the stale ReVa-named
+   directories** and rename the new one to `reverse-engineering-assistant`:
+
+   ```bash
+   rm -rf "$GHIDRA_INSTALL_DIR/Ghidra/Extensions/<old-worktree-name>"
+   mv "$GHIDRA_INSTALL_DIR/Ghidra/Extensions/<current-worktree-name>" \
+      "$GHIDRA_INSTALL_DIR/Ghidra/Extensions/reverse-engineering-assistant"
+   ```
+
+2. **Python e2e tests load the installed extension**, not the worktree source.
+   Forgetting to `gradle install` (or installing from the wrong worktree)
+   produces "tool not found" errors that look like missing test setup but are
+   really stale installs. Always `gradle install` + rename before running
+   `pytest -m e2e`.
+
+A bare `git worktree add` does **not** propagate any settings here — the gradle
+project name comes from the directory name. If you want a stable extension
+name across worktrees, override `buildExtension.archiveBaseName` in
+`build.gradle` (not done by default).

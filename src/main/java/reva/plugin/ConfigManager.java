@@ -60,6 +60,8 @@ public class ConfigManager implements ConfigurationBackendListener {
     public static final String ANALYSIS_TIMEOUT_SECONDS = "Analysis Timeout Seconds";
     public static final String FOLLOW_READS = "Follow Reads";
     public static final String FOLLOW_WRITES = "Follow Writes";
+    public static final String SCRIPT_TIMEOUT_SECONDS = "Script Timeout Seconds";
+    public static final String SCRIPT_OUTPUT_CHAR_LIMIT = "Script Output Char Limit";
 
     // Default values
     private static final int DEFAULT_PORT = 8080;
@@ -78,6 +80,8 @@ public class ConfigManager implements ConfigurationBackendListener {
     private static final int DEFAULT_ANALYSIS_TIMEOUT_SECONDS = 600;
     private static final boolean DEFAULT_FOLLOW_READS = true;
     private static final boolean DEFAULT_FOLLOW_WRITES = true;
+    private static final int DEFAULT_SCRIPT_TIMEOUT_SECONDS = 60;
+    private static final int DEFAULT_SCRIPT_OUTPUT_CHAR_LIMIT = 65536;
 
     private final ConfigurationBackend backend;
     private final Map<String, Object> cachedOptions = new ConcurrentHashMap<>();
@@ -203,6 +207,10 @@ public class ConfigManager implements ConfigurationBackendListener {
             "When 'Follow Me' is on, navigate the listing for tools that read program state (e.g. get-decompilation, find-cross-references)");
         toolOptions.registerOption(FOLLOW_WRITES, DEFAULT_FOLLOW_WRITES, help,
             "When 'Follow Me' is on, navigate the listing for tools that modify program state (e.g. set-comment, rename-variables)");
+        toolOptions.registerOption(SCRIPT_TIMEOUT_SECONDS, DEFAULT_SCRIPT_TIMEOUT_SECONDS, help,
+            "Default timeout in seconds for the run-script tool (per-call override available)");
+        toolOptions.registerOption(SCRIPT_OUTPUT_CHAR_LIMIT, DEFAULT_SCRIPT_OUTPUT_CHAR_LIMIT, help,
+            "Maximum characters captured per stdout/stderr stream from a script run (default 65536)");
     }
 
     /**
@@ -243,6 +251,10 @@ public class ConfigManager implements ConfigurationBackendListener {
             backend.getBoolean(SERVER_OPTIONS, FOLLOW_READS, DEFAULT_FOLLOW_READS));
         cachedOptions.put(FOLLOW_WRITES,
             backend.getBoolean(SERVER_OPTIONS, FOLLOW_WRITES, DEFAULT_FOLLOW_WRITES));
+        cachedOptions.put(SCRIPT_TIMEOUT_SECONDS,
+            backend.getInt(SERVER_OPTIONS, SCRIPT_TIMEOUT_SECONDS, DEFAULT_SCRIPT_TIMEOUT_SECONDS));
+        cachedOptions.put(SCRIPT_OUTPUT_CHAR_LIMIT,
+            backend.getInt(SERVER_OPTIONS, SCRIPT_OUTPUT_CHAR_LIMIT, DEFAULT_SCRIPT_OUTPUT_CHAR_LIMIT));
 
         Msg.debug(this, "Loaded ReVa configuration settings");
     }
@@ -591,6 +603,37 @@ public class ConfigManager implements ConfigurationBackendListener {
      */
     public void setFollowWrites(boolean follow) {
         backend.setBoolean(SERVER_OPTIONS, FOLLOW_WRITES, follow);
+    }
+
+    /**
+     * @return default per-call timeout in seconds for the run-script tool
+     */
+    public int getScriptTimeoutSeconds() {
+        return (Integer) cachedOptions.getOrDefault(SCRIPT_TIMEOUT_SECONDS,
+            DEFAULT_SCRIPT_TIMEOUT_SECONDS);
+    }
+
+    /**
+     * Set the default per-call timeout in seconds for the run-script tool.
+     */
+    public void setScriptTimeoutSeconds(int seconds) {
+        backend.setInt(SERVER_OPTIONS, SCRIPT_TIMEOUT_SECONDS, seconds);
+    }
+
+    /**
+     * @return maximum characters captured per stdout/stderr stream from a
+     *         script run before truncation
+     */
+    public int getScriptOutputCharLimit() {
+        return (Integer) cachedOptions.getOrDefault(SCRIPT_OUTPUT_CHAR_LIMIT,
+            DEFAULT_SCRIPT_OUTPUT_CHAR_LIMIT);
+    }
+
+    /**
+     * Set the maximum characters captured per stdout/stderr stream.
+     */
+    public void setScriptOutputCharLimit(int chars) {
+        backend.setInt(SERVER_OPTIONS, SCRIPT_OUTPUT_CHAR_LIMIT, chars);
     }
 
     /**

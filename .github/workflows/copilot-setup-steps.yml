@@ -59,7 +59,7 @@ jobs:
 
       - name: Install Ghidra
         # Sets GHIDRA_INSTALL_DIR for subsequent steps and the agent session.
-        uses: antoniovazquezblanco/setup-ghidra@v2.1.1
+        uses: antoniovazquezblanco/setup-ghidra@v2.1.2
         with:
           version: "latest"
           auth_token: ${{ secrets.GITHUB_TOKEN }}

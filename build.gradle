@@ -151,6 +151,20 @@ task integrationTest(type: Test) {
 	exclude '**/*Suite*'
 }
 
+// Ghidra 12.1+ installs GhidraObjectInputFilter via a custom serial filter factory
+// during HeadlessGhidraApplicationConfiguration init. The JVM only allows the
+// serial filter factory to be set once, and JDK 17+ defaults to BuiltinFilterFactory
+// before any user code runs — so under a Gradle test JVM, Ghidra's installer fails
+// with "Cannot replace filter factory: ObjectInputFilter$Config$BuiltinFilterFactory".
+// Pin the factory at JVM startup via -Djdk.serialFilterFactory so Ghidra's
+// installer just looks up the existing factory instead of replacing it. The
+// factory class itself lives in the Ghidra Framework jar that's already on the
+// test classpath. Documented in GhidraSerialFilterFactory.java line 27-31.
+tasks.withType(Test).configureEach {
+	systemProperty 'jdk.serialFilterFactory',
+		'ghidra.framework.remote.GhidraSerialFilterFactory'
+}
+
 // Make check depend on integrationTest
 check.dependsOn integrationTest
 

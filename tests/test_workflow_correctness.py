@@ -15,13 +15,30 @@ import json
 from pathlib import Path
 
 import pytest
+import pytest_asyncio
 
+# Every test in this module runs against the session-scoped mcp-reva
+# subprocess (see mcp_stdio_client override below), so all tests must
+# share the same event loop the session fixture lives on. loop_scope
+# defaults to "function" otherwise, which would prevent the cross-test
+# session fixture from working.
 pytestmark = [
     pytest.mark.e2e,
     pytest.mark.slow,
-    pytest.mark.asyncio,
+    pytest.mark.asyncio(loop_scope="session"),
     pytest.mark.timeout(240),
 ]
+
+
+# Override conftest.py's function-scoped mcp_stdio_client for this module
+# with the session-scoped variant. The 66 tests here only need a working
+# MCP client — none depend on per-test workspace state. Each test isolates
+# itself by importing under a unique destinationFolder, allocated by the
+# autouse _set_test_program_folder fixture and consumed below in
+# _import_and_analyze.
+@pytest_asyncio.fixture(loop_scope="session")
+async def mcp_stdio_client(mcp_stdio_client_session):
+    yield mcp_stdio_client_session
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
@@ -67,12 +84,20 @@ async def _import_and_analyze(client, fixture_name: str = "test_arm64") -> str:
     with forceFullAnalysis=true. This guarantees that the Mach-O symbol-table
     analyzer has applied function symbols, rather than relying on whatever
     subset analyzeAfterImport happened to run.
+
+    Each test imports into a unique destinationFolder (allocated by the
+    autouse _set_test_program_folder fixture in conftest.py) so the
+    session-scoped mcp-reva subprocess doesn't accumulate name collisions.
+    import-file auto-creates the folder.
     """
+    from tests.conftest import reva_test_program_folder
+
     fixture = _validate_fixture(fixture_name)
     result = await client.call_tool(
         "import-file",
         arguments={
             "path": fixture,
+            "destinationFolder": reva_test_program_folder(),
             "enableVersionControl": False,
             "analyzeAfterImport": False,
         },

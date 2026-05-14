@@ -13,11 +13,59 @@ Fixture Scopes:
 - function: Created for each test function (server, mcp_client, capture_ghidra_logs)
 """
 
+import contextvars
 import pytest
 import pytest_asyncio
+import re
 import sys
 import os
 from pathlib import Path
+
+
+# ============================================================================
+# Per-test destinationFolder isolation
+# ============================================================================
+#
+# The shared session-scoped mcp_stdio_client_session fixture reuses one
+# mcp-reva subprocess across many tests, which amortizes the ~30-60s
+# PyGhidra/JVM/Jetty startup macOS pays per cold start. The tradeoff is
+# that the subprocess's project is shared, so naive imports would
+# collide (Ghidra rejects duplicate program paths, and structure/tag
+# names registered by one test could leak into another's view of the
+# same program).
+#
+# Resolution: each test imports into a unique destinationFolder derived
+# from its nodeid. import-file auto-creates the folder, so callers don't
+# need a separate create-folder call. _import_and_analyze in
+# test_workflow_correctness.py reads this contextvar.
+_test_program_folder: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "reva_test_program_folder", default="/"
+)
+
+
+def reva_test_program_folder() -> str:
+    """Return the destinationFolder allocated to the currently-running test.
+
+    Falls back to "/" when no test scope is active (e.g. session fixtures
+    importing fixtures before any test starts). Helpers like
+    ``_import_and_analyze`` use this to keep test-state inside a per-test
+    folder when sharing a session-scoped MCP subprocess.
+    """
+    return _test_program_folder.get()
+
+
+@pytest.fixture(autouse=True)
+def _set_test_program_folder(request):
+    """Allocate a unique destinationFolder for each test from its nodeid."""
+    raw = request.node.nodeid
+    # Replace any character that isn't safe in a Ghidra folder name. Ghidra
+    # tolerates alnum + a handful of separators; "_" is the safe baseline.
+    safe = re.sub(r"[^A-Za-z0-9_]+", "_", raw).strip("_") or "test"
+    token = _test_program_folder.set(f"/reva_e2e/{safe}/")
+    try:
+        yield
+    finally:
+        _test_program_folder.reset(token)
 
 
 # ============================================================================
@@ -446,3 +494,92 @@ async def mcp_stdio_client(isolated_workspace):
         if "cancel scope" not in str(e):
             raise
         print(f"[Fixture] Suppressed expected cancel scope error during stdio_client cleanup")
+
+
+@pytest.fixture(scope="session")
+def _session_mcp_workspace(tmp_path_factory) -> Path:
+    """Single shared workspace for the session-scoped mcp-reva subprocess.
+
+    The function-scoped ``isolated_workspace`` fixture would re-create
+    .reva/ for every test, which defeats the point of reusing the
+    subprocess (and the subprocess captures cwd at startup anyway, so
+    re-pointing isolated_workspace mid-session has no effect on the
+    already-running server).
+    """
+    return tmp_path_factory.mktemp("reva_session_workspace")
+
+
+@pytest_asyncio.fixture(scope="session", loop_scope="session")
+async def mcp_stdio_client_session(_session_mcp_workspace):
+    """Session-scoped variant of mcp_stdio_client — one mcp-reva per pytest run.
+
+    Spawns the mcp-reva subprocess exactly once for the whole pytest session
+    instead of paying the ~30-60s PyGhidra/JVM/Jetty startup per test. Test
+    modules that opt in (currently test_workflow_correctness.py) override
+    the function-scoped ``mcp_stdio_client`` with this fixture.
+
+    Tests must isolate themselves inside the shared project. Use the
+    ``reva_test_program_folder()`` helper as the ``destinationFolder`` for
+    import-file calls — the autouse ``_set_test_program_folder`` fixture
+    allocates a unique folder per test, and import-file auto-creates it.
+
+    Suppresses the same anyio cancel-scope RuntimeError as
+    ``mcp_stdio_client`` during teardown.
+    """
+    from mcp.client.stdio import stdio_client, StdioServerParameters
+    from mcp import ClientSession
+    import asyncio
+
+    server_params = StdioServerParameters(
+        command="uv",
+        args=["run", "mcp-reva"],
+        cwd=str(_session_mcp_workspace),
+        env=os.environ.copy(),
+    )
+
+    print(
+        f"\n[Fixture] Starting session-scoped mcp-reva in "
+        f"{_session_mcp_workspace}..."
+    )
+
+    try:
+        async with stdio_client(server_params) as (read_stream, write_stream):
+            session = ClientSession(read_stream, write_stream)
+            await session.__aenter__()
+            try:
+                print("[Fixture] Subprocess started; initializing MCP session...")
+                # Session-scoped init runs once. Give it more headroom than the
+                # per-test fixture (60s) because the first cold start on macOS
+                # CI is the worst-case path.
+                try:
+                    init_result = await asyncio.wait_for(
+                        session.initialize(),
+                        timeout=180.0,
+                    )
+                    print(
+                        f"[Fixture] Session MCP ready: "
+                        f"{init_result.serverInfo.name} "
+                        f"v{init_result.serverInfo.version}"
+                    )
+                except asyncio.TimeoutError:
+                    raise TimeoutError(
+                        "Session-scoped MCP init timed out after 180 seconds. "
+                        "Check stderr logs for errors."
+                    )
+
+                yield session
+
+                print("[Fixture] Closing session-scoped MCP session...")
+            finally:
+                try:
+                    await session.__aexit__(None, None, None)
+                except RuntimeError as e:
+                    if "cancel scope" not in str(e):
+                        raise
+                except Exception as e:
+                    print(
+                        f"[Fixture] Warning during session-scoped cleanup: {e}"
+                    )
+    except RuntimeError as e:
+        if "cancel scope" not in str(e):
+            raise

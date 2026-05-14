@@ -1325,14 +1325,25 @@ public class ProjectToolProvider extends AbstractToolProvider {
                     return createErrorResult("No active project found");
                 }
 
-                // Get destination folder
+                // Get destination folder. If a non-root folder is requested
+                // but doesn't exist, auto-create it (and any missing parents)
+                // — this lets callers stage imports under a unique folder per
+                // operation without needing a separate create-folder tool.
                 DomainFolder destFolder;
                 if (destinationFolder.equals("/")) {
                     destFolder = project.getProjectData().getRootFolder();
                 } else {
                     destFolder = project.getProjectData().getFolder(destinationFolder);
                     if (destFolder == null) {
-                        return createErrorResult("Destination folder not found: " + destinationFolder);
+                        try {
+                            destFolder = createDestinationFolderHierarchy(
+                                project, destinationFolder);
+                        } catch (ghidra.util.InvalidNameException
+                                | java.io.IOException e) {
+                            return createErrorResult(
+                                "Could not create destination folder "
+                                    + destinationFolder + ": " + e.getMessage());
+                        }
                     }
                 }
 
@@ -1804,6 +1815,35 @@ public class ProjectToolProvider extends AbstractToolProvider {
                 return createErrorResult("Failed to capture debug info: " + e.getMessage());
             }
         });
+    }
+
+    /**
+     * Walk a slash-separated project path and create any missing folders, returning
+     * the deepest folder. Used by import-file to honor destinationFolder values that
+     * don't yet exist (e.g. per-test sandboxing folders supplied by callers).
+     *
+     * Empty path components (leading "/", trailing "/", "//" runs) are skipped.
+     *
+     * @param project the active Ghidra project
+     * @param path slash-separated folder path, e.g. "/foo/bar/" or "foo/bar"
+     * @return the deepest DomainFolder for the path
+     * @throws ghidra.util.InvalidNameException if any segment is invalid
+     * @throws java.io.IOException if folder creation fails
+     */
+    private DomainFolder createDestinationFolderHierarchy(Project project, String path)
+            throws ghidra.util.InvalidNameException, java.io.IOException {
+        DomainFolder folder = project.getProjectData().getRootFolder();
+        for (String part : path.split("/")) {
+            if (part.isEmpty()) {
+                continue;
+            }
+            DomainFolder child = folder.getFolder(part);
+            if (child == null) {
+                child = folder.createFolder(part);
+            }
+            folder = child;
+        }
+        return folder;
     }
 
 }

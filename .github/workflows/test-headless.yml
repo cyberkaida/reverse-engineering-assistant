@@ -87,16 +87,32 @@ jobs:
 
     - name: Run Headless Integration Tests
       id: headless_test
+      shell: bash
       run: |
         echo "::group::Running headless integration tests"
-        uv run pytest tests/ -v --timeout=180 --tb=short --junitxml=test-results.xml
+        # macos-latest (arm64, M1) hosted runners pay PyGhidra/JVM startup
+        # per subprocess test (~30-60s each) and the e2e suite spawns
+        # mcp-reva fresh for every test via the function-scoped
+        # mcp_stdio_client fixture. Sequential, that's ~30-45 min wall-clock
+        # for 100+ tests. On macOS we parallelize with pytest-xdist so JVM
+        # startups overlap. -n 2 (vs the 3 vCPUs available) keeps headroom
+        # for the 7GB RAM cap — each PyGhidra+JVM is ~1.5-2GB. Linux runs
+        # sequentially since it's already <10 min and the sequential path
+        # is the well-trodden one.
+        # Default --dist=load round-robins individual tests across workers,
+        # which is what we want: the 66-test workflow_correctness file
+        # spreads across both workers instead of piling onto one.
+        if [[ "$RUNNER_OS" == "macOS" ]]; then
+          PYTEST_NPROC="-n 2"
+        else
+          PYTEST_NPROC=""
+        fi
+        uv run pytest tests/ $PYTEST_NPROC -v --timeout=180 --tb=short --junitxml=test-results.xml
         echo "::endgroup::"
-      # macos-latest (arm64) hosted runners pay PyGhidra/JVM startup per
-      # subprocess test, making the e2e suite ~5x slower than Linux. With
-      # the workflow_correctness suite the full run takes ~45 min on macOS
-      # vs <10 min on Linux. Keep headroom above the observed 43 min worst
-      # case so the step doesn't kill the run before tests finish.
-      timeout-minutes: 60
+      # Sequential macOS used the full 60 min; -n 2 should ~halve that to
+      # ~25 min. 40 min leaves room for the first run after the change to
+      # surface tuning issues without killing the whole matrix.
+      timeout-minutes: 40
       env:
         GHIDRA_INSTALL_DIR: ${{ env.GHIDRA_INSTALL_DIR }}
 

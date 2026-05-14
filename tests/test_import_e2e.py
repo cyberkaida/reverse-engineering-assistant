@@ -11,19 +11,34 @@ Test Fixtures:
 """
 
 import pytest
+import pytest_asyncio
 import json
 from pathlib import Path
 
-# Mark all tests in this file
+# Mark all tests in this file. loop_scope="session" so every test shares
+# the one event loop the session-scoped mcp-reva subprocess lives on
+# (see the mcp_stdio_client override below).
 pytestmark = [
     pytest.mark.e2e,
     pytest.mark.slow,
-    pytest.mark.asyncio,
+    pytest.mark.asyncio(loop_scope="session"),
     pytest.mark.timeout(240)  # 4 minutes for full workflow
 ]
 
 # Path to test fixtures directory
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
+
+
+# Reuse one mcp-reva subprocess across this whole module instead of paying
+# the ~30-60s PyGhidra/JVM/Jetty startup per test. These tests import the
+# same fixtures repeatedly; Ghidra's Loaded.save() auto-appends a counter
+# on name collision (test_arm64, test_arm64.0, ...) so the imports don't
+# clash, and every test asserts on the returned importedPrograms paths and
+# uses ">=" checks against list-project-files — both robust to a shared,
+# accumulating project. See conftest.mcp_stdio_client_session.
+@pytest_asyncio.fixture(loop_scope="session")
+async def mcp_stdio_client(mcp_stdio_client_session):
+    yield mcp_stdio_client_session
 
 
 def validate_fixture(fixture_name: str):

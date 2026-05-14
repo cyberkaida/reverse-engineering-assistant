@@ -20,15 +20,29 @@ import uuid
 from pathlib import Path
 
 import pytest
+import pytest_asyncio
 
+# loop_scope="session" so every test shares the one event loop the
+# session-scoped mcp-reva subprocess lives on (see mcp_stdio_client below).
 pytestmark = [
     pytest.mark.e2e,
     pytest.mark.slow,
-    pytest.mark.asyncio,
+    pytest.mark.asyncio(loop_scope="session"),
     pytest.mark.timeout(240),
 ]
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
+
+
+# Reuse one mcp-reva subprocess across this whole module instead of paying
+# the ~30-60s PyGhidra/JVM/Jetty startup per test. Each test still imports
+# its own program: Ghidra's Loaded.save() auto-appends a counter on name
+# collision (test_arm64, test_arm64.0, ...), and every test here operates
+# on the returned importedPrograms path, so the copies stay independent.
+# See conftest.mcp_stdio_client_session.
+@pytest_asyncio.fixture(loop_scope="session")
+async def mcp_stdio_client(mcp_stdio_client_session):
+    yield mcp_stdio_client_session
 
 
 def _resolve_workflow_fixture():

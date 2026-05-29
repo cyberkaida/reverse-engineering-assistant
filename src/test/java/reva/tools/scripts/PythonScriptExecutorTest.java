@@ -18,6 +18,7 @@ package reva.tools.scripts;
 import static org.junit.Assert.*;
 import static org.mockito.Mockito.*;
 
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.Before;
@@ -142,6 +143,33 @@ public class PythonScriptExecutorTest {
             (f, p, t, out, err, monitor) -> { /* no-op */ });
         Result r = exec.execute(scriptFile, program, null, 60, 1024);
         assertFalse(r.timedOut());
+    }
+
+    @Test
+    public void returnsPromptlyWhenScriptFinishesBeforeTimeout() throws Exception {
+        // Regression guard: the executor schedules a TimeoutTaskMonitor that
+        // fires after `timeoutSeconds`, but it must NOT wait for that monitor
+        // — it must return as soon as the runner returns. If someone ever
+        // rewrites this to await the timeout (e.g. join on a timer thread,
+        // or block on a Future with the timeout deadline), the wall-clock
+        // here jumps from milliseconds to ~60s and this test fails.
+        PythonScriptExecutor exec = new PythonScriptExecutor(
+            (f, p, t, out, err, monitor) -> Thread.sleep(100));
+
+        long startNs = System.nanoTime();
+        Result r = exec.execute(scriptFile, program, null, 60, 1024);
+        long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNs);
+
+        assertFalse("script finished before timeout, should not be flagged",
+            r.timedOut());
+        assertNull("no execution error expected", r.executionError());
+        // Script slept 100ms; timeout was 60s. Generous slack for CI jitter,
+        // but well below the timeout — the failure mode we care about is
+        // "the executor blocked for the full timeout".
+        assertTrue(
+            "execute() returned in " + elapsedMs + "ms but timeout was 60s; "
+            + "expected prompt return after runner completed",
+            elapsedMs < 5_000);
     }
 
     @Test

@@ -11,7 +11,7 @@ This file provides guidance for Claude Code when working with the ReVa headless 
 | **Default Host** | 127.0.0.1 |
 | **MCP SDK Version** | v0.17.0 |
 | **Jackson Version** | 2.20.x |
-| **PyGhidra Version** | 3.0.0+ |
+| **PyGhidra Version** | 3.1.0+ |
 | **Startup Time** | 4-7 seconds |
 | **Memory Usage** | ~250-400 MB |
 

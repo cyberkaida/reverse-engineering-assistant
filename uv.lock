@@ -557,15 +557,15 @@ wheels = [
 
 [[package]]
 name = "pyghidra"
-version = "3.0.0"
+version = "3.1.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "jpype1" },
     { name = "packaging" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/63/02/16f94ba4d32c01395d50973fe3aba1da9e9bf3551bc44364de3e8c9d71eb/pyghidra-3.0.0.tar.gz", hash = "sha256:865769da8e2575a97e2d531982039c12b9f8022d715d62e50b59fafd22be2c80", size = 51699, upload-time = "2025-12-08T18:07:33.168Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/1f/eb/842a540cf3a8328a76636de17b0f5b3b11ac75c50a89660260f27021412a/pyghidra-3.1.0.tar.gz", hash = "sha256:2106ac131eb9a4990a79ee84dc2d39a792cf7b2d0de5eaaf1b0e6d7d2d290bb6", size = 53509, upload-time = "2026-05-14T10:00:11.403Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/40/3e/0a5e4c786a7338d9fe68998257e9624839fdb51f70063842eddb18fd1107/pyghidra-3.0.0-py3-none-any.whl", hash = "sha256:b8380b285124059c2976523dfd7eabbf619b25b65383bc636384acbd8dbc9e08", size = 50325, upload-time = "2025-12-08T18:07:32.267Z" },
+    { url = "https://files.pythonhosted.org/packages/0d/e9/1d8f9a790be5c6d3f95a8c1428016269c0c049ae70463bc3edbc76f2bb04/pyghidra-3.1.0-py3-none-any.whl", hash = "sha256:62d76e4c42352fc38cb3a9526ba7e25681d21388c16e59a2d17e99aeaf47ac94", size = 51595, upload-time = "2026-05-14T09:59:59.323Z" },
 ]
 
 [[package]]
@@ -742,7 +742,7 @@ requires-dist = [
     { name = "httpx-sse", marker = "extra == 'test'", specifier = ">=0.4.0" },
     { name = "mcp" },
     { name = "mcp", marker = "extra == 'test'" },
-    { name = "pyghidra", specifier = ">=3.0.0" },
+    { name = "pyghidra", specifier = ">=3.1.0" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=7.0.0" },
     { name = "pytest-asyncio", marker = "extra == 'test'", specifier = ">=0.21.0" },
     { name = "pytest-sugar", marker = "extra == 'test'", specifier = ">=0.9.0" },

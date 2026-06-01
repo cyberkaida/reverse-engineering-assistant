@@ -135,6 +135,18 @@ dependencies {
 	// pcodeTestImplementation "junit:junit:4.13.2"
 }
 
+// Ghidra 12.1+ installs a global deserialization filter factory during
+// ApplicationConfiguration init (GhidraObjectInputFilter). Java's
+// ObjectInputFilter.Config.setSerialFilterFactory() may only be called once,
+// before any deserialization. Gradle test workers deserialize over their
+// daemon socket first, locking the factory to the JVM builtin and causing
+// "IllegalStateException: Cannot replace filter factory". Specifying the
+// factory at JVM startup lets Ghidra lazily reuse it instead of replacing it.
+// Matches Ghidra's own gradle/javaTestProject.gradle test configuration.
+test {
+	jvmArgs '-Djdk.serialFilterFactory=ghidra.framework.remote.GhidraSerialFilterFactory'
+}
+
 task integrationTest(type: Test) {
 	group 'verification'
 	description 'Runs integration tests (tests that require GUI/headed environment)'
@@ -146,6 +158,10 @@ task integrationTest(type: Test) {
 
 	// These tests require a GUI environment
 	systemProperty 'java.awt.headless', 'false'
+
+	// See note on the `test` task: Ghidra 12.1+ requires the serial filter
+	// factory to be specified at JVM startup for Gradle test workers.
+	jvmArgs '-Djdk.serialFilterFactory=ghidra.framework.remote.GhidraSerialFilterFactory'
 
 	// Exclude suite classes
 	exclude '**/*Suite*'

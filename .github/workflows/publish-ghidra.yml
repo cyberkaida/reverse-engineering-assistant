@@ -22,6 +22,7 @@ jobs:
             "12.0.2",
             "12.0.3",
             "12.0.4",
+            "12.1",
         ]
     name: Build distribution 📦
     runs-on: ubuntu-latest

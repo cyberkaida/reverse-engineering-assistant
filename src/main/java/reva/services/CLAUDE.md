@@ -12,7 +12,7 @@ This file provides guidance for working with the ReVa services package, which im
 | **Implementation** | `McpServerManager` |
 | **MCP SDK Version** | v0.17.0 |
 | **Jackson Version** | 2.20.x |
-| **PyGhidra Version** | 3.0.0+ |
+| **PyGhidra Version** | 3.1.0+ |
 
 ## Package Overview
 

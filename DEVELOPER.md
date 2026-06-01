@@ -150,7 +150,7 @@ ReVa is designed to handle the Ghidra lifecycle correctly:
 | MCP SDK | v0.17.0 |
 | Jackson | 2.20.x |
 | Jetty | 11.0.26 |
-| PyGhidra | 3.0.0+ |
+| PyGhidra | 3.1.0+ |
 | JUnit | 4 (NOT 5) |
 
 ### Build Commands

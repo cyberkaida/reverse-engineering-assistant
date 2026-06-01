@@ -23,6 +23,7 @@ jobs:
           - "12.0.2"
           - "12.0.3"
           - "12.0.4"
+          - "12.1"
           - "latest"
       fail-fast: false  # Continue other tests if one fails
 
@@ -56,6 +57,16 @@ jobs:
       uses: gradle/actions/setup-gradle@v6
       with:
         gradle-version: "8.14"
+
+    # Ghidra releases ship prebuilt decompiler natives for Linux and Windows but
+    # NOT macOS. Without this, decompilation silently returns nothing on macOS
+    # runners and any decompiler-dependent headless test fails. Ghidra searches
+    # build/os/<platform> (where this task writes) before os/<platform>, so the
+    # installed PyGhidra runtime picks these up. Linux runners already have
+    # prebuilt natives, so the step is macOS-only.
+    - name: Build Ghidra natives (macOS only)
+      if: runner.os == 'macOS'
+      run: gradle -p "$GHIDRA_INSTALL_DIR/support/gradle" buildNatives
 
     - name: Build ReVa Extension
       run: gradle clean buildExtension --no-build-cache

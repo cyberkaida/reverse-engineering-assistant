@@ -271,7 +271,7 @@ Install via: `claude plugin marketplace add cyberkaida/reverse-engineering-assis
 
 ### Python
 - Python: 3.10+ (managed via uv)
-- PyGhidra: 3.0.0+ (Ghidra initialization)
+- PyGhidra: 3.1.0+ (Ghidra initialization)
 - MCP: Latest (stdio transport implementation)
 - httpx + httpx-sse: MCP HTTP client (for StdioBridge)
 

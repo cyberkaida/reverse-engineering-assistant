@@ -24,8 +24,14 @@ import org.junit.Before;
 import org.junit.After;
 import org.junit.BeforeClass;
 import org.junit.AfterClass;
+import org.junit.Rule;
+import org.junit.rules.TestWatcher;
+import org.junit.runner.Description;
 
 import static org.junit.Assert.fail;
+
+import ghidra.framework.Application;
+import ghidra.framework.OSFileNotFoundException;
 
 import java.time.Duration;
 import java.util.Map;
@@ -72,6 +78,42 @@ public abstract class RevaIntegrationTestBase extends AbstractGhidraHeadedIntegr
     protected ConfigManager configManager;
     protected McpServerManager serverManager;
     protected ObjectMapper objectMapper;
+
+    /**
+     * On test failure, surface an actionable hint when the failure is likely caused by a
+     * missing Ghidra decompiler native (macOS ships no prebuilt decompiler). This turns a
+     * confusing "Decompilation should not be empty" into a clear "run buildNatives".
+     */
+    @Rule
+    public final TestWatcher decompilerNativeHintWatcher = new TestWatcher() {
+        @Override
+        protected void failed(Throwable e, Description description) {
+            DecompilerNativeHint
+                .hintForFailure(System.getProperty("os.name"), isDecompileNativeAvailable())
+                .ifPresent(hint -> {
+                    System.err.println();
+                    System.err.println("================================ ReVa test hint ================================");
+                    System.err.println(hint);
+                    System.err.println("================================================================================");
+                });
+        }
+    };
+
+    /**
+     * Determine whether Ghidra can locate its decompiler native binary, mirroring how
+     * {@code DecompileProcessFactory} resolves it. Only a definitive "not found" reports
+     * false; any other error is treated as "available" so the hint is never misleading.
+     */
+    private static boolean isDecompileNativeAvailable() {
+        try {
+            Application.getOSFile("decompile");
+            return true;
+        } catch (OSFileNotFoundException e) {
+            return false;
+        } catch (Throwable t) {
+            return true;
+        }
+    }
 
 
     /**

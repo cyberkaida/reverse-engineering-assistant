@@ -1,7 +1,7 @@
 # ReVa Headless Integration Test Dependencies
 
 # PyGhidra for headless Ghidra integration
-pyghidra>=1.0.0
+pyghidra>=3.1.0
 
 # MCP SDK for proper client communication
 mcp>=1.0.0

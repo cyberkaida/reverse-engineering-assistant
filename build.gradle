@@ -143,8 +143,27 @@ dependencies {
 // "IllegalStateException: Cannot replace filter factory". Specifying the
 // factory at JVM startup lets Ghidra lazily reuse it instead of replacing it.
 // Matches Ghidra's own gradle/javaTestProject.gradle test configuration.
+//
+// GhidraSerialFilterFactory only exists in Ghidra 12.1+, so gate the JVM arg on
+// the installed version: setting it for an older Ghidra makes every test worker
+// fail at startup with "invalid jdk.serialFilterFactory: ClassNotFoundException".
+def ghidraSupportsSerialFilterFactory = {
+	def propsFile = new File(ghidraInstallDir, "Ghidra/application.properties")
+	if (!propsFile.exists()) {
+		return false
+	}
+	def props = new Properties()
+	propsFile.withInputStream { props.load(it) }
+	def parts = (props.getProperty("application.version", "0") =~ /\d+/).collect { it as int }
+	def major = parts.size() > 0 ? parts[0] : 0
+	def minor = parts.size() > 1 ? parts[1] : 0
+	return major > 12 || (major == 12 && minor >= 1)
+}()
+
 test {
-	jvmArgs '-Djdk.serialFilterFactory=ghidra.framework.remote.GhidraSerialFilterFactory'
+	if (ghidraSupportsSerialFilterFactory) {
+		jvmArgs '-Djdk.serialFilterFactory=ghidra.framework.remote.GhidraSerialFilterFactory'
+	}
 }
 
 task integrationTest(type: Test) {
@@ -160,8 +179,11 @@ task integrationTest(type: Test) {
 	systemProperty 'java.awt.headless', 'false'
 
 	// See note on the `test` task: Ghidra 12.1+ requires the serial filter
-	// factory to be specified at JVM startup for Gradle test workers.
-	jvmArgs '-Djdk.serialFilterFactory=ghidra.framework.remote.GhidraSerialFilterFactory'
+	// factory to be specified at JVM startup for Gradle test workers, and the
+	// class only exists on 12.1+, so gate it the same way.
+	if (ghidraSupportsSerialFilterFactory) {
+		jvmArgs '-Djdk.serialFilterFactory=ghidra.framework.remote.GhidraSerialFilterFactory'
+	}
 
 	// Exclude suite classes
 	exclude '**/*Suite*'

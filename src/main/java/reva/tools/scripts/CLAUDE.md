@@ -62,6 +62,7 @@ Two `ConfigManager` keys back the executor:
 
 | Key | Default | Effect |
 |-----|---------|--------|
+| `SCRIPT_TOOLS_ENABLED` | false | Registers or suppresses all script tools (`run-script`, `list-scripts`, `read-script`, `write-script`, `edit-script`). |
 | `SCRIPT_TIMEOUT_SECONDS` | 60 | Default per-call timeout (overridable via `timeoutSeconds` arg). |
 | `SCRIPT_OUTPUT_CHAR_LIMIT` | 65536 | Per-stream truncation cap (stdout and stderr independent). |
 

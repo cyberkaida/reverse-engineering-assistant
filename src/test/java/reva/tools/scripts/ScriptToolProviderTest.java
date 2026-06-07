@@ -80,6 +80,15 @@ public class ScriptToolProviderTest {
     }
 
     @Test
+    public void registerToolsRegistersNoneWhenDisabled() throws Exception {
+        ScriptToolProvider disabledProvider = new ScriptToolProvider(
+            server, executor, dirManager, () -> false, () -> 60, () -> 65536,
+            () -> null);
+        disabledProvider.registerTools();
+        assertTrue(disabledProvider.getRegisteredTools().isEmpty());
+    }
+
+    @Test
     public void runScriptSchemaRequiresProgramPath() throws Exception {
         provider.registerTools();
         Tool runScript = findTool(provider, "run-script");

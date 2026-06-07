@@ -27,6 +27,19 @@ import org.junit.Test;
 public class ConfigManagerScriptOptionsTest {
 
     @Test
+    public void scriptToolsDisabledByDefault() {
+        ConfigManager config = new ConfigManager();
+        assertFalse(config.isScriptToolsEnabled());
+    }
+
+    @Test
+    public void scriptToolsToggleIsConfigurable() {
+        ConfigManager config = new ConfigManager();
+        config.setScriptToolsEnabled(true);
+        assertTrue(config.isScriptToolsEnabled());
+    }
+
+    @Test
     public void scriptTimeoutDefaultsTo60Seconds() {
         ConfigManager config = new ConfigManager();
         assertEquals(60, config.getScriptTimeoutSeconds());

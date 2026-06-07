@@ -60,6 +60,7 @@ public class ConfigManager implements ConfigurationBackendListener {
     public static final String ANALYSIS_TIMEOUT_SECONDS = "Analysis Timeout Seconds";
     public static final String FOLLOW_READS = "Follow Reads";
     public static final String FOLLOW_WRITES = "Follow Writes";
+    public static final String SCRIPT_TOOLS_ENABLED = "Script Tools Enabled";
     public static final String SCRIPT_TIMEOUT_SECONDS = "Script Timeout Seconds";
     public static final String SCRIPT_OUTPUT_CHAR_LIMIT = "Script Output Char Limit";
 
@@ -80,6 +81,7 @@ public class ConfigManager implements ConfigurationBackendListener {
     private static final int DEFAULT_ANALYSIS_TIMEOUT_SECONDS = 600;
     private static final boolean DEFAULT_FOLLOW_READS = true;
     private static final boolean DEFAULT_FOLLOW_WRITES = true;
+    private static final boolean DEFAULT_SCRIPT_TOOLS_ENABLED = false;
     private static final int DEFAULT_SCRIPT_TIMEOUT_SECONDS = 60;
     private static final int DEFAULT_SCRIPT_OUTPUT_CHAR_LIMIT = 65536;
 
@@ -207,6 +209,8 @@ public class ConfigManager implements ConfigurationBackendListener {
             "When 'Follow Me' is on, navigate the listing for tools that read program state (e.g. get-decompilation, find-cross-references)");
         toolOptions.registerOption(FOLLOW_WRITES, DEFAULT_FOLLOW_WRITES, help,
             "When 'Follow Me' is on, navigate the listing for tools that modify program state (e.g. set-comment, rename-variables)");
+        toolOptions.registerOption(SCRIPT_TOOLS_ENABLED, DEFAULT_SCRIPT_TOOLS_ENABLED, help,
+            "Whether script management and execution tools are registered (run-script, list-scripts, read-script, write-script, edit-script)");
         toolOptions.registerOption(SCRIPT_TIMEOUT_SECONDS, DEFAULT_SCRIPT_TIMEOUT_SECONDS, help,
             "Default timeout in seconds for the run-script tool (per-call override available)");
         toolOptions.registerOption(SCRIPT_OUTPUT_CHAR_LIMIT, DEFAULT_SCRIPT_OUTPUT_CHAR_LIMIT, help,
@@ -251,6 +255,8 @@ public class ConfigManager implements ConfigurationBackendListener {
             backend.getBoolean(SERVER_OPTIONS, FOLLOW_READS, DEFAULT_FOLLOW_READS));
         cachedOptions.put(FOLLOW_WRITES,
             backend.getBoolean(SERVER_OPTIONS, FOLLOW_WRITES, DEFAULT_FOLLOW_WRITES));
+        cachedOptions.put(SCRIPT_TOOLS_ENABLED,
+            backend.getBoolean(SERVER_OPTIONS, SCRIPT_TOOLS_ENABLED, DEFAULT_SCRIPT_TOOLS_ENABLED));
         cachedOptions.put(SCRIPT_TIMEOUT_SECONDS,
             backend.getInt(SERVER_OPTIONS, SCRIPT_TIMEOUT_SECONDS, DEFAULT_SCRIPT_TIMEOUT_SECONDS));
         cachedOptions.put(SCRIPT_OUTPUT_CHAR_LIMIT,
@@ -603,6 +609,22 @@ public class ConfigManager implements ConfigurationBackendListener {
      */
     public void setFollowWrites(boolean follow) {
         backend.setBoolean(SERVER_OPTIONS, FOLLOW_WRITES, follow);
+    }
+
+    /**
+     * Whether script management and execution tools are enabled.
+     * @return True if script tools should be registered
+     */
+    public boolean isScriptToolsEnabled() {
+        return (Boolean) cachedOptions.getOrDefault(SCRIPT_TOOLS_ENABLED, DEFAULT_SCRIPT_TOOLS_ENABLED);
+    }
+
+    /**
+     * Set whether script management and execution tools are enabled.
+     * @param enabled True to register script tools
+     */
+    public void setScriptToolsEnabled(boolean enabled) {
+        backend.setBoolean(SERVER_OPTIONS, SCRIPT_TOOLS_ENABLED, enabled);
     }
 
     /**

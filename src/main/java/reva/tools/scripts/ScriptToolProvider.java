@@ -69,6 +69,7 @@ public class ScriptToolProvider extends AbstractToolProvider {
 
     private final PythonScriptExecutor executor;
     private final ScriptDirectoryManager dirManager;
+    private final Supplier<Boolean> scriptToolsEnabledSupplier;
     private final Supplier<Integer> defaultTimeoutSupplier;
     private final Supplier<Integer> outputCapSupplier;
     private final Supplier<PluginTool> activeToolSupplier;
@@ -82,7 +83,7 @@ public class ScriptToolProvider extends AbstractToolProvider {
             ScriptDirectoryManager dirManager,
             Supplier<Integer> defaultTimeoutSupplier,
             Supplier<Integer> outputCapSupplier) {
-        this(server, executor, dirManager, defaultTimeoutSupplier,
+        this(server, executor, dirManager, () -> true, defaultTimeoutSupplier,
             outputCapSupplier, ScriptToolProvider::defaultActiveToolLookup);
     }
 
@@ -90,12 +91,15 @@ public class ScriptToolProvider extends AbstractToolProvider {
             McpSyncServer server,
             PythonScriptExecutor executor,
             ScriptDirectoryManager dirManager,
+            Supplier<Boolean> scriptToolsEnabledSupplier,
             Supplier<Integer> defaultTimeoutSupplier,
             Supplier<Integer> outputCapSupplier,
             Supplier<PluginTool> activeToolSupplier) {
         super(server);
         this.executor = Objects.requireNonNull(executor, "executor");
         this.dirManager = Objects.requireNonNull(dirManager, "dirManager");
+        this.scriptToolsEnabledSupplier =
+            Objects.requireNonNull(scriptToolsEnabledSupplier, "scriptToolsEnabledSupplier");
         this.defaultTimeoutSupplier =
             Objects.requireNonNull(defaultTimeoutSupplier, "defaultTimeoutSupplier");
         this.outputCapSupplier =
@@ -115,10 +119,12 @@ public class ScriptToolProvider extends AbstractToolProvider {
         PythonScriptExecutor executor =
             new PythonScriptExecutor(new GhidraScriptRunner());
         ScriptDirectoryManager dirs = GhidraDirectoryFactory.build();
+        Supplier<Boolean> enabledSupplier = config::isScriptToolsEnabled;
         Supplier<Integer> timeoutSupplier = config::getScriptTimeoutSeconds;
         Supplier<Integer> capSupplier = config::getScriptOutputCharLimit;
         return new ScriptToolProvider(
-            server, executor, dirs, timeoutSupplier, capSupplier);
+            server, executor, dirs, enabledSupplier, timeoutSupplier, capSupplier,
+            ScriptToolProvider::defaultActiveToolLookup);
     }
 
     private static PluginTool defaultActiveToolLookup() {
@@ -129,6 +135,9 @@ public class ScriptToolProvider extends AbstractToolProvider {
 
     @Override
     public void registerTools() {
+        if (!scriptToolsEnabledSupplier.get()) {
+            return;
+        }
         registerRunScriptTool();
         registerListScriptsTool();
         registerReadScriptTool();

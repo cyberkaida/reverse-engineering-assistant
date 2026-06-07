@@ -101,6 +101,8 @@ public class MyToolIntegrationTest extends RevaIntegrationTestBase {
 - **Transaction leaks**: Always close transactions in finally blocks
 - **Program not found**: Ensure `env.open(program)` is called if tools can't find the program
 - **JSON parsing**: Use helper methods, don't parse manually
+- **Cross-fork project name collisions**: The temp test project persists across the `forkEvery=1` JVM restarts, so hardcoded program names collide on the second test with `DuplicateFileException: /<name> already exists` (real case: `sample_v1`). Give every program a per-test-unique name (e.g. suffix with the test method name), don't reuse a fixed name across tests.
+- **Multi-program tests need explicit registration**: `env.open(program)` registers only **one** program with `RevaProgramManager`'s lookup map. Tests that load two or more programs (e.g. diff/compare) must call `RevaProgramManager.registerProgram()` for **each** program, or the tool's path lookup can't find them and the test fails with a `RuntimeException`.
 
 ## Worktree → Ghidra Install Collisions (`gradle install`)
 

@@ -159,6 +159,21 @@ boolean verbose = getOptionalBoolean(request, "verbose", false);
 | `HighFunctionDBUtil` | `updateDBVariable()` | **REQUIRED** for persisting variable changes |
 | `SymbolUtil` | `isDefaultSymbolName()` | Filter Ghidra-generated names |
 
+## Ghidra API Imports
+
+**Verify a Ghidra class's package before importing it — never infer a `ghidra.*` sub-package from a sibling class.** Guessing produces `cannot find symbol` and breaks the build. Two real cases that each cost a compile cycle:
+
+| Guessed (wrong) | Actual |
+|-----------------|--------|
+| `import ghidra.util.exception.InvalidNameException;` | `ghidra.util.InvalidNameException` |
+| `import ghidra.generic.util.datastruct.TimeoutTaskMonitor;` | `ghidra.util.task.TimeoutTaskMonitor` |
+
+Confirm the package against the Ghidra source tree (`../ghidra`) first, e.g.:
+```bash
+find "$GHIDRA_INSTALL_DIR" -name "InvalidNameException.java"
+# → .../ghidra/util/InvalidNameException.java
+```
+
 ## Troubleshooting
 
 ### Common Build Issues

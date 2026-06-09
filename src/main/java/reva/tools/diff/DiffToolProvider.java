@@ -10,6 +10,7 @@ import io.modelcontextprotocol.spec.McpSchema.CallToolRequest;
 
 import ghidra.feature.vt.api.main.VTProgramCorrelatorFactory;
 import ghidra.program.model.address.Address;
+import ghidra.program.model.address.AddressSetView;
 import ghidra.program.model.listing.Program;
 import ghidra.util.exception.CancelledException;
 import ghidra.util.task.TaskMonitor;
@@ -34,6 +35,7 @@ public class DiffToolProvider extends AbstractToolProvider {
     @Override
     public void registerTools() {
         registerCreateSessionTool();
+        registerAddCorrelatorTool();
         registerSummaryTool();
         registerListFunctionsTool();
         registerFunctionDiffTool();
@@ -53,16 +55,16 @@ public class DiffToolProvider extends AbstractToolProvider {
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("diff-list-sessions")
             .title("List Diff Sessions")
-            .description("List cached diff sessions (source/destination pairs and the correlators run).")
+            .description("List persisted diff sessions (kept durably until explicitly deleted): each source/destination pair and the correlators run so far.")
             .inputSchema(createSchema(new HashMap<>(), List.of()))
             .build();
         registerTool(tool, (exchange, request) -> {
             List<Map<String, Object>> sessions = new ArrayList<>();
-            for (DiffSession ds : DiffSessionManager.list()) {
+            for (DiffSessionManager.SessionSummary s : DiffSessionManager.list()) {
                 Map<String, Object> row = new LinkedHashMap<>();
-                row.put("sourceProgramPath", ds.sourcePath);
-                row.put("destinationProgramPath", ds.destinationPath);
-                row.put("correlatorsRun", ds.correlatorsRun);
+                row.put("sourceProgramPath", s.sourcePath());
+                row.put("destinationProgramPath", s.destinationPath());
+                row.put("correlatorsRun", s.correlatorsRun());
                 sessions.add(row);
             }
             return createJsonResult(Map.of("success", true, "sessions", sessions));
@@ -75,7 +77,7 @@ public class DiffToolProvider extends AbstractToolProvider {
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("diff-delete-session")
             .title("Delete Diff Session")
-            .description("Drop a cached diff session so the next create-session re-correlates fresh.")
+            .description("Permanently delete a persisted diff session (its Version Tracking DomainFile). This is the only thing that removes a session — sessions are never auto-deleted; the next diff-create-session for the pair re-correlates fresh.")
             .inputSchema(createSchema(properties, List.of("sourceProgramPath", "destinationProgramPath")))
             .build();
         registerTool(tool, (exchange, request) -> {
@@ -140,43 +142,63 @@ public class DiffToolProvider extends AbstractToolProvider {
     }
 
     /** Number of bytes in a function's body (address-independent: a shifted but
-     *  unchanged function has the same size). 0 if no function at {@code entry}. */
-    private int functionSize(Program program, Address entry) {
+     *  unchanged function has the same size). 0 if no function at {@code entry}.
+     *  Package-private static for direct unit testing. */
+    static int functionSize(Program program, Address entry) {
         ghidra.program.model.listing.Function fn =
             program.getFunctionManager().getFunctionAt(entry);
         return fn != null ? (int) fn.getBody().getNumAddresses() : 0;
     }
 
-    /** Raw instruction bytes over a function's body, in address order (empty on error). */
-    private byte[] functionBytes(Program program, Address entry) {
+    /** Readable raw bytes over a function's body, in address order, or {@code null} if NONE of
+     *  the body could be read (e.g. an entirely uninitialized body). Unreadable sub-ranges are
+     *  skipped (their readable bytes still contribute) rather than aborting the whole read.
+     *  <p>The prior version returned {@code byte[0]} on the first
+     *  {@link ghidra.program.model.mem.MemoryAccessException}: two unreadable bodies then compared
+     *  EQUAL, so a genuinely-changed pair could be silently reported "no change". This matters on
+     *  fully-linked images, where a function whose Ghidra-computed body spills into an unreadable
+     *  region would drop out of the recall lens entirely. Package-private static for direct unit
+     *  testing. */
+    static byte[] functionBytes(Program program, Address entry) {
         ghidra.program.model.listing.Function fn =
             program.getFunctionManager().getFunctionAt(entry);
-        if (fn == null) return new byte[0];
+        if (fn == null) return null;
         java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+        boolean readAny = false;
         for (ghidra.program.model.address.AddressRange range : fn.getBody()) {
             int len = (int) range.getLength();
             byte[] buf = new byte[len];
+            int n;
             try {
-                program.getMemory().getBytes(range.getMinAddress(), buf);
-                out.write(buf, 0, len);
+                n = program.getMemory().getBytes(range.getMinAddress(), buf);
             } catch (ghidra.program.model.mem.MemoryAccessException e) {
-                return new byte[0];
+                n = 0; // range start uninitialized: contributes no readable bytes
+            }
+            if (n > 0) {
+                out.write(buf, 0, n);
+                readAny = true;
             }
         }
-        return out.toByteArray();
+        return readAny ? out.toByteArray() : null;
     }
 
     /** True if the matched pair's raw body bytes differ. Address-DEPENDENT: reliable on
      *  relocatable objects (.ko — functions at the same address) but noisy on fully-linked
-     *  images where unchanged functions shift, so this is an opt-in recall signal. */
+     *  images where unchanged functions shift, so this is an opt-in recall signal. A body that
+     *  cannot be read at all ({@code null}) is treated as "differs": we cannot certify it
+     *  identical, and silently reporting "no change" for an unreadable pair is the bug this
+     *  guards against. */
     private boolean bodyBytesDiffer(DiffSession ds, MatchInfo mi) {
         if (functionSize(ds.sourceProgram, mi.sourceAddress)
                 != functionSize(ds.destinationProgram, mi.destinationAddress)) {
             return true;
         }
-        return !java.util.Arrays.equals(
-            functionBytes(ds.sourceProgram, mi.sourceAddress),
-            functionBytes(ds.destinationProgram, mi.destinationAddress));
+        byte[] a = functionBytes(ds.sourceProgram, mi.sourceAddress);
+        byte[] b = functionBytes(ds.destinationProgram, mi.destinationAddress);
+        if (a == null || b == null) {
+            return true;
+        }
+        return !java.util.Arrays.equals(a, b);
     }
 
     /**
@@ -230,10 +252,17 @@ public class DiffToolProvider extends AbstractToolProvider {
         List<MatchInfo> matches = VersionTrackingUtil.collectFunctionMatches(ds.vtSession);
         Set<Address> matchedSrc = new HashSet<>();
         Set<Address> matchedDst = new HashSet<>();
-        int identical = 0, changed = 0;
+        int identical = 0, changed = 0, degenerate = 0;
         for (MatchInfo mi : matches) {
             matchedSrc.add(mi.sourceAddress);
             matchedDst.add(mi.destinationAddress);
+            // A function whose body is a single address has not really been disassembled — its
+            // entry exists (e.g. from a symbol) but no instructions/body were built. Both the
+            // size and body-bytes lenses read getBody(), so they are blind on such functions.
+            if (functionSize(ds.sourceProgram, mi.sourceAddress) <= 1
+                    || functionSize(ds.destinationProgram, mi.destinationAddress) <= 1) {
+                degenerate++;
+            }
             if (isChanged(changeProfile(ds, mi, includeBodyBytes))) changed++; else identical++;
         }
         int removed = VersionTrackingUtil.unmatchedFunctions(ds.sourceProgram, matchedSrc).size();
@@ -249,6 +278,19 @@ public class DiffToolProvider extends AbstractToolProvider {
         out.put("unmatchedInSource", removed); // removed
         out.put("unmatchedInDestination", added);     // added
         out.put("correlatorsRun", ds.correlatorsRun);
+        // Under-analysis guard: if most matched functions have 1-address bodies, the program(s)
+        // were imported without disassembly, so the size/body-bytes lenses cannot see body changes
+        // and "changed" will read near-0 no matter the knob. Surface that rather than letting the
+        // agent conclude "no changes." Name matching, diff-strings, and diff-function still work.
+        if (!matches.isEmpty() && degenerate * 2 > matches.size()) {
+            out.put("analysisWarning", "Most matched functions have 1-address bodies (no "
+                + "disassembly) — the source and/or destination program appears UNDER-ANALYZED. The "
+                + "size and body-bytes lenses compare function bodies, so they cannot detect changes "
+                + "here and 'changed' will read near-0 regardless of includeBodyByteChanges. Run "
+                + "analyze-program on both programs (disassembly + function bodies) before relying on "
+                + "those lenses. Name-based matching, diff-strings, and diff-function (decompiler) "
+                + "are unaffected.");
+        }
         return out;
     }
 
@@ -289,7 +331,9 @@ public class DiffToolProvider extends AbstractToolProvider {
             @SuppressWarnings("unchecked")
             Map<String, Object> matched = (Map<String, Object>) out.get("matched");
             int changedCount = ((Number) matched.get("changed")).intValue();
-            if (changedCount == 0 && !includeBodyBytes) {
+            // Skip the body-bytes hint when the programs are under-analyzed: the knob can't help
+            // when bodies are 1-address, and analysisWarning already explains the real fix.
+            if (changedCount == 0 && !includeBodyBytes && !out.containsKey("analysisWarning")) {
                 out.put("hint", "0 changed under the precision lenses (similarity/callees/size). "
                     + "Operand/control-flow tweaks that VT scores as identical are not counted here "
                     + "— set includeBodyByteChanges=true to also check raw instruction bytes (a recall "
@@ -945,14 +989,28 @@ public class DiffToolProvider extends AbstractToolProvider {
                 return createErrorResult("maxLogEntries must be >= 1; got " + maxLogEntries);
             }
 
-            // Long-poll: return immediately when terminal, else hold until the window elapses.
-            long deadline = System.currentTimeMillis() + (long) waitSeconds * 1000L;
-            while (!job.getStatus().isTerminal() && System.currentTimeMillis() < deadline) {
+            // Long-poll with progress: return the instant the job terminates, else hold until the
+            // window expires. Emits MCP progress notifications on each tick when the client
+            // supplied a progressToken — this both drives the progress UI and resets the client's
+            // idle/tool-call timeout, preventing spurious "operation timed out" errors on long
+            // waitSeconds values.
+            awaitWithProgress(exchange, request, waitSeconds,
+                () -> job.getStatus().isTerminal(),
+                () -> {
+                    String latest = job.getLatestLogMessage();
+                    return latest != null ? latest : job.getStatus().name().toLowerCase();
+                });
+
+            // Emit a final progress notification when the job has reached a terminal state,
+            // consistent with awaitDiffJob's behavior.
+            Object statusProgressToken = request.progressToken();
+            if (statusProgressToken != null && exchange != null && job.getStatus().isTerminal()) {
                 try {
-                    Thread.sleep(250L);
-                } catch (InterruptedException ie) {
-                    Thread.currentThread().interrupt();
-                    break;
+                    exchange.progressNotification(new McpSchema.ProgressNotification(
+                        statusProgressToken, 1.0, 1.0,
+                        "Diff " + job.getStatus().name().toLowerCase()));
+                } catch (Exception ignore) {
+                    // best-effort
                 }
             }
 
@@ -1064,6 +1122,15 @@ public class DiffToolProvider extends AbstractToolProvider {
         properties.put("timeoutSeconds", Map.of("type", "integer",
             "description", "Hard cap on correlation time in seconds; -1 (default) for unlimited.",
             "default", -1));
+        properties.put("sourceScope", Map.of("type", "array",
+            "items", Map.of("type", "string"),
+            "description", "Optional: restrict the initial correlation to these source functions "
+                + "(names or addresses). Omitted = all functions, then auto-scoped to the residual "
+                + "per stage."));
+        properties.put("destinationScope", Map.of("type", "array",
+            "items", Map.of("type", "string"),
+            "description", "Optional: restrict the initial correlation to these destination "
+                + "functions (names or addresses). Omitted = all functions."));
 
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("diff-create-session")
@@ -1098,6 +1165,15 @@ public class DiffToolProvider extends AbstractToolProvider {
             requireAnalyzed(source);
             requireAnalyzed(dest);
 
+            List<String> srcScopeIds = getOptionalStringList(request.arguments(), "sourceScope", List.of());
+            List<String> dstScopeIds = getOptionalStringList(request.arguments(), "destinationScope", List.of());
+            // Resolve eagerly so a bad identifier errors before the job starts (IllegalArgumentException
+            // is auto-converted to an error response by registerTool).
+            AddressSetView initSrc = srcScopeIds.isEmpty() ? null
+                : VersionTrackingUtil.resolveScope(source, srcScopeIds);
+            AddressSetView initDst = dstScopeIds.isEmpty() ? null
+                : VersionTrackingUtil.resolveScope(dest, dstScopeIds);
+
             DiffJobManager mgr = RevaInternalServiceRegistry.getService(DiffJobManager.class);
             if (mgr == null) {
                 return createErrorResult("background diff service unavailable");
@@ -1110,13 +1186,78 @@ public class DiffToolProvider extends AbstractToolProvider {
             // monitor — never TaskMonitor.DUMMY.
             DiffJob job = mgr.startOrAttach(DiffJobKind.CORRELATE, srcPath, dstPath,
                 () -> (monitor) -> {
-                    DiffSession ds = DiffSessionManager.getOrCreate(source, dest, factories, force, monitor);
+                    DiffSession ds = DiffSessionManager.createStaged(source, dest, factories,
+                        initSrc, initDst, force, monitor);
                     return summarize(ds, false);
                 }, timeoutSeconds);
 
             return awaitDiffJob(exchange, request, job, waitSeconds, srcPath, dstPath,
                 "Correlation still running. Poll diff-status with this jobId and "
                 + "sinceLogSeq=logCursor; or call diff-cancel to stop.");
+        });
+    }
+
+    // ---- diff-add-correlator -------------------------------------------
+
+    private void registerAddCorrelatorTool() {
+        Map<String, Object> properties = new HashMap<>();
+        putPairProperties(properties);
+        properties.put("correlator", Map.of("type", "string",
+            "enum", VersionTrackingUtil.CORRELATOR_KEYS_AVAILABLE,
+            "description", "Which correlator to run over the residual (or chosen scope)."));
+        properties.put("sourceScope", Map.of("type", "array", "items", Map.of("type", "string"),
+            "description", "Optional source functions (names/addresses) to scope this correlator to. "
+                + "Omitted = the current unmatched residual."));
+        properties.put("destinationScope", Map.of("type", "array", "items", Map.of("type", "string"),
+            "description", "Optional destination functions to scope this correlator to. Omitted = residual."));
+        Map<String, Object> waitProp = new HashMap<>();
+        waitProp.put("type", "integer");
+        waitProp.put("minimum", 0);
+        waitProp.put("default", 10);
+        waitProp.put("description",
+            "Seconds to wait inline before returning a {status:running, jobId}.");
+        properties.put("waitSeconds", waitProp);
+
+        McpSchema.Tool tool = McpSchema.Tool.builder()
+            .name("diff-add-correlator")
+            .title("Refine Diff With Another Correlator")
+            .description("Run one more VT correlator over the existing session's still-unmatched "
+                + "residual (or an agent-chosen scope) and persist. The refine step: correlate broadly "
+                + "with diff-create-session, read the residual (diff-list-functions category=removed/added), "
+                + "then aim a sharper correlator at a chosen subset. Runs as a background job.")
+            .inputSchema(createSchema(properties,
+                List.of("sourceProgramPath", "destinationProgramPath", "correlator")))
+            .build();
+
+        registerTool(tool, (exchange, request) -> {
+            DiffSession ds = requireSession(request);
+            String key = getString(request, "correlator");
+            // Resolve eagerly so a bad key errors synchronously before the job starts.
+            VTProgramCorrelatorFactory factory = VersionTrackingUtil.correlatorForKey(key);
+            int waitSeconds = getOptionalInt(request, "waitSeconds", 10);
+            if (waitSeconds < 0) {
+                return createErrorResult("waitSeconds must be >= 0; got " + waitSeconds);
+            }
+            List<String> srcIds = getOptionalStringList(request.arguments(), "sourceScope", List.of());
+            List<String> dstIds = getOptionalStringList(request.arguments(), "destinationScope", List.of());
+            // Resolve scopes eagerly; a bad identifier errors synchronously.
+            AddressSetView scopeSrc = srcIds.isEmpty() ? null
+                : VersionTrackingUtil.resolveScope(ds.sourceProgram, srcIds);
+            AddressSetView scopeDst = dstIds.isEmpty() ? null
+                : VersionTrackingUtil.resolveScope(ds.destinationProgram, dstIds);
+
+            DiffJobManager mgr = RevaInternalServiceRegistry.getService(DiffJobManager.class);
+            if (mgr == null) {
+                return createErrorResult("background diff service unavailable");
+            }
+            DiffJob job = mgr.startOrAttach(DiffJobKind.ADD_CORRELATOR, ds.sourcePath, ds.destinationPath,
+                () -> (monitor) -> {
+                    DiffSession refreshed = DiffSessionManager.addCorrelator(
+                        ds, factory, scopeSrc, scopeDst, monitor);
+                    return summarize(refreshed, false);
+                }, -1);
+            return awaitDiffJob(exchange, request, job, waitSeconds, ds.sourcePath, ds.destinationPath,
+                "Refinement still running. Poll diff-status with this jobId; or diff-cancel to stop.");
         });
     }
 
@@ -1145,25 +1286,14 @@ public class DiffToolProvider extends AbstractToolProvider {
         Object progressToken = request.progressToken();
         boolean emitProgress = progressToken != null && exchange != null;
 
-        long deadline = System.currentTimeMillis() + (long) waitSeconds * 1000L;
-        while (!job.getStatus().isTerminal() && System.currentTimeMillis() < deadline) {
-            if (emitProgress) {
-                try {
-                    String latest = job.getLatestLogMessage();
-                    String msg = (latest != null) ? latest : job.getStatus().name().toLowerCase();
-                    exchange.progressNotification(new McpSchema.ProgressNotification(
-                        progressToken, 0.5, 1.0, msg));
-                } catch (Exception ignore) {
-                    // best-effort
-                }
-            }
-            try {
-                Thread.sleep(250L);
-            } catch (InterruptedException ie) {
-                Thread.currentThread().interrupt();
-                break;
-            }
-        }
+        // Shared wait primitive: emits progress on each tick when progressToken is set, so the
+        // client's idle/tool-call timer is reset and long waits survive.
+        awaitWithProgress(exchange, request, waitSeconds,
+            () -> job.getStatus().isTerminal(),
+            () -> {
+                String latest = job.getLatestLogMessage();
+                return latest != null ? latest : job.getStatus().name().toLowerCase();
+            });
 
         if (job.getStatus().isTerminal()) {
             Map<String, Object> result;

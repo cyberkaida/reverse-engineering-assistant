@@ -11,6 +11,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import ghidra.app.services.ProgramManager;
 import ghidra.feature.vt.api.db.VTSessionDB;
 import ghidra.feature.vt.api.main.VTSession;
+import ghidra.program.database.ProgramBuilder;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.listing.Program;
 import ghidra.util.task.TaskMonitor;
@@ -123,11 +124,11 @@ public class DiffToolProviderIntegrationTest extends RevaIntegrationTestBase {
         Program src = DiffTestPrograms.buildSource(this);
         Program dst = DiffTestPrograms.buildDestination(this);
         try {
-            DiffSession a = DiffSessionManager.getOrCreate(src, dst,
-                VersionTrackingUtil.defaultCorrelatorSequence(), false, TaskMonitor.DUMMY);
-            DiffSession b = DiffSessionManager.getOrCreate(src, dst,
-                VersionTrackingUtil.defaultCorrelatorSequence(), false, TaskMonitor.DUMMY);
-            assertSame("second getOrCreate should return cached instance", a, b);
+            DiffSession a = DiffSessionManager.createStaged(src, dst,
+                VersionTrackingUtil.defaultCorrelatorSequence(), null, null, false, TaskMonitor.DUMMY);
+            DiffSession b = DiffSessionManager.createStaged(src, dst,
+                VersionTrackingUtil.defaultCorrelatorSequence(), null, null, false, TaskMonitor.DUMMY);
+            assertSame("second createStaged should return cached instance", a, b);
             assertFalse("correlators should have run", a.correlatorsRun.isEmpty());
         } finally {
             DiffSessionManager.clearAll();
@@ -652,6 +653,126 @@ public class DiffToolProviderIntegrationTest extends RevaIntegrationTestBase {
             src.release(this);
             dst.release(this);
         }
+    }
+
+    /**
+     * Regression for the body-bytes read-failure bug. {@code functionBytes()} must return
+     * {@code null} (NOT an empty array) when a function body cannot be read, so that two unreadable
+     * bodies are not treated as byte-equal. The old code returned {@code byte[0]} on the first
+     * MemoryAccessException, which made {@code bodyBytesDiffer()} report "no change" for a pair it
+     * could not actually compare — a function whose body spilled into unreadable memory silently
+     * fell into the identical bucket under the recall lens. Here {@code victim_fn}'s body lives in
+     * uninitialized memory, so reading it throws.
+     */
+    @Test
+    public void testFunctionBytesReturnsNullOnUnreadableBody() throws Exception {
+        Program p = buildUnreadableVictimProgram("diff_unreadable");
+        try {
+            Address readable = p.getAddressFactory().getAddress("0x01001000");
+            Address unreadable = p.getAddressFactory().getAddress("0x01002000");
+
+            assertNotNull("anchor_fn must exist",
+                p.getFunctionManager().getFunctionAt(readable));
+            assertNotNull("victim_fn (uninitialized body) must exist",
+                p.getFunctionManager().getFunctionAt(unreadable));
+
+            // Readable body returns its actual bytes.
+            byte[] anchorBytes = DiffToolProvider.functionBytes(p, readable);
+            assertNotNull("readable function body must return its bytes", anchorBytes);
+            assertArrayEquals("readable body bytes must match what was written",
+                new byte[]{0x31, (byte) 0xC0, (byte) 0xC3}, anchorBytes);
+
+            // Unreadable body returns null — the fix. The OLD code returned byte[0] here, so two
+            // unreadable bodies compared equal and the pair was silently reported "identical".
+            byte[] victimBytes = DiffToolProvider.functionBytes(p, unreadable);
+            assertNull("unreadable function body must return null, not an empty array", victimBytes);
+
+            // Size lens is byte-independent (address counts), so it still reports the body sizes.
+            assertEquals(3, DiffToolProvider.functionSize(p, readable));
+            assertEquals(0x40, DiffToolProvider.functionSize(p, unreadable));
+        } finally {
+            p.release(this);
+        }
+    }
+
+    /** Build a program with one readable anchor function and a victim_fn whose entire body lives
+     *  in UNINITIALIZED memory, so reading its bytes throws MemoryAccessException. */
+    private Program buildUnreadableVictimProgram(String name) throws Exception {
+        ProgramBuilder b = new ProgramBuilder(name, ProgramBuilder._X86, this);
+        b.createMemory("text", "0x01001000", 0x100);
+        b.setBytes("0x01001000", new byte[]{0x31, (byte) 0xC0, (byte) 0xC3}); // xor eax,eax; ret
+        b.disassemble("0x01001000", 3);
+        b.createEmptyFunction("anchor_fn", "0x01001000", 3, null);
+        // victim_fn: body entirely in uninitialized memory -> getBytes throws on read.
+        b.createUninitializedMemory("void", "0x01002000", 0x40);
+        b.createEmptyFunction("victim_fn", "0x01002000", 0x40, null);
+        return b.getProgram();
+    }
+
+    /**
+     * Under-analysis guard: when most matched functions have 1-address bodies (a symbols-only
+     * import that skipped disassembly), diff-summary must surface an analysisWarning instead of
+     * letting the agent read "0 changed" as "no changes" — the size/body-bytes lenses are blind on
+     * such bodies. A normally-analyzed pair must NOT carry the warning. The misleading body-bytes
+     * hint must also be suppressed when the warning fires.
+     */
+    @Test
+    public void testSummaryWarnsWhenProgramsUnderAnalyzed() throws Exception {
+        Program degSrc = buildDegenerateProgram("diff_degenerate_src");
+        Program degDst = buildDegenerateProgram("diff_degenerate_dst");
+        Program src = DiffTestPrograms.buildSource(this);
+        Program dst = DiffTestPrograms.buildDestination(this);
+        ghidra.app.services.ProgramManager pm = tool.getService(ghidra.app.services.ProgramManager.class);
+        for (Program p : new Program[]{degSrc, degDst, src, dst}) {
+            env.open(p);
+            pm.openProgram(p);
+            serverManager.programOpened(p, tool);
+        }
+        try {
+            Map<String, Object> degArgs = new HashMap<>();
+            degArgs.put("sourceProgramPath", degSrc.getDomainFile().getPathname());
+            degArgs.put("destinationProgramPath", degDst.getDomainFile().getPathname());
+            callMcpTool("diff-create-session", degArgs);
+            JsonNode degSummary = parseJsonContent(callMcpTool("diff-summary", degArgs));
+            assertTrue("under-analyzed pair must carry analysisWarning",
+                degSummary.has("analysisWarning"));
+            assertTrue("warning mentions under-analyzed",
+                degSummary.get("analysisWarning").asText().toLowerCase().contains("under-analyzed"));
+            assertFalse("body-bytes hint suppressed when under-analyzed", degSummary.has("hint"));
+
+            Map<String, Object> normArgs = new HashMap<>();
+            normArgs.put("sourceProgramPath", src.getDomainFile().getPathname());
+            normArgs.put("destinationProgramPath", dst.getDomainFile().getPathname());
+            callMcpTool("diff-create-session", normArgs);
+            JsonNode normSummary = parseJsonContent(callMcpTool("diff-summary", normArgs));
+            assertFalse("normally-analyzed pair must NOT carry analysisWarning",
+                normSummary.has("analysisWarning"));
+        } finally {
+            DiffSessionManager.clearAll();
+            for (Program p : new Program[]{degSrc, degDst, src, dst}) {
+                serverManager.programClosed(p, tool);
+            }
+            degSrc.release(this);
+            degDst.release(this);
+            src.release(this);
+            dst.release(this);
+        }
+    }
+
+    /** Build a program whose functions all have 1-address bodies (entry exists but nothing was
+     *  disassembled) — the signature of a symbols-only import that skipped analysis. */
+    private Program buildDegenerateProgram(String name) throws Exception {
+        ProgramBuilder b = new ProgramBuilder(name, ProgramBuilder._X86, this);
+        b.createMemory("text", "0x01001000", 0x1000);
+        String[] fns = {"alpha_fn", "beta_fn", "gamma_fn", "delta_fn"};
+        int addr = 0x01001000;
+        for (String fn : fns) {
+            String a = "0x" + Integer.toHexString(addr);
+            b.setBytes(a, new byte[]{(byte) 0xC3}); // a byte exists, but we never disassemble
+            b.createEmptyFunction(fn, a, 1, null);  // body length 1 -> getNumAddresses() == 1
+            addr += 0x100;
+        }
+        return b.getProgram();
     }
 
     /**

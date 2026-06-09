@@ -23,8 +23,10 @@ import static org.junit.Assert.fail;
 
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 import org.junit.Test;
 
@@ -38,6 +40,7 @@ import ghidra.program.util.GhidraProgramUtilities;
 import ghidra.util.task.TaskMonitor;
 import io.modelcontextprotocol.spec.McpSchema.CallToolRequest;
 import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
+import io.modelcontextprotocol.spec.McpSchema.ProgressNotification;
 import io.modelcontextprotocol.spec.McpSchema.TextContent;
 import reva.RevaIntegrationTestBase;
 import reva.plugin.RevaProgramManager;
@@ -191,5 +194,80 @@ public class AnalysisStatusIntegrationTest extends RevaIntegrationTestBase {
         String text = ((TextContent) result.content().get(0)).text();
         assertTrue("Error text should mention the missing job",
             text.toLowerCase().contains("job") || text.contains("analysis-999999"));
+    }
+
+    /**
+     * Verify that analysis-status emits at least one MCP progress notification when the client
+     * supplies a progressToken. This is a regression guard for the client-timeout bug:
+     * the old analysis-status wait loop was a bare Thread.sleep loop that emitted zero
+     * notifications, so a long waitSeconds held the connection open silently until the MCP
+     * client's idle timer fired ("The operation timed out."). The fix routes the wait through
+     * {@code AbstractToolProvider.awaitWithProgress()}, which emits one notification per 250 ms
+     * tick and a final notification on terminal — matching analyze-program's behavior.
+     *
+     * <p><b>Test limitation (documented, analogous to DiffStatusCancelIntegrationTest):</b>
+     * The synthetic program is tiny and terminates in milliseconds. By the time this test's
+     * second MCP client connects, initializes, and calls analysis-status, the job is almost
+     * always already terminal — so the per-tick emission inside the wait loop is not reliably
+     * exercised. The assertion ({@code received.size() >= 1}) is satisfied by the terminal
+     * completion notification emitted after the wait. This test fails on pre-fix code (which
+     * emitted zero notifications) and passes on fixed code, so it guards "analysis-status emits
+     * notifications at all." It does NOT deterministically guard the per-tick path that resets
+     * the client timer; correctness of that path is verified by code inspection and consistency
+     * with the proven analyze-program path (same shared primitive, same 250 ms cadence).
+     */
+    @Test
+    public void testAnalysisStatusEmitsProgressNotifications() throws Exception {
+        DomainFile[] fileOut = new DomainFile[1];
+        Program saveable = createRegisteredSaveableProgram("progress", fileOut);
+        try {
+            String programPath = saveable.getDomainFile().getPathname();
+
+            // Kick off the analysis with waitSeconds=0 to get a running job handle immediately.
+            JsonNode analyze = callTool("analyze-program", Map.of(
+                "programPath", programPath,
+                "waitSeconds", 0,
+                "forceFullAnalysis", true,
+                "persist", "save"));
+            String jobId = analyze.get("jobId").asText();
+            assertFalse("jobId should be non-empty", jobId.isEmpty());
+
+            // Call analysis-status WITH a progressToken and a non-trivial waitSeconds.
+            // Collect progress notifications via the client's progressConsumer.
+            List<ProgressNotification> received = new CopyOnWriteArrayList<>();
+            String token = "reva-status-progress-test";
+
+            withMcpClient(createMcpTransport(),
+                spec -> spec.progressConsumer(received::add),
+                client -> {
+                    client.initialize();
+                    CallToolRequest statusRequest = CallToolRequest.builder()
+                        .name("analysis-status")
+                        .arguments(Map.of(
+                            "jobId", jobId,
+                            "sinceLogSeq", 0,
+                            "waitSeconds", 5,
+                            "maxLogEntries", 50))
+                        .progressToken(token)
+                        .build();
+                    CallToolResult result = client.callTool(statusRequest);
+                    assertMcpResultNotError(result, "analysis-status with progressToken should succeed");
+                    try {
+                        // Allow time for any final progress frame to be delivered async.
+                        Thread.sleep(500);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                });
+
+            assertTrue("analysis-status should emit at least 1 progress notification when "
+                + "progressToken is set (got " + received.size() + ")",
+                received.size() >= 1);
+            for (ProgressNotification n : received) {
+                assertEquals("progressToken must round-trip unchanged", token, n.progressToken());
+            }
+        } finally {
+            cleanup(saveable, fileOut[0]);
+        }
     }
 }

@@ -119,6 +119,15 @@ public abstract class RevaIntegrationTestBase extends AbstractGhidraHeadedIntegr
 
         // Create and register shared ConfigManager
         sharedConfigManager = new ConfigManager(sharedTool);
+        // Bind the test server to a random free port (ServerSocket(0)) instead of the
+        // default 8080, so integration tests never collide with a dev/dogfooding server
+        // on 8080 (or with another test run). The client URL below reads getServerPort(),
+        // so it follows automatically. Mirrors RevaHeadlessLauncher's useRandomPort path.
+        try {
+            sharedConfigManager.setRandomAvailablePort();
+        } catch (java.io.IOException e) {
+            throw new RuntimeException("Failed to select a random server port for tests", e);
+        }
         reva.util.RevaInternalServiceRegistry.registerService(ConfigManager.class, sharedConfigManager);
 
         // Create and register shared McpServerManager

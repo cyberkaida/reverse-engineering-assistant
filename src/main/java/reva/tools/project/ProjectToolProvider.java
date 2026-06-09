@@ -23,9 +23,7 @@ import java.util.Map;
 import java.util.Objects;
 
 import ghidra.app.plugin.core.analysis.AutoAnalysisManager;
-import ghidra.app.plugin.core.analysis.AutoAnalysisManagerListener;
 import ghidra.app.services.Analyzer;
-import ghidra.framework.data.DefaultCheckinHandler;
 import ghidra.framework.model.DomainObject;
 import ghidra.framework.main.AppInfo;
 import ghidra.framework.model.DomainFile;
@@ -47,10 +45,8 @@ import ghidra.util.Msg;
 import ghidra.util.classfinder.ClassSearcher;
 import ghidra.util.task.TaskMonitor;
 import ghidra.util.task.TimeoutTaskMonitor;
-import ghidra.util.task.WrappingTaskMonitor;
 import java.util.LinkedHashMap;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
 import ghidra.app.util.importer.MessageLog;
 import ghidra.app.util.opinion.LoadResults;
 import ghidra.app.util.opinion.LoadSpec;
@@ -66,12 +62,16 @@ import ghidra.plugins.importer.batch.BatchInfo;
 import ghidra.app.util.bin.ByteProvider;
 import ghidra.framework.store.local.LocalFileSystem;
 import io.modelcontextprotocol.server.McpSyncServer;
-import io.modelcontextprotocol.server.McpSyncServerExchange;
 import io.modelcontextprotocol.spec.McpSchema;
 import reva.debug.DebugCaptureService;
 import reva.plugin.RevaProgramManager;
 import reva.plugin.ConfigManager;
+import reva.services.AnalysisJob;
+import reva.services.AnalysisJobManager;
+import reva.services.AnalyzeRequest;
 import reva.tools.AbstractToolProvider;
+import reva.util.ProgramPersistenceUtil;
+import reva.util.ProgramPersistenceUtil.PersistMode;
 import reva.util.SchemaUtil;
 import reva.util.RevaInternalServiceRegistry;
 
@@ -103,6 +103,8 @@ public class ProjectToolProvider extends AbstractToolProvider {
         registerListProjectFilesTool();
         registerCheckinProgramTool();
         registerAnalyzeProgramTool();
+        registerAnalysisStatusTool();
+        registerAnalysisCancelTool();
         registerListAnalyzersTool();
         registerChangeProcessorTool();
         registerImportFileTool();
@@ -329,86 +331,12 @@ public class ProjectToolProvider extends AbstractToolProvider {
             DomainFile domainFile = program.getDomainFile();
 
             try {
-                // Save program first (required before version control operations)
-                // Skip save for read-only programs (common in test environments)
-                if (!domainFile.isReadOnly()) {
-                    try {
-                        program.save(message, TaskMonitor.DUMMY);
-                        program.flushEvents();  // Ensure SAVED event is processed
-                    } catch (java.io.IOException e) {
-                        return createErrorResult("Failed to save program: " + e.getMessage());
-                    }
-                }
-
-                // Release program from cache before version control operations
-                // Version control requires no active consumers on the domain file
-                boolean wasCached = RevaProgramManager.releaseProgramFromCache(program);
-                if (wasCached) {
-                    Msg.debug(this, "Released program from cache for version control: " + programPath);
-                }
-
-                if (domainFile.canAddToRepository()) {
-                    // New file - add to version control
-                    domainFile.addToVersionControl(message, !keepCheckedOut, TaskMonitor.DUMMY);
-
-                    // Re-open program to cache if it was cached and we're keeping it checked out
-                    if (wasCached && keepCheckedOut) {
-                        Program reopenedProgram = RevaProgramManager.reopenProgramToCache(programPath);
-                        if (reopenedProgram != null) {
-                            Msg.debug(this, "Re-opened program to cache after version control: " + programPath);
-                        }
-                    }
-
-                    Map<String, Object> result = new HashMap<>();
-                    result.put("success", true);
-                    result.put("action", "added_to_version_control");
-                    result.put("programPath", programPath);
-                    result.put("message", message);
-                    result.put("keepCheckedOut", keepCheckedOut);
-                    result.put("isVersioned", domainFile.isVersioned());
-                    result.put("isCheckedOut", domainFile.isCheckedOut());
-
-                    return createJsonResult(result);
-                }
-                else if (domainFile.canCheckin()) {
-                    // Existing versioned file - check in changes
-                    DefaultCheckinHandler checkinHandler = new DefaultCheckinHandler(
-                        message + "\n💜🐉✨ (ReVa)", keepCheckedOut, false);
-                    domainFile.checkin(checkinHandler, TaskMonitor.DUMMY);
-
-                    // Re-open program to cache if it was cached and we're keeping it checked out
-                    if (wasCached && keepCheckedOut) {
-                        Program reopenedProgram = RevaProgramManager.reopenProgramToCache(programPath);
-                        if (reopenedProgram != null) {
-                            Msg.debug(this, "Re-opened program to cache after checkin: " + programPath);
-                        }
-                    }
-
-                    Map<String, Object> result = new HashMap<>();
-                    result.put("success", true);
-                    result.put("action", "checked_in");
-                    result.put("programPath", programPath);
-                    result.put("message", message);
-                    result.put("keepCheckedOut", keepCheckedOut);
-                    result.put("isVersioned", domainFile.isVersioned());
-                    result.put("isCheckedOut", domainFile.isCheckedOut());
-
-                    return createJsonResult(result);
-                }
-                else if (!domainFile.isVersioned()) {
-                    // Not versioned - changes were already saved at the beginning
-                    Map<String, Object> result = new HashMap<>();
-                    result.put("success", true);
-                    result.put("action", "saved");
-                    result.put("programPath", programPath);
-                    result.put("message", message);
-                    result.put("isVersioned", false);
-                    result.put("info", "Program is not under version control - changes were saved instead");
-
-                    return createJsonResult(result);
-                }
-                else {
-                    // Other version control errors
+                // Pre-validation: reject versioned files that cannot be persisted via
+                // checkin/addToVC so the user gets the specific error rather than a silent
+                // local-only save. ProgramPersistenceUtil.selectAction would otherwise treat
+                // these as SAVE. These branches must run BEFORE persist().
+                if (!domainFile.canAddToRepository() && !domainFile.canCheckin()
+                        && domainFile.isVersioned()) {
                     if (!domainFile.isCheckedOut()) {
                         return createErrorResult("Program is not checked out and cannot be modified: " + programPath);
                     }
@@ -419,6 +347,65 @@ public class ProjectToolProvider extends AbstractToolProvider {
                         return createErrorResult("Program cannot be checked in for an unknown reason: " + programPath);
                     }
                 }
+
+                // Save locally, then checkin/addToVC when the file is under version control.
+                // persist() saves while the program is still open (the program object held here
+                // is the cache's consumer; releasing it before save would close it). checkin/
+                // addToVersionControl tolerate an open program (Ghidra forces keepCheckedOut=true
+                // when the file is in use), so the cache release happens afterward as pure
+                // cache hygiene.
+                ProgramPersistenceUtil.PersistResult pr = ProgramPersistenceUtil.persist(
+                    program, ProgramPersistenceUtil.PersistMode.AUTO, message, keepCheckedOut,
+                    TaskMonitor.DUMMY);
+
+                // Release program from cache after version control operations.
+                boolean wasCached = RevaProgramManager.releaseProgramFromCache(program);
+                if (wasCached) {
+                    Msg.debug(this, "Released program from cache after version control: " + programPath);
+                }
+
+                // A checkin/addToVC failure after a successful save surfaces as an error,
+                // matching the prior "Checkin failed: ..." behavior. Skip the reopen, as the
+                // prior flow also errored out before reopening.
+                if (pr.error != null) {
+                    return createErrorResult("Checkin failed: " + pr.error);
+                }
+
+                // Re-open program to cache if it was cached and we're keeping it checked out.
+                boolean didVersionControl = pr.action == ProgramPersistenceUtil.PersistAction.CHECKIN
+                    || pr.action == ProgramPersistenceUtil.PersistAction.ADD_TO_VC;
+                if (didVersionControl && wasCached && keepCheckedOut) {
+                    Program reopenedProgram = RevaProgramManager.reopenProgramToCache(programPath);
+                    if (reopenedProgram != null) {
+                        Msg.debug(this, "Re-opened program to cache after version control: " + programPath);
+                    }
+                }
+
+                Map<String, Object> result = new HashMap<>();
+                result.put("success", true);
+                result.put("programPath", programPath);
+                result.put("message", message);
+                if (pr.action == ProgramPersistenceUtil.PersistAction.ADD_TO_VC) {
+                    result.put("action", "added_to_version_control");
+                    result.put("keepCheckedOut", keepCheckedOut);
+                    result.put("isVersioned", domainFile.isVersioned());
+                    result.put("isCheckedOut", domainFile.isCheckedOut());
+                }
+                else if (pr.action == ProgramPersistenceUtil.PersistAction.CHECKIN) {
+                    result.put("action", "checked_in");
+                    result.put("keepCheckedOut", keepCheckedOut);
+                    result.put("isVersioned", domainFile.isVersioned());
+                    result.put("isCheckedOut", domainFile.isCheckedOut());
+                }
+                else {
+                    // SAVE or SKIP (read-only): treated as a local save, matching the prior
+                    // "not under version control" / read-only handling.
+                    result.put("action", "saved");
+                    result.put("isVersioned", false);
+                    result.put("info", "Program is not under version control - changes were saved instead");
+                }
+
+                return createJsonResult(result);
 
             } catch (Exception e) {
                 return createErrorResult("Checkin failed: " + e.getMessage());
@@ -683,17 +670,42 @@ public class ProjectToolProvider extends AbstractToolProvider {
             + "Pass -1 to disable the timeout entirely (analysis runs until done).");
         properties.put("timeoutSeconds", timeoutProp);
 
+        Map<String, Object> waitProp = new HashMap<>();
+        waitProp.put("type", "integer");
+        waitProp.put("minimum", 0);
+        waitProp.put("default", 10);
+        waitProp.put("description",
+            "Seconds to wait inline for analysis to finish before returning a job handle to poll. "
+            + "Small programs finish within this window and return the full result in one call; long "
+            + "analyses return {status:running, jobId} to poll with analysis-status. Keep this safely "
+            + "below your MCP client's tool-call timeout — the inline wait holds the request open, so a "
+            + "value above the client timeout would drop the call (the job still runs and stays pollable).");
+        properties.put("waitSeconds", waitProp);
+
+        Map<String, Object> persistProp = new HashMap<>();
+        persistProp.put("type", "string");
+        persistProp.put("enum", List.of("auto", "save", "none"));
+        persistProp.put("default", "auto");
+        persistProp.put("description",
+            "How to persist the analysis when it finishes: auto = save locally then checkin if the "
+            + "file is under version control; save = local save only; none = don't persist (read-only).");
+        properties.put("persist", persistProp);
+
         List<String> required = List.of("programPath");
 
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("analyze-program")
             .title("Analyze Program")
             .description(
-                "Run Ghidra's auto-analysis on a program. Blocks until analysis completes or times out, "
-                + "wraps the work in a transaction, marks the program analyzed, and reports per-analyzer "
-                + "task names and timings. Supports per-call analyzer overrides via enableAnalyzers / "
-                + "disableAnalyzers (use list-analyzers for valid names). After import-file, call this "
-                + "tool to populate functions, strings, and references.")
+                "Run Ghidra's auto-analysis on a program as a background job, then persist the result. "
+                + "Waits inline up to waitSeconds for completion: small programs finish in that window and "
+                + "return the full result (success, analyzersRun, durationMs, persisted, saved, ...) in one "
+                + "call with status=completed. Longer analyses return {status:running, jobId, log} so you "
+                + "can poll analysis-status with the jobId (or stop it with analysis-cancel). Only one "
+                + "analysis runs per program at a time — calling again while one is in flight reuses the "
+                + "running job. Supports per-call analyzer overrides via enableAnalyzers / disableAnalyzers "
+                + "(use list-analyzers for valid names) and a persist mode (auto/save/none). After "
+                + "import-file, call this tool to populate functions, strings, and references.")
             .inputSchema(createSchema(properties, required))
             .build();
 
@@ -717,15 +729,39 @@ public class ProjectToolProvider extends AbstractToolProvider {
                     "timeoutSeconds must be a positive integer or -1 (no timeout); got " + timeoutSeconds);
             }
 
+            int waitSeconds = getOptionalInt(request, "waitSeconds", 10);
+            if (waitSeconds < 0) {
+                return createErrorResult("waitSeconds must be >= 0; got " + waitSeconds);
+            }
+
+            // Map the persist mode string to the runner's PersistMode.
+            String persistArg = getOptionalString(request, "persist", "auto");
+            PersistMode persistMode;
+            switch (persistArg.toLowerCase()) {
+                case "auto":
+                    persistMode = PersistMode.AUTO;
+                    break;
+                case "save":
+                    persistMode = PersistMode.SAVE;
+                    break;
+                case "none":
+                    persistMode = PersistMode.NONE;
+                    break;
+                default:
+                    return createErrorResult(
+                        "persist must be one of [auto, save, none]; got '" + persistArg + "'");
+            }
+
             // Get the analysis manager early so its analyzers register their options on the
             // program before we validate user-supplied override names. Without this, a fresh
             // program has no entries in ANALYSIS_PROPERTIES and every override would be
-            // rejected as "unknown analyzer".
-            AutoAnalysisManager mgr = AutoAnalysisManager.getAnalysisManager(program);
-            if (mgr == null) {
+            // rejected as "unknown analyzer". (Validation runs synchronously, before submit,
+            // so bad input still errors immediately.)
+            AutoAnalysisManager aam = AutoAnalysisManager.getAnalysisManager(program);
+            if (aam == null) {
                 return createErrorResult("Could not get analysis manager for program: " + programPath);
             }
-            mgr.initializeOptions();
+            aam.initializeOptions();
 
             Options analysisOpts = program.getOptions(Program.ANALYSIS_PROPERTIES);
 
@@ -743,131 +779,358 @@ public class ProjectToolProvider extends AbstractToolProvider {
                 }
             }
 
-            // Snapshot original values so we can restore after the run (per-call overrides don't persist).
-            Map<String, Boolean> snapshot = new LinkedHashMap<>();
-            if (!enableAnalyzers.isEmpty() || !disableAnalyzers.isEmpty()) {
-                int overrideTx = program.startTransaction("ReVa: Apply analyzer overrides");
-                try {
-                    for (String name : enableAnalyzers) {
-                        snapshot.put(name, analysisOpts.getBoolean(name, true));
-                        analysisOpts.setBoolean(name, true);
-                    }
-                    for (String name : disableAnalyzers) {
-                        snapshot.put(name, analysisOpts.getBoolean(name, true));
-                        analysisOpts.setBoolean(name, false);
-                    }
-                    program.endTransaction(overrideTx, true);
-                } catch (Exception e) {
-                    program.endTransaction(overrideTx, false);
-                    throw e;
-                }
+            AnalysisJobManager mgr = RevaInternalServiceRegistry.getService(AnalysisJobManager.class);
+            if (mgr == null) {
+                return createErrorResult("background analysis service unavailable");
             }
+
+            // Single-flight: atomically reuse an in-flight job for this program, or start a new
+            // one. startOrAttach holds the manager lock across find+create+submit so two
+            // concurrent calls for the same program can't both launch an analysis.
+            AnalysisJob job = mgr.startOrAttach(programPath, new AnalyzeRequest(
+                program, enableAnalyzers, disableAnalyzers, forceFullAnalysis,
+                timeoutSeconds, persistMode));
 
             Object progressToken = request.progressToken();
             boolean emitProgress = progressToken != null && exchange != null;
 
-            TaskMonitor baseMonitor = (timeoutSeconds == -1)
-                ? TaskMonitor.DUMMY
-                : TimeoutTaskMonitor.timeoutIn(timeoutSeconds, TimeUnit.SECONDS);
-
-            AnalysisProgressMonitor monitor = new AnalysisProgressMonitor(
-                baseMonitor,
-                emitProgress ? exchange : null,
-                progressToken);
-
-            AtomicBoolean ended = new AtomicBoolean(false);
-            AutoAnalysisManagerListener listener = (m, isCancelled) -> ended.set(true);
-            mgr.addListener(listener);
-
-            long startMs = System.currentTimeMillis();
-            boolean wasFullAnalysis;
-            boolean cancelled;
-            boolean timedOut;
-
-            int analysisTx = program.startTransaction("ReVa: Auto Analysis");
-            try {
-                wasFullAnalysis = forceFullAnalysis || !GhidraProgramUtilities.isAnalyzed(program);
-
+            // Inline long-poll: wait up to waitSeconds for the job to reach a terminal state,
+            // emitting best-effort progress notifications when the client opted in.
+            long deadline = System.currentTimeMillis() + (long) waitSeconds * 1000L;
+            while (!job.getStatus().isTerminal() && System.currentTimeMillis() < deadline) {
                 if (emitProgress) {
-                    exchange.progressNotification(new McpSchema.ProgressNotification(
-                        progressToken, 0.0, 1.0,
-                        wasFullAnalysis
-                            ? "Starting full auto-analysis..."
-                            : "Starting incremental auto-analysis..."));
-                }
-
-                if (wasFullAnalysis) {
-                    mgr.reAnalyzeAll(null);
-                }
-                mgr.startAnalysis(monitor); // blocks until analysis completes or monitor is cancelled
-                cancelled = monitor.isCancelled();
-                timedOut = cancelled && timeoutSeconds != -1;
-
-                if (!cancelled) {
-                    GhidraProgramUtilities.markProgramAnalyzed(program);
-                }
-                program.endTransaction(analysisTx, true);
-            } catch (Exception e) {
-                program.endTransaction(analysisTx, false);
-                mgr.removeListener(listener);
-                restoreAnalyzerOptions(program, analysisOpts, snapshot);
-                throw e;
-            }
-
-            mgr.removeListener(listener);
-            restoreAnalyzerOptions(program, analysisOpts, snapshot);
-
-            long durationMs = System.currentTimeMillis() - startMs;
-
-            List<Map<String, Object>> analyzersRun = new ArrayList<>();
-            for (String taskName : mgr.getTimedTasks()) {
-                analyzersRun.add(Map.of("name", taskName));
-            }
-
-            List<String> messages = new ArrayList<>();
-            if (mgr.getMessageLog() != null && mgr.getMessageLog().hasMessages()) {
-                for (String line : mgr.getMessageLog().toString().split("\n")) {
-                    if (!line.isBlank()) {
-                        messages.add(line);
+                    try {
+                        // Show the CURRENT activity (latest log line), not a frozen first line.
+                        String latest = job.getLatestLogMessage();
+                        String msg = (latest != null)
+                            ? latest
+                            : job.getStatus().name().toLowerCase();
+                        // We don't know total work; report a small non-zero fraction so clients
+                        // see liveness without implying completion.
+                        exchange.progressNotification(new McpSchema.ProgressNotification(
+                            progressToken, 0.5, 1.0, msg));
+                    } catch (Exception ignore) {
+                        // A progress-notification failure must never break the tool.
                     }
                 }
-            }
-
-            if (emitProgress) {
-                String finalMsg;
-                if (timedOut) {
-                    finalMsg = "Analysis timed out after " + timeoutSeconds + " seconds";
-                } else if (cancelled) {
-                    finalMsg = "Analysis cancelled";
-                } else {
-                    finalMsg = "Analysis complete (" + analyzersRun.size() + " analyzers ran in "
-                        + durationMs + "ms)";
+                try {
+                    Thread.sleep(250L);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    break;
                 }
-                exchange.progressNotification(new McpSchema.ProgressNotification(
-                    progressToken, 1.0, 1.0, finalMsg));
             }
 
-            Map<String, Object> result = new HashMap<>();
-            result.put("success", !cancelled);
-            result.put("programPath", programPath);
-            result.put("analyzed", GhidraProgramUtilities.isAnalyzed(program));
-            result.put("wasFullAnalysis", wasFullAnalysis);
-            result.put("durationMs", durationMs);
-            result.put("totalTaskTimeMs", mgr.getTotalTimeInMillis());
-            result.put("cancelled", cancelled);
-            result.put("timedOut", timedOut);
-            result.put("analyzersRun", analyzersRun);
-            if (!messages.isEmpty()) {
-                result.put("messages", messages);
+            if (job.getStatus().isTerminal()) {
+                // Start from the job's result map (which carries success/analyzed/wasFullAnalysis/
+                // durationMs/analyzersRun/messages/persisted/saved/... for backward compatibility).
+                Map<String, Object> result = job.getResult();
+                if (result == null) {
+                    // Only happens on FAILED before a result map was set.
+                    result = new HashMap<>();
+                    result.put("success", false);
+                    result.put("programPath", programPath);
+                    if (job.getError() != null) {
+                        result.put("error", job.getError());
+                    }
+                } else {
+                    result = new HashMap<>(result);
+                }
+                result.put("jobId", job.getJobId());
+                result.put("status", job.getStatus().name().toLowerCase());
+
+                if (emitProgress) {
+                    try {
+                        exchange.progressNotification(new McpSchema.ProgressNotification(
+                            progressToken, 1.0, 1.0,
+                            "Analysis " + job.getStatus().name().toLowerCase()));
+                    } catch (Exception ignore) {
+                        // best-effort
+                    }
+                }
+
+                return createJsonResult(result);
             }
-            if (timedOut) {
-                result.put("error",
-                    "Analysis timed out after " + timeoutSeconds + " seconds. "
-                        + "Increase timeoutSeconds or pass -1 for unlimited.");
+
+            // Still running after the inline wait: return a job handle to poll.
+            AnalysisJob.LogPage page = job.logSince(0, 50);
+            List<Map<String, Object>> log = new ArrayList<>();
+            for (AnalysisJob.LogEntry entry : page.entries) {
+                Map<String, Object> e = new LinkedHashMap<>();
+                e.put("seq", entry.seq);
+                e.put("elapsedMs", entry.elapsedMs);
+                e.put("message", entry.message);
+                log.add(e);
+            }
+
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("success", true);
+            result.put("programPath", programPath);
+            result.put("jobId", job.getJobId());
+            result.put("status", "running");
+            result.put("functionCount", job.getFunctionCount());
+            result.put("log", log);
+            result.put("logCursor", page.nextCursor);
+            result.put("truncated", page.truncated);
+            result.put("hint",
+                "Analysis still running. Poll analysis-status with this jobId and "
+                + "sinceLogSeq=logCursor; or call analysis-cancel to stop.");
+
+            return createJsonResult(result);
+        });
+    }
+
+    /**
+     * Register the analysis-status tool: a log-tailing long-poll the model loops on to monitor a
+     * background analysis job until it terminates.
+     */
+    private void registerAnalysisStatusTool() {
+        Map<String, Object> properties = new HashMap<>();
+        properties.put("jobId", SchemaUtil.stringProperty(
+            "The analysis job to poll (e.g., 'analysis-3'), as returned by analyze-program. "
+            + "Provide exactly one of jobId or programPath."));
+        properties.put("programPath", SchemaUtil.stringProperty(
+            "Alternative to jobId: the program path (e.g., '/Hatchery.exe') whose LATEST analysis "
+            + "job should be polled. Provide exactly one of jobId or programPath."));
+
+        Map<String, Object> sinceProp = new HashMap<>();
+        sinceProp.put("type", "integer");
+        sinceProp.put("minimum", 0);
+        sinceProp.put("default", 0);
+        sinceProp.put("description",
+            "Return only log entries with seq greater than this cursor. Feed back the previous "
+            + "call's logCursor here to get just the new lines.");
+        properties.put("sinceLogSeq", sinceProp);
+
+        Map<String, Object> waitProp = new HashMap<>();
+        waitProp.put("type", "integer");
+        waitProp.put("minimum", 0);
+        waitProp.put("default", 10);
+        waitProp.put("description",
+            "Seconds to long-poll: the call holds open up to this long waiting for progress, then "
+            + "returns. It returns the instant the job terminates. Keep this safely below your MCP "
+            + "client's tool-call timeout — the inline wait holds the request open, so a value above "
+            + "the client timeout would drop the call (the job still runs and stays pollable).");
+        properties.put("waitSeconds", waitProp);
+
+        Map<String, Object> maxLogProp = new HashMap<>();
+        maxLogProp.put("type", "integer");
+        maxLogProp.put("minimum", 1);
+        maxLogProp.put("default", 50);
+        maxLogProp.put("description",
+            "Maximum number of log entries to return per call. When more are available, truncated "
+            + "is true and you should call again with sinceLogSeq=logCursor to drain them.");
+        properties.put("maxLogEntries", maxLogProp);
+
+        List<String> required = List.of();
+
+        McpSchema.Tool tool = McpSchema.Tool.builder()
+            .name("analysis-status")
+            .title("Analysis Status")
+            .description(
+                "Poll a background analysis job started by analyze-program. Call repeatedly, feeding "
+                + "back logCursor as sinceLogSeq, until status is terminal "
+                + "(completed/failed/cancelled/timed_out). Each call returns the new log lines since "
+                + "the cursor and the live function count, and long-polls up to waitSeconds for "
+                + "progress — returning immediately when the job finishes. When terminal, the response "
+                + "also carries the full result (persisted, saved, durationMs, ...). Identify the job "
+                + "by jobId (preferred) or by programPath (resolves to that program's latest job).")
+            .inputSchema(createSchema(properties, required))
+            .build();
+
+        registerTool(tool, (exchange, request) -> {
+            AnalysisJobManager mgr = RevaInternalServiceRegistry.getService(AnalysisJobManager.class);
+            if (mgr == null) {
+                return createErrorResult("background analysis service unavailable");
+            }
+
+            String jobId = getOptionalString(request, "jobId", null);
+            String programPath = getOptionalString(request, "programPath", null);
+            boolean hasJobId = jobId != null && !jobId.isBlank();
+            boolean hasProgramPath = programPath != null && !programPath.isBlank();
+
+            if (hasJobId && hasProgramPath) {
+                return createErrorResult("Provide exactly one of jobId or programPath, not both");
+            }
+            if (!hasJobId && !hasProgramPath) {
+                return createErrorResult("provide jobId or programPath");
+            }
+
+            AnalysisJob job;
+            if (hasJobId) {
+                job = mgr.get(jobId);
+                if (job == null) {
+                    List<String> ids = new ArrayList<>();
+                    for (AnalysisJob j : mgr.all()) {
+                        ids.add(j.getJobId());
+                    }
+                    return createErrorResult("No job " + jobId + ". Active jobs: " + ids);
+                }
+            } else {
+                job = latestJobForProgram(mgr, programPath);
+                if (job == null) {
+                    return createErrorResult("No analysis job found for programPath: " + programPath);
+                }
+            }
+
+            long sinceLogSeq = getOptionalInt(request, "sinceLogSeq", 0);
+            if (sinceLogSeq < 0) {
+                return createErrorResult("sinceLogSeq must be >= 0; got " + sinceLogSeq);
+            }
+            int waitSeconds = getOptionalInt(request, "waitSeconds", 10);
+            if (waitSeconds < 0) {
+                return createErrorResult("waitSeconds must be >= 0; got " + waitSeconds);
+            }
+            int maxLogEntries = getOptionalInt(request, "maxLogEntries", 50);
+            if (maxLogEntries < 1) {
+                return createErrorResult("maxLogEntries must be >= 1; got " + maxLogEntries);
+            }
+
+            // Batch-over-window long-poll: return the instant the job terminates, else hold until
+            // the window expires.
+            long deadline = System.currentTimeMillis() + (long) waitSeconds * 1000L;
+            while (true) {
+                if (job.getStatus().isTerminal()) {
+                    break;
+                }
+                if (System.currentTimeMillis() >= deadline) {
+                    break;
+                }
+                try {
+                    Thread.sleep(250L);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+
+            AnalysisJob.LogPage page = job.logSince(sinceLogSeq, maxLogEntries);
+            List<Map<String, Object>> log = new ArrayList<>();
+            for (AnalysisJob.LogEntry entry : page.entries) {
+                Map<String, Object> e = new LinkedHashMap<>();
+                e.put("seq", entry.seq);
+                e.put("elapsedMs", entry.elapsedMs);
+                e.put("message", entry.message);
+                log.add(e);
+            }
+
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("success", true);
+            result.put("jobId", job.getJobId());
+            result.put("programPath", job.getProgramPath());
+            result.put("status", job.getStatus().name().toLowerCase());
+            result.put("functionCount", job.getFunctionCount());
+            result.put("log", log);
+            result.put("logCursor", page.nextCursor);
+            result.put("truncated", page.truncated);
+
+            if (job.getStatus().isTerminal()) {
+                Map<String, Object> jobResult = job.getResult();
+                if (jobResult != null) {
+                    result.put("result", jobResult);
+                } else if (job.getError() != null) {
+                    result.put("error", job.getError());
+                }
             }
 
             return createJsonResult(result);
         });
+    }
+
+    private void registerAnalysisCancelTool() {
+        Map<String, Object> properties = new HashMap<>();
+        properties.put("jobId", SchemaUtil.stringProperty(
+            "The analysis job to cancel (e.g. 'analysis-3')."));
+
+        List<String> required = List.of("jobId");
+
+        McpSchema.Tool tool = McpSchema.Tool.builder()
+            .name("analysis-cancel")
+            .title("Analysis Cancel")
+            .description(
+                "Request cancellation of a running background analysis job started by analyze-program. "
+                + "Cancellation is asynchronous: this returns immediately after requesting it; poll "
+                + "analysis-status until the job reaches a terminal state (cancelled) to confirm. "
+                + "Partial analysis work is still persisted when the job unwinds. If the job has already "
+                + "finished, this is a no-op and reports alreadyTerminal:true.")
+            .inputSchema(createSchema(properties, required))
+            .build();
+
+        registerTool(tool, (exchange, request) -> {
+            AnalysisJobManager mgr = RevaInternalServiceRegistry.getService(AnalysisJobManager.class);
+            if (mgr == null) {
+                return createErrorResult("background analysis service unavailable");
+            }
+
+            String jobId = getString(request, "jobId");
+
+            AnalysisJob job = mgr.get(jobId);
+            if (job == null) {
+                List<String> ids = new ArrayList<>();
+                for (AnalysisJob j : mgr.all()) {
+                    ids.add(j.getJobId());
+                }
+                return createErrorResult("No job " + jobId + ". Active jobs: " + ids);
+            }
+
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("success", true);
+            result.put("jobId", job.getJobId());
+
+            if (job.getStatus().isTerminal()) {
+                result.put("status", job.getStatus().name().toLowerCase());
+                result.put("alreadyTerminal", true);
+                result.put("message", "Job already finished; nothing to cancel.");
+                return createJsonResult(result);
+            }
+
+            job.requestCancel();
+            result.put("status", job.getStatus().name().toLowerCase());
+            result.put("alreadyTerminal", false);
+            result.put("message", "Cancellation requested. Poll analysis-status until the job reaches "
+                + "a terminal state (cancelled); partial analysis is still persisted.");
+            return createJsonResult(result);
+        });
+    }
+
+    /**
+     * Find the latest analysis job for the given program path. Job ids are {@code "analysis-<N>"}
+     * with monotonically increasing N; the latest job is the one with the greatest N.
+     *
+     * @param mgr the analysis job manager
+     * @param programPath the program path to match
+     * @return the most recent job for that path, or null if none exists
+     */
+    private AnalysisJob latestJobForProgram(AnalysisJobManager mgr, String programPath) {
+        AnalysisJob latest = null;
+        long latestN = Long.MIN_VALUE;
+        for (AnalysisJob job : mgr.all()) {
+            if (!job.getProgramPath().equals(programPath)) {
+                continue;
+            }
+            long n = jobIdSuffix(job.getJobId());
+            if (latest == null || n > latestN) {
+                latest = job;
+                latestN = n;
+            }
+        }
+        return latest;
+    }
+
+    /**
+     * Parse the numeric suffix of an {@code "analysis-<N>"} job id. Returns {@link Long#MIN_VALUE}
+     * for ids that don't end in a parseable number, so malformed ids never win the "latest" race.
+     */
+    private long jobIdSuffix(String jobId) {
+        int dash = jobId.lastIndexOf('-');
+        if (dash < 0 || dash == jobId.length() - 1) {
+            return Long.MIN_VALUE;
+        }
+        try {
+            return Long.parseLong(jobId.substring(dash + 1));
+        } catch (NumberFormatException e) {
+            return Long.MIN_VALUE;
+        }
     }
 
     /**
@@ -894,26 +1157,6 @@ public class ProjectToolProvider extends AbstractToolProvider {
                 + "). Pass the top-level analyzer name only.";
         }
         return null;
-    }
-
-    /**
-     * Restore analyzer options to their pre-run values. No-op if snapshot is empty.
-     */
-    private void restoreAnalyzerOptions(Program program, Options analysisOpts,
-            Map<String, Boolean> snapshot) {
-        if (snapshot.isEmpty()) {
-            return;
-        }
-        int tx = program.startTransaction("ReVa: Restore analyzer overrides");
-        try {
-            for (Map.Entry<String, Boolean> entry : snapshot.entrySet()) {
-                analysisOpts.setBoolean(entry.getKey(), entry.getValue());
-            }
-            program.endTransaction(tx, true);
-        } catch (Exception e) {
-            program.endTransaction(tx, false);
-            Msg.error(this, "Failed to restore analyzer options: " + e.getMessage(), e);
-        }
     }
 
     /**
@@ -1057,59 +1300,6 @@ public class ProjectToolProvider extends AbstractToolProvider {
             subOptions.add(entry);
         }
         return subOptions;
-    }
-
-    /**
-     * TaskMonitor that wraps a delegate (timeout-aware or DUMMY) and forwards monitor
-     * activity to MCP progress notifications when an exchange and progressToken are
-     * available. Throttled to avoid flooding the channel during chatty analyzers.
-     */
-    private static final class AnalysisProgressMonitor extends WrappingTaskMonitor {
-        private static final long THROTTLE_MS = 250;
-
-        private final McpSyncServerExchange exchange;
-        private final Object progressToken;
-        private long lastEmitMs = 0L;
-        private String lastMessage = "";
-
-        AnalysisProgressMonitor(TaskMonitor delegate, McpSyncServerExchange exchange,
-                Object progressToken) {
-            super(delegate);
-            this.exchange = exchange;
-            this.progressToken = progressToken;
-        }
-
-        private boolean canEmit() {
-            return exchange != null && progressToken != null;
-        }
-
-        private void emit(String message, boolean force) {
-            if (!canEmit()) {
-                return;
-            }
-            long now = System.currentTimeMillis();
-            if (!force && (now - lastEmitMs) < THROTTLE_MS) {
-                return;
-            }
-            lastEmitMs = now;
-            try {
-                // Use a coarse 0..1 scale: AutoAnalysisManager has no global progress signal we can
-                // map to a number, so we lean on the message field for human-readable status.
-                exchange.progressNotification(new McpSchema.ProgressNotification(
-                    progressToken, 0.5, 1.0, message));
-            } catch (Exception e) {
-                // Notification failures must never break analysis.
-            }
-        }
-
-        @Override
-        public void setMessage(String message) {
-            super.setMessage(message);
-            if (message != null && !message.equals(lastMessage)) {
-                lastMessage = message;
-                emit(message, false);
-            }
-        }
     }
 
     /**

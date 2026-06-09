@@ -138,7 +138,7 @@ mcp-reva CLI → PyGhidra → ReVaLauncher → Jetty (HTTP)
 - **Foundation Layer** (`util/`) - AddressUtil, ProgramLookupUtil, DataTypeParserUtil, etc.
 - **Plugin Layer** (`plugin/`) - ConfigManager, RevaProgramManager, Ghidra lifecycle
 - **Server Layer** (`server/`) - McpServerManager, Jetty server, streamable transport
-- **Tool Layer** (`tools/`) - 18 specialized tool packages (decompiler, functions, strings, callgraph, dataflow, etc.)
+- **Tool Layer** (`tools/`) - 19 specialized tool packages (decompiler, functions, strings, callgraph, dataflow, etc.)
 - **Resource Layer** (`resources/`) - Read-only MCP resource providers
 - **Headless Layer** (`headless/`) - RevaHeadlessLauncher for PyGhidra integration
 
@@ -154,7 +154,7 @@ src/main/java/reva/          # Java extension code
   ├── util/                  # Foundational utilities (ALWAYS use these!)
   ├── plugin/                # ConfigManager, plugin lifecycle
   ├── server/                # McpServerManager, Jetty
-  ├── tools/                 # 18 tool provider packages
+  ├── tools/                 # 19 tool provider packages
   ├── resources/             # MCP resource providers
   ├── headless/              # RevaHeadlessLauncher
   └── ui/                    # Optional GUI components
@@ -168,13 +168,14 @@ scripts/                     # Helper scripts (reva_headless_server.py)
 ### Package-Level Documentation
 Each major package contains its own CLAUDE.md file with detailed implementation guidance:
 - **Essential Infrastructure**: `util/`, `plugin/`, `server/` - Core systems documentation
-- **Tool Providers**: Each of the 18 tool packages has comprehensive implementation guides
+- **Tool Providers**: Each of the 19 tool packages has comprehensive implementation guides
 - **Supporting Systems**: `resources/`, `services/`, `ui/` - Specialized component documentation
 
 ### Tool Provider Categories
 - **Core Analysis**: decompiler, functions, strings, symbols, xrefs, memory
 - **Data & Types**: data, datatypes, structures
 - **Advanced Analysis**: callgraph, dataflow, constants, vtable, imports
+- **diff**: binary diffing via Version Tracking (match functions, explain changes, transfer analysis between variants)
 - **Annotations**: comments, bookmarks
 - **Project Management**: project
 - **Scripting**: scripts (Python script run/list/read/write/edit; requires PyGhidra)

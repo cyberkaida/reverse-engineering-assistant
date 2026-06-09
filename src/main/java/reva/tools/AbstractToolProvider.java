@@ -330,6 +330,43 @@ public abstract class AbstractToolProvider implements ToolProvider {
     }
 
     /**
+     * Get an optional double parameter from CallToolRequest
+     * @param request The CallToolRequest
+     * @param key The parameter key
+     * @param defaultValue The default value if not present
+     * @return The double value or default
+     */
+    protected double getOptionalDouble(CallToolRequest request, String key, double defaultValue) {
+        return getOptionalDouble(request.arguments(), key, defaultValue);
+    }
+
+    /**
+     * Get an optional double parameter from arguments
+     * @param args The arguments map
+     * @param key The parameter key
+     * @param defaultValue The default value if not present
+     * @return The double value or default
+     */
+    protected double getOptionalDouble(Map<String, Object> args, String key, double defaultValue) {
+        Object value = args.get(key);
+        if (value == null) {
+            return defaultValue;
+        }
+        if (value instanceof Number) {
+            return ((Number) value).doubleValue();
+        }
+        // Try to parse string representations of numbers
+        if (value instanceof String) {
+            try {
+                return Double.parseDouble((String) value);
+            } catch (NumberFormatException e) {
+                throw new IllegalArgumentException("Parameter '" + key + "' must be a number, got: " + value);
+            }
+        }
+        throw new IllegalArgumentException("Parameter '" + key + "' must be a number");
+    }
+
+    /**
      * Get an optional integer parameter from arguments that can be null.
      * Unlike getOptionalInt(), this method can return null when the parameter is not provided
      * or when explicitly set to null, allowing distinction between "not provided" and "provided with default".

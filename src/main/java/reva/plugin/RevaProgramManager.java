@@ -215,6 +215,46 @@ public class RevaProgramManager {
     }
 
     /**
+     * Check out a versioned domain file (non-exclusively, without prompting) before it is
+     * opened, so the resulting program is writable and no GUI dialog is shown.
+     * <p>
+     * Unlike {@link #ensureCheckedOut(Program, String)}, which operates on an already-open
+     * program, this works on the {@link DomainFile} prior to opening. That ordering is
+     * required: Ghidra returns a read-only domain object for a versioned file with no local
+     * checkout, and a post-open checkout cannot upgrade it to writable.
+     * @param domainFile The domain file to check out
+     * @param programPath The path of the program (for logging)
+     */
+    private static void checkoutBeforeOpen(DomainFile domainFile, String programPath) {
+        if (domainFile == null) {
+            return;
+        }
+
+        // Only attempt a checkout when the file is versioned, not already checked out, and
+        // checkout is actually permitted (e.g. not a read-only/transient project).
+        if (domainFile.isVersioned() && !domainFile.isCheckedOut() && domainFile.canCheckout()) {
+            try {
+                Msg.debug(RevaProgramManager.class,
+                    "Attempting pre-open auto-checkout for: " + programPath);
+                boolean success = domainFile.checkout(false, TaskMonitor.DUMMY);
+                if (success) {
+                    Msg.info(RevaProgramManager.class,
+                        "Auto-checked out versioned program before open: " + programPath);
+                } else {
+                    Msg.warn(RevaProgramManager.class,
+                        "Failed to auto-checkout versioned program: " + programPath +
+                        " (may be checked out exclusively by another user); " +
+                        "program will open read-only");
+                }
+            } catch (Exception e) {
+                Msg.error(RevaProgramManager.class,
+                    "Could not auto-checkout program " + programPath + ": " + e.getMessage(), e);
+                // Continue anyway - program is still usable in read-only mode
+            }
+        }
+    }
+
+    /**
      * Get a program by its path
      * @param programPath Path to the program
      * @return Program object or null if not found
@@ -322,8 +362,22 @@ public class RevaProgramManager {
             return null;
         }
 
-        // Open the program
+        // Check out the file BEFORE opening if it is versioned but not checked out.
+        // This must happen before ProgramOpener.openProgram() for two reasons:
+        //   1. In a headed (GUI) Ghidra, ProgramOpener.performOptionalCheckout() would
+        //      otherwise pop a modal "Versioned File not Checked Out" dialog (via
+        //      Swing.runNow) that blocks the MCP server thread until a human clicks.
+        //   2. Ghidra's DomainFile.getDomainObject() returns a READ-ONLY object for a
+        //      versioned file that has no local checkout (folderItem == null). A checkout
+        //      performed *after* opening cannot upgrade that already-open read-only
+        //      instance, so write tools (diff-transfer-markup, etc.) would fail. Checking
+        //      out first makes getDomainObject() return a writable program.
+        checkoutBeforeOpen(domainFile, programPath);
+
+        // Open the program. setSilent() suppresses ALL interactive prompts on the server
+        // thread (checkout prompt AND the crash-recovery dialog), so the open never blocks.
         ProgramOpener programOpener = new ProgramOpener(programCache);
+        programOpener.setSilent();
         ProgramLocator locator = new ProgramLocator(domainFile);
         Program program = programOpener.openProgram(locator, TaskMonitor.DUMMY);
 

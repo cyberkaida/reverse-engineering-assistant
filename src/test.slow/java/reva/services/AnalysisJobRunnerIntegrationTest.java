@@ -30,7 +30,8 @@ import ghidra.program.model.symbol.SourceType;
 import ghidra.program.util.GhidraProgramUtilities;
 import ghidra.util.task.TaskMonitor;
 import reva.RevaIntegrationTestBase;
-import reva.services.AnalysisJob.Status;
+import reva.services.JobLog;
+import reva.services.JobStatus;
 import reva.util.ProgramPersistenceUtil.PersistMode;
 
 /**
@@ -120,11 +121,11 @@ public class AnalysisJobRunnerIntegrationTest extends RevaIntegrationTestBase {
                 Thread.sleep(250L);
             }
 
-            assertEquals("Job should complete successfully", Status.COMPLETED, job.getStatus());
+            assertEquals("Job should complete successfully", JobStatus.COMPLETED, job.getStatus());
             assertTrue("Program should be marked analyzed in Ghidra metadata",
                 GhidraProgramUtilities.isAnalyzed(saveable));
 
-            AnalysisJob.LogPage page = job.logSince(0, 1000);
+            JobLog.LogPage page = job.logSince(0, 1000);
             assertFalse("Job log should have captured entries", page.entries.isEmpty());
 
             Map<String, Object> result = job.getResult();

@@ -41,8 +41,8 @@ import io.modelcontextprotocol.spec.McpSchema.TextContent;
 import reva.RevaIntegrationTestBase;
 import reva.plugin.RevaProgramManager;
 import reva.services.AnalysisJob;
-import reva.services.AnalysisJob.Status;
 import reva.services.AnalysisJobManager;
+import reva.services.JobStatus;
 import reva.services.AnalyzeRequest;
 import reva.util.ProgramPersistenceUtil.PersistMode;
 import reva.util.RevaInternalServiceRegistry;
@@ -207,7 +207,7 @@ public class AnalysisCancelIntegrationTest extends RevaIntegrationTestBase {
             }
 
             assertEquals("Pre-cancelled job should end CANCELLED",
-                Status.CANCELLED, job.getStatus());
+                JobStatus.CANCELLED, job.getStatus());
         } finally {
             cleanup(saveable, fileOut[0]);
         }

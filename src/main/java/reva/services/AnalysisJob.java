@@ -1,8 +1,5 @@
 package reva.services;
 
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
 import java.util.Map;
 
 /**
@@ -10,77 +7,18 @@ import java.util.Map;
  *
  * <p>Holds the job's identity, status, an append-only log buffer with a monotonic
  * per-job sequence counter, and optional result/error payloads. The instance is
- * thread-safe: the log entry list is guarded by a private lock, the sequence counter
- * is incremented under that lock, and the mutable scalar fields are volatile.
+ * thread-safe: the log is delegated to {@link JobLog} (which is internally guarded),
+ * and the mutable scalar fields are volatile.
  */
 public class AnalysisJob {
-
-    /**
-     * Lifecycle status of an analysis job.
-     */
-    public enum Status {
-        RUNNING,
-        PERSISTING,
-        COMPLETED,
-        FAILED,
-        CANCELLED,
-        TIMED_OUT;
-
-        /**
-         * @return true if this status is a terminal state (no further transitions)
-         */
-        public boolean isTerminal() {
-            switch (this) {
-                case COMPLETED:
-                case FAILED:
-                case CANCELLED:
-                case TIMED_OUT:
-                    return true;
-                default:
-                    return false;
-            }
-        }
-    }
-
-    /**
-     * A single append-only log entry with its sequence number and elapsed time.
-     */
-    public static final class LogEntry {
-        public final long seq;
-        public final long elapsedMs;
-        public final String message;
-
-        public LogEntry(long seq, long elapsedMs, String message) {
-            this.seq = seq;
-            this.elapsedMs = elapsedMs;
-            this.message = message;
-        }
-    }
-
-    /**
-     * A page of log entries returned by {@link AnalysisJob#logSince(long, int)}.
-     */
-    public static final class LogPage {
-        public final List<LogEntry> entries;
-        public final long nextCursor;
-        public final boolean truncated;
-
-        public LogPage(List<LogEntry> entries, long nextCursor, boolean truncated) {
-            this.entries = entries;
-            this.nextCursor = nextCursor;
-            this.truncated = truncated;
-        }
-    }
 
     private final String jobId;
     private final String programPath;
     private final long startMs;
 
-    private final Object logLock = new Object();
-    private final List<LogEntry> log = new ArrayList<>();
-    private long seqCounter = 0;
+    private final JobLog jobLog;
 
-    private volatile Status status = Status.RUNNING;
+    private volatile JobStatus status = JobStatus.RUNNING;
     private volatile int functionCount = 0;
     private volatile long endMs = 0;
     private volatile Map<String, Object> result;
@@ -93,14 +31,12 @@ public class AnalysisJob {
     // Cursor into the AutoAnalysisManager message log; advanced by the manager's ticker
     // (single writer) so a volatile int is sufficient.
     private volatile int lastMessageLineCount = 0;
-    // Most-recently-appended message, used by appendLogDeduped to suppress setMessage spam.
-    // Guarded by logLock.
-    private String lastAppendedMessage;
 
     public AnalysisJob(String jobId, String programPath) {
         this.jobId = jobId;
         this.programPath = programPath;
         this.startMs = System.currentTimeMillis();
+        this.jobLog = new JobLog(startMs);
     }
 
     public String getJobId() {
@@ -111,7 +47,7 @@ public class AnalysisJob {
         return programPath;
     }
 
-    public Status getStatus() {
+    public JobStatus getStatus() {
         return status;
     }
 
@@ -129,14 +65,7 @@ public class AnalysisJob {
      *
      * @param message the log message
      */
-    public void appendLog(String message) {
-        synchronized (logLock) {
-            lastAppendedMessage = message;
-            long seq = ++seqCounter;
-            long elapsedMs = System.currentTimeMillis() - startMs;
-            log.add(new LogEntry(seq, elapsedMs, message));
-        }
-    }
+    public void appendLog(String message) { jobLog.append(message); }
 
     /**
      * Append a message only if it differs from the most-recently-appended message. Used by
@@ -144,17 +73,7 @@ public class AnalysisJob {
      *
      * @param message the candidate log message
      */
-    public void appendLogDeduped(String message) {
-        synchronized (logLock) {
-            if (message != null && message.equals(lastAppendedMessage)) {
-                return;
-            }
-            lastAppendedMessage = message;
-            long seq = ++seqCounter;
-            long elapsedMs = System.currentTimeMillis() - startMs;
-            log.add(new LogEntry(seq, elapsedMs, message));
-        }
-    }
+    public void appendLogDeduped(String message) { jobLog.appendDeduped(message); }
 
     /**
      * The most recently appended log message, or {@code null} if nothing has been logged yet.
@@ -162,11 +81,7 @@ public class AnalysisJob {
      *
      * @return the latest log message, or null
      */
-    public String getLatestLogMessage() {
-        synchronized (logLock) {
-            return lastAppendedMessage;
-        }
-    }
+    public String getLatestLogMessage() { return jobLog.latestMessage(); }
 
     /**
      * Return log entries with {@code seq > sinceSeq}, at most {@code max} of them.
@@ -177,28 +92,7 @@ public class AnalysisJob {
      *         (or {@code sinceSeq} if none), and whose {@code truncated} flag is true
      *         when more matching entries existed beyond {@code max}
      */
-    public LogPage logSince(long sinceSeq, int max) {
-        synchronized (logLock) {
-            List<LogEntry> out = new ArrayList<>();
-            int matched = 0;
-            long nextCursor = sinceSeq;
-            boolean truncated = false;
-            for (LogEntry entry : log) {
-                if (entry.seq <= sinceSeq) {
-                    continue;
-                }
-                matched++;
-                if (out.size() < max) {
-                    out.add(entry);
-                    nextCursor = entry.seq;
-                } else {
-                    truncated = true;
-                    break;
-                }
-            }
-            return new LogPage(Collections.unmodifiableList(out), nextCursor, truncated);
-        }
-    }
+    public JobLog.LogPage logSince(long sinceSeq, int max) { return jobLog.logSince(sinceSeq, max); }
 
     public void setFunctionCount(int functionCount) {
         this.functionCount = functionCount;
@@ -213,7 +107,7 @@ public class AnalysisJob {
     }
 
     public Map<String, Object> getResult() {
-        return result;
+        return result == null ? null : java.util.Collections.unmodifiableMap(result);
     }
 
     public void setError(String error) {
@@ -229,17 +123,17 @@ public class AnalysisJob {
      *
      * @param status the new status
      */
-    public void markTerminal(Status status) {
+    public void markTerminal(JobStatus status) {
         this.endMs = System.currentTimeMillis();
         this.status = status;
     }
 
     /**
      * Transition this job to the non-terminal PERSISTING state. Unlike
-     * {@link #markTerminal(Status)} this does NOT stamp the end time.
+     * {@link #markTerminal(JobStatus)} this does NOT stamp the end time.
      */
     public void toPersisting() {
-        this.status = Status.PERSISTING;
+        this.status = JobStatus.PERSISTING;
     }
 
     public ghidra.program.model.listing.Program getProgram() {

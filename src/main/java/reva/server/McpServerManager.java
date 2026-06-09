@@ -48,6 +48,7 @@ import reva.plugin.FollowMeService;
 import reva.resources.ResourceProvider;
 import reva.resources.impl.ProgramListResource;
 import reva.services.AnalysisJobManager;
+import reva.services.DiffJobManager;
 import reva.services.RevaMcpService;
 import reva.tools.ToolProvider;
 import reva.tools.data.DataToolProvider;
@@ -106,6 +107,9 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
 
     // Background auto-analysis job registry + worker (shared by analyze-program and friends)
     private final AnalysisJobManager analysisJobManager;
+
+    // Background diff job registry (shared by diff-create-session and friends)
+    private final DiffJobManager diffJobManager;
 
     /**
      * Constructor for GUI mode. Initializes the MCP server with all capabilities.
@@ -167,6 +171,9 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
         // submit and poll jobs. Disposed in shutdown().
         analysisJobManager = new AnalysisJobManager();
         RevaInternalServiceRegistry.registerService(AnalysisJobManager.class, analysisJobManager);
+
+        diffJobManager = new DiffJobManager();
+        RevaInternalServiceRegistry.registerService(DiffJobManager.class, diffJobManager);
 
         // Follow Me demo navigation is GUI-only — not registered in headless mode,
         // so AbstractToolProvider.followRead/followWrite become no-ops.
@@ -386,6 +393,9 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
             if (analysisJobManager != null) {
                 analysisJobManager.cancelJobsForProgram(program.getDomainFile().getPathname());
             }
+            if (diffJobManager != null) {
+                diffJobManager.cancelJobsForProgram(program.getDomainFile().getPathname());
+            }
 
             for (ResourceProvider provider : resourceProviders) {
                 provider.programClosed(program);
@@ -580,6 +590,10 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
         if (analysisJobManager != null) {
             analysisJobManager.dispose();
             RevaInternalServiceRegistry.unregisterService(AnalysisJobManager.class);
+        }
+        if (diffJobManager != null) {
+            diffJobManager.dispose();
+            RevaInternalServiceRegistry.unregisterService(DiffJobManager.class);
         }
 
         // Notify all providers to clean up

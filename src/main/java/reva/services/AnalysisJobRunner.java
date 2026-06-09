@@ -30,7 +30,6 @@ import ghidra.util.task.DummyCancellableTaskMonitor;
 import ghidra.util.task.TaskMonitor;
 import ghidra.util.task.TimeoutTaskMonitor;
 import ghidra.util.task.WrappingTaskMonitor;
-import reva.services.AnalysisJob.Status;
 import reva.util.ProgramPersistenceUtil;
 import reva.util.ProgramPersistenceUtil.PersistMode;
 import reva.util.ProgramPersistenceUtil.PersistResult;
@@ -63,7 +62,7 @@ public class AnalysisJobRunner implements Runnable {
         if (aam == null) {
             job.setError("Could not get analysis manager for program: " + job.getProgramPath());
             job.appendLog("Analysis failed: could not get analysis manager");
-            job.markTerminal(Status.FAILED);
+            job.markTerminal(JobStatus.FAILED);
             return;
         }
         aam.initializeOptions();
@@ -92,7 +91,7 @@ public class AnalysisJobRunner implements Runnable {
                 program.endTransaction(overrideTx, false);
                 job.setError(e.getMessage());
                 job.appendLog("Analysis failed: " + e.getMessage());
-                job.markTerminal(Status.FAILED);
+                job.markTerminal(JobStatus.FAILED);
                 return;
             }
         }
@@ -127,7 +126,7 @@ public class AnalysisJobRunner implements Runnable {
             restoreAnalyzerOptions(program, analysisOpts, snapshot);
             job.setError(e.getMessage());
             job.appendLog("Analysis failed: " + e.getMessage());
-            job.markTerminal(Status.FAILED);
+            job.markTerminal(JobStatus.FAILED);
             return;
         }
 
@@ -205,13 +204,13 @@ public class AnalysisJobRunner implements Runnable {
 
         job.setResult(result);
 
-        Status status;
+        JobStatus status;
         if (cancelled && job.isCancelRequested()) {
-            status = Status.CANCELLED;
+            status = JobStatus.CANCELLED;
         } else if (cancelled) {
-            status = (req.timeoutSeconds != -1) ? Status.TIMED_OUT : Status.CANCELLED;
+            status = (req.timeoutSeconds != -1) ? JobStatus.TIMED_OUT : JobStatus.CANCELLED;
         } else {
-            status = Status.COMPLETED;
+            status = JobStatus.COMPLETED;
         }
         job.appendLog("Analysis " + status + " (" + durationMs + "ms)");
         job.markTerminal(status);

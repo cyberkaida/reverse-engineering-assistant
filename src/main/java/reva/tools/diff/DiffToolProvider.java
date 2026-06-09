@@ -533,6 +533,10 @@ public class DiffToolProvider extends AbstractToolProvider {
         putPairProperties(properties);
         properties.put("function", Map.of("type", "string",
             "description", "Function name or address on EITHER side; the matched counterpart is resolved via the session."));
+        properties.put("includeArtifactHunks", Map.of("type", "boolean",
+            "description", "Show decompiler-artifact hunks (variable renumbering, string-label "
+                + "content) in full instead of collapsing them. Default false — artifacts are "
+                + "tagged and counted under suppressedHunks but their content is omitted."));
 
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("diff-function")
@@ -567,8 +571,14 @@ public class DiffToolProvider extends AbstractToolProvider {
             if (after == null) {
                 return createErrorResult("Decompilation failed or timed out for destination function '" + df.getName() + "'.");
             }
+            // normalizeAddressShifts=true: on relocated (linked) images the decompiler
+            // renames LAB_/DAT_/FUN_ on every load address, which would otherwise drown
+            // a genuine statement change in pure relocation noise. Masking is equality-only
+            // — the snippets below still show the original identifiers. includeArtifactHunks
+            // governs whether variable-renumber / string-label artifact hunks are expanded.
+            boolean includeArtifactHunks = getOptionalBoolean(request, "includeArtifactHunks", false);
             reva.util.DecompilationDiffUtil.DiffResult diff =
-                reva.util.DecompilationDiffUtil.createDiff(before, after);
+                reva.util.DecompilationDiffUtil.createDiff(before, after, 2, true, includeArtifactHunks);
 
             Map<String, Object> out = new LinkedHashMap<>();
             out.put("success", true);

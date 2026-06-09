@@ -18,6 +18,8 @@ package reva.tools;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.function.BooleanSupplier;
+import java.util.function.Supplier;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -35,6 +37,7 @@ import reva.util.AddressUtil;
 import reva.util.RevaInternalServiceRegistry;
 import reva.util.RevaToolLogger;
 import io.modelcontextprotocol.server.McpServerFeatures.SyncToolSpecification;
+import io.modelcontextprotocol.server.McpSyncServerExchange;
 import io.modelcontextprotocol.spec.McpSchema.CallToolRequest;
 import reva.plugin.RevaProgramManager;
 import reva.util.ProgramLookupUtil;
@@ -781,6 +784,52 @@ public abstract class AbstractToolProvider implements ToolProvider {
      */
     protected Address getAddressFromSymbolArgs(Map<String, Object> args, Program program) throws IllegalArgumentException {
         return getAddressFromSymbolArgs(args, program, "symbolName");
+    }
+
+    /**
+     * Progress-emitting long-poll primitive shared by all four wait loops:
+     * {@code analyze-program}, {@code analysis-status}, {@code awaitDiffJob} (create/transfer/add-correlator),
+     * and {@code diff-status}. Holds the request open up to {@code waitSeconds}, sleeping 250 ms per tick.
+     * On each tick, if the client supplied a {@code progressToken}, emits one MCP progress notification
+     * (fraction 0.5/1.0, message = latest log line or status name) — this (a) drives the client's progress
+     * UI and (b) resets the client's idle/tool-call timeout so long waits survive. Returns immediately
+     * when {@code isTerminal} returns true. Swallows notification failures so they never break the tool.
+     *
+     * <p>Callers are responsible for emitting a final completion notification when the job finishes and
+     * for building the response; this method only performs the wait.
+     *
+     * @param exchange      the MCP exchange (may be null in tests/headless; progress is skipped)
+     * @param request       the current tool request; checked for {@code progressToken}
+     * @param waitSeconds   maximum seconds to wait (0 = return immediately without sleeping)
+     * @param isTerminal    supplier that returns {@code true} when the job has reached a terminal state
+     * @param latestMessage supplier for the current activity message (e.g. latest log line); may return null
+     */
+    protected void awaitWithProgress(McpSyncServerExchange exchange, CallToolRequest request,
+            int waitSeconds, BooleanSupplier isTerminal, Supplier<String> latestMessage) {
+        Object progressToken = request.progressToken();
+        boolean emitProgress = progressToken != null && exchange != null;
+
+        long deadline = System.currentTimeMillis() + (long) waitSeconds * 1000L;
+        while (!isTerminal.getAsBoolean() && System.currentTimeMillis() < deadline) {
+            if (emitProgress) {
+                try {
+                    String msg = latestMessage.get();
+                    if (msg == null || msg.isBlank()) {
+                        msg = "running";
+                    }
+                    exchange.progressNotification(new McpSchema.ProgressNotification(
+                        progressToken, 0.5, 1.0, msg));
+                } catch (Exception ignore) {
+                    // A progress-notification failure must never break the tool.
+                }
+            }
+            try {
+                Thread.sleep(250L);
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
     }
 
     /**

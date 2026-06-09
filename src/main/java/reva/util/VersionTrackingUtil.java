@@ -15,6 +15,7 @@ import ghidra.feature.vt.gui.task.ApplyMarkupItemTask;
 import ghidra.feature.vt.gui.util.VTOptionDefines;
 import ghidra.framework.options.ToolOptions;
 import ghidra.program.model.address.Address;
+import ghidra.program.model.address.AddressSet;
 import ghidra.program.model.address.AddressSetView;
 import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.Program;
@@ -176,15 +177,32 @@ public final class VersionTrackingUtil {
 
     /**
      * Resolved outgoing callee symbol names for the function at {@code entry}
-     * (address-independent; thunk callees forward to their target's name).
+     * (address-independent; thunk callees are resolved to their ultimate target before
+     * the default-name filter is applied).
      * Returns an empty set if no function is defined at {@code entry}.
+     * <p>
+     * Only <em>non-default</em> callee names are returned — callees whose name is a
+     * Ghidra-generated placeholder (e.g. {@code FUN_<addr>}, {@code LAB_<addr>}) are
+     * silently skipped. On fully-linked images, unnamed callees carry
+     * address-derived names that shift between builds even when nothing semantic changed,
+     * so including them would fire the callee-change lens on pure relocation noise.
+     * The filter is intentionally narrow: it only drops names that
+     * {@link SymbolUtil#isDefaultSymbolName(String)} recognises as auto-generated, so
+     * genuine named-callee swaps (e.g. a callee replaced by a differently-named
+     * function, both explicitly named) are still detected.
+     * <p>
+     * Thunk resolution: when a callee is a thunk, {@link Function#getThunkedFunction(boolean)}
+     * (recursive) is called to obtain the ultimate target before checking the name.  This
+     * prevents {@code thunk_FUN_<addr>} names — which {@link SymbolUtil#isDefaultSymbolName}
+     * does not recognise — from leaking through on stripped binaries and firing the
+     * callee-change lens on pure relocation noise.
      * <p>
      * This is the cheap, scalable signal for semantic changes that byte/instruction
      * correlators are blind to — most importantly a relocation-only patch that keeps
-     * identical instruction bytes but swaps one called symbol for another,
-     * both explicitly named. Comparing names rather than
-     * addresses makes it robust to layout shifts between builds, and it is O(refs) so it
-     * scales to whole-program diffs where decompiling every matched function would not.
+     * identical instruction bytes but swaps one called symbol for another. Comparing
+     * names rather than addresses makes it robust to layout shifts between builds, and
+     * it is O(refs) so it scales to whole-program diffs where decompiling every matched
+     * function would not.
      */
     public static SortedSet<String> calleeNames(Program program, Address entry, TaskMonitor monitor) {
         SortedSet<String> names = new TreeSet<>();
@@ -196,7 +214,16 @@ public final class VersionTrackingUtil {
             return names;
         }
         for (Function callee : fn.getCalledFunctions(monitor)) {
-            names.add(callee.getName());
+            // Resolve thunks to their ultimate target so that thunk_FUN_<addr> names
+            // (which isDefaultSymbolName does not match) do not bypass the filter.
+            Function target = callee.isThunk() ? callee.getThunkedFunction(true) : callee;
+            if (target == null) {
+                target = callee;
+            }
+            String name = target.getName();
+            if (!SymbolUtil.isDefaultSymbolName(name)) {
+                names.add(name);
+            }
         }
         return names;
     }
@@ -258,5 +285,87 @@ public final class VersionTrackingUtil {
         ApplyMarkupItemTask task = new ApplyMarkupItemTask(session, items, applyOptions);
         task.run(monitor);
         return !task.hasErrors();
+    }
+
+    /**
+     * AddressSet covering the BODIES of every non-external function in {@code program} whose
+     * entry point is not in {@code matchedEntries}. This is the "residual" a later correlator
+     * stage is scoped to, so the exact-match correlators never run over the whole image at once.
+     */
+    public static AddressSet unmatchedFunctionBodies(Program program, Set<Address> matchedEntries) {
+        AddressSet set = new AddressSet();
+        var it = program.getFunctionManager().getFunctions(true);
+        while (it.hasNext()) {
+            Function fn = it.next();
+            if (fn.isExternal()) continue;
+            if (matchedEntries.contains(fn.getEntryPoint())) continue;
+            set.add(fn.getBody());
+        }
+        return set;
+    }
+
+    /**
+     * Resolve an agent-supplied scope (function names or addresses) to an AddressSet covering
+     * those functions' bodies in {@code program}. Throws IllegalArgumentException naming any
+     * identifier that does not resolve to a function.
+     */
+    public static AddressSet resolveScope(Program program, List<String> identifiers) {
+        AddressSet set = new AddressSet();
+        List<String> unresolved = new ArrayList<>();
+        for (String id : identifiers) {
+            Address addr = AddressUtil.resolveAddressOrSymbol(program, id);
+            Function fn = (addr != null) ? program.getFunctionManager().getFunctionContaining(addr) : null;
+            if (fn == null && addr != null) {
+                fn = program.getFunctionManager().getFunctionAt(addr);
+            }
+            if (fn == null) {
+                unresolved.add(id);
+            } else {
+                set.add(fn.getBody());
+            }
+        }
+        if (!unresolved.isEmpty()) {
+            throw new IllegalArgumentException("Could not resolve to functions: " + unresolved);
+        }
+        return set;
+    }
+
+    /**
+     * Run ONE correlator scoped to the given source/destination address sets, in its own session
+     * transaction (so the caller can save the persisted session between stages). Returns the
+     * correlator's display name. Mirrors {@link #runCorrelators}'s min-function-size handling.
+     */
+    public static String runOneCorrelator(VTSession session, Program source, AddressSetView srcSet,
+            Program dest, AddressSetView dstSet, VTProgramCorrelatorFactory factory,
+            TaskMonitor monitor) throws CancelledException {
+        int txId = session.startTransaction("ReVa diff correlation: " + factory.getName());
+        boolean ok = false;
+        try {
+            VTOptions opts = factory.createDefaultOptions();
+            if (opts.contains(ExactMatchBytesProgramCorrelatorFactory.FUNCTION_MINIMUM_SIZE)) {
+                opts.setInt(ExactMatchBytesProgramCorrelatorFactory.FUNCTION_MINIMUM_SIZE, 1);
+            }
+            VTProgramCorrelator correlator =
+                factory.createCorrelator(source, srcSet, dest, dstSet, opts);
+            correlator.correlate(session, monitor);
+            ok = true;
+            return factory.getName();
+        } finally {
+            session.endTransaction(txId, ok);
+        }
+    }
+
+    /** Entry points of the source-side functions already matched (for residual computation). */
+    public static Set<Address> matchedSourceEntries(VTSession session) {
+        Set<Address> entries = new HashSet<>();
+        for (MatchInfo mi : collectFunctionMatches(session)) entries.add(mi.sourceAddress);
+        return entries;
+    }
+
+    /** Entry points of the destination-side functions already matched. */
+    public static Set<Address> matchedDestEntries(VTSession session) {
+        Set<Address> entries = new HashSet<>();
+        for (MatchInfo mi : collectFunctionMatches(session)) entries.add(mi.destinationAddress);
+        return entries;
     }
 }

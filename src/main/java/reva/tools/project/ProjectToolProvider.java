@@ -797,30 +797,12 @@ public class ProjectToolProvider extends AbstractToolProvider {
 
             // Inline long-poll: wait up to waitSeconds for the job to reach a terminal state,
             // emitting best-effort progress notifications when the client opted in.
-            long deadline = System.currentTimeMillis() + (long) waitSeconds * 1000L;
-            while (!job.getStatus().isTerminal() && System.currentTimeMillis() < deadline) {
-                if (emitProgress) {
-                    try {
-                        // Show the CURRENT activity (latest log line), not a frozen first line.
-                        String latest = job.getLatestLogMessage();
-                        String msg = (latest != null)
-                            ? latest
-                            : job.getStatus().name().toLowerCase();
-                        // We don't know total work; report a small non-zero fraction so clients
-                        // see liveness without implying completion.
-                        exchange.progressNotification(new McpSchema.ProgressNotification(
-                            progressToken, 0.5, 1.0, msg));
-                    } catch (Exception ignore) {
-                        // A progress-notification failure must never break the tool.
-                    }
-                }
-                try {
-                    Thread.sleep(250L);
-                } catch (InterruptedException ie) {
-                    Thread.currentThread().interrupt();
-                    break;
-                }
-            }
+            awaitWithProgress(exchange, request, waitSeconds,
+                () -> job.getStatus().isTerminal(),
+                () -> {
+                    String latest = job.getLatestLogMessage();
+                    return latest != null ? latest : job.getStatus().name().toLowerCase();
+                });
 
             if (job.getStatus().isTerminal()) {
                 // Start from the job's result map (which carries success/analyzed/wasFullAnalysis/
@@ -987,21 +969,28 @@ public class ProjectToolProvider extends AbstractToolProvider {
                 return createErrorResult("maxLogEntries must be >= 1; got " + maxLogEntries);
             }
 
-            // Batch-over-window long-poll: return the instant the job terminates, else hold until
-            // the window expires.
-            long deadline = System.currentTimeMillis() + (long) waitSeconds * 1000L;
-            while (true) {
-                if (job.getStatus().isTerminal()) {
-                    break;
-                }
-                if (System.currentTimeMillis() >= deadline) {
-                    break;
-                }
+            // Long-poll with progress: return the instant the job terminates, else hold until the
+            // window expires. Emits MCP progress notifications on each tick when the client
+            // supplied a progressToken — this both drives the progress UI and resets the client's
+            // idle/tool-call timeout, preventing spurious "operation timed out" errors on long
+            // waitSeconds values.
+            awaitWithProgress(exchange, request, waitSeconds,
+                () -> job.getStatus().isTerminal(),
+                () -> {
+                    String latest = job.getLatestLogMessage();
+                    return latest != null ? latest : job.getStatus().name().toLowerCase();
+                });
+
+            // Emit a final progress notification when the job has reached a terminal state,
+            // consistent with analyze-program's behavior.
+            Object progressToken = request.progressToken();
+            if (progressToken != null && exchange != null && job.getStatus().isTerminal()) {
                 try {
-                    Thread.sleep(250L);
-                } catch (InterruptedException ie) {
-                    Thread.currentThread().interrupt();
-                    break;
+                    exchange.progressNotification(new McpSchema.ProgressNotification(
+                        progressToken, 1.0, 1.0,
+                        "Analysis " + job.getStatus().name().toLowerCase()));
+                } catch (Exception ignore) {
+                    // best-effort
                 }
             }
 

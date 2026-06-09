@@ -8,10 +8,202 @@ The `reva.tools.project` package provides MCP tools for Ghidra project managemen
 
 ## Key Tools
 
-- `get-current-program` - Get the currently active program with metadata
+- `get-current-program` - Get the currently active program with metadata (GUI mode only)
 - `list-project-files` - List files and folders in the Ghidra project with optional recursion
-- `list-open-programs` - List all programs currently open in Ghidra across all tools
+- `list-open-programs` - List all programs currently open in Ghidra across all tools (GUI mode only)
 - `checkin-program` - Check in (commit) a program to version control with commit message
+- `analyze-program` - Run Ghidra auto-analysis as a **background job**, wait inline up to `waitSeconds`, then persist the result (see [Background Analysis Jobs](#background-analysis-jobs))
+- `analysis-status` - Long-poll a running analysis job: tail its log, read the live function count, get the full result when terminal
+- `analysis-cancel` - Request cancellation of a running analysis job (async; partial work is still persisted)
+- `list-analyzers` - List analyzers applicable to a program (names feed `analyze-program`'s `enableAnalyzers` / `disableAnalyzers`)
+- `change-processor` - Change the processor architecture (language/compiler spec) of an existing program
+- `import-file` - Import a file into the project, optionally analyzing and adding to version control
+- `capture-reva-debug-info` - Capture ReVa debug information
+
+## Background Analysis Jobs
+
+`analyze-program`, `analysis-status`, and `analysis-cancel` together implement a poll-driven
+background analysis workflow. The synchronous `analyze-program` of old has been rewritten: it now
+submits the analysis to a background worker (`reva.services.AnalysisJobManager` → `AnalysisJob` +
+`AnalysisJobRunner`, fed an `AnalyzeRequest`), waits inline for a short window, and **persists** the
+result when the job finishes. (The old synchronous tool never saved — a latent bug this fixes.)
+
+**All Ghidra work runs off the request thread.** The worker (`AnalysisJobRunner`) opens the analysis
+transaction, applies any per-call analyzer overrides, calls `startAnalysis`, marks the program
+analyzed, and persists — all on a background thread, mirroring the proven off-Swing path of the
+former synchronous tool and `checkin-program`. The MCP handler thread only long-polls the job and
+serializes its state into JSON.
+
+### Status lifecycle
+
+Statuses: `running`, `persisting` (non-terminal), and the terminal set `completed`, `failed`,
+`cancelled`, `timed_out`. The lifecycle is **not strictly linear** — `failed` is reached directly
+from `running` (no analysis manager, or an exception inside the analysis transaction) and never
+passes through `persisting`:
+
+```
+running ──► persisting ──► completed
+   │             ├────────► cancelled    (cancel requested while running)
+   │             └────────► timed_out    (timeout fired, no cancel requested)
+   └──────────────────────► failed       (setup error / analysis-transaction exception)
+```
+
+`AnalysisJob.Status.isTerminal()` is the single source of truth the tools poll on. `persisting`
+means analysis succeeded and the program is being saved/checked-in; partial work from a cancelled or
+timed-out run is **still persisted** before the job goes terminal.
+
+### The model-facing poll loop
+
+The model starts the job (optionally with `waitSeconds:0` to return immediately), then loops
+`analysis-status`, feeding the previous call's `logCursor` back as `sinceLogSeq`, until the status is
+terminal — at which point `analysis-status` also returns the full `result`.
+
+```jsonc
+// 1. Start the job, don't block the request thread at all.
+// → analyze-program { "programPath": "/big.exe", "waitSeconds": 0 }
+{
+  "success": true,
+  "programPath": "/big.exe",
+  "jobId": "analysis-3",
+  "status": "running",
+  "functionCount": 0,
+  "log": [ { "seq": 1, "elapsedMs": 12, "message": "Starting full auto-analysis…" } ],
+  "logCursor": 1,
+  "truncated": false,
+  "hint": "Analysis still running. Poll analysis-status with this jobId and sinceLogSeq=logCursor; or call analysis-cancel to stop."
+}
+
+// 2. Long-poll. Feed back logCursor as sinceLogSeq to get only new lines.
+// → analysis-status { "jobId": "analysis-3", "sinceLogSeq": 1, "waitSeconds": 10 }
+{
+  "success": true,
+  "jobId": "analysis-3",
+  "programPath": "/big.exe",
+  "status": "running",
+  "functionCount": 482,
+  "log": [ { "seq": 2, "elapsedMs": 3140, "message": "Analyzing… Function Start Search" } ],
+  "logCursor": 2,
+  "truncated": false
+}
+
+// 3. ...repeat with sinceLogSeq=2, then 3, ... until status is terminal.
+// → analysis-status { "jobId": "analysis-3", "sinceLogSeq": 7, "waitSeconds": 10 }
+{
+  "success": true,
+  "jobId": "analysis-3",
+  "programPath": "/big.exe",
+  "status": "completed",
+  "functionCount": 1207,
+  "log": [ { "seq": 8, "elapsedMs": 41230, "message": "Analysis COMPLETED (41218ms)" } ],
+  "logCursor": 8,
+  "truncated": false,
+  "result": {
+    "success": true,
+    "programPath": "/big.exe",
+    "analyzed": true,
+    "wasFullAnalysis": true,
+    "durationMs": 41218,
+    "totalTaskTimeMs": 39870,
+    "cancelled": false,
+    "timedOut": false,
+    "analyzersRun": [ { "name": "Function Start Search" } ],
+    "persisted": "checkin",
+    "saved": true
+  }
+}
+```
+
+`analysis-status` polling notes:
+
+| Param           | Default | Meaning |
+|-----------------|---------|---------|
+| `jobId`         | —       | The job to poll. Provide **exactly one** of `jobId` or `programPath`. |
+| `programPath`   | —       | Resolves to that program's **latest** job (`analysis-<N>`, greatest N). |
+| `sinceLogSeq`   | `0`     | Cursor — return only entries with `seq > sinceLogSeq`. Feed back `logCursor`. |
+| `waitSeconds`   | `10`    | Long-poll window; returns **the instant** the job terminates, else holds until it expires. |
+| `maxLogEntries` | `50`    | Page size. When more entries remain, `truncated:true`. |
+
+**Drain the log before trusting status alone.** When a response has `truncated:true`, call again with
+`sinceLogSeq=logCursor` to fetch the remaining log lines — there are more than `maxLogEntries`
+buffered. Status itself is always current regardless of truncation.
+
+### Small-program fast path (backward compatible)
+
+When `analyze-program` finishes within `waitSeconds` (default 10), the inline wait observes a terminal
+status and returns the job's full result map in one call — with `status:"completed"` (or the
+terminal status) added. **All prior fields are preserved** (`success`, `analyzed`, `wasFullAnalysis`,
+`durationMs`, `analyzersRun`, `messages`, …), so existing callers keep working; the new
+`jobId`, `status`, `persisted`, and `saved` fields are additive.
+
+The result map produced by `AnalysisJobRunner` (returned either inline by `analyze-program` or under
+`result` by `analysis-status`) contains:
+
+| Field            | Notes |
+|------------------|-------|
+| `success`        | `true` unless the run was cancelled/timed-out. |
+| `programPath`    | The analyzed program. |
+| `analyzed`       | `GhidraProgramUtilities.isAnalyzed(program)` after the run. |
+| `wasFullAnalysis`| `true` on a fresh program or with `forceFullAnalysis`; else incremental. |
+| `durationMs`     | Wall-clock analysis time. |
+| `totalTaskTimeMs`| Sum of per-analyzer task time. |
+| `cancelled`      | `true` if the monitor was cancelled (cancel or timeout). |
+| `timedOut`       | `true` only when the timeout fired and no cancel was requested. |
+| `analyzersRun`   | `[{ "name": ... }]` of timed analyzer tasks. |
+| `messages`       | Analyzer message-log lines (present only when non-empty). |
+| `persisted`      | `checkin` \| `add_to_vc` \| `save` \| `skipped` \| `failed`. |
+| `saved`          | Whether a local save occurred. |
+| `persistError`   | Present only when checkin/add-to-VC failed after a successful local save. |
+
+`persisted:"skipped"` covers **both** `persist:"none"` **and** "program had no changes since the
+analysis" (`!program.isChanged()`). A persist failure is reported (`persisted:"failed"` +
+`persistError`) but is **not** fatal — analysis success is independent of persistence.
+
+### Persist semantics (`persist` param: `auto` | `save` | `none`)
+
+Backed by `reva.util.ProgramPersistenceUtil` (the shared save-or-checkin helper, also used by
+`checkin-program`):
+
+| Mode            | Behavior |
+|-----------------|----------|
+| `auto` (default)| **Save locally, then checkin** if the file is under version control (add-to-VC for a not-yet-versioned file, checkin for an existing versioned file). |
+| `save`          | Local save only — never touches version control. |
+| `none`          | Don't persist at all (`persisted:"skipped"`). Use for a read-only analysis. |
+
+The background persist always runs with `keepCheckedOut=true`, so it won't release the program's
+checkout out from under an interactive session.
+
+### Single-flight: one analysis per program
+
+Only one analysis runs per program at a time. `analyze-program` checks
+`AnalysisJobManager.runningJobForProgram(programPath)`: if a job is in flight it **reuses** that job
+instead of starting a second one. Caveat for the model: the reuse path does **not** rebuild the
+`AnalyzeRequest`, so the second call's `enableAnalyzers` / `disableAnalyzers` / `persist` /
+`forceFullAnalysis` are **silently ignored** — overrides apply only to the call that *starts* the
+job. (Analyzer-name *validation* still runs on every call and can still reject bad names.) To change
+overrides, cancel the running job and start a fresh one.
+
+### `waitSeconds` vs. the client tool-call timeout
+
+The inline wait (in both `analyze-program` and `analysis-status`) holds the MCP request open for up
+to `waitSeconds`. **Keep `waitSeconds` safely below the MCP client's tool-call timeout.** A value
+above the client timeout drops the call — but the background job keeps running and stays pollable, so
+this degrades to "the model has to re-poll" rather than losing work. Long analyses are *designed* to
+fall through the inline wait into the pollable job; this is the normal path, not an error.
+
+### `analysis-cancel`
+
+`analysis-cancel` requires `jobId`. It sets the job's cancel flag and cancels the attached monitor
+so the in-flight analysis unwinds. Cancellation is **asynchronous**: the tool returns immediately
+(`alreadyTerminal:false`, "Cancellation requested"); poll `analysis-status` until the job reaches
+`cancelled` to confirm. Partial analysis is still persisted as the job unwinds. Cancelling an
+already-finished job is a no-op (`alreadyTerminal:true`).
+
+### Supporting classes (`reva.services.*`)
+
+- **`AnalysisJobManager`** — creates jobs (`analysis-<N>` ids), submits them to the worker pool, tracks them, enforces single-flight (`runningJobForProgram`), and looks them up (`get`, `all`). Caps retained jobs and cancels jobs on program-close / shutdown.
+- **`AnalysisJob`** — in-memory job state: status, an append-only log buffer with a monotonic per-job `seq` counter (`logSince(sinceSeq, max)` returns a `LogPage` with `nextCursor` + `truncated`), live `functionCount`, and the result/error payloads. Thread-safe.
+- **`AnalysisJobRunner`** — the `Runnable` that does all the Ghidra work on the worker thread (overrides → transaction → `startAnalysis` → persist → terminal status). Its `JobLogTaskMonitor` mirrors analyzer `setMessage` output into the job log (deduped) and refreshes the live function count.
+- **`AnalyzeRequest`** — the immutable parameter bundle (program, enable/disable analyzers, `forceFullAnalysis`, `timeoutSeconds`, `persistMode`).
 
 ## Critical Implementation Patterns
 
@@ -375,3 +567,5 @@ for (PluginTool tool : runningTools) {
 - **Path consistency**: Use DomainFile.getPathname() for consistent path representation
 - **Transaction safety**: Version control operations handle their own transactions
 - **TaskMonitor usage**: Use TaskMonitor.DUMMY for simple operations
+- **Background analysis**: `analyze-program` runs auto-analysis on a worker thread (`reva.services.*`) and persists the result; the request thread only long-polls. See [Background Analysis Jobs](#background-analysis-jobs).
+- **Persistence**: `analyze-program` and `checkin-program` share `reva.util.ProgramPersistenceUtil` for save-then-checkin semantics.

@@ -47,6 +47,7 @@ import reva.plugin.ConfigChangeListener;
 import reva.plugin.FollowMeService;
 import reva.resources.ResourceProvider;
 import reva.resources.impl.ProgramListResource;
+import reva.services.AnalysisJobManager;
 import reva.services.RevaMcpService;
 import reva.tools.ToolProvider;
 import reva.tools.data.DataToolProvider;
@@ -103,6 +104,9 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
     // Follow Me demo navigation service - GUI mode only
     private final FollowMeService followMeService;
 
+    // Background auto-analysis job registry + worker (shared by analyze-program and friends)
+    private final AnalysisJobManager analysisJobManager;
+
     /**
      * Constructor for GUI mode. Initializes the MCP server with all capabilities.
      * This constructor creates a ConfigManager from the PluginTool for backward compatibility.
@@ -157,6 +161,12 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
         // Make server and server manager available via service registry
         RevaInternalServiceRegistry.registerService(McpSyncServer.class, server);
         RevaInternalServiceRegistry.registerService(McpServerManager.class, this);
+
+        // Background analysis job manager: a single per-server instance owning the worker and
+        // ticker threads. Registered so analyze-program (and later analysis-status/-cancel) can
+        // submit and poll jobs. Disposed in shutdown().
+        analysisJobManager = new AnalysisJobManager();
+        RevaInternalServiceRegistry.registerService(AnalysisJobManager.class, analysisJobManager);
 
         // Follow Me demo navigation is GUI-only — not registered in headless mode,
         // so AbstractToolProvider.followRead/followWrite become no-ops.
@@ -372,6 +382,11 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
 
         // Notify providers only if this was the last tool with the program
         if (tools == null || tools.isEmpty()) {
+            // The program is truly going away: cancel any background analysis on it.
+            if (analysisJobManager != null) {
+                analysisJobManager.cancelJobsForProgram(program.getDomainFile().getPathname());
+            }
+
             for (ResourceProvider provider : resourceProviders) {
                 provider.programClosed(program);
             }
@@ -559,6 +574,13 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
         programToTools.clear();
         activeProgram = null;
         activeTool = null;
+
+        // Dispose the background analysis job manager (cancels running jobs, reaps worker/ticker
+        // threads) and unregister it so a fresh server instance does not see a dead manager.
+        if (analysisJobManager != null) {
+            analysisJobManager.dispose();
+            RevaInternalServiceRegistry.unregisterService(AnalysisJobManager.class);
+        }
 
         // Notify all providers to clean up
         for (ResourceProvider provider : resourceProviders) {

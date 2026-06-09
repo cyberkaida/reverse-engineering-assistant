@@ -98,8 +98,10 @@ public class RevaPluginMcpIntegrationTest extends RevaIntegrationTestBase {
     @Test
     public void testServerConfiguration() {
         assertTrue("Server should be enabled", configManager.isServerEnabled());
-        // Check that the server is using the default port (8080)
-        assertEquals("Server port should be default", 8080, configManager.getServerPort());
+        // Integration tests bind a random free port (see RevaIntegrationTestBase), so assert a
+        // valid bound port rather than the 8080 default. The default is covered by
+        // ConfigManagerPortTest; the random-port wiring by RandomPortRegressionIntegrationTest.
+        assertTrue("Server port should be a valid bound port", configManager.getServerPort() > 0);
     }
 
     @Test

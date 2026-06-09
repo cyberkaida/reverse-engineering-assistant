@@ -14,7 +14,6 @@ import java.util.concurrent.atomic.AtomicLong;
 import ghidra.app.plugin.core.analysis.AutoAnalysisManager;
 import ghidra.program.model.listing.Program;
 import ghidra.util.Msg;
-import reva.services.AnalysisJob.Status;
 
 /**
  * In-memory registry of background analysis jobs plus the worker execution that runs them.
@@ -195,7 +194,7 @@ public class AnalysisJobManager {
         try {
             for (AnalysisJob job : jobs.values()) {
                 try {
-                    if (job.getStatus() != Status.RUNNING) {
+                    if (job.getStatus() != JobStatus.RUNNING) {
                         continue;
                     }
                     Program program = job.getProgram();

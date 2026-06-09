@@ -41,8 +41,8 @@ import io.modelcontextprotocol.spec.McpSchema.TextContent;
 import reva.RevaIntegrationTestBase;
 import reva.plugin.RevaProgramManager;
 import reva.services.AnalysisJob;
-import reva.services.AnalysisJob.Status;
 import reva.services.AnalysisJobManager;
+import reva.services.JobStatus;
 import reva.util.RevaInternalServiceRegistry;
 
 /**
@@ -211,7 +211,7 @@ public class AnalyzeProgramAsyncIntegrationTest extends RevaIntegrationTestBase 
                 Thread.sleep(250L);
             }
 
-            assertEquals("Job should complete successfully", Status.COMPLETED, job.getStatus());
+            assertEquals("Job should complete successfully", JobStatus.COMPLETED, job.getStatus());
         } finally {
             cleanup(saveable, fileOut[0]);
         }

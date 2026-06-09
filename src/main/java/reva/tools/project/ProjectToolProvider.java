@@ -69,6 +69,7 @@ import reva.plugin.ConfigManager;
 import reva.services.AnalysisJob;
 import reva.services.AnalysisJobManager;
 import reva.services.AnalyzeRequest;
+import reva.services.JobLog;
 import reva.tools.AbstractToolProvider;
 import reva.util.ProgramPersistenceUtil;
 import reva.util.ProgramPersistenceUtil.PersistMode;
@@ -853,9 +854,9 @@ public class ProjectToolProvider extends AbstractToolProvider {
             }
 
             // Still running after the inline wait: return a job handle to poll.
-            AnalysisJob.LogPage page = job.logSince(0, 50);
+            JobLog.LogPage page = job.logSince(0, 50);
             List<Map<String, Object>> log = new ArrayList<>();
-            for (AnalysisJob.LogEntry entry : page.entries) {
+            for (JobLog.LogEntry entry : page.entries) {
                 Map<String, Object> e = new LinkedHashMap<>();
                 e.put("seq", entry.seq);
                 e.put("elapsedMs", entry.elapsedMs);
@@ -1004,9 +1005,9 @@ public class ProjectToolProvider extends AbstractToolProvider {
                 }
             }
 
-            AnalysisJob.LogPage page = job.logSince(sinceLogSeq, maxLogEntries);
+            JobLog.LogPage page = job.logSince(sinceLogSeq, maxLogEntries);
             List<Map<String, Object>> log = new ArrayList<>();
-            for (AnalysisJob.LogEntry entry : page.entries) {
+            for (JobLog.LogEntry entry : page.entries) {
                 Map<String, Object> e = new LinkedHashMap<>();
                 e.put("seq", entry.seq);
                 e.put("elapsedMs", entry.elapsedMs);

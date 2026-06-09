@@ -18,12 +18,12 @@ The single most important rule in this package:
 
 `putPairProperties()` encodes this in every tool's schema: `sourceProgramPath` is "the trusted/analyzed/old program (markup flows FROM here)" and `destinationProgramPath` is "the variant/new/patched program (markup flows TO here)." Getting orientation backwards silently writes the wrong names into the wrong program, so the descriptions are deliberately blunt.
 
-## The Ten Tools and the Funnel
+## The Twelve Tools and the Funnel
 
-`DiffToolProvider.registerTools()` registers ten tools. They form a read-then-write funnel:
+`DiffToolProvider.registerTools()` registers twelve tools. They form a read-then-write funnel:
 
 **Setup**
-- `diff-create-session` — Correlate the two programs with VT and cache the result. Expensive (minutes on large binaries); idempotent unless `force=true` or the `correlators` selection changes. Optional `correlators` array picks/orders the VT correlators (omit for the default sequence; drop `symbol-name` to diff by structure/bytes when names are stripped or untrusted). Returns summary counts.
+- `diff-create-session` — Correlate the two programs with VT and cache the result. Expensive (minutes on large binaries); idempotent unless `force=true` or the `correlators` selection changes. Optional `correlators` array picks/orders the VT correlators (omit for the default sequence; drop `symbol-name` to diff by structure/bytes when names are stripped or untrusted). Returns summary counts. *Runs as a background job — see Async Model below.*
 
 **Read / orient**
 - `diff-summary` — Counts plus a ranked teaser of the most-changed matched functions (lowest similarity first), each tagged with a `changeTypes` profile (see *Typed Change Profile* below). The "what changed?" entry point. `includeBodyByteChanges` (default false) adds the body-bytes recall lens. When `matched.changed == 0` **and** the body-bytes knob is off, the result carries a `hint` string pointing the agent at `includeBodyByteChanges=true` — so "0 changed under the precision lenses" isn't mistaken for "no changes" (operand/control-flow tweaks VT scores identical are caught only by the recall knob). The hint is omitted when the knob is on or when `changed > 0`.
@@ -35,14 +35,32 @@ The single most important rule in this package:
 - `diff-data` — Added/removed defined non-string data (by representation + address).
 
 **Write (mutate destination)**
-- `diff-transfer-markup` — Auto-apply VT markup from source to destination for every match at/above a confidence floor, in a transaction. Returns applied matches and below-floor proposals for selective review.
+- `diff-transfer-markup` — Auto-apply VT markup from source to destination for every match at/above a confidence floor, in a transaction. Returns applied matches and below-floor proposals for selective review. *Runs as a background job — see Async Model below.*
 - `diff-apply-match` — Apply VT markup for exactly one matched function pair (a proposal the agent chose), by source/destination address.
+
+**Background jobs / polling**
+- `diff-status` — Long-poll a running diff job by `jobId` (or by the source+destination pair). Returns new log lines since a `sinceLogSeq` cursor. When the job reaches a terminal state, also returns the job's full result: the session summary for a `create-session` job, or the applied/proposed markup for a `transfer-markup` job.
+- `diff-cancel` — Request async cancellation of a running diff job by `jobId`. Poll `diff-status` until the status is `cancelled`. A cancelled `transfer-markup` job rolls back all changes (all-or-nothing).
 
 **Housekeeping**
 - `diff-list-sessions` — List cached sessions (pairs + correlators run).
 - `diff-delete-session` — Drop a cached session so the next `create-session` re-correlates fresh.
 
-The intended flow: `create-session` → `summary` → `list-functions` → `function` (drill in); `strings` / `data` for orthogonal signals; `transfer-markup` / `apply-match` to write findings back; `list-sessions` / `delete-session` to manage the cache.
+The intended flow: `create-session` → `summary` → `list-functions` → `function` (drill in); `strings` / `data` for orthogonal signals; `transfer-markup` / `apply-match` to write findings back; `list-sessions` / `delete-session` to manage the cache. For large binaries: poll `diff-status` after `create-session` or `transfer-markup`, and use `diff-cancel` to abort if needed.
+
+## Async Model
+
+`diff-create-session` and `diff-transfer-markup` submit their work as cancellable background jobs rather than blocking the request thread. Both accept a `waitSeconds` parameter (default 10): they wait inline up to that many seconds before returning. Small binaries finish within the window and return the same result shape as before (backward-compatible). Large binaries return `{status: "running", jobId, log, logCursor}` when the inline wait expires.
+
+**Polling**: call `diff-status` with the returned `jobId` (or equivalently with the source+destination pair) and pass `sinceLogSeq` from the previous response to receive only new log lines. When the job terminates the response includes the full result (summary or markup). **Cancellation**: call `diff-cancel` with the `jobId`, then poll `diff-status` until `status == "cancelled"`. A cancelled `transfer-markup` rolls back atomically — all-or-nothing.
+
+Key behavioral notes:
+- **Serialized worker**: all correlation and markup-transfer jobs run on a single shared daemon worker (these are memory-heavy operations), so jobs queue rather than run concurrently.
+- **Survives client disconnect**: the work runs on the worker thread, not the request thread, so dropping the connection does not abort the job.
+- **Real cancellation**: the worker uses a live `TaskMonitor` (the old synchronous path used `TaskMonitor.DUMMY` — no progress reporting, no cancel). The new path supports both.
+- **Single-flight attach**: if a job of the same kind (correlate or transfer) for the same source+destination pair is already running, a second call attaches to it rather than starting a new one. The `force`/`correlators` overrides on the attached call are ignored until the in-flight job finishes.
+- **`cancelled` can still leave a usable session**: cancellation is checked after the work returns, so a cancel landing *after* correlation finished but before the terminal-status check marks the job `cancelled` even though a valid `DiffSession` was already cached. A subsequent read tool against that pair may legitimately succeed — treat "cancelled" as "the job stopped," not "nothing was produced."
+- **Program close cancels jobs but does not evict the cached session**: closing a program requests cancellation of its in-flight diff jobs, but the cached `DiffSession` (and its `VTSession` + `Program` handles) is *not* auto-released on close — it survives until `diff-delete-session`/`clearAll`, or a `force`/different-correlator re-correlation of the same pair. (VT-session lifecycle hardening is deliberately deferred — see the design spec.)
 
 ## Session Cache
 
@@ -120,4 +138,5 @@ VT correlates *functions*. `requireAnalyzed()` rejects any program whose functio
 - **Classification is profile-driven**: changed iff `changeTypes` (similarity/callees/size, plus opt-in body-bytes) is non-empty — not VT similarity alone. `body-bytes` is the agent's recall knob (`includeBodyByteChanges`); precise on `.ko`, noisy on linked images.
 - **`IDENTICAL_THRESHOLD = 0.9999`** is the `similarity` lens boundary and the default transfer floor; richer ranking is deferred.
 - **Correlators are selectable** per session via the `correlators` param (`CORRELATOR_KEYS_AVAILABLE`); changing the selection re-correlates. The default sequence is exact-match only; `combined-reference` is opt-in and can match functions across body changes (reference-based; leaf functions with no refs still won't match).
+- **`diff-create-session` and `diff-transfer-markup` are async background jobs**: accept `waitSeconds` (default 10); small binaries finish inline, large ones return `{status:"running", jobId}` to poll via `diff-status`. Cancel with `diff-cancel` (transfer rolls back atomically). Jobs are serialized on a single worker; a second call for the same pair+kind attaches to the in-flight job.
 - **Reuse, don't reinvent**: function diffs go through `DecompilationDiffUtil`; VT orchestration goes through `VersionTrackingUtil`.

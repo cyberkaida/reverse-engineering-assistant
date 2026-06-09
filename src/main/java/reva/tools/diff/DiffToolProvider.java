@@ -4,16 +4,23 @@ import java.io.IOException;
 import java.util.*;
 
 import io.modelcontextprotocol.server.McpSyncServer;
+import io.modelcontextprotocol.server.McpSyncServerExchange;
 import io.modelcontextprotocol.spec.McpSchema;
 import io.modelcontextprotocol.spec.McpSchema.CallToolRequest;
 
+import ghidra.feature.vt.api.main.VTProgramCorrelatorFactory;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.listing.Program;
 import ghidra.util.exception.CancelledException;
 import ghidra.util.task.TaskMonitor;
 
+import reva.services.DiffJob;
+import reva.services.DiffJobKind;
+import reva.services.DiffJobManager;
+import reva.services.JobLog;
 import reva.tools.AbstractToolProvider;
 import reva.util.AddressUtil;
+import reva.util.RevaInternalServiceRegistry;
 import reva.util.VersionTrackingUtil;
 import reva.util.VersionTrackingUtil.MatchInfo;
 
@@ -36,6 +43,8 @@ public class DiffToolProvider extends AbstractToolProvider {
         registerApplyMatchTool();
         registerListSessionsTool();
         registerDeleteSessionTool();
+        registerStatusTool();
+        registerCancelTool();
     }
 
     // ---- diff-list-sessions / diff-delete-session ----------------------
@@ -667,6 +676,76 @@ public class DiffToolProvider extends AbstractToolProvider {
 
     // ---- diff-transfer-markup ------------------------------------------
 
+    /**
+     * Apply VT markup from source to destination for every FUNCTION match at/above {@code floor},
+     * collecting below-floor matches as proposals. Checks {@code monitor} between matches so the
+     * job can be cancelled; throws CancelledException if cancelled mid-run.
+     */
+    private Map<String, Object> transferMarkup(DiffSession ds, double floor, TaskMonitor monitor)
+            throws CancelledException {
+        ghidra.framework.options.ToolOptions applyOpts = VersionTrackingUtil.defaultApplyOptions();
+
+        Map<String, ghidra.feature.vt.api.main.VTMatch> best = new LinkedHashMap<>();
+        for (ghidra.feature.vt.api.main.VTMatchSet ms : ds.vtSession.getMatchSets()) {
+            for (ghidra.feature.vt.api.main.VTMatch m : ms.getMatches()) {
+                if (m.getAssociation().getType() != ghidra.feature.vt.api.main.VTAssociationType.FUNCTION) continue;
+                String key = m.getAssociation().getSourceAddress() + " "
+                    + m.getAssociation().getDestinationAddress();
+                ghidra.feature.vt.api.main.VTMatch prev = best.get(key);
+                if (prev == null || m.getSimilarityScore().getScore() > prev.getSimilarityScore().getScore())
+                    best.put(key, m);
+            }
+        }
+
+        List<Map<String, Object>> applied = new ArrayList<>();
+        List<Map<String, Object>> skipped = new ArrayList<>();
+        List<Map<String, Object>> proposed = new ArrayList<>();
+        Program dest = ds.destinationProgram;
+        int sTx = ds.vtSession.startTransaction("ReVa diff transfer markup");
+        int pTx = dest.startTransaction("ReVa diff transfer markup");
+        boolean ok = false;
+        try {
+            for (ghidra.feature.vt.api.main.VTMatch m : best.values()) {
+                monitor.checkCancelled();
+                ghidra.feature.vt.api.main.VTAssociation a = m.getAssociation();
+                double sim = m.getSimilarityScore().getScore();
+                Map<String, Object> row = transferRow(ds, m, sim);
+                if (sim >= floor) {
+                    boolean did;
+                    try {
+                        did = VersionTrackingUtil.acceptAndApplyMarkup(ds.vtSession, a, applyOpts, monitor);
+                    } catch (CancelledException e) {
+                        did = false;
+                    }
+                    if (did) applied.add(row); else skipped.add(row);
+                } else {
+                    proposed.add(row);
+                }
+            } // end for
+            // Cancellation can fire inside the final match's acceptAndApplyMarkup, where the inner
+            // catch swallows it. Re-check here so a late cancel unwinds through the finally with
+            // ok=false (rolling back ALL markup applied this run) instead of committing partial
+            // state under a CANCELLED status. Transfer is all-or-nothing on cancel.
+            monitor.checkCancelled();
+            ok = true;
+        } finally {
+            dest.endTransaction(pTx, ok);
+            ds.vtSession.endTransaction(sTx, ok);
+        }
+
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("success", true);
+        out.put("sourceProgramPath", ds.sourcePath);
+        out.put("destinationProgramPath", ds.destinationPath);
+        out.put("appliedCount", applied.size());
+        out.put("skippedCount", skipped.size());
+        out.put("proposedCount", proposed.size());
+        out.put("applied", applied);
+        out.put("skipped", skipped);
+        out.put("proposed", proposed);
+        return out;
+    }
+
     private void registerTransferMarkupTool() {
         Map<String, Object> properties = new HashMap<>();
         putPairProperties(properties);
@@ -674,74 +753,43 @@ public class DiffToolProvider extends AbstractToolProvider {
             "description", "Similarity floor for auto-apply (0..1). Matches below are returned as proposals.",
             "default", VersionTrackingUtil.IDENTICAL_THRESHOLD));
 
+        Map<String, Object> waitProp = new HashMap<>();
+        waitProp.put("type", "integer");
+        waitProp.put("minimum", 0);
+        waitProp.put("default", 10);
+        waitProp.put("description",
+            "Seconds to wait inline for the transfer to finish before returning a job handle. "
+            + "Small match sets finish in this window; large-image transfers return "
+            + "{status:running, jobId} to poll via diff-status.");
+        properties.put("waitSeconds", waitProp);
+
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("diff-transfer-markup")
             .title("Transfer Analysis Markup")
             .description("Auto-apply VT markup (names/prototypes/datatypes/comments) from source to "
                 + "destination for matches at/above the confidence floor, in a transaction. Returns "
-                + "applied matches and the below-floor proposals for selective review.")
+                + "applied matches and the below-floor proposals for selective review. Runs as a "
+                + "background job: waits inline up to waitSeconds, then returns {status:running, jobId} "
+                + "for large match sets.")
             .inputSchema(createSchema(properties, List.of("sourceProgramPath", "destinationProgramPath")))
             .build();
 
         registerTool(tool, (exchange, request) -> {
             DiffSession ds = requireSession(request);
             double floor = getOptionalDouble(request, "confidence", VersionTrackingUtil.IDENTICAL_THRESHOLD);
-            ghidra.framework.options.ToolOptions applyOpts = VersionTrackingUtil.defaultApplyOptions();
-
-            // Dedupe FUNCTION matches by (src,dst) keeping the highest-similarity VTMatch.
-            Map<String, ghidra.feature.vt.api.main.VTMatch> best = new LinkedHashMap<>();
-            for (ghidra.feature.vt.api.main.VTMatchSet ms : ds.vtSession.getMatchSets()) {
-                for (ghidra.feature.vt.api.main.VTMatch m : ms.getMatches()) {
-                    if (m.getAssociation().getType() != ghidra.feature.vt.api.main.VTAssociationType.FUNCTION) continue;
-                    String key = m.getAssociation().getSourceAddress() + " "
-                        + m.getAssociation().getDestinationAddress();
-                    ghidra.feature.vt.api.main.VTMatch prev = best.get(key);
-                    if (prev == null || m.getSimilarityScore().getScore() > prev.getSimilarityScore().getScore())
-                        best.put(key, m);
-                }
+            int waitSeconds = getOptionalInt(request, "waitSeconds", 10);
+            if (waitSeconds < 0) {
+                return createErrorResult("waitSeconds must be >= 0; got " + waitSeconds);
             }
-
-            List<Map<String, Object>> applied = new ArrayList<>();
-            List<Map<String, Object>> skipped = new ArrayList<>();
-            List<Map<String, Object>> proposed = new ArrayList<>();
-            Program dest = ds.destinationProgram;
-            int sTx = ds.vtSession.startTransaction("ReVa diff transfer markup");
-            int pTx = dest.startTransaction("ReVa diff transfer markup");
-            boolean ok = false;
-            try {
-                for (ghidra.feature.vt.api.main.VTMatch m : best.values()) {
-                    ghidra.feature.vt.api.main.VTAssociation a = m.getAssociation();
-                    double sim = m.getSimilarityScore().getScore();
-                    Map<String, Object> row = transferRow(ds, m, sim);
-                    if (sim >= floor) {
-                        boolean did;
-                        try {
-                            did = VersionTrackingUtil.acceptAndApplyMarkup(ds.vtSession, a, applyOpts, TaskMonitor.DUMMY);
-                        } catch (CancelledException e) {
-                            did = false;
-                        }
-                        if (did) applied.add(row); else skipped.add(row);
-                    } else {
-                        proposed.add(row);
-                    }
-                }
-                ok = true;
-            } finally {
-                dest.endTransaction(pTx, ok);
-                ds.vtSession.endTransaction(sTx, ok);
+            DiffJobManager mgr = RevaInternalServiceRegistry.getService(DiffJobManager.class);
+            if (mgr == null) {
+                return createErrorResult("background diff service unavailable");
             }
-
-            Map<String, Object> out = new LinkedHashMap<>();
-            out.put("success", true);
-            out.put("sourceProgramPath", ds.sourcePath);
-            out.put("destinationProgramPath", ds.destinationPath);
-            out.put("appliedCount", applied.size());
-            out.put("skippedCount", skipped.size());
-            out.put("proposedCount", proposed.size());
-            out.put("applied", applied);
-            out.put("skipped", skipped);
-            out.put("proposed", proposed);
-            return createJsonResult(out);
+            DiffJob job = mgr.startOrAttach(DiffJobKind.TRANSFER_MARKUP, ds.sourcePath, ds.destinationPath,
+                () -> (monitor) -> transferMarkup(ds, floor, monitor), -1);
+            return awaitDiffJob(exchange, request, job, waitSeconds, ds.sourcePath, ds.destinationPath,
+                "Markup transfer still running. Poll diff-status with this jobId and "
+                + "sinceLogSeq=logCursor; or call diff-cancel to stop.");
         });
     }
 
@@ -827,6 +875,161 @@ public class DiffToolProvider extends AbstractToolProvider {
         });
     }
 
+    // ---- diff-status / diff-cancel -------------------------------------
+
+    /** diff-status: log-tailing long-poll over a diff job until it terminates. */
+    private void registerStatusTool() {
+        Map<String, Object> properties = new HashMap<>();
+        properties.put("jobId", Map.of("type", "string",
+            "description", "The diff job to poll (e.g. 'diff-3'), as returned by diff-create-session "
+                + "or diff-transfer-markup. Provide jobId, or the source+destination pair."));
+        putPairProperties(properties); // sourceProgramPath/destinationProgramPath (optional here)
+        Map<String, Object> sinceProp = new HashMap<>();
+        sinceProp.put("type", "integer");
+        sinceProp.put("minimum", 0);
+        sinceProp.put("default", 0);
+        sinceProp.put("description", "Return only log entries with seq greater than this cursor "
+            + "(feed back the previous logCursor).");
+        properties.put("sinceLogSeq", sinceProp);
+        Map<String, Object> waitProp = new HashMap<>();
+        waitProp.put("type", "integer");
+        waitProp.put("minimum", 0);
+        waitProp.put("default", 10);
+        waitProp.put("description", "Seconds to long-poll; returns the instant the job terminates. "
+            + "Keep below your MCP client tool-call timeout.");
+        properties.put("waitSeconds", waitProp);
+        properties.put("maxLogEntries", Map.of("type", "integer", "minimum", 1, "default", 50,
+            "description", "Max log entries per call; drain more with sinceLogSeq=logCursor."));
+
+        McpSchema.Tool tool = McpSchema.Tool.builder()
+            .name("diff-status")
+            .title("Poll Diff Job")
+            .description("Poll a background diff job (correlation or markup transfer) started by "
+                + "diff-create-session / diff-transfer-markup. Returns new log lines since the cursor "
+                + "and, when terminal, the full result (the summary, or the applied/proposed markup). "
+                + "Identify by jobId, or by the source+destination pair (resolves to the latest job).")
+            .inputSchema(createSchema(properties, List.of()))
+            .build();
+
+        registerTool(tool, (exchange, request) -> {
+            DiffJobManager mgr = RevaInternalServiceRegistry.getService(DiffJobManager.class);
+            if (mgr == null) {
+                return createErrorResult("background diff service unavailable");
+            }
+            String jobId = getOptionalString(request, "jobId", null);
+            DiffJob job;
+            if (jobId != null) {
+                job = mgr.get(jobId);
+                if (job == null) {
+                    return createErrorResult("No diff job with id '" + jobId + "'.");
+                }
+            } else {
+                String srcPath = getString(request, "sourceProgramPath");
+                String dstPath = getString(request, "destinationProgramPath");
+                job = mgr.latestForPair(srcPath, dstPath);
+                if (job == null) {
+                    return createErrorResult("No diff job for that source/destination pair. "
+                        + "Run diff-create-session first.");
+                }
+            }
+            int sinceLogSeq = getOptionalInt(request, "sinceLogSeq", 0);
+            int waitSeconds = getOptionalInt(request, "waitSeconds", 10);
+            if (waitSeconds < 0) {
+                return createErrorResult("waitSeconds must be >= 0; got " + waitSeconds);
+            }
+            int maxLogEntries = getOptionalInt(request, "maxLogEntries", 50);
+            if (sinceLogSeq < 0) {
+                return createErrorResult("sinceLogSeq must be >= 0; got " + sinceLogSeq);
+            }
+            if (maxLogEntries < 1) {
+                return createErrorResult("maxLogEntries must be >= 1; got " + maxLogEntries);
+            }
+
+            // Long-poll: return immediately when terminal, else hold until the window elapses.
+            long deadline = System.currentTimeMillis() + (long) waitSeconds * 1000L;
+            while (!job.getStatus().isTerminal() && System.currentTimeMillis() < deadline) {
+                try {
+                    Thread.sleep(250L);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+
+            JobLog.LogPage page = job.logSince(sinceLogSeq, maxLogEntries);
+            List<Map<String, Object>> log = renderLogPage(page);
+
+            Map<String, Object> out;
+            if (job.getStatus().isTerminal() && job.getResult() != null) {
+                out = new LinkedHashMap<>(job.getResult());
+            } else if (job.getStatus().isTerminal()) {
+                // Terminal with no result payload => failed / cancelled / timed_out.
+                out = new LinkedHashMap<>();
+                out.put("success", false);
+                out.put("sourceProgramPath", job.getSourcePath());
+                out.put("destinationProgramPath", job.getDestinationPath());
+                if (job.getError() != null) {
+                    out.put("error", job.getError());
+                }
+            } else {
+                // Still running.
+                out = new LinkedHashMap<>();
+                out.put("success", true);
+                out.put("sourceProgramPath", job.getSourcePath());
+                out.put("destinationProgramPath", job.getDestinationPath());
+            }
+            out.put("jobId", job.getJobId());
+            out.put("kind", job.getKind().name().toLowerCase());
+            out.put("status", job.getStatus().name().toLowerCase());
+            out.put("log", log);
+            out.put("logCursor", page.nextCursor);
+            out.put("truncated", page.truncated);
+            return createJsonResult(out);
+        });
+    }
+
+    /** diff-cancel: request async cancellation of a running diff job. */
+    private void registerCancelTool() {
+        Map<String, Object> properties = new HashMap<>();
+        properties.put("jobId", Map.of("type", "string",
+            "description", "The diff job to cancel (e.g. 'diff-3')."));
+        McpSchema.Tool tool = McpSchema.Tool.builder()
+            .name("diff-cancel")
+            .title("Cancel Diff Job")
+            .description("Request cancellation of a running diff job started by diff-create-session "
+                + "or diff-transfer-markup. Asynchronous: poll diff-status until status is cancelled. "
+                + "A cancelled markup transfer rolls back (all-or-nothing).")
+            .inputSchema(createSchema(properties, List.of("jobId")))
+            .build();
+
+        registerTool(tool, (exchange, request) -> {
+            DiffJobManager mgr = RevaInternalServiceRegistry.getService(DiffJobManager.class);
+            if (mgr == null) {
+                return createErrorResult("background diff service unavailable");
+            }
+            String jobId = getString(request, "jobId");
+            DiffJob job = mgr.get(jobId);
+            if (job == null) {
+                return createErrorResult("No diff job with id '" + jobId + "'.");
+            }
+            Map<String, Object> out = new LinkedHashMap<>();
+            out.put("jobId", jobId);
+            if (job.getStatus().isTerminal()) {
+                out.put("success", true);
+                out.put("alreadyTerminal", true);
+                out.put("status", job.getStatus().name().toLowerCase());
+                out.put("message", "Job already finished; nothing to cancel.");
+            } else {
+                job.requestCancel();
+                out.put("success", true);
+                out.put("alreadyTerminal", false);
+                out.put("status", job.getStatus().name().toLowerCase());
+                out.put("message", "Cancellation requested. Poll diff-status until status is cancelled.");
+            }
+            return createJsonResult(out);
+        });
+    }
+
     // ---- diff-create-session -------------------------------------------
 
     private void registerCreateSessionTool() {
@@ -848,12 +1051,30 @@ public class DiffToolProvider extends AbstractToolProvider {
                 + "no references still won't match (Ghidra VT has no body-similarity correlator). "
                 + "Changing the selection re-correlates this pair."));
 
+        Map<String, Object> waitProp = new HashMap<>();
+        waitProp.put("type", "integer");
+        waitProp.put("minimum", 0);
+        waitProp.put("default", 10);
+        waitProp.put("description",
+            "Seconds to wait inline for correlation to finish before returning a job handle. "
+            + "Small binaries finish in this window and return the full summary; large ones "
+            + "return {status:running, jobId} to poll via diff-status. Keep below your "
+            + "MCP client tool-call timeout.");
+        properties.put("waitSeconds", waitProp);
+        properties.put("timeoutSeconds", Map.of("type", "integer",
+            "description", "Hard cap on correlation time in seconds; -1 (default) for unlimited.",
+            "default", -1));
+
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("diff-create-session")
             .title("Create Binary Diff Session")
-            .description("Correlate two programs with Ghidra Version Tracking and cache the result. "
-                + "Expensive (minutes on large binaries); idempotent unless force=true or the "
-                + "correlators selection changes. Both programs must already be analyzed. "
+            .description("Correlate two programs with Ghidra Version Tracking and cache the result as a "
+                + "background job. Waits inline up to waitSeconds (default 10): small binaries finish in "
+                + "that window and return the full summary; large binaries return "
+                + "{status:running, jobId} to poll via diff-status. Idempotent unless force=true or the "
+                + "correlators selection changes. Both programs must already be analyzed. NOTE: if a "
+                + "correlation for this same pair is already running, this call attaches to that in-flight "
+                + "job and the force/correlators overrides on this call are ignored until it finishes. "
                 + "Returns summary counts and the correlators that ran.")
             .inputSchema(createSchema(properties, List.of("sourceProgramPath", "destinationProgramPath")))
             .build();
@@ -863,21 +1084,126 @@ public class DiffToolProvider extends AbstractToolProvider {
             String dstPath = getString(request, "destinationProgramPath");
             boolean force = getOptionalBoolean(request, "force", false);
             List<String> correlatorKeys = getOptionalStringList(request.arguments(), "correlators", List.of());
+            int waitSeconds = getOptionalInt(request, "waitSeconds", 10);
+            if (waitSeconds < 0) {
+                return createErrorResult("waitSeconds must be >= 0; got " + waitSeconds);
+            }
+            int timeoutSeconds = getOptionalInt(request, "timeoutSeconds", -1);
+            if (timeoutSeconds == 0 || (timeoutSeconds < 0 && timeoutSeconds != -1)) {
+                return createErrorResult("timeoutSeconds must be a positive integer or -1 (no timeout); got "
+                    + timeoutSeconds);
+            }
             Program source = getValidatedProgram(srcPath);
             Program dest = getValidatedProgram(dstPath);
             requireAnalyzed(source);
             requireAnalyzed(dest);
 
-            DiffSession ds;
-            try {
-                ds = DiffSessionManager.getOrCreate(source, dest,
-                    VersionTrackingUtil.correlatorSequence(correlatorKeys), force, TaskMonitor.DUMMY);
-            } catch (IOException e) {
-                return createErrorResult("Correlation failed (I/O): " + e.getMessage());
-            } catch (CancelledException e) {
-                return createErrorResult("Correlation cancelled or timed out.");
+            DiffJobManager mgr = RevaInternalServiceRegistry.getService(DiffJobManager.class);
+            if (mgr == null) {
+                return createErrorResult("background diff service unavailable");
             }
-            return createJsonResult(summarize(ds, false));
+
+            List<VTProgramCorrelatorFactory> factories =
+                VersionTrackingUtil.correlatorSequence(correlatorKeys);
+            // The work closure owns the domain logic: correlate (caching the session as a side
+            // effect) then build today's summary. Runs on the worker with a real, cancellable
+            // monitor — never TaskMonitor.DUMMY.
+            DiffJob job = mgr.startOrAttach(DiffJobKind.CORRELATE, srcPath, dstPath,
+                () -> (monitor) -> {
+                    DiffSession ds = DiffSessionManager.getOrCreate(source, dest, factories, force, monitor);
+                    return summarize(ds, false);
+                }, timeoutSeconds);
+
+            return awaitDiffJob(exchange, request, job, waitSeconds, srcPath, dstPath,
+                "Correlation still running. Poll diff-status with this jobId and "
+                + "sinceLogSeq=logCursor; or call diff-cancel to stop.");
         });
+    }
+
+    /** Serialize a job log page to the MCP wire shape (seq/elapsedMs/message per entry). */
+    private List<Map<String, Object>> renderLogPage(JobLog.LogPage page) {
+        List<Map<String, Object>> log = new ArrayList<>();
+        for (JobLog.LogEntry entry : page.entries) {
+            Map<String, Object> e = new LinkedHashMap<>();
+            e.put("seq", entry.seq);
+            e.put("elapsedMs", entry.elapsedMs);
+            e.put("message", entry.message);
+            log.add(e);
+        }
+        return log;
+    }
+
+    /**
+     * Inline long-poll: wait up to waitSeconds for the diff job to terminate, emitting best-effort
+     * progress notifications when the client opted in. On terminal, return the job's result map
+     * (today's tool shape) plus jobId/status; otherwise return a running handle to poll.
+     */
+    private McpSchema.CallToolResult awaitDiffJob(
+            McpSyncServerExchange exchange,
+            McpSchema.CallToolRequest request, DiffJob job, int waitSeconds,
+            String srcPath, String dstPath, String runningHint) {
+        Object progressToken = request.progressToken();
+        boolean emitProgress = progressToken != null && exchange != null;
+
+        long deadline = System.currentTimeMillis() + (long) waitSeconds * 1000L;
+        while (!job.getStatus().isTerminal() && System.currentTimeMillis() < deadline) {
+            if (emitProgress) {
+                try {
+                    String latest = job.getLatestLogMessage();
+                    String msg = (latest != null) ? latest : job.getStatus().name().toLowerCase();
+                    exchange.progressNotification(new McpSchema.ProgressNotification(
+                        progressToken, 0.5, 1.0, msg));
+                } catch (Exception ignore) {
+                    // best-effort
+                }
+            }
+            try {
+                Thread.sleep(250L);
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
+
+        if (job.getStatus().isTerminal()) {
+            Map<String, Object> result;
+            Map<String, Object> jobResult = job.getResult();
+            if (jobResult == null) {
+                result = new LinkedHashMap<>();
+                result.put("success", false);
+                result.put("sourceProgramPath", srcPath);
+                result.put("destinationProgramPath", dstPath);
+                if (job.getError() != null) {
+                    result.put("error", job.getError());
+                }
+            } else {
+                result = new LinkedHashMap<>(jobResult);
+            }
+            result.put("jobId", job.getJobId());
+            result.put("status", job.getStatus().name().toLowerCase());
+            if (emitProgress) {
+                try {
+                    exchange.progressNotification(new McpSchema.ProgressNotification(
+                        progressToken, 1.0, 1.0, "Diff " + job.getStatus().name().toLowerCase()));
+                } catch (Exception ignore) {
+                    // best-effort
+                }
+            }
+            return createJsonResult(result);
+        }
+
+        JobLog.LogPage page = job.logSince(0, 50);
+        List<Map<String, Object>> log = renderLogPage(page);
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("success", true);
+        result.put("sourceProgramPath", srcPath);
+        result.put("destinationProgramPath", dstPath);
+        result.put("jobId", job.getJobId());
+        result.put("status", "running");
+        result.put("log", log);
+        result.put("logCursor", page.nextCursor);
+        result.put("truncated", page.truncated);
+        result.put("hint", runningHint);
+        return createJsonResult(result);
     }
 }

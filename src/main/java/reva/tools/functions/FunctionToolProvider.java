@@ -27,6 +27,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import ghidra.app.cmd.disassemble.DisassembleCommand;
 import ghidra.app.cmd.function.CreateFunctionCmd;
 import ghidra.app.util.cparser.C.ParseException;
 import ghidra.util.task.TaskMonitor;
@@ -1401,20 +1402,29 @@ public class FunctionToolProvider extends AbstractToolProvider {
                     AddressUtil.formatAddress(address) + ": " + existingFunc.getName());
             }
 
-            // Check if there's an instruction at the address
-            Instruction instr = program.getListing().getInstructionAt(address);
-            if (instr == null) {
-                return createErrorResult("No instruction at address " +
-                    AddressUtil.formatAddress(address) +
-                    ". The address may need to be disassembled first.");
-            }
-
             // Navigate first so demo viewers see the cursor land before the function appears.
             followWrite(program, address);
 
             // Create the function using CreateFunctionCmd
             int txId = program.startTransaction("Create Function");
             try {
+                // Seed disassembly if the address has not been disassembled yet.
+                // Some imports (e.g. stripped relocatable objects) never auto-disassemble
+                // their code sections, so create-function must disassemble on demand.
+                Instruction instr = program.getListing().getInstructionAt(address);
+                if (instr == null) {
+                    DisassembleCommand dis = new DisassembleCommand(address, null, true);
+                    dis.applyTo(program, TaskMonitor.DUMMY);
+                    instr = program.getListing().getInstructionAt(address);
+                    if (instr == null) {
+                        program.endTransaction(txId, false);
+                        String statusMsg = dis.getStatusMsg();
+                        return createErrorResult("Could not disassemble at " +
+                            AddressUtil.formatAddress(address) +
+                            (statusMsg != null ? ": " + statusMsg : ""));
+                    }
+                }
+
                 CreateFunctionCmd cmd = new CreateFunctionCmd(address);
                 boolean success = cmd.applyTo(program);
 

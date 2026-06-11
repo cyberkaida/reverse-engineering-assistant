@@ -52,6 +52,13 @@ public final class ProgramPersistenceUtil {
         if (file.canCheckin()) {
             return PersistAction.CHECKIN;
         }
+        // canCheckin() requires modifiedSinceCheckout(), which only counts SAVED
+        // changes: a checked-out file whose modifications are still in memory
+        // reports canCheckin()=false until a save bumps the local version. persist()
+        // saves before the checkin step, so plan CHECKIN for that case too.
+        if (file.isVersioned() && file.isCheckedOut() && file.isChanged()) {
+            return PersistAction.CHECKIN;
+        }
         if (file.canAddToRepository()) {
             return PersistAction.ADD_TO_VC;
         }

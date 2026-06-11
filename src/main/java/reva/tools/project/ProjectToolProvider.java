@@ -335,9 +335,12 @@ public class ProjectToolProvider extends AbstractToolProvider {
                 // Pre-validation: reject versioned files that cannot be persisted via
                 // checkin/addToVC so the user gets the specific error rather than a silent
                 // local-only save. ProgramPersistenceUtil.selectAction would otherwise treat
-                // these as SAVE. These branches must run BEFORE persist().
+                // these as SAVE. These branches must run BEFORE persist(). A file whose only
+                // modifications are in memory is exempt: canCheckin()/modifiedSinceCheckout()
+                // only count SAVED changes, and persist()'s save below makes the checkin
+                // legal — rejecting it here would be a catch-22.
                 if (!domainFile.canAddToRepository() && !domainFile.canCheckin()
-                        && domainFile.isVersioned()) {
+                        && domainFile.isVersioned() && !domainFile.isChanged()) {
                     if (!domainFile.isCheckedOut()) {
                         return createErrorResult("Program is not checked out and cannot be modified: " + programPath);
                     }

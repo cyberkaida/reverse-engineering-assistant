@@ -25,6 +25,21 @@ jobs:
           - "12.0.4"
           - "12.1"
           - "latest"
+        # macOS hosted runners are ~4x slower per e2e test and far scarcer
+        # (7 concurrent macOS jobs queued for hours). Linux carries full
+        # version coverage; macOS validates the platform itself (native
+        # decompiler build, arm64) on the oldest and newest Ghidra only.
+        exclude:
+          - os: macos-latest
+            ghidra-version: "12.0.1"
+          - os: macos-latest
+            ghidra-version: "12.0.2"
+          - os: macos-latest
+            ghidra-version: "12.0.3"
+          - os: macos-latest
+            ghidra-version: "12.0.4"
+          - os: macos-latest
+            ghidra-version: "12.1"
       fail-fast: false  # Continue other tests if one fails
 
     name: Test on ${{ matrix.os }} / Ghidra ${{ matrix.ghidra-version }}
@@ -100,16 +115,18 @@ jobs:
       id: headless_test
       run: |
         echo "::group::Running headless integration tests"
-        uv run pytest tests/ -v --timeout=180 --tb=short --junitxml=test-results.xml
+        uv run pytest tests/ -v --timeout=180 --tb=short --junitxml=test-results.xml ${PYTEST_EXTRA_ARGS}
         echo "::endgroup::"
-      # macos-latest (arm64) hosted runners pay PyGhidra/JVM startup per
-      # subprocess test, making the e2e suite ~5x slower than Linux. With
-      # the workflow_correctness suite the full run takes ~45 min on macOS
-      # vs <10 min on Linux. Keep headroom above the observed 43 min worst
-      # case so the step doesn't kill the run before tests finish.
-      timeout-minutes: 60
+      # The e2e suite shares one mcp-reva server per pytest session (per
+      # xdist worker), so the dominant historical cost — a full JVM/PyGhidra
+      # boot per test (~40s on macOS, ~10s on Linux) — is paid once per
+      # worker instead of ~110 times. macOS additionally runs 2 xdist
+      # workers. If this times out again, suspect a server hang or a new
+      # per-test boot, not a slow suite.
+      timeout-minutes: 30
       env:
         GHIDRA_INSTALL_DIR: ${{ env.GHIDRA_INSTALL_DIR }}
+        PYTEST_EXTRA_ARGS: ${{ runner.os == 'macOS' && '-n 2' || '' }}
 
     - name: Upload test artifacts
       uses: actions/upload-artifact@v7

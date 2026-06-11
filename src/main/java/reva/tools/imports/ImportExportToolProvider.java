@@ -24,6 +24,7 @@ import io.modelcontextprotocol.server.McpSyncServer;
 import io.modelcontextprotocol.spec.McpSchema;
 import reva.tools.AbstractToolProvider;
 import reva.util.AddressUtil;
+import reva.util.SchemaUtil;
 
 /**
  * Tool provider for import/export analysis.
@@ -61,37 +62,22 @@ public class ImportExportToolProvider extends AbstractToolProvider {
     // ========================================================================
 
     private void registerListImportsTool() {
-        Map<String, Object> properties = new HashMap<>();
-        properties.put("programPath", Map.of(
-            "type", "string",
-            "description", "Path in the Ghidra Project to the program"
-        ));
-        properties.put("libraryFilter", Map.of(
-            "type", "string",
-            "description", "Optional: filter by library name (case-insensitive partial match)"
-        ));
-        properties.put("maxResults", Map.of(
-            "type", "integer",
-            "description", "Maximum number of imports to return (default: 500)",
-            "default", 500
-        ));
-        properties.put("startIndex", Map.of(
-            "type", "integer",
-            "description", "Starting index for pagination (default: 0)",
-            "default", 0
-        ));
-        properties.put("groupByLibrary", Map.of(
-            "type", "boolean",
-            "description", "Group imports by library name (default: true)",
-            "default", true
-        ));
-
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("list-imports")
             .title("List Imports")
             .description("List all imported functions from external libraries. " +
                 "Useful for understanding what external APIs a binary uses.")
-            .inputSchema(createSchema(properties, List.of("programPath")))
+            .inputSchema(SchemaUtil.builder()
+                .programPath()
+                .stringProperty("libraryFilter",
+                    "Optional: filter by library name (case-insensitive partial match)")
+                .integerProperty("maxResults",
+                    "Maximum number of imports to return (default: 500)", 500)
+                .integerProperty("startIndex",
+                    "Starting index for pagination (default: 0)", 0)
+                .booleanProperty("groupByLibrary",
+                    "Group imports by library name (default: true)", true)
+                .build())
             .build();
 
         registerTool(tool, (exchange, request) -> {
@@ -121,28 +107,18 @@ public class ImportExportToolProvider extends AbstractToolProvider {
     }
 
     private void registerListExportsTool() {
-        Map<String, Object> properties = new HashMap<>();
-        properties.put("programPath", Map.of(
-            "type", "string",
-            "description", "Path in the Ghidra Project to the program"
-        ));
-        properties.put("maxResults", Map.of(
-            "type", "integer",
-            "description", "Maximum number of exports to return (default: 500)",
-            "default", 500
-        ));
-        properties.put("startIndex", Map.of(
-            "type", "integer",
-            "description", "Starting index for pagination (default: 0)",
-            "default", 0
-        ));
-
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("list-exports")
             .title("List Exports")
             .description("List all exported symbols from the binary. " +
                 "Shows functions and data that the binary exports for use by other modules.")
-            .inputSchema(createSchema(properties, List.of("programPath")))
+            .inputSchema(SchemaUtil.builder()
+                .programPath()
+                .integerProperty("maxResults",
+                    "Maximum number of exports to return (default: 500)", 500)
+                .integerProperty("startIndex",
+                    "Starting index for pagination (default: 0)", 0)
+                .build())
             .build();
 
         registerTool(tool, (exchange, request) -> {
@@ -164,31 +140,20 @@ public class ImportExportToolProvider extends AbstractToolProvider {
     }
 
     private void registerFindImportReferencesTool() {
-        Map<String, Object> properties = new HashMap<>();
-        properties.put("programPath", Map.of(
-            "type", "string",
-            "description", "Path in the Ghidra Project to the program"
-        ));
-        properties.put("importName", Map.of(
-            "type", "string",
-            "description", "Name of the imported function to find references for (case-insensitive)"
-        ));
-        properties.put("libraryName", Map.of(
-            "type", "string",
-            "description", "Optional: specific library name to narrow search (case-insensitive)"
-        ));
-        properties.put("maxResults", Map.of(
-            "type", "integer",
-            "description", "Maximum number of references to return (default: 100)",
-            "default", 100
-        ));
-
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("find-import-references")
             .title("Find Import References")
             .description("Find all locations where a specific imported function is called. " +
                 "Also finds references through thunks (IAT stubs).")
-            .inputSchema(createSchema(properties, List.of("programPath", "importName")))
+            .inputSchema(SchemaUtil.builder()
+                .programPath()
+                .requiredStringProperty("importName",
+                    "Name of the imported function to find references for (case-insensitive)")
+                .stringProperty("libraryName",
+                    "Optional: specific library name to narrow search (case-insensitive)")
+                .integerProperty("maxResults",
+                    "Maximum number of references to return (default: 100)", 100)
+                .build())
             .build();
 
         registerTool(tool, (exchange, request) -> {
@@ -227,22 +192,16 @@ public class ImportExportToolProvider extends AbstractToolProvider {
     }
 
     private void registerResolveThunkTool() {
-        Map<String, Object> properties = new HashMap<>();
-        properties.put("programPath", Map.of(
-            "type", "string",
-            "description", "Path in the Ghidra Project to the program"
-        ));
-        properties.put("address", Map.of(
-            "type", "string",
-            "description", "Address of the thunk or jump stub to resolve"
-        ));
-
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("resolve-thunk")
             .title("Resolve Thunk")
             .description("Follow a thunk chain to find the actual target function. " +
                 "Thunks are wrapper functions that jump to another location.")
-            .inputSchema(createSchema(properties, List.of("programPath", "address")))
+            .inputSchema(SchemaUtil.builder()
+                .programPath()
+                .requiredStringProperty("address",
+                    "Address of the thunk or jump stub to resolve")
+                .build())
             .build();
 
         registerTool(tool, (exchange, request) -> {

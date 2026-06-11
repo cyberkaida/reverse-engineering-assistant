@@ -34,6 +34,7 @@ import reva.plugin.ConfigManager;
 import reva.tools.AbstractToolProvider;
 import reva.util.AddressUtil;
 import reva.util.RevaInternalServiceRegistry;
+import reva.util.SchemaUtil;
 
 /**
  * Tool provider for data flow analysis operations.
@@ -63,23 +64,17 @@ public class DataFlowToolProvider extends AbstractToolProvider {
     // ========================================================================
 
     private void registerTraceBackwardTool() {
-        Map<String, Object> properties = new HashMap<>();
-        properties.put("programPath", Map.of(
-            "type", "string",
-            "description", "Path in the Ghidra Project to the program"
-        ));
-        properties.put("address", Map.of(
-            "type", "string",
-            "description", "Address within a function to trace backward from"
-        ));
-
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("trace-data-flow-backward")
             .title("Trace Data Flow Backward")
             .description("Trace where a value at an address comes from. " +
                 "Follows the data dependency chain backward to find origins " +
                 "(constants, parameters, memory loads, etc.).")
-            .inputSchema(createSchema(properties, List.of("programPath", "address")))
+            .inputSchema(SchemaUtil.builder()
+                .programPath()
+                .requiredStringProperty("address",
+                    "Address within a function to trace backward from")
+                .build())
             .build();
 
         registerTool(tool, (exchange, request) -> {
@@ -100,23 +95,17 @@ public class DataFlowToolProvider extends AbstractToolProvider {
     }
 
     private void registerTraceForwardTool() {
-        Map<String, Object> properties = new HashMap<>();
-        properties.put("programPath", Map.of(
-            "type", "string",
-            "description", "Path in the Ghidra Project to the program"
-        ));
-        properties.put("address", Map.of(
-            "type", "string",
-            "description", "Address within a function to trace forward from"
-        ));
-
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("trace-data-flow-forward")
             .title("Trace Data Flow Forward")
             .description("Trace where a value at an address flows to. " +
                 "Follows the data dependency chain forward to find uses " +
                 "(stores, function calls, returns, etc.).")
-            .inputSchema(createSchema(properties, List.of("programPath", "address")))
+            .inputSchema(SchemaUtil.builder()
+                .programPath()
+                .requiredStringProperty("address",
+                    "Address within a function to trace forward from")
+                .build())
             .build();
 
         registerTool(tool, (exchange, request) -> {
@@ -137,26 +126,18 @@ public class DataFlowToolProvider extends AbstractToolProvider {
     }
 
     private void registerFindVariableAccessesTool() {
-        Map<String, Object> properties = new HashMap<>();
-        properties.put("programPath", Map.of(
-            "type", "string",
-            "description", "Path in the Ghidra Project to the program"
-        ));
-        properties.put("functionAddress", Map.of(
-            "type", "string",
-            "description", "Address of the function to analyze"
-        ));
-        properties.put("variableName", Map.of(
-            "type", "string",
-            "description", "Name of the variable to find accesses for"
-        ));
-
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("find-variable-accesses")
             .title("Find Variable Accesses")
             .description("Find all reads and writes to a variable within a function. " +
                 "Useful for understanding how a variable is used throughout a function.")
-            .inputSchema(createSchema(properties, List.of("programPath", "functionAddress", "variableName")))
+            .inputSchema(SchemaUtil.builder()
+                .programPath()
+                .requiredStringProperty("functionAddress",
+                    "Address of the function to analyze")
+                .requiredStringProperty("variableName",
+                    "Name of the variable to find accesses for")
+                .build())
             .build();
 
         registerTool(tool, (exchange, request) -> {

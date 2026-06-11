@@ -184,7 +184,7 @@ class TestFatMachoBinaryImport:
 class TestImportedFilesInProject:
     """Tests verifying imported files appear correctly in list-project-files."""
 
-    async def test_archive_files_appear_in_project(self, mcp_stdio_client, isolated_workspace):
+    async def test_archive_files_appear_in_project(self, mcp_stdio_client_isolated, isolated_workspace):
         """
         After importing an archive, verify all programs appear in list-project-files.
 
@@ -194,7 +194,7 @@ class TestImportedFilesInProject:
         archive_path = validate_fixture("test_archive.zip")
 
         # First, import the archive
-        import_result = await mcp_stdio_client.call_tool(
+        import_result = await mcp_stdio_client_isolated.call_tool(
             "import-file",
             arguments={
                 "path": archive_path,
@@ -212,7 +212,7 @@ class TestImportedFilesInProject:
             print(f"  - {prog}")
 
         # Now verify files appear in list-project-files
-        list_result = await mcp_stdio_client.call_tool(
+        list_result = await mcp_stdio_client_isolated.call_tool(
             "list-project-files",
             arguments={"folderPath": "/", "recursive": True}
         )
@@ -237,7 +237,7 @@ class TestImportedFilesInProject:
 
         print(f"\n✓ Project listing shows {item_count} items after importing {len(imported_programs)} programs")
 
-    async def test_fat_binary_slices_appear_separately(self, mcp_stdio_client, isolated_workspace):
+    async def test_fat_binary_slices_appear_separately(self, mcp_stdio_client_isolated, isolated_workspace):
         """
         After importing a fat binary, verify both architecture slices appear in project.
 
@@ -247,7 +247,7 @@ class TestImportedFilesInProject:
         fat_binary_path = validate_fixture("test_fat_binary")
 
         # Import the fat binary
-        import_result = await mcp_stdio_client.call_tool(
+        import_result = await mcp_stdio_client_isolated.call_tool(
             "import-file",
             arguments={
                 "path": fat_binary_path,
@@ -267,7 +267,7 @@ class TestImportedFilesInProject:
             print(f"  - {prog}")
 
         # Verify files appear in list-project-files
-        list_result = await mcp_stdio_client.call_tool(
+        list_result = await mcp_stdio_client_isolated.call_tool(
             "list-project-files",
             arguments={"folderPath": "/", "recursive": True}
         )

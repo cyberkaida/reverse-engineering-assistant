@@ -105,7 +105,7 @@ class TestMCPToolCalls:
 class TestProjectCreation:
     """Test that mcp-reva creates Ghidra project in .reva/."""
 
-    async def test_does_not_create_reva_directory(self, mcp_stdio_client, isolated_workspace, test_binary):
+    async def test_does_not_create_reva_directory(self, mcp_stdio_client_isolated, isolated_workspace, test_binary):
         """CLI does NOT create .reva directory in stdio mode (lazy initialization prevents unnecessary creation)"""
         reva_dir = isolated_workspace / ".reva"
 
@@ -114,7 +114,7 @@ class TestProjectCreation:
 
         # Even after using MCP tools, .reva should NOT be created
         # (MCP tools use Java-side project management, not Python ProjectManager)
-        await mcp_stdio_client.call_tool(
+        await mcp_stdio_client_isolated.call_tool(
             "import-file",
             arguments={"path": str(test_binary)}
         )
@@ -122,11 +122,11 @@ class TestProjectCreation:
         # .reva still should NOT exist (ProjectManager.import_binary() was never called)
         assert not reva_dir.exists(), ".reva directory should not be created by MCP tools in stdio mode"
 
-    async def test_lazy_initialization_prevents_directory_creation(self, mcp_stdio_client, isolated_workspace):
+    async def test_lazy_initialization_prevents_directory_creation(self, mcp_stdio_client_isolated, isolated_workspace):
         """ProjectManager lazy initialization prevents .reva directory creation at startup"""
         reva_dir = isolated_workspace / ".reva"
 
-        # The mcp_stdio_client fixture starts the CLI which creates a ProjectManager
+        # The mcp_stdio_client_isolated fixture starts the CLI which creates a ProjectManager
         # With lazy initialization, .reva should NOT be created
         assert not reva_dir.exists(), ".reva directory should not be created by CLI startup"
 

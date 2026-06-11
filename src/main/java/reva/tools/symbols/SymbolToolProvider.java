@@ -30,6 +30,7 @@ import io.modelcontextprotocol.server.McpSyncServer;
 import io.modelcontextprotocol.spec.McpSchema;
 import reva.tools.AbstractToolProvider;
 import reva.util.AddressUtil;
+import reva.util.SchemaUtil;
 import reva.util.SymbolUtil;
 
 /**
@@ -54,31 +55,18 @@ public class SymbolToolProvider extends AbstractToolProvider {
      * Register a tool to get the count of symbols in a program
      */
     private void registerSymbolsCountTool() {
-        // Define schema for the tool
-        Map<String, Object> properties = new HashMap<>();
-        properties.put("programPath", Map.of(
-            "type", "string",
-            "description", "Path in the Ghidra Project to the program to get symbol count from"
-        ));
-        properties.put("includeExternal", Map.of(
-            "type", "boolean",
-            "description", "Whether to include external symbols in the count",
-            "default", false
-        ));
-        properties.put("filterDefaultNames", Map.of(
-            "type", "boolean",
-            "description", "Whether to filter out default Ghidra generated names like FUN_, DAT_, etc.",
-            "default", true
-        ));
-
-        List<String> required = List.of("programPath");
-
         // Create the tool
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("get-symbols-count")
             .title("Get Symbols Count")
             .description("Get the total count of symbols in the program (use this before calling get-symbols to plan pagination)")
-            .inputSchema(createSchema(properties, required))
+            .inputSchema(SchemaUtil.builder()
+                .programPath()
+                .booleanProperty("includeExternal",
+                    "Whether to include external symbols in the count", false)
+                .booleanProperty("filterDefaultNames",
+                    "Whether to filter out default Ghidra generated names like FUN_, DAT_, etc.", true)
+                .build())
             .build();
 
         // Register the tool with a handler
@@ -118,41 +106,19 @@ public class SymbolToolProvider extends AbstractToolProvider {
      * Register a tool to get symbols from a program with pagination
      */
     private void registerSymbolsTool() {
-        // Define schema for the tool
-        Map<String, Object> properties = new HashMap<>();
-        properties.put("programPath", Map.of(
-            "type", "string",
-            "description", "Path in the Ghidra Project to the program to get symbols from"
-        ));
-        properties.put("includeExternal", Map.of(
-            "type", "boolean",
-            "description", "Whether to include external symbols in the result",
-            "default", false
-        ));
-        properties.put("startIndex", Map.of(
-            "type", "integer",
-            "description", "Starting index for pagination (0-based)",
-            "default", 0
-        ));
-        properties.put("maxCount", Map.of(
-            "type", "integer",
-            "description", "Maximum number of symbols to return (recommend using get-symbols-count first and using chunks of 200)",
-            "default", 200
-        ));
-        properties.put("filterDefaultNames", Map.of(
-            "type", "boolean",
-            "description", "Whether to filter out default Ghidra generated names like FUN_, DAT_, etc.",
-            "default", true
-        ));
-
-        List<String> required = List.of("programPath");
-
         // Create the tool
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("get-symbols")
             .title("Get Symbols")
             .description("Get symbols from the selected program with pagination (use get-symbols-count first to determine total count)")
-            .inputSchema(createSchema(properties, required))
+            .inputSchema(SchemaUtil.builder()
+                .programPath()
+                .booleanProperty("includeExternal",
+                    "Whether to include external symbols in the result", false)
+                .pagination(200)
+                .booleanProperty("filterDefaultNames",
+                    "Whether to filter out default Ghidra generated names like FUN_, DAT_, etc.", true)
+                .build())
             .build();
 
         // Register the tool with a handler
@@ -200,16 +166,9 @@ public class SymbolToolProvider extends AbstractToolProvider {
             }
 
             // Create pagination metadata
-            Map<String, Object> paginationInfo = new HashMap<>();
-            paginationInfo.put("startIndex", pagination.startIndex());
-            paginationInfo.put("requestedCount", pagination.maxCount());
-            paginationInfo.put("actualCount", symbolData.size());
-            paginationInfo.put("nextStartIndex", pagination.startIndex() + symbolData.size());
-            paginationInfo.put("totalProcessed", currentIndex);
+            Map<String, Object> paginationInfo = paginationResult(pagination, "symbols", symbolData, currentIndex);
             paginationInfo.put("includeExternal", includeExternal);
             paginationInfo.put("filterDefaultNames", filterDefaultNames);
-
-            paginationInfo.put("symbols", symbolData);
             return createJsonResult(paginationInfo);
         });
     }

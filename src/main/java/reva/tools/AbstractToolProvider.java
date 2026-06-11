@@ -641,6 +641,30 @@ public abstract class AbstractToolProvider implements ToolProvider {
     }
 
     /**
+     * Build the standard pagination envelope. Mirrors the hand-rolled
+     * paginationInfo maps previously duplicated across providers
+     * (startIndex, requestedCount, actualCount, nextStartIndex,
+     * totalProcessed, &lt;dataKey&gt;).
+     *
+     * @param params         the pagination request (startIndex, maxCount)
+     * @param dataKey        JSON key under which to place the returned page
+     * @param page           the items in this page
+     * @param totalProcessed number of items scanned to produce this page
+     * @return an ordered map ready for createJsonResult(...)
+     */
+    protected static Map<String, Object> paginationResult(PaginationParams params,
+            String dataKey, java.util.List<?> page, int totalProcessed) {
+        Map<String, Object> info = new java.util.LinkedHashMap<>();
+        info.put("startIndex", params.startIndex());
+        info.put("requestedCount", params.maxCount());
+        info.put("actualCount", page.size());
+        info.put("nextStartIndex", params.startIndex() + page.size());
+        info.put("totalProcessed", totalProcessed);
+        info.put(dataKey, page);
+        return info;
+    }
+
+    /**
      * Get and resolve an address from MCP CallToolRequest
      * @param request The CallToolRequest
      * @param program The program to resolve the address in

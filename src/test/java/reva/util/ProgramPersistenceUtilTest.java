@@ -32,6 +32,26 @@ public class ProgramPersistenceUtilTest {
         assertEquals(PersistAction.SAVE,
             ProgramPersistenceUtil.selectAction(file(false, false, false), PersistMode.AUTO));
     }
+    @Test public void autoChecksInCheckedOutFileWithOnlyInMemoryChanges() {
+        // canCheckin() requires modifiedSinceCheckout(), which only counts SAVED
+        // changes — a checked-out file whose modifications are still in memory
+        // reports canCheckin()=false until persist()'s save. The plan must still
+        // be CHECKIN, since persist() saves before the checkin step.
+        DomainFile f = file(false, false, false);
+        when(f.isVersioned()).thenReturn(true);
+        when(f.isCheckedOut()).thenReturn(true);
+        when(f.isChanged()).thenReturn(true);
+        assertEquals(PersistAction.CHECKIN,
+            ProgramPersistenceUtil.selectAction(f, PersistMode.AUTO));
+    }
+    @Test public void autoSavesCheckedOutFileWithNoChangesAtAll() {
+        DomainFile f = file(false, false, false);
+        when(f.isVersioned()).thenReturn(true);
+        when(f.isCheckedOut()).thenReturn(true);
+        when(f.isChanged()).thenReturn(false);
+        assertEquals(PersistAction.SAVE,
+            ProgramPersistenceUtil.selectAction(f, PersistMode.AUTO));
+    }
     @Test public void saveModeNeverChecksInEvenIfVersioned() {
         assertEquals(PersistAction.SAVE,
             ProgramPersistenceUtil.selectAction(file(true, false, false), PersistMode.SAVE));

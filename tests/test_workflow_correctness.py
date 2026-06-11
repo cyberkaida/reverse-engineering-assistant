@@ -321,6 +321,14 @@ class TestVariableRenamePersistence:
         )
         checkin_data = json.loads(checkin.content[0].text)
         assert checkin_data.get("success") is True, f"checkin not successful: {checkin_data}"
+        # analyze-program's persist already added this program to version
+        # control, so this call must be a real checkin — not a silent local
+        # save (the regression shape of the selectAction in-memory-changes
+        # bug, where the rename would still survive reopen via the local
+        # save and this test would pass without testing checkin at all).
+        assert checkin_data.get("action") == "checked_in", (
+            f"Expected a real checkin of the versioned program, got: {checkin_data}"
+        )
 
         # 4. Force reload by re-reading decompilation
         second_decomp = await mcp_stdio_client.call_tool(

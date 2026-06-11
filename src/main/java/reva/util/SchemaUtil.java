@@ -271,6 +271,42 @@ public class SchemaUtil {
         }
 
         /**
+         * Add the canonical programPath string property and mark it required.
+         * @return This builder for method chaining
+         */
+        public SchemaBuilder programPath() {
+            properties.put("programPath", SchemaUtil.stringProperty(
+                "Path in the Ghidra Project to the program"));
+            required.add("programPath");
+            return this;
+        }
+
+        /**
+         * Add the standard optional pagination parameters (startIndex and maxCount).
+         * @param defaultMaxCount Default page size for maxCount
+         * @return This builder for method chaining
+         */
+        public SchemaBuilder pagination(int defaultMaxCount) {
+            properties.put("startIndex", SchemaUtil.integerPropertyWithDefault(
+                "Starting index for pagination", 0));
+            properties.put("maxCount", SchemaUtil.integerPropertyWithDefault(
+                "Maximum number of results to return", defaultMaxCount));
+            return this;
+        }
+
+        /**
+         * Add a string property and mark it required in one call.
+         * @param name Property name
+         * @param description Property description
+         * @return This builder for method chaining
+         */
+        public SchemaBuilder requiredStringProperty(String name, String description) {
+            properties.put(name, SchemaUtil.stringProperty(description));
+            required.add(name);
+            return this;
+        }
+
+        /**
          * Build the schema
          * @return JsonSchema object
          */

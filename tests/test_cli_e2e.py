@@ -14,6 +14,7 @@ All tests use real PyGhidra and Ghidra integration.
 
 import json
 import re
+from pathlib import Path
 
 import pytest
 
@@ -26,6 +27,32 @@ pytestmark = [
     pytest.mark.asyncio(loop_scope="session"),
     pytest.mark.timeout(180)  # 3 minutes for full subprocess + PyGhidra + server startup
 ]
+
+
+def _require_fixture_binary(name: str) -> Path:
+    """Resolve a fixture binary under tests/fixtures/, guarding against LFS pointers.
+
+    Skips the test if the fixture is absent. Fails (rather than skips) if the
+    file is a Git LFS pointer instead of the real binary: a real fixture is
+    tens of KB, while a pointer is ~140 bytes of text starting with
+    "version https://git-lfs.github.com". Without this guard, import-file
+    fails inside the JVM with a confusing error.
+    """
+    fixture = Path(__file__).parent / "fixtures" / name
+    if not fixture.exists():
+        pytest.skip(f"Test fixture not found: {fixture}")
+    if fixture.stat().st_size < 200:
+        try:
+            head = fixture.read_text()
+        except UnicodeDecodeError:
+            return fixture  # actually a small binary; treat as real
+        if head.startswith("version https://git-lfs.github.com"):
+            pytest.fail(
+                f"Test fixture {fixture.name} is a Git LFS pointer, not the "
+                "actual file. Run 'git lfs pull' locally or enable LFS in "
+                "CI checkout."
+            )
+    return fixture
 
 
 class TestCLIStartup:
@@ -116,7 +143,7 @@ class TestMCPToolCalls:
 class TestProjectCreation:
     """Test that mcp-reva creates Ghidra project in .reva/."""
 
-    async def test_does_not_create_reva_directory(self, mcp_stdio_client_isolated, isolated_workspace, test_binary):
+    async def test_does_not_create_reva_directory(self, mcp_stdio_client_isolated, isolated_workspace):
         """CLI does NOT create .reva directory in stdio mode (lazy initialization prevents unnecessary creation)"""
         reva_dir = isolated_workspace / ".reva"
 
@@ -125,9 +152,20 @@ class TestProjectCreation:
 
         # Even after using MCP tools, .reva should NOT be created
         # (MCP tools use Java-side project management, not Python ProjectManager)
-        await mcp_stdio_client_isolated.call_tool(
+        fixture = _require_fixture_binary("test_arm64")
+        import_result = await mcp_stdio_client_isolated.call_tool(
             "import-file",
-            arguments={"path": str(test_binary)}
+            arguments={
+                "path": str(fixture),
+                "enableVersionControl": False,
+                "analyzeAfterImport": False,
+            }
+        )
+
+        # A real fixture binary must import cleanly; an error here would make
+        # the .reva assertion below meaningless.
+        assert not getattr(import_result, "isError", False), (
+            f"Import failed: {import_result.content[0].text if import_result.content else 'no content'}"
         )
 
         # .reva still should NOT exist (ProjectManager.import_binary() was never called)
@@ -160,27 +198,7 @@ class TestBinaryImportRoundTrip:
         self, mcp_stdio_client, isolated_workspace, ghidra_initialized
     ):
         """import-file followed by list-project-files reflects the imported program."""
-        from pathlib import Path
-
-        fixture = Path(__file__).parent / "fixtures" / "test_arm64"
-        if not fixture.exists():
-            pytest.skip(f"Test fixture not found: {fixture}")
-        # Detect Git LFS pointer files (when checkout did not pull LFS objects).
-        # A real test_arm64 is ~33KB Mach-O; a pointer is ~140 bytes of text
-        # starting with "version https://git-lfs.github.com". Without this,
-        # import-file fails inside the JVM with a confusing error.
-        if fixture.stat().st_size < 200:
-            try:
-                head = fixture.read_text()
-            except UnicodeDecodeError:
-                pass  # actually a small binary; treat as real
-            else:
-                if head.startswith("version https://git-lfs.github.com"):
-                    pytest.fail(
-                        f"Test fixture {fixture.name} is a Git LFS pointer, not the "
-                        "actual file. Run 'git lfs pull' locally or enable LFS in "
-                        "CI checkout."
-                    )
+        fixture = _require_fixture_binary("test_arm64")
 
         import_result = await mcp_stdio_client.call_tool(
             "import-file",

@@ -12,7 +12,7 @@ These are unit tests that don't require real Ghidra integration.
 
 import pytest
 from pathlib import Path
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock
 
 # Mark all tests in this file as CLI unit tests
 pytestmark = [pytest.mark.cli, pytest.mark.unit]
@@ -21,22 +21,15 @@ pytestmark = [pytest.mark.cli, pytest.mark.unit]
 class TestProjectManagerInit:
     """Test ProjectManager initialization and directory creation."""
 
-    def test_creates_reva_directory_in_cwd(self, isolated_workspace):
-        """ProjectManager creates .reva/projects/ on first use (lazy initialization)"""
+    def test_defaults_to_reva_dir_in_cwd_without_creating_it(self, isolated_workspace):
+        """ProjectManager defaults to .reva/projects/ in cwd but defers creation (lazy initialization)"""
         from reva_cli.project_manager import ProjectManager
 
         pm = ProjectManager()
 
-        # Should NOT create directory on init (lazy initialization)
+        # Lazy initialization: nothing on disk until first use (import_binary)
         assert not (isolated_workspace / ".reva").exists()
-
-        # Manually trigger initialization (normally done by import_binary)
-        pm.projects_dir.mkdir(parents=True, exist_ok=True)
-
-        # Now directory should exist
-        assert (isolated_workspace / ".reva").exists()
-        assert (isolated_workspace / ".reva" / "projects").exists()
-        assert (isolated_workspace / ".reva" / "projects").is_dir()
+        assert pm.projects_dir == isolated_workspace / ".reva" / "projects"
 
     def test_accepts_custom_projects_dir(self, tmp_path):
         """ProjectManager accepts custom project directory (lazy initialization)"""
@@ -45,16 +38,9 @@ class TestProjectManagerInit:
         custom_dir = tmp_path / "custom_projects"
         pm = ProjectManager(projects_dir=custom_dir)
 
-        # Should NOT create directory on init (lazy initialization)
+        # Lazy initialization: the custom directory is recorded but not created
         assert not custom_dir.exists()
         assert pm.projects_dir == custom_dir
-
-        # Manually trigger directory creation
-        pm.projects_dir.mkdir(parents=True, exist_ok=True)
-
-        # Now directory should exist
-        assert custom_dir.exists()
-        assert custom_dir.is_dir()
 
 
 class TestProjectNaming:
@@ -130,8 +116,7 @@ class TestProjectManagerCleanup:
         # Should not raise
         pm.cleanup()
 
-    @patch('reva_cli.project_manager.ProjectManager.open_project')
-    def test_cleanup_releases_programs(self, mock_open_project, isolated_workspace):
+    def test_cleanup_releases_programs(self, isolated_workspace):
         """Cleanup releases opened programs"""
         from reva_cli.project_manager import ProjectManager
 
@@ -147,8 +132,7 @@ class TestProjectManagerCleanup:
         # Should have called release
         mock_program.release.assert_called_once()
 
-    @patch('reva_cli.project_manager.ProjectManager.open_project')
-    def test_cleanup_closes_project(self, mock_open_project, isolated_workspace):
+    def test_cleanup_closes_project(self, isolated_workspace):
         """Cleanup closes the project"""
         from reva_cli.project_manager import ProjectManager
 
@@ -162,8 +146,7 @@ class TestProjectManagerCleanup:
         # Should have called close
         mock_project.close.assert_called_once()
 
-    @patch('reva_cli.project_manager.ProjectManager.open_project')
-    def test_cleanup_handles_errors_gracefully(self, mock_open_project, isolated_workspace, capsys):
+    def test_cleanup_handles_errors_gracefully(self, isolated_workspace, capsys):
         """Cleanup continues even if individual cleanup steps fail"""
         from reva_cli.project_manager import ProjectManager
 

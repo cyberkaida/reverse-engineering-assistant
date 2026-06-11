@@ -34,6 +34,7 @@ import io.modelcontextprotocol.server.McpSyncServer;
 import io.modelcontextprotocol.spec.McpSchema;
 import reva.tools.AbstractToolProvider;
 import reva.util.AddressUtil;
+import reva.util.SchemaUtil;
 
 /**
  * Tool provider for vtable (virtual function table) analysis.
@@ -82,28 +83,19 @@ public class VtableToolProvider extends AbstractToolProvider {
     // ========================================================================
 
     private void registerAnalyzeVtableTool() {
-        Map<String, Object> properties = new HashMap<>();
-        properties.put("programPath", Map.of(
-            "type", "string",
-            "description", "Path in the Ghidra Project to the program"
-        ));
-        properties.put("vtableAddress", Map.of(
-            "type", "string",
-            "description", "Address of the vtable to analyze"
-        ));
-        properties.put("maxEntries", Map.of(
-            "type", "integer",
-            "description", "Maximum number of vtable entries to read (default: 200)",
-            "default", DEFAULT_MAX_VTABLE_ENTRIES
-        ));
-
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("analyze-vtable")
             .title("Analyze Vtable")
             .description("Analyze a virtual function table (vtable) at the given address. " +
                 "Returns the list of function pointers with their slot indices and offsets. " +
                 "Useful for understanding C++ class hierarchies and virtual method dispatch.")
-            .inputSchema(createSchema(properties, List.of("programPath", "vtableAddress")))
+            .inputSchema(SchemaUtil.builder()
+                .programPath()
+                .requiredStringProperty("vtableAddress",
+                    "Address of the vtable to analyze")
+                .integerProperty("maxEntries",
+                    "Maximum number of vtable entries to read (default: 200)", DEFAULT_MAX_VTABLE_ENTRIES)
+                .build())
             .build();
 
         registerTool(tool, (exchange, request) -> {
@@ -119,25 +111,6 @@ public class VtableToolProvider extends AbstractToolProvider {
     }
 
     private void registerFindVtableCallersTool() {
-        Map<String, Object> properties = new HashMap<>();
-        properties.put("programPath", Map.of(
-            "type", "string",
-            "description", "Path in the Ghidra Project to the program"
-        ));
-        properties.put("functionAddress", Map.of(
-            "type", "string",
-            "description", "Address or name of the function that is called via vtable"
-        ));
-        properties.put("vtableAddress", Map.of(
-            "type", "string",
-            "description", "Address of the vtable containing the function (optional - will search if not provided)"
-        ));
-        properties.put("maxResults", Map.of(
-            "type", "integer",
-            "description", "Maximum number of results to return (default: 500)",
-            "default", DEFAULT_MAX_RESULTS
-        ));
-
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("find-vtable-callers")
             .title("Find Vtable Callers")
@@ -146,7 +119,15 @@ public class VtableToolProvider extends AbstractToolProvider {
                 "with the matching offset. If vtableAddress is not provided, will first search for " +
                 "vtables containing the function. Essential for finding callers of virtual methods. " +
                 "Note: Offset extraction patterns are optimized for x86/x64 instruction formats.")
-            .inputSchema(createSchema(properties, List.of("programPath", "functionAddress")))
+            .inputSchema(SchemaUtil.builder()
+                .programPath()
+                .requiredStringProperty("functionAddress",
+                    "Address or name of the function that is called via vtable")
+                .stringProperty("vtableAddress",
+                    "Address of the vtable containing the function (optional - will search if not provided)")
+                .integerProperty("maxResults",
+                    "Maximum number of results to return (default: 500)", DEFAULT_MAX_RESULTS)
+                .build())
             .build();
 
         registerTool(tool, (exchange, request) -> {
@@ -171,23 +152,17 @@ public class VtableToolProvider extends AbstractToolProvider {
     }
 
     private void registerFindVtablesContainingFunctionTool() {
-        Map<String, Object> properties = new HashMap<>();
-        properties.put("programPath", Map.of(
-            "type", "string",
-            "description", "Path in the Ghidra Project to the program"
-        ));
-        properties.put("functionAddress", Map.of(
-            "type", "string",
-            "description", "Address or name of the function to search for in vtables"
-        ));
-
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("find-vtables-containing-function")
             .title("Find Vtables Containing Function")
             .description("Find all vtables that contain a pointer to the given function. " +
                 "Returns the vtable addresses and slot indices where the function appears. " +
                 "Useful for discovering which classes implement a virtual method.")
-            .inputSchema(createSchema(properties, List.of("programPath", "functionAddress")))
+            .inputSchema(SchemaUtil.builder()
+                .programPath()
+                .requiredStringProperty("functionAddress",
+                    "Address or name of the function to search for in vtables")
+                .build())
             .build();
 
         registerTool(tool, (exchange, request) -> {

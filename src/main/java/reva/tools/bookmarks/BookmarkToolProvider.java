@@ -60,20 +60,17 @@ public class BookmarkToolProvider extends AbstractToolProvider {
      * Register a tool to set or update a bookmark at an address
      */
     private void registerSetBookmarkTool() {
-        Map<String, Object> properties = new HashMap<>();
-        properties.put("programPath", SchemaUtil.stringProperty("Path to the program in the Ghidra Project"));
-        properties.put("addressOrSymbol", SchemaUtil.stringProperty("Address or symbol name where to set the bookmark"));
-        properties.put("type", SchemaUtil.stringProperty("Bookmark type (e.g. 'Note', 'Warning', 'TODO', 'Bug', 'Analysis')"));
-        properties.put("category", SchemaUtil.stringProperty("Bookmark category for organizing bookmarks (optional)"));
-        properties.put("comment", SchemaUtil.stringProperty("Bookmark comment text"));
-
-        List<String> required = List.of("programPath", "addressOrSymbol", "type", "comment");
-
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("set-bookmark")
             .title("Set Bookmark")
             .description("Set or update a bookmark at a specific address. Used to keep track of important locations in the program.")
-            .inputSchema(createSchema(properties, required))
+            .inputSchema(SchemaUtil.builder()
+                .programPath()
+                .requiredStringProperty("addressOrSymbol", "Address or symbol name where to set the bookmark")
+                .requiredStringProperty("type", "Bookmark type (e.g. 'Note', 'Warning', 'TODO', 'Bug', 'Analysis')")
+                .stringProperty("category", "Bookmark category for organizing bookmarks (optional)")
+                .requiredStringProperty("comment", "Bookmark comment text")
+                .build())
             .build();
 
         registerTool(tool, (exchange, request) -> {
@@ -241,19 +238,16 @@ public class BookmarkToolProvider extends AbstractToolProvider {
      * Register a tool to remove a bookmark
      */
     private void registerRemoveBookmarkTool() {
-        Map<String, Object> properties = new HashMap<>();
-        properties.put("programPath", SchemaUtil.stringProperty("Path to the program in the Ghidra Project"));
-        properties.put("addressOrSymbol", SchemaUtil.stringProperty("Address or symbol name of the bookmark"));
-        properties.put("type", SchemaUtil.stringProperty("Bookmark type"));
-        properties.put("category", SchemaUtil.stringProperty("Bookmark category (optional)"));
-
-        List<String> required = List.of("programPath", "addressOrSymbol", "type");
-
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("remove-bookmark")
             .title("Remove Bookmark")
             .description("Remove a specific bookmark")
-            .inputSchema(createSchema(properties, required))
+            .inputSchema(SchemaUtil.builder()
+                .programPath()
+                .requiredStringProperty("addressOrSymbol", "Address or symbol name of the bookmark")
+                .requiredStringProperty("type", "Bookmark type")
+                .stringProperty("category", "Bookmark category (optional)")
+                .build())
             .build();
 
         registerTool(tool, (exchange, request) -> {
@@ -407,17 +401,14 @@ public class BookmarkToolProvider extends AbstractToolProvider {
      * Register a tool to list bookmark categories for a type
      */
     private void registerListBookmarkCategoriesTool() {
-        Map<String, Object> properties = new HashMap<>();
-        properties.put("programPath", SchemaUtil.stringProperty("Path to the program in the Ghidra Project"));
-        properties.put("type", SchemaUtil.stringProperty("Bookmark type to get categories for"));
-
-        List<String> required = List.of("programPath", "type");
-
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("list-bookmark-categories")
             .title("List Bookmark Categories")
             .description("List all categories for a given bookmark type")
-            .inputSchema(createSchema(properties, required))
+            .inputSchema(SchemaUtil.builder()
+                .programPath()
+                .requiredStringProperty("type", "Bookmark type to get categories for")
+                .build())
             .build();
 
         registerTool(tool, (exchange, request) -> {

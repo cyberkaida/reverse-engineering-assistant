@@ -493,7 +493,8 @@ public class DecompilerToolProvider extends AbstractToolProvider {
 
         try {
             DataType newDataType = DataTypeParserUtil.parseDataTypeObjectFromString(
-                newDataTypeString, archiveName);
+                newDataTypeString, archiveName,
+                symbol.getProgram().getDomainFile().getPathname());
 
             if (newDataType == null) {
                 errors.add("Could not find data type: " + newDataTypeString + " for variable " + varName);

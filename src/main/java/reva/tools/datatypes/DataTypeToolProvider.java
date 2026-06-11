@@ -33,6 +33,7 @@ import reva.plugin.RevaProgramManager;
 import reva.tools.AbstractToolProvider;
 import reva.util.DataTypeParserUtil;
 import reva.util.RevaInternalServiceRegistry;
+import reva.util.SchemaUtil;
 
 /**
  * Tool provider for data type operations.
@@ -58,20 +59,14 @@ public class DataTypeToolProvider extends AbstractToolProvider {
      * Register a tool to get data type archives for a specific program
      */
     private void registerGetDataTypeArchivesTool() {
-        // Define schema for the tool
-        Map<String, Object> properties = new HashMap<>();
-        properties.put("programPath", Map.of(
-            "type", "string",
-            "description", "Path in the Ghidra Project to get data type archives for"
-        ));
-        List<String> required = List.of("programPath");
-
         // Create the tool
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("get-data-type-archives")
             .title("Get Data Type Archives")
             .description("Get data type archives for a specific program")
-            .inputSchema(createSchema(properties, required))
+            .inputSchema(SchemaUtil.builder()
+                .programPath()
+                .build())
             .build();
 
         // Register the tool with a handler
@@ -171,45 +166,18 @@ public class DataTypeToolProvider extends AbstractToolProvider {
      * Register a tool to get data types from an archive
      */
     private void registerGetDataTypesTool() {
-        // Define schema for the tool
-        Map<String, Object> properties = new HashMap<>();
-        properties.put("programPath", Map.of(
-            "type", "string",
-            "description", "Path in the Ghidra Project to get data types from"
-        ));
-        properties.put("archiveName", Map.of(
-            "type", "string",
-            "description", "Name of the data type archive"
-        ));
-        properties.put("categoryPath", Map.of(
-            "type", "string",
-            "description", "Path to category to list data types from (e.g., '/Structure'). Use '/' for root category.",
-            "default", "/"
-        ));
-        properties.put("includeSubcategories", Map.of(
-            "type", "boolean",
-            "description", "Whether to include data types from subcategories",
-            "default", false
-        ));
-        properties.put("startIndex", Map.of(
-            "type", "integer",
-            "description", "Starting index for pagination (0-based)",
-            "default", 0
-        ));
-        properties.put("maxCount", Map.of(
-            "type", "integer",
-            "description", "Maximum number of data types to return",
-            "default", 100
-        ));
-
-        List<String> required = List.of("programPath", "archiveName");
-
         // Create the tool
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("get-data-types")
             .title("Get Data Types")
             .description("Get data types from a data type archive")
-            .inputSchema(createSchema(properties, required))
+            .inputSchema(SchemaUtil.builder()
+                .programPath()
+                .requiredStringProperty("archiveName", "Name of the data type archive")
+                .stringProperty("categoryPath", "Path to category to list data types from (e.g., '/Structure'). Use '/' for root category.", "/")
+                .booleanProperty("includeSubcategories", "Whether to include data types from subcategories", false)
+                .pagination(100)
+                .build())
             .build();
 
         // Register the tool with a handler
@@ -292,30 +260,16 @@ public class DataTypeToolProvider extends AbstractToolProvider {
      * Register a tool to get a data type by string representation (e.g., "char**")
      */
     private void registerGetDataTypeByStringTool() {
-        // Define schema for the tool
-        Map<String, Object> properties = new HashMap<>();
-        properties.put("programPath", Map.of(
-            "type", "string",
-            "description", "Path in the Ghidra Project to search for data types in"
-        ));
-        properties.put("dataTypeString", Map.of(
-            "type", "string",
-            "description", "String representation of the data type (e.g., 'char**', 'int[10]')"
-        ));
-        properties.put("archiveName", Map.of(
-            "type", "string",
-            "description", "Optional name of the data type archive to search in. If not provided, all archives will be searched.",
-            "default", ""
-        ));
-
-        List<String> required = List.of("programPath", "dataTypeString");
-
         // Create the tool
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("get-data-type-by-string")
             .title("Get Data Type by String")
             .description("Get a data type by its string representation")
-            .inputSchema(createSchema(properties, required))
+            .inputSchema(SchemaUtil.builder()
+                .programPath()
+                .requiredStringProperty("dataTypeString", "String representation of the data type (e.g., 'char**', 'int[10]')")
+                .stringProperty("archiveName", "Optional name of the data type archive to search in. If not provided, all archives will be searched.", "")
+                .build())
             .build();
 
         // Register the tool with a handler

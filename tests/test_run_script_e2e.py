@@ -116,15 +116,18 @@ class TestRunScriptE2E:
     ):
         """`currentProgram` must be bound to the program from programPath."""
         program_path = await _import_test_program(mcp_stdio_client)
-        expected_name = program_path.lstrip("/")  # "test_arm64"
 
+        # Compare the bound program's project pathname, not its display name:
+        # in a shared project repeated imports of the same fixture get a
+        # uniquifying counter suffix on the DomainFile (e.g. /test_arm64.3)
+        # while the program's internal name stays "test_arm64".
         result = await mcp_stdio_client.call_tool(
             "run-script",
             arguments={
                 "programPath": program_path,
                 "code": (
-                    "name = currentProgram.getName()\n"
-                    "print('PROGRAM_NAME=' + name)\n"
+                    "path = currentProgram.getDomainFile().getPathname()\n"
+                    "print('PROGRAM_PATH=' + path)\n"
                 ),
                 "timeoutSeconds": 30,
             },
@@ -132,7 +135,7 @@ class TestRunScriptE2E:
 
         data = _parse(result)
         assert data["success"] is True, f"failure: {data}"
-        assert f"PROGRAM_NAME={expected_name}" in data["stdout"], (
+        assert f"PROGRAM_PATH={program_path}" in data["stdout"], (
             f"unexpected stdout: {data['stdout']!r}"
         )
 

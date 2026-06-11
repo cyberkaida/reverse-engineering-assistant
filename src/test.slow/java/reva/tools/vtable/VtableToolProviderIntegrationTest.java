@@ -56,14 +56,6 @@ public class VtableToolProviderIntegrationTest extends RevaIntegrationTestBase {
     /** Itanium-ABI mangled name for {@code Dog::legs() const}. */
     private static final String DOG_LEGS_MANGLED = "__ZNK3Dog4legsEv";
 
-    private String importFixture() throws Exception {
-        return withMcpClient(createMcpTransport(),
-            (McpClientFunction<String>) client -> {
-                client.initialize();
-                return AnalyzedFixtureSupport.importAndAnalyze(client, "test_cpp_x86_64");
-            });
-    }
-
     /**
      * Resolve the entry-point address of a function by its (possibly mangled)
      * symbol name via get-symbols. Returns the first FUNCTION-typed symbol's
@@ -115,7 +107,7 @@ public class VtableToolProviderIntegrationTest extends RevaIntegrationTestBase {
      */
     @Test
     public void testAnalyzeVtable() throws Exception {
-        String path = importFixture();
+        String path = AnalyzedFixtureSupport.importAndAnalyze(this, "test_cpp_x86_64");
         withMcpClient(createMcpTransport(), client -> {
             client.initialize();
 
@@ -188,7 +180,7 @@ public class VtableToolProviderIntegrationTest extends RevaIntegrationTestBase {
      */
     @Test
     public void testFindVtablesContainingFunction() throws Exception {
-        String path = importFixture();
+        String path = AnalyzedFixtureSupport.importAndAnalyze(this, "test_cpp_x86_64");
         withMcpClient(createMcpTransport(), client -> {
             client.initialize();
 
@@ -226,7 +218,7 @@ public class VtableToolProviderIntegrationTest extends RevaIntegrationTestBase {
      */
     @Test
     public void testFindVtableCallers() throws Exception {
-        String path = importFixture();
+        String path = AnalyzedFixtureSupport.importAndAnalyze(this, "test_cpp_x86_64");
         withMcpClient(createMcpTransport(), client -> {
             client.initialize();
 
@@ -285,7 +277,7 @@ public class VtableToolProviderIntegrationTest extends RevaIntegrationTestBase {
 
         // (2) analyze-vtable on a non-vtable code address is NOT an error; it
         //     reports a structure-less, single non-function terminator entry.
-        String path = importFixture();
+        String path = AnalyzedFixtureSupport.importAndAnalyze(this, "test_cpp_x86_64");
         withMcpClient(createMcpTransport(), client -> {
             client.initialize();
             String legsAddr = addressOfSymbol(client, path, DOG_LEGS_MANGLED);

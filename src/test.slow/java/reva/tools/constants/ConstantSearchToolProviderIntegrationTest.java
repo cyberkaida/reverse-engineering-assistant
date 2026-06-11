@@ -45,14 +45,6 @@ import reva.RevaIntegrationTestBase;
  */
 public class ConstantSearchToolProviderIntegrationTest extends RevaIntegrationTestBase {
 
-    private String importFixture() throws Exception {
-        return withMcpClient(createMcpTransport(),
-            (McpClientFunction<String>) client -> {
-                client.initialize();
-                return AnalyzedFixtureSupport.importAndAnalyze(client, "test_x86_64");
-            });
-    }
-
     /**
      * Pick a stable, non-noise constant the fixture actually contains by reading
      * list-common-constants. Returns the raw decimal value of the most frequent
@@ -68,7 +60,7 @@ public class ConstantSearchToolProviderIntegrationTest extends RevaIntegrationTe
 
     @Test
     public void testListCommonConstants() throws Exception {
-        String path = importFixture();
+        String path = AnalyzedFixtureSupport.importAndAnalyze(this, "test_x86_64");
         withMcpClient(createMcpTransport(), client -> {
             client.initialize();
             CallToolResult r = client.callTool(new CallToolRequest("list-common-constants",
@@ -101,7 +93,7 @@ public class ConstantSearchToolProviderIntegrationTest extends RevaIntegrationTe
 
     @Test
     public void testListCommonConstantsDefaultFiltersNoise() throws Exception {
-        String path = importFixture();
+        String path = AnalyzedFixtureSupport.importAndAnalyze(this, "test_x86_64");
         withMcpClient(createMcpTransport(), client -> {
             client.initialize();
             // includeSmallValues omitted -> default false -> noise (0-255, -1) excluded.
@@ -125,7 +117,7 @@ public class ConstantSearchToolProviderIntegrationTest extends RevaIntegrationTe
 
     @Test
     public void testFindConstantUsesPresentValue() throws Exception {
-        String path = importFixture();
+        String path = AnalyzedFixtureSupport.importAndAnalyze(this, "test_x86_64");
         withMcpClient(createMcpTransport(), client -> {
             client.initialize();
 
@@ -170,7 +162,7 @@ public class ConstantSearchToolProviderIntegrationTest extends RevaIntegrationTe
 
     @Test
     public void testFindConstantUsesAbsentValue() throws Exception {
-        String path = importFixture();
+        String path = AnalyzedFixtureSupport.importAndAnalyze(this, "test_x86_64");
         withMcpClient(createMcpTransport(), client -> {
             client.initialize();
             // 0xdeadbeefcafef00d is extremely unlikely to appear as an immediate in this
@@ -189,7 +181,7 @@ public class ConstantSearchToolProviderIntegrationTest extends RevaIntegrationTe
 
     @Test
     public void testFindConstantsInRange() throws Exception {
-        String path = importFixture();
+        String path = AnalyzedFixtureSupport.importAndAnalyze(this, "test_x86_64");
         withMcpClient(createMcpTransport(), client -> {
             client.initialize();
 
@@ -250,7 +242,7 @@ public class ConstantSearchToolProviderIntegrationTest extends RevaIntegrationTe
 
     @Test
     public void testFindConstantsInRangeMinGreaterThanMaxIsError() throws Exception {
-        String path = importFixture();
+        String path = AnalyzedFixtureSupport.importAndAnalyze(this, "test_x86_64");
         withMcpClient(createMcpTransport(), client -> {
             client.initialize();
             CallToolResult r = client.callTool(new CallToolRequest("find-constants-in-range",

@@ -72,6 +72,19 @@ public final class AnalyzedFixtureSupport {
         return programPath;
     }
 
+    /**
+     * Convenience overload for tests: opens an MCP client via the test base,
+     * imports + analyzes the fixture, and returns the programPath. Use this
+     * instead of duplicating a per-class importFixture() helper.
+     */
+    public static String importAndAnalyze(RevaIntegrationTestBase base, String name) throws Exception {
+        return base.withMcpClient(base.createMcpTransport(),
+            (RevaIntegrationTestBase.McpClientFunction<String>) client -> {
+                client.initialize();
+                return importAndAnalyze(client, name);
+            });
+    }
+
     private static String extractProgramPath(JsonNode importJson) {
         if (importJson.has("importedPrograms")
                 && importJson.get("importedPrograms").isArray()

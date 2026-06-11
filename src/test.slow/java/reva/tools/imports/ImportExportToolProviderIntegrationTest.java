@@ -36,14 +36,6 @@ import reva.RevaIntegrationTestBase;
  */
 public class ImportExportToolProviderIntegrationTest extends RevaIntegrationTestBase {
 
-    private String importFixture() throws Exception {
-        return withMcpClient(createMcpTransport(),
-            (McpClientFunction<String>) client -> {
-                client.initialize();
-                return AnalyzedFixtureSupport.importAndAnalyze(client, "test_x86_64");
-            });
-    }
-
     /**
      * Read the ungrouped import list and return the import entry whose name matches
      * "printf" or "_printf" (case-insensitive). Returns null if none is present.
@@ -60,7 +52,7 @@ public class ImportExportToolProviderIntegrationTest extends RevaIntegrationTest
 
     @Test
     public void testListImportsContainsPrintf() throws Exception {
-        String path = importFixture();
+        String path = AnalyzedFixtureSupport.importAndAnalyze(this, "test_x86_64");
         withMcpClient(createMcpTransport(), client -> {
             client.initialize();
             // groupByLibrary defaults to true (-> "libraries"); request ungrouped to get "imports".
@@ -85,7 +77,7 @@ public class ImportExportToolProviderIntegrationTest extends RevaIntegrationTest
 
     @Test
     public void testListImportsGroupedByLibrary() throws Exception {
-        String path = importFixture();
+        String path = AnalyzedFixtureSupport.importAndAnalyze(this, "test_x86_64");
         withMcpClient(createMcpTransport(), client -> {
             client.initialize();
             // Default grouping: result carries "libraries", not "imports".
@@ -108,7 +100,7 @@ public class ImportExportToolProviderIntegrationTest extends RevaIntegrationTest
 
     @Test
     public void testFindImportReferencesToPrintf() throws Exception {
-        String path = importFixture();
+        String path = AnalyzedFixtureSupport.importAndAnalyze(this, "test_x86_64");
         withMcpClient(createMcpTransport(), client -> {
             client.initialize();
 
@@ -147,7 +139,7 @@ public class ImportExportToolProviderIntegrationTest extends RevaIntegrationTest
 
     @Test
     public void testListExports() throws Exception {
-        String path = importFixture();
+        String path = AnalyzedFixtureSupport.importAndAnalyze(this, "test_x86_64");
         withMcpClient(createMcpTransport(), client -> {
             client.initialize();
             CallToolResult r = client.callTool(new CallToolRequest("list-exports",
@@ -175,7 +167,7 @@ public class ImportExportToolProviderIntegrationTest extends RevaIntegrationTest
 
     @Test
     public void testResolveThunkOnImportThunk() throws Exception {
-        String path = importFixture();
+        String path = AnalyzedFixtureSupport.importAndAnalyze(this, "test_x86_64");
         withMcpClient(createMcpTransport(), client -> {
             client.initialize();
 

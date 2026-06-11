@@ -22,6 +22,10 @@ import java.util.Map;
  * Fluent builder for the standard ReVa tool result envelope:
  * a {@code success} flag, the {@code programPath}, plus arbitrary data fields.
  * Insertion order is preserved (LinkedHashMap) for stable, readable JSON.
+ *
+ * <p>Available for providers that emit the standard success/programPath envelope;
+ * existing providers have not yet been migrated to it (the schema migration was
+ * schema-only) &mdash; prefer it for new tools and future result-envelope cleanups.
  */
 public final class ToolResultBuilder {
     private final Map<String, Object> data = new LinkedHashMap<>();

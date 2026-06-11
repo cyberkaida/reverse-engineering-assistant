@@ -61,14 +61,6 @@ public class DataFlowToolProviderIntegrationTest extends RevaIntegrationTestBase
 
     private static final String FIXTURE = "test_dataflow_x86_64";
 
-    private String importFixture() throws Exception {
-        return withMcpClient(createMcpTransport(),
-            (McpClientFunction<String>) client -> {
-                client.initialize();
-                return AnalyzedFixtureSupport.importAndAnalyze(client, FIXTURE);
-            });
-    }
-
     /**
      * Resolve the entry address of {@code transform} by scanning get-symbols for a
      * function named "transform" or "_transform" (Mach-O underscore). Returns the
@@ -110,7 +102,7 @@ public class DataFlowToolProviderIntegrationTest extends RevaIntegrationTestBase
 
     @Test
     public void testTraceDataFlowForward() throws Exception {
-        String path = importFixture();
+        String path = AnalyzedFixtureSupport.importAndAnalyze(this, FIXTURE);
         String entry = transformEntry(path);
 
         withMcpClient(createMcpTransport(), client -> {
@@ -188,7 +180,7 @@ public class DataFlowToolProviderIntegrationTest extends RevaIntegrationTestBase
 
     @Test
     public void testTraceDataFlowBackward() throws Exception {
-        String path = importFixture();
+        String path = AnalyzedFixtureSupport.importAndAnalyze(this, FIXTURE);
         String entry = transformEntry(path);
 
         withMcpClient(createMcpTransport(), client -> {
@@ -256,7 +248,7 @@ public class DataFlowToolProviderIntegrationTest extends RevaIntegrationTestBase
 
     @Test
     public void testFindVariableAccesses() throws Exception {
-        String path = importFixture();
+        String path = AnalyzedFixtureSupport.importAndAnalyze(this, FIXTURE);
         String entry = transformEntry(path);
 
         withMcpClient(createMcpTransport(), client -> {

@@ -12,6 +12,7 @@ Test Fixtures:
 
 import pytest
 import json
+import re
 from pathlib import Path
 
 # Mark all tests in this file
@@ -59,9 +60,11 @@ class TestArchiveImport:
         """
         Import a zip archive containing multiple binaries.
 
-        Expected: Archive contains 3 source files (arm64, x86_64, fat binary).
-        The fat binary should produce 2 programs.
-        Total expected: >= 4 programs imported.
+        The archive contains 3 source files (arm64, x86_64, fat binary), but
+        BatchInfo counts each fat Mach-O slice as its own discovered file (the
+        fat container itself is not counted), so filesDiscovered == 4:
+        test_arm64, test_x86_64, and the fat binary's arm64 + x86_64 slices.
+        Each discovered file imports as one program, so exactly 4 programs.
         """
         archive_path = validate_fixture("test_archive.zip")
 
@@ -88,14 +91,14 @@ class TestArchiveImport:
 
         assert data.get("success") is True, "Import should succeed"
 
-        # Verify multiple files discovered from archive
+        # BatchInfo counts each fat slice separately: arm64 + x86_64 + 2 slices = 4
         files_discovered = data.get("filesDiscovered", 0)
-        assert files_discovered >= 3, f"Should discover >= 3 files, got {files_discovered}"
+        assert files_discovered == 4, f"Should discover exactly 4 files, got {files_discovered}"
 
-        # Verify importedPrograms list (this is the actual count of imported programs)
+        # Each discovered file imports as exactly one program
         imported_programs = data.get("importedPrograms", [])
-        # Archive has: test_arm64 (1) + test_x86_64 (1) + test_fat_binary (2 slices) = 4
-        assert len(imported_programs) >= 3, f"Should have >= 3 imported programs, got {len(imported_programs)}"
+        assert len(imported_programs) == 4, \
+            f"Should have exactly 4 imported programs, got {len(imported_programs)}: {imported_programs}"
 
         print(f"✓ Archive imported: {files_discovered} discovered, {len(imported_programs)} programs imported")
         print(f"✓ Programs: {imported_programs}")
@@ -113,7 +116,11 @@ class TestArchiveImport:
         )
 
         assert result is not None
+        assert not getattr(result, "isError", False), (
+            f"Import failed: {result.content[0].text if result.content else 'no content'}"
+        )
         data = json.loads(result.content[0].text)
+        assert data.get("success") is True, f"Import should succeed: {data}"
 
         # Required fields returned by the import-file tool
         required_fields = [
@@ -235,6 +242,13 @@ class TestImportedFilesInProject:
         assert item_count >= len(imported_programs), \
             f"Should have at least {len(imported_programs)} items, got {item_count}"
 
+        # Identity check: every imported program must appear in the listing by path.
+        listed_paths = [e.get("programPath") for e in file_entries]
+        for prog in imported_programs:
+            assert prog in listed_paths, (
+                f"Imported program {prog!r} not in listing: {listed_paths}"
+            )
+
         print(f"\n✓ Project listing shows {item_count} items after importing {len(imported_programs)} programs")
 
     async def test_fat_binary_slices_appear_separately(self, mcp_stdio_client_isolated, isolated_workspace):
@@ -285,6 +299,13 @@ class TestImportedFilesInProject:
 
         # Verify we have 2 files (one per architecture)
         assert item_count >= 2, f"Should have at least 2 files (one per arch), got {item_count}"
+
+        # Identity check: every imported slice must appear in the listing by path.
+        listed_paths = [e.get("programPath") for e in entries]
+        for prog in imported_programs:
+            assert prog in listed_paths, (
+                f"Imported slice {prog!r} not in listing: {listed_paths}"
+            )
 
         for i, entry in enumerate(entries, 1):
             print(f"  [{i}] {entry}")
@@ -561,7 +582,11 @@ class TestImportResponseFields:
         )
 
         assert result is not None
+        assert not getattr(result, "isError", False), (
+            f"Import failed: {result.content[0].text if result.content else 'no content'}"
+        )
         data = json.loads(result.content[0].text)
+        assert data.get("success") is True, f"Import should succeed: {data}"
 
         # Core fields that should always be present
         required_fields = [
@@ -589,40 +614,70 @@ class TestImportResponseFields:
                 print(f"  {field}: {data[field]}")
 
     async def test_path_handling_parameters_work(self, mcp_stdio_client, isolated_workspace):
-        """Verify path handling parameters are accepted and import succeeds."""
-        binary_path = validate_fixture("test_arm64")
+        """stripLeadingPath/stripAllContainerPath visibly change project paths.
 
-        # Test with explicit path handling options
-        result = await mcp_stdio_client.call_tool(
+        Path semantics (ProjectToolProvider.fsrlToPath, mirroring Ghidra's
+        ImportBatchTask):
+        - stripLeadingPath=True drops the source file's directory components,
+          so project paths start at the archive name; False keeps them, so the
+          source directory (.../tests/fixtures/...) appears in the path.
+        - stripAllContainerPath=True flattens interior container paths, so the
+          fat binary's slices lose their "test_fat_binary" component.
+        Project names are sanitized ('/' becomes '_'), so path components show
+        up as underscore-joined segments of a flat name, not nested folders.
+        These effects are only observable with a container input, hence the
+        archive fixture rather than a plain single binary.
+        """
+        archive_path = validate_fixture("test_archive.zip")
+
+        default_result = await mcp_stdio_client.call_tool(
             "import-file",
             arguments={
-                "path": binary_path,
+                "path": archive_path,
                 "enableVersionControl": False,
-                "stripLeadingPath": True,  # Use default value
-                "stripAllContainerPath": False,  # Use default value
+                "analyzeAfterImport": False,
+                "stripLeadingPath": True,
+                "stripAllContainerPath": False,
             }
         )
+        assert not getattr(default_result, "isError", False), (
+            f"Import failed: {default_result.content[0].text if default_result.content else 'no content'}"
+        )
+        default_data = json.loads(default_result.content[0].text)
+        assert default_data.get("success") is True, f"Import should succeed: {default_data}"
+        default_paths = default_data.get("importedPrograms", [])
+        assert len(default_paths) == 4, f"Expected 4 programs, got {default_paths}"
+        # Leading source directories stripped: paths start at the archive name
+        # (a duplicate-name counter suffix may follow on a shared project).
+        assert all(p.startswith("/test_archive.zip") for p in default_paths), default_paths
+        # Interior container path kept: both fat slices carry the fat binary component.
+        assert sum("test_fat_binary" in p for p in default_paths) == 2, default_paths
 
-        assert result is not None
-        assert hasattr(result, 'content') and len(result.content) > 0, "Result should have content"
+        stripped_result = await mcp_stdio_client.call_tool(
+            "import-file",
+            arguments={
+                "path": archive_path,
+                "enableVersionControl": False,
+                "analyzeAfterImport": False,
+                "stripLeadingPath": False,
+                "stripAllContainerPath": True,
+            }
+        )
+        assert not getattr(stripped_result, "isError", False), (
+            f"Import failed: {stripped_result.content[0].text if stripped_result.content else 'no content'}"
+        )
+        stripped_data = json.loads(stripped_result.content[0].text)
+        assert stripped_data.get("success") is True, f"Import should succeed: {stripped_data}"
+        stripped_paths = stripped_data.get("importedPrograms", [])
+        assert len(stripped_paths) == 4, f"Expected 4 programs, got {stripped_paths}"
+        # Leading path kept: the fixture directory appears in every project path.
+        assert all("fixtures" in p for p in stripped_paths), stripped_paths
+        assert not any(p.startswith("/test_archive.zip") for p in stripped_paths), stripped_paths
+        # Interior container path flattened: no slice keeps the fat binary component.
+        assert not any("test_fat_binary" in p for p in stripped_paths), stripped_paths
 
-        content_text = result.content[0].text
-        if not content_text:
-            pytest.fail(
-                "Empty response from tool. The installed ReVa extension may be outdated. "
-                "Run 'gradle install' to install the development version."
-            )
-
-        data = json.loads(content_text)
-
-        # Main assertion: import should succeed with these parameters
-        assert data.get("success") is True, "Import should succeed with path handling params"
-
-        # Verify program was imported
-        imported = data.get("importedPrograms", [])
-        assert len(imported) > 0, "Should import at least one program"
-
-        print(f"✓ Import succeeded with path handling parameters: {imported}")
+        print(f"✓ stripLeadingPath=True, stripAllContainerPath=False: {default_paths}")
+        print(f"✓ stripLeadingPath=False, stripAllContainerPath=True: {stripped_paths}")
 
 
 class TestImportErrorHandling:
@@ -697,15 +752,14 @@ class TestImportProgressMessages:
         assert "message" in data, "Response should include 'message' field"
         message = data["message"]
 
-        # Message should mention the import completion and the actual counts.
-        # Don't accept "any digit in message" -- file paths in CI contain digits
-        # (e.g. python3.14, /tmp/pytest-of-X/pytest-1/...), so the old assertion
-        # would pass on a message that omitted the counts entirely.
+        # Message must state the actual counts in the tool's completion
+        # phrasing ("Import completed. N of M files imported..."). A bare
+        # substring digit check could match digits from file paths instead.
         assert "Import completed" in message or "imported" in message.lower(), \
             f"Message should mention import completion: {message}"
         files_imported = data.get("filesImported", 0)
-        assert str(files_imported) in message, (
-            f"Message should reference filesImported={files_imported}: {message}"
+        assert re.search(rf"\b{files_imported} of \d+ files imported\b", message), (
+            f"Message should state '{files_imported} of <total> files imported': {message}"
         )
 
         print(f"✓ Import message: {message}")
@@ -739,10 +793,15 @@ class TestImportProgressMessages:
         assert files_discovered >= 3, f"Should discover at least 3 files, got {files_discovered}"
         assert files_imported >= 3, f"Should import at least 3 files, got {files_imported}"
 
-        # Verify message references the counts
+        # Verify message states the counts in the tool's completion phrasing
+        # ("Import completed. N of M files imported...")
         message = data.get("message", "")
-        assert str(files_imported) in message or str(files_discovered) in message, \
-            f"Message should reference file counts: {message}"
+        assert re.search(
+            rf"\b{files_imported} of {files_discovered} files imported\b", message
+        ), (
+            f"Message should state '{files_imported} of {files_discovered} "
+            f"files imported': {message}"
+        )
 
         print(f"✓ Archive import message: {message}")
         print(f"  Discovered: {files_discovered}, Imported: {files_imported}, Programs: {imported_programs}")
@@ -775,10 +834,11 @@ class TestImportProgressMessages:
         analyzed_count = data.get("filesAnalyzed", 0)
         assert analyzed_count > 0, "Should have analyzed at least one file"
 
-        # Verify message mentions analysis
+        # Verify message states the analysis count in the tool's phrasing
+        # (", N analyzed")
         message = data.get("message", "")
-        assert "analy" in message.lower(), \
-            f"Message should mention analysis when analyzeAfterImport=true: {message}"
+        assert re.search(rf"\b{analyzed_count} analyzed\b", message), \
+            f"Message should state '{analyzed_count} analyzed' when analyzeAfterImport=true: {message}"
 
         print(f"✓ Import with analysis message: {message}")
         print(f"  Files analyzed: {analyzed_count}")

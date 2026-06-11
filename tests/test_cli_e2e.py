@@ -13,6 +13,7 @@ All tests use real PyGhidra and Ghidra integration.
 """
 
 import json
+import re
 
 import pytest
 
@@ -32,27 +33,30 @@ class TestCLIStartup:
 
     async def test_cli_initializes_successfully(self, mcp_stdio_client):
         """CLI starts and initializes MCP session successfully"""
-        # mcp_stdio_client fixture already initializes
-        # If we got here, initialization succeeded
-        assert mcp_stdio_client is not None
+        # The fixture stores the InitializeResult it received during session setup.
+        assert mcp_stdio_client.reva_init_result is not None
 
     async def test_server_info_is_correct(self, mcp_stdio_client):
         """Server reports correct name and version"""
-        # Initialize already happened in fixture, but we can check the info
-        # by calling initialize again (it's idempotent in MCP)
-        result = await mcp_stdio_client.initialize()
+        # The fixture already initialized the session (one initialize per MCP
+        # session); assert on the stored InitializeResult.
+        info = mcp_stdio_client.reva_init_result
 
-        assert result.serverInfo.name == "ReVa"
-        assert result.serverInfo.version == "1.21.0"  # MCP SDK protocol version
+        assert info.serverInfo.name == "ReVa"
+        # The version tracks the MCP SDK release; require a sane semver-ish
+        # shape rather than pinning a specific release.
+        assert re.match(r"\d+\.\d+", info.serverInfo.version), (
+            f"Unexpected server version format: {info.serverInfo.version!r}"
+        )
 
     async def test_server_capabilities(self, mcp_stdio_client):
         """Server reports expected capabilities"""
-        result = await mcp_stdio_client.initialize()
+        info = mcp_stdio_client.reva_init_result
 
         # ReVa supports tools, resources, and prompts
-        assert result.capabilities.tools is not None
-        assert result.capabilities.resources is not None
-        assert result.capabilities.prompts is not None
+        assert info.capabilities.tools is not None
+        assert info.capabilities.resources is not None
+        assert info.capabilities.prompts is not None
 
 
 class TestMCPToolCalls:
@@ -71,26 +75,33 @@ class TestMCPToolCalls:
         # Note: Tool names may vary, just ensure we have a substantial list
         assert len([name for name in tool_names if "function" in name.lower()]) > 0
 
-    async def test_call_list_programs_tool(self, mcp_stdio_client, test_binary, ghidra_initialized):
-        """Can call list-project-files tool"""
-        # The test_binary fixture creates a binary in isolated_workspace
-        # The ProjectManager should have auto-imported it
-
+    async def test_call_list_programs_tool(self, mcp_stdio_client):
+        """list-project-files returns a well-formed listing payload"""
         result = await mcp_stdio_client.call_tool(
             "list-project-files",
             arguments={"folderPath": "/"}
         )
 
-        # Should get a response (even if no files in project yet)
         assert result is not None
-        assert hasattr(result, 'content')
+        assert not result.isError, (
+            f"list-project-files failed: "
+            f"{result.content[0].text if result.content else 'no content'}"
+        )
+        data = json.loads(result.content[0].text)
+        assert "itemCount" in data and "items" in data, f"unexpected payload: {data}"
+        assert isinstance(data["items"], list)
 
     async def test_list_resources(self, mcp_stdio_client):
         """Can list MCP resources"""
         result = await mcp_stdio_client.list_resources()
 
-        # ReVa provides program list resource
+        # ReVa registers the program-list resource (ProgramListResource).
+        # Resource uri may be an AnyUrl object, so compare as strings.
         assert result.resources is not None
+        resource_uris = [str(r.uri) for r in result.resources]
+        assert "ghidra://programs" in resource_uris, (
+            f"program-list resource missing; got {resource_uris}"
+        )
 
     async def test_sequential_tool_calls(self, mcp_stdio_client):
         """Can make multiple sequential tool calls"""

@@ -69,20 +69,16 @@ public class CommentToolProvider extends AbstractToolProvider {
      * Register a tool to set or update a comment at an address
      */
     private void registerSetCommentTool() {
-        Map<String, Object> properties = new HashMap<>();
-        properties.put("programPath", SchemaUtil.stringProperty("Path to the program in the Ghidra Project"));
-        properties.put("addressOrSymbol", SchemaUtil.stringProperty("Address or symbol name where to set the comment"));
-        properties.put("commentType", SchemaUtil.stringPropertyWithDefault(
-            "Type of comment: 'pre', 'eol', 'post', 'plate', or 'repeatable'", "eol"));
-        properties.put("comment", SchemaUtil.stringProperty("The comment text to set"));
-
-        List<String> required = List.of("programPath", "addressOrSymbol", "comment");
-
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("set-comment")
             .title("Set Comment")
             .description("Set or update a comment at a specific address. Use this to keep notes or annotations for yourself and the human.")
-            .inputSchema(createSchema(properties, required))
+            .inputSchema(SchemaUtil.builder()
+                .programPath()
+                .requiredStringProperty("addressOrSymbol", "Address or symbol name where to set the comment")
+                .stringProperty("commentType", "Type of comment: 'pre', 'eol', 'post', 'plate', or 'repeatable'", "eol")
+                .requiredStringProperty("comment", "The comment text to set")
+                .build())
             .build();
 
         registerTool(tool, (exchange, request) -> {
@@ -233,19 +229,15 @@ public class CommentToolProvider extends AbstractToolProvider {
      * Register a tool to remove a comment at an address
      */
     private void registerRemoveCommentTool() {
-        Map<String, Object> properties = new HashMap<>();
-        properties.put("programPath", SchemaUtil.stringProperty("Path to the program in the Ghidra Project"));
-        properties.put("addressOrSymbol", SchemaUtil.stringProperty("Address or symbol name where to remove the comment"));
-        properties.put("commentType", SchemaUtil.stringProperty(
-            "Type of comment to remove: 'pre', 'eol', 'post', 'plate', or 'repeatable'"));
-
-        List<String> required = List.of("programPath", "addressOrSymbol", "commentType");
-
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("remove-comment")
             .title("Remove Comment")
             .description("Remove a specific comment at an address")
-            .inputSchema(createSchema(properties, required))
+            .inputSchema(SchemaUtil.builder()
+                .programPath()
+                .requiredStringProperty("addressOrSymbol", "Address or symbol name where to remove the comment")
+                .requiredStringProperty("commentType", "Type of comment to remove: 'pre', 'eol', 'post', 'plate', or 'repeatable'")
+                .build())
             .build();
 
         registerTool(tool, (exchange, request) -> {

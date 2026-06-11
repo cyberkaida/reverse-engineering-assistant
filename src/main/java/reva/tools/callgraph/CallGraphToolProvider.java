@@ -18,6 +18,7 @@ import io.modelcontextprotocol.server.McpSyncServer;
 import io.modelcontextprotocol.spec.McpSchema;
 import reva.tools.AbstractToolProvider;
 import reva.util.AddressUtil;
+import reva.util.SchemaUtil;
 
 /**
  * Tool provider for call graph analysis operations.
@@ -52,21 +53,6 @@ public class CallGraphToolProvider extends AbstractToolProvider {
     // ========================================================================
 
     private void registerGetCallGraphTool() {
-        Map<String, Object> properties = new HashMap<>();
-        properties.put("programPath", Map.of(
-            "type", "string",
-            "description", "Path in the Ghidra Project to the program"
-        ));
-        properties.put("functionAddress", Map.of(
-            "type", "string",
-            "description", "Address or name of the function to analyze"
-        ));
-        properties.put("depth", Map.of(
-            "type", "integer",
-            "description", "How many levels of callers/callees to include (default: 1, max: 10)",
-            "default", 1
-        ));
-
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("get-call-graph")
             .title("Get Call Graph")
@@ -74,7 +60,13 @@ public class CallGraphToolProvider extends AbstractToolProvider {
                 "(functions that call this one) and callees (functions this one calls) " +
                 "up to the specified depth. Useful for understanding a function's context " +
                 "in the overall program flow.")
-            .inputSchema(createSchema(properties, List.of("programPath", "functionAddress")))
+            .inputSchema(SchemaUtil.builder()
+                .programPath()
+                .requiredStringProperty("functionAddress",
+                    "Address or name of the function to analyze")
+                .integerProperty("depth",
+                    "How many levels of callers/callees to include (default: 1, max: 10)", 1)
+                .build())
             .build();
 
         registerTool(tool, (exchange, request) -> {
@@ -98,6 +90,8 @@ public class CallGraphToolProvider extends AbstractToolProvider {
     }
 
     private void registerGetCallTreeTool() {
+        // Left hand-built: 'direction' carries an enum constraint that SchemaBuilder
+        // does not express, so migrating would risk dropping the constraint.
         Map<String, Object> properties = new HashMap<>();
         properties.put("programPath", Map.of(
             "type", "string",

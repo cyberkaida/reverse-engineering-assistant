@@ -39,6 +39,7 @@ import io.modelcontextprotocol.server.McpSyncServer;
 import io.modelcontextprotocol.spec.McpSchema;
 import reva.tools.AbstractToolProvider;
 import reva.util.AddressUtil;
+import reva.util.SchemaUtil;
 import reva.util.SimilarityComparator;
 
 
@@ -83,21 +84,14 @@ public class StringToolProvider extends AbstractToolProvider {
      * Register a tool to get the count of strings in a program
      */
     private void registerStringsCountTool() {
-        // Define schema for the tool
-        Map<String, Object> properties = new HashMap<>();
-        properties.put("programPath", Map.of(
-            "type", "string",
-            "description", "Path in the Ghidra Project to the program to get string count from"
-        ));
-
-        List<String> required = List.of("programPath");
-
         // Create the tool
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("get-strings-count")
             .title("Get Strings Count")
             .description("Get the total count of strings in the program (use this before calling get-strings to plan pagination)")
-            .inputSchema(createSchema(properties, required))
+            .inputSchema(SchemaUtil.builder()
+                .programPath()
+                .build())
             .build();
 
         // Register the tool with a handler
@@ -132,44 +126,18 @@ public class StringToolProvider extends AbstractToolProvider {
      * - Both provided: error (mutually exclusive)
      */
     private void registerStringsTool() {
-        // Define schema for the tool
-        Map<String, Object> properties = new HashMap<>();
-        properties.put("programPath", Map.of(
-            "type", "string",
-            "description", "Path in the Ghidra Project to the program to get strings from"
-        ));
-        properties.put("searchString", Map.of(
-            "type", "string",
-            "description", "Optional: sort results by similarity to this string (scored by longest common substring). Mutually exclusive with regexPattern."
-        ));
-        properties.put("regexPattern", Map.of(
-            "type", "string",
-            "description", "Optional: filter results to strings matching this regex pattern. Mutually exclusive with searchString."
-        ));
-        properties.put("startIndex", Map.of(
-            "type", "integer",
-            "description", "Starting index for pagination (0-based)",
-            "default", 0
-        ));
-        properties.put("maxCount", Map.of(
-            "type", "integer",
-            "description", "Maximum number of strings to return (recommended to use get-strings-count first and request chunks of 100 at most)",
-            "default", 100
-        ));
-        properties.put("includeReferencingFunctions", Map.of(
-            "type", "boolean",
-            "description", "Include list of functions that reference each string (max 100 per string).",
-            "default", false
-        ));
-
-        List<String> required = List.of("programPath");
-
         // Create the tool
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("get-strings")
             .title("Get Strings")
             .description("Get strings from the selected program with pagination. Optionally filter by regex (regexPattern) or sort by similarity (searchString). Use get-strings-count first to determine total count.")
-            .inputSchema(createSchema(properties, required))
+            .inputSchema(SchemaUtil.builder()
+                .programPath()
+                .stringProperty("searchString", "Optional: sort results by similarity to this string (scored by longest common substring). Mutually exclusive with regexPattern.")
+                .stringProperty("regexPattern", "Optional: filter results to strings matching this regex pattern. Mutually exclusive with searchString.")
+                .pagination(100)
+                .booleanProperty("includeReferencingFunctions", "Include list of functions that reference each string (max 100 per string).", false)
+                .build())
             .build();
 
         // Register the tool with a handler

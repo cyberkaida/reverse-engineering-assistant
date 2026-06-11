@@ -13,6 +13,8 @@ Verifies:
 - timeoutSeconds bounds runaway scripts
 - write-script → run-script by scriptName round-trip
 - read-script returns cat -n style numbered output
+- list-scripts surfaces a freshly written script with its directory metadata
+- edit-script replaces text in place and the edited script still executes
 """
 
 import json
@@ -278,6 +280,136 @@ class TestRunScriptE2E:
         assert data["contents"] == "1\talpha\n2\tbeta\n3\tgamma\n"
         assert data["totalLines"] == 3
         assert data["truncated"] is False
+
+
+class TestScriptFileManagementE2E:
+    """list-scripts and edit-script against the live script directories."""
+
+    async def test_list_scripts_includes_written_script(
+        self, mcp_stdio_client, isolated_workspace
+    ):
+        """A script written via write-script must appear in list-scripts.
+
+        Filters by the unique name so the assertion is immune to whatever
+        else lives in the user/system script directories.
+        """
+        script_name = f"reva_e2e_{uuid.uuid4().hex[:8]}.py"
+
+        write = await mcp_stdio_client.call_tool(
+            "write-script",
+            arguments={"scriptName": script_name, "code": "print('listed')\n"},
+        )
+        write_data = _parse(write)
+        assert write_data["success"] is True, f"write failed: {write_data}"
+
+        listing = await mcp_stdio_client.call_tool(
+            "list-scripts",
+            arguments={"nameFilter": script_name},
+        )
+        data = _parse(listing)
+        assert data["total"] >= 1, (
+            f"list-scripts must find the freshly written script; got {data!r}"
+        )
+        entries = [s for s in data["scripts"] if s.get("name") == script_name]
+        assert entries, (
+            f"Expected exactly our script under nameFilter={script_name!r}; "
+            f"got {data['scripts']!r}"
+        )
+        entry = entries[0]
+        assert entry["absolutePath"] == write_data["absolutePath"], (
+            f"list-scripts path must match where write-script wrote: "
+            f"entry={entry!r} write={write_data!r}"
+        )
+        assert entry["writeable"] is True, (
+            f"Script in the default write directory must be writeable: {entry!r}"
+        )
+        assert entry["directory"], f"Entry must carry its directory: {entry!r}"
+
+    async def test_edit_script_replaces_text_and_script_still_runs(
+        self, mcp_stdio_client, isolated_workspace
+    ):
+        """write -> edit -> read-back -> run: the edit lands and executes."""
+        program_path = await _import_test_program(mcp_stdio_client)
+        script_name = f"reva_e2e_{uuid.uuid4().hex[:8]}.py"
+        token = uuid.uuid4().hex[:8]
+        original_marker = f"MARKER_ORIGINAL_{token}"
+        edited_marker = f"MARKER_EDITED_{token}"
+
+        write = await mcp_stdio_client.call_tool(
+            "write-script",
+            arguments={
+                "scriptName": script_name,
+                "code": (
+                    "# @runtime PyGhidra\n"
+                    f"print('{original_marker}')\n"
+                ),
+            },
+        )
+        assert _parse(write)["success"] is True
+
+        edit = await mcp_stdio_client.call_tool(
+            "edit-script",
+            arguments={
+                "scriptName": script_name,
+                "old_string": original_marker,
+                "new_string": edited_marker,
+            },
+        )
+        edit_data = _parse(edit)
+        assert edit_data["success"] is True, f"edit failed: {edit_data}"
+        assert edit_data["replacements"] == 1, (
+            f"Exactly one occurrence should have been replaced: {edit_data!r}"
+        )
+
+        read = await mcp_stdio_client.call_tool(
+            "read-script",
+            arguments={"scriptName": script_name},
+        )
+        read_data = _parse(read)
+        assert edited_marker in read_data["contents"], (
+            f"Edited marker missing from read-back: {read_data['contents']!r}"
+        )
+        assert original_marker not in read_data["contents"], (
+            f"Original marker should be gone after edit: {read_data['contents']!r}"
+        )
+
+        run = await mcp_stdio_client.call_tool(
+            "run-script",
+            arguments={
+                "programPath": program_path,
+                "scriptName": script_name,
+                "timeoutSeconds": 30,
+            },
+        )
+        run_data = _parse(run)
+        assert run_data["success"] is True, f"edited script failed to run: {run_data}"
+        assert edited_marker in run_data["stdout"], (
+            f"Edited script must print the new marker; stdout={run_data['stdout']!r}"
+        )
+
+    async def test_edit_script_errors_when_old_string_missing(
+        self, mcp_stdio_client, isolated_workspace
+    ):
+        """edit-script must error (not silently no-op) when old_string is absent."""
+        script_name = f"reva_e2e_{uuid.uuid4().hex[:8]}.py"
+        write = await mcp_stdio_client.call_tool(
+            "write-script",
+            arguments={"scriptName": script_name, "code": "print('stable')\n"},
+        )
+        assert _parse(write)["success"] is True
+
+        edit = await mcp_stdio_client.call_tool(
+            "edit-script",
+            arguments={
+                "scriptName": script_name,
+                "old_string": "text_that_is_not_in_the_script",
+                "new_string": "anything",
+            },
+        )
+        assert getattr(edit, "isError", False), (
+            f"edit-script with a missing old_string must be an error; got: "
+            f"{edit.content[0].text if getattr(edit, 'content', None) else 'no content'}"
+        )
 
 
 # Reusable Python snippet that finds a function by C-source name. Mach-O

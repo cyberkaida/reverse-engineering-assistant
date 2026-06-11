@@ -23,6 +23,7 @@ import io.modelcontextprotocol.server.McpSyncServer;
 import io.modelcontextprotocol.spec.McpSchema;
 import reva.tools.AbstractToolProvider;
 import reva.util.AddressUtil;
+import reva.util.SchemaUtil;
 
 /**
  * Tool provider for searching and analyzing constant values in a program.
@@ -57,29 +58,20 @@ public class ConstantSearchToolProvider extends AbstractToolProvider {
     // ========================================================================
 
     private void registerFindConstantUsesTool() {
-        Map<String, Object> properties = new HashMap<>();
-        properties.put("programPath", Map.of(
-            "type", "string",
-            "description", "Path in the Ghidra Project to the program"
-        ));
-        properties.put("value", Map.of(
-            "type", "string",
-            "description", "The constant value to search for. Supports decimal (123), hex (0x7b), " +
-                "negative (-1), or named constants. For hex, use 0x prefix."
-        ));
-        properties.put("maxResults", Map.of(
-            "type", "integer",
-            "description", "Maximum number of results to return (default: 500)",
-            "default", DEFAULT_MAX_RESULTS
-        ));
-
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("find-constant-uses")
             .title("Find Constant Uses")
             .description("Find all locations where a specific constant value is used as an " +
                 "immediate operand in instructions. Useful for finding magic numbers, " +
                 "error codes, buffer sizes, or other significant values.")
-            .inputSchema(createSchema(properties, List.of("programPath", "value")))
+            .inputSchema(SchemaUtil.builder()
+                .programPath()
+                .requiredStringProperty("value",
+                    "The constant value to search for. Supports decimal (123), hex (0x7b), " +
+                        "negative (-1), or named constants. For hex, use 0x prefix.")
+                .integerProperty("maxResults",
+                    "Maximum number of results to return (default: 500)", DEFAULT_MAX_RESULTS)
+                .build())
             .build();
 
         registerTool(tool, (exchange, request) -> {
@@ -100,32 +92,21 @@ public class ConstantSearchToolProvider extends AbstractToolProvider {
     }
 
     private void registerFindConstantsInRangeTool() {
-        Map<String, Object> properties = new HashMap<>();
-        properties.put("programPath", Map.of(
-            "type", "string",
-            "description", "Path in the Ghidra Project to the program"
-        ));
-        properties.put("minValue", Map.of(
-            "type", "string",
-            "description", "Minimum value (inclusive). Supports decimal or hex (0x) format."
-        ));
-        properties.put("maxValue", Map.of(
-            "type", "string",
-            "description", "Maximum value (inclusive). Supports decimal or hex (0x) format."
-        ));
-        properties.put("maxResults", Map.of(
-            "type", "integer",
-            "description", "Maximum number of results to return (default: 500)",
-            "default", DEFAULT_MAX_RESULTS
-        ));
-
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("find-constants-in-range")
             .title("Find Constants in Range")
             .description("Find all constant values within a specified range. Useful for finding " +
                 "error codes (e.g., 400-599 for HTTP errors), enum values, or constants " +
                 "that fall within expected bounds.")
-            .inputSchema(createSchema(properties, List.of("programPath", "minValue", "maxValue")))
+            .inputSchema(SchemaUtil.builder()
+                .programPath()
+                .requiredStringProperty("minValue",
+                    "Minimum value (inclusive). Supports decimal or hex (0x) format.")
+                .requiredStringProperty("maxValue",
+                    "Maximum value (inclusive). Supports decimal or hex (0x) format.")
+                .integerProperty("maxResults",
+                    "Maximum number of results to return (default: 500)", DEFAULT_MAX_RESULTS)
+                .build())
             .build();
 
         registerTool(tool, (exchange, request) -> {
@@ -151,33 +132,21 @@ public class ConstantSearchToolProvider extends AbstractToolProvider {
     }
 
     private void registerListCommonConstantsTool() {
-        Map<String, Object> properties = new HashMap<>();
-        properties.put("programPath", Map.of(
-            "type", "string",
-            "description", "Path in the Ghidra Project to the program"
-        ));
-        properties.put("topN", Map.of(
-            "type", "integer",
-            "description", "Number of most common constants to return (default: 50)",
-            "default", DEFAULT_TOP_CONSTANTS
-        ));
-        properties.put("minValue", Map.of(
-            "type", "string",
-            "description", "Optional minimum value to consider (filters out small constants)"
-        ));
-        properties.put("includeSmallValues", Map.of(
-            "type", "boolean",
-            "description", "Include small values (0-255) which are often noise (default: false)",
-            "default", false
-        ));
-
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("list-common-constants")
             .title("List Common Constants")
             .description("Find the most frequently used constant values in the program. " +
                 "Helps identify important magic numbers, sizes, flags, or other significant values. " +
                 "By default filters out small values (0-255) which are often noise.")
-            .inputSchema(createSchema(properties, List.of("programPath")))
+            .inputSchema(SchemaUtil.builder()
+                .programPath()
+                .integerProperty("topN",
+                    "Number of most common constants to return (default: 50)", DEFAULT_TOP_CONSTANTS)
+                .stringProperty("minValue",
+                    "Optional minimum value to consider (filters out small constants)")
+                .booleanProperty("includeSmallValues",
+                    "Include small values (0-255) which are often noise (default: false)", false)
+                .build())
             .build();
 
         registerTool(tool, (exchange, request) -> {

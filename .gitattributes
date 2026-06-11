@@ -5,3 +5,4 @@ tests/fixtures/test_x86_64 filter=lfs diff=lfs merge=lfs -text
 tests/fixtures/test_cpp_arm64 filter=lfs diff=lfs merge=lfs -text
 tests/fixtures/test_cpp_x86_64 filter=lfs diff=lfs merge=lfs -text
 tests/fixtures/*.zip filter=lfs diff=lfs merge=lfs -text
+tests/fixtures/test_dataflow_x86_64 filter=lfs diff=lfs merge=lfs -text

@@ -105,22 +105,47 @@ public class DataTypeParserUtil {
      */
     public static DataType parseDataTypeObjectFromString(String dataTypeString, String archiveName)
             throws Exception {
+        return parseDataTypeObjectFromString(dataTypeString, archiveName, "");
+    }
+
+    /**
+     * Parse a data type from its string representation and return the actual DataType object,
+     * prioritizing the given program's data type manager. Derived types (pointers, arrays)
+     * take their layout from the data organization of the manager that parses them: a
+     * pointer parsed against a generic archive gets that archive's default pointer size,
+     * not the program's. Pass the programPath whenever the type will be applied to a
+     * program so sizes follow the program's data organization.
+     *
+     * @param dataTypeString String representation of the data type (e.g., "char**", "int[10]")
+     * @param archiveName Optional name of specific archive to search in, or empty string to search all
+     * @param programPath Path of the program whose data type manager should be searched first
+     * @return The DataType object or null if not found
+     * @throws Exception if there's an error parsing the data type
+     */
+    public static DataType parseDataTypeObjectFromString(String dataTypeString, String archiveName,
+            String programPath) throws Exception {
         if (dataTypeString == null || dataTypeString.isEmpty()) {
             throw new IllegalArgumentException("No data type string provided");
         }
 
-        // Get data type managers to search in - for this method we use empty programPath since it's the legacy method
-        List<DataTypeManager> managersToSearch = getDataTypeManagersToSearch(archiveName, "");
+        List<DataTypeManager> managersToSearch = getDataTypeManagersToSearch(archiveName, programPath);
         if (managersToSearch.isEmpty()) {
             throw new IllegalStateException("No data type managers available");
         }
 
+        DataTypeManager destinationDtm = getDestinationManager(programPath);
+
         // Search for the data type
         for (DataTypeManager dtm : managersToSearch) {
             try {
-                // Use Ghidra's DataTypeParser to parse the string
+                // Use Ghidra's DataTypeParser to parse the string. Derived types
+                // (pointers, arrays) take their layout from the DESTINATION
+                // manager's data organization, so parse into the program's DTM
+                // when one is given — otherwise "int *" gets the source
+                // archive's default pointer size instead of the program's.
                 ghidra.util.data.DataTypeParser parser = new ghidra.util.data.DataTypeParser(
-                    dtm, dtm, null, ghidra.util.data.DataTypeParser.AllowedDataTypes.ALL);
+                    dtm, destinationDtm != null ? destinationDtm : dtm, null,
+                    ghidra.util.data.DataTypeParser.AllowedDataTypes.ALL);
 
                 DataType dt = parser.parse(dataTypeString);
                 if (dt != null) {
@@ -132,6 +157,18 @@ public class DataTypeParserUtil {
         }
 
         return null;
+    }
+
+    /**
+     * Resolve the data type manager of the program at programPath, or null when no
+     * program is given or it cannot be found.
+     */
+    private static DataTypeManager getDestinationManager(String programPath) {
+        if (programPath == null || programPath.isEmpty()) {
+            return null;
+        }
+        Program targetProgram = RevaProgramManager.getProgramByPath(programPath);
+        return targetProgram != null ? targetProgram.getDataTypeManager() : null;
     }
 
 
@@ -155,15 +192,20 @@ public class DataTypeParserUtil {
             throw new IllegalStateException("No data type managers available");
         }
 
+        DataTypeManager destinationDtm = getDestinationManager(programPath);
+
         // Search for the data type
         DataType foundDataType = null;
         DataTypeManager foundManager = null;
 
         for (DataTypeManager dtm : managersToSearch) {
             try {
-                // Use Ghidra's DataTypeParser to parse the string
+                // Parse into the program's DTM when one is given so derived
+                // types (pointers, arrays) report the program's layout, not
+                // the source archive's default data organization.
                 ghidra.util.data.DataTypeParser parser = new ghidra.util.data.DataTypeParser(
-                    dtm, dtm, null, ghidra.util.data.DataTypeParser.AllowedDataTypes.ALL);
+                    dtm, destinationDtm != null ? destinationDtm : dtm, null,
+                    ghidra.util.data.DataTypeParser.AllowedDataTypes.ALL);
 
                 DataType dt = parser.parse(dataTypeString);
                 if (dt != null) {

@@ -150,7 +150,8 @@ public class DataToolProvider extends AbstractToolProvider {
                 // Try to parse the data type from the string and get the actual DataType object
                 DataType dataType;
                 try {
-                    dataType = DataTypeParserUtil.parseDataTypeObjectFromString(dataTypeString, archiveName);
+                    dataType = DataTypeParserUtil.parseDataTypeObjectFromString(dataTypeString,
+                        archiveName, program.getDomainFile().getPathname());
                     if (dataType == null) {
                         return createErrorResult("Could not find data type: " + dataTypeString +
                             ". Try using the get-data-type-archives and get-data-types tools to find available data types.");

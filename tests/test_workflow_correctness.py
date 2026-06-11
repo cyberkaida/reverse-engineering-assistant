@@ -19,7 +19,7 @@ import pytest
 pytestmark = [
     pytest.mark.e2e,
     pytest.mark.slow,
-    pytest.mark.asyncio,
+    pytest.mark.asyncio(loop_scope="session"),
     pytest.mark.timeout(240),
 ]
 

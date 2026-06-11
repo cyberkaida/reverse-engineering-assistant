@@ -6,17 +6,20 @@ Fixtures:
 - test_program: Create a test program with memory and strings (reused across tests)
 - server: Start and stop a ReVa headless server for each test
 - mcp_client: Helper object for making MCP requests
+- mcp_stdio_client: SESSION-SHARED mcp-reva stdio server (one JVM per session/worker)
+- mcp_stdio_client_isolated: fresh mcp-reva subprocess per test (old behavior)
 - capture_ghidra_logs: Auto-use fixture that prints Ghidra logs on test failure
 
 Fixture Scopes:
-- session: Created once, shared across all tests (ghidra_initialized, test_program)
-- function: Created for each test function (server, mcp_client, capture_ghidra_logs)
+- session: Created once, shared across all tests (ghidra_initialized, test_program, mcp_stdio_client)
+- function: Created for each test function (server, mcp_client, mcp_stdio_client_isolated, capture_ghidra_logs)
 """
 
 import pytest
 import pytest_asyncio
 import sys
 import os
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 
@@ -358,47 +361,28 @@ def cli_process(isolated_workspace):
         proc.wait()
 
 
-@pytest_asyncio.fixture(loop_scope="function")
-async def mcp_stdio_client(isolated_workspace):
-    """
-    Create an MCP client that connects to mcp-reva via stdio.
+@asynccontextmanager
+async def _stdio_mcp_session(workspace, init_timeout: float = 120.0):
+    """Spawn `uv run mcp-reva` in `workspace` and yield an initialized ClientSession.
 
-    Uses the official MCP Python SDK stdio_client to spawn mcp-reva
-    as a subprocess and communicate via stdin/stdout.
-
-    Scope: function (new client for each test)
-
-    Yields:
-        ClientSession: MCP client session connected to mcp-reva
-
-    Example:
-        @pytest.mark.asyncio
-        async def test_initialize(mcp_stdio_client):
-            result = await mcp_stdio_client.initialize()
-            assert result.serverInfo.name == "ReVa"
-
-    Note:
-        Suppresses RuntimeError from anyio cancel scope during teardown.
-        This is a known pytest-asyncio/anyio compatibility issue that
-        doesn't affect functionality.
+    Shared implementation behind mcp_stdio_client (session-scoped) and
+    mcp_stdio_client_isolated (function-scoped). Suppresses the known
+    pytest-asyncio/anyio "cancel scope" RuntimeError during teardown.
     """
     from mcp.client.stdio import stdio_client, StdioServerParameters
     from mcp import ClientSession
-    from pathlib import Path
     import asyncio
 
-    # Configure mcp-reva as stdio server
     server_params = StdioServerParameters(
         command="uv",
         args=["run", "mcp-reva"],
-        cwd=str(isolated_workspace),
+        cwd=str(workspace),
         env=os.environ.copy()
     )
 
-    print(f"\n[Fixture] Starting mcp-reva via stdio_client in {isolated_workspace}...")
+    print(f"\n[Fixture] Starting mcp-reva via stdio_client in {workspace}...")
 
     try:
-        # Connect to mcp-reva via stdio
         async with stdio_client(server_params) as (read_stream, write_stream):
             session = ClientSession(read_stream, write_stream)
 
@@ -411,19 +395,17 @@ async def mcp_stdio_client(isolated_workspace):
                 # No artificial delay before initialize. mcp-reva does its blocking
                 # PyGhidra/project/server startup before the stdio bridge starts
                 # reading stdin, so any initialize request we send queues in the
-                # OS pipe buffer until the bridge is ready. The 60-second
-                # asyncio.wait_for covers that whole startup, which can be
-                # 10-30 seconds on CI. The previous 2s sleep was both unnecessary
-                # on fast hosts and insufficient as a safety net on slow ones.
+                # OS pipe buffer until the bridge is ready. The wait_for covers
+                # that whole startup, which can be 10-40 seconds on CI runners.
                 try:
                     init_result = await asyncio.wait_for(
                         session.initialize(),
-                        timeout=60.0
+                        timeout=init_timeout
                     )
                     print(f"[Fixture] MCP session initialized: {init_result.serverInfo.name} v{init_result.serverInfo.version}")
                 except asyncio.TimeoutError:
                     raise TimeoutError(
-                        "MCP session initialization timed out after 60 seconds. "
+                        f"MCP session initialization timed out after {init_timeout} seconds. "
                         "Check stderr logs for errors."
                     )
 
@@ -446,3 +428,52 @@ async def mcp_stdio_client(isolated_workspace):
         if "cancel scope" not in str(e):
             raise
         print(f"[Fixture] Suppressed expected cancel scope error during stdio_client cleanup")
+
+
+@pytest_asyncio.fixture(scope="session", loop_scope="session")
+async def mcp_stdio_client(tmp_path_factory):
+    """
+    Session-shared MCP client connected to ONE mcp-reva subprocess.
+
+    Booting mcp-reva costs a full JVM + PyGhidra + Ghidra startup (~10s on
+    Linux CI, ~40s on macOS CI). Spawning it per test made the macOS e2e job
+    exceed its 60-minute step timeout, so one server is shared by the whole
+    session (per xdist worker). This is safe because every e2e test imports
+    its own program: Ghidra's Loaded.save() appends a counter to duplicate
+    names, so repeated imports of the same fixture binary yield distinct
+    programPaths and tests only ever touch the path their own import returned.
+
+    Use mcp_stdio_client_isolated instead when a test asserts on server
+    STARTUP behavior or on project-wide state (file counts, workspace dirs).
+
+    NOTE: modules using this fixture must mark tests with
+    pytest.mark.asyncio(loop_scope="session") so the test runs in the same
+    event loop the session's MCP streams are bound to.
+
+    Yields:
+        ClientSession: initialized MCP client session connected to mcp-reva
+    """
+    workspace = tmp_path_factory.mktemp("reva_shared_server")
+    async with _stdio_mcp_session(workspace) as session:
+        yield session
+
+
+@pytest_asyncio.fixture(loop_scope="session")
+async def mcp_stdio_client_isolated(isolated_workspace):
+    """
+    Function-scoped MCP client: a FRESH mcp-reva subprocess for one test.
+
+    This is the old (pre-shared-server) behavior. It costs a full JVM boot
+    per test, so reserve it for tests that genuinely need a pristine server
+    or project: server-startup assertions (e.g. lazy init must not create
+    .reva/ in cwd) and project-global assertions (e.g. list-project-files
+    item counts on a known-empty project).
+
+    Runs in the session event loop (loop_scope="session") so it can be used
+    inside modules marked pytest.mark.asyncio(loop_scope="session").
+
+    Yields:
+        ClientSession: initialized MCP client session connected to mcp-reva
+    """
+    async with _stdio_mcp_session(isolated_workspace) as session:
+        yield session

@@ -126,8 +126,15 @@ class TestE2EWorkflow:
         )
 
         assert decomp_result is not None
+        assert not getattr(decomp_result, "isError", False), (
+            f"get-decompilation failed: "
+            f"{decomp_result.content[0].text if decomp_result.content else 'no content'}"
+        )
         decomp_data = json.loads(decomp_result.content[0].text)
         print(f"Initial decompilation response: {json.dumps(decomp_data, indent=2)[:200]}...")
+        assert decomp_data.get("decompilation"), (
+            f"Expected non-empty decompilation for 'entry': {decomp_data}"
+        )
 
         # The program should now be checked out automatically
         # We can't directly verify checkout status via MCP, but the next step
@@ -327,7 +334,7 @@ class TestE2EWorkflow:
         program_path = import_data["importedPrograms"][0]
 
         # Open the program by getting decompilation (this caches it)
-        await mcp_stdio_client.call_tool(
+        decomp_result = await mcp_stdio_client.call_tool(
             "get-decompilation",
             arguments={
                 "programPath": program_path,
@@ -335,10 +342,20 @@ class TestE2EWorkflow:
                 "limit": 5
             }
         )
+        assert not getattr(decomp_result, "isError", False), (
+            f"get-decompilation failed: "
+            f"{decomp_result.content[0].text if decomp_result.content else 'no content'}"
+        )
+        # get-decompilation has no "success" field; a non-empty decompilation
+        # body is the success signal.
+        decomp_data = json.loads(decomp_result.content[0].text)
+        assert decomp_data.get("decompilation"), (
+            f"Expected non-empty decompilation for 'entry': {decomp_data}"
+        )
         print("✓ Program opened and cached")
 
         print("\n=== Make changes ===")
-        await mcp_stdio_client.call_tool(
+        comment_result = await mcp_stdio_client.call_tool(
             "set-comment",
             arguments={
                 "programPath": program_path,
@@ -346,6 +363,12 @@ class TestE2EWorkflow:
                 "comment": "Cache release test"
             }
         )
+        assert not getattr(comment_result, "isError", False), (
+            f"set-comment failed: "
+            f"{comment_result.content[0].text if comment_result.content else 'no content'}"
+        )
+        comment_data = json.loads(comment_result.content[0].text)
+        assert comment_data.get("success") is True, f"set-comment failed: {comment_data}"
         print("✓ Changes made")
 
         print("\n=== Save (tests cache handling) ===")

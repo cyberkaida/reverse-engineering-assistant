@@ -403,6 +403,9 @@ async def _stdio_mcp_session(workspace, init_timeout: float = 120.0):
                         timeout=init_timeout
                     )
                     print(f"[Fixture] MCP session initialized: {init_result.serverInfo.name} v{init_result.serverInfo.version}")
+                    # Tests assert on server info without re-initializing -- a session
+                    # supports exactly one initialize per MCP spec.
+                    session.reva_init_result = init_result
                 except asyncio.TimeoutError:
                     raise TimeoutError(
                         f"MCP session initialization timed out after {init_timeout} seconds. "

@@ -78,6 +78,17 @@ async def _import_test_program(client, analyze: bool = False) -> str:
 
 
 def _parse(result) -> dict:
+    """Parse a tool result's JSON body, failing loudly on tool-level errors.
+
+    Every call site expects a non-error result (script-level failures are
+    reported inside the JSON as success=False, not as MCP errors), so an
+    isError result here means the tool itself broke — surface its error text
+    instead of a downstream KeyError/JSONDecodeError.
+    """
+    assert not getattr(result, "isError", False), (
+        f"tool returned an error result: "
+        f"{result.content[0].text if getattr(result, 'content', None) else 'no content'}"
+    )
     return json.loads(result.content[0].text)
 
 

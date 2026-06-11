@@ -64,15 +64,6 @@ public class StructureToolProvider extends AbstractToolProvider {
      * Register tool to parse C-style structure definitions (create-or-replace)
      */
     private void registerParseCStructureTool() {
-        Map<String, Object> properties = new HashMap<>();
-        properties.put("programPath", SchemaUtil.createStringProperty("Path of the program"));
-        properties.put("cDefinition", SchemaUtil.createStringProperty("C-style structure definition"));
-        properties.put("category", SchemaUtil.createOptionalStringProperty("Category path (default: /)"));
-
-        List<String> required = new ArrayList<>();
-        required.add("programPath");
-        required.add("cDefinition");
-
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("parse-c-structure")
             .title("Parse C Structure")
@@ -80,7 +71,11 @@ public class StructureToolProvider extends AbstractToolProvider {
                          "If a structure with the same name already exists, it will be replaced " +
                          "with the new definition (fields are completely rebuilt). " +
                          "Use get-structure-info to see the current layout before modifying.")
-            .inputSchema(createSchema(properties, required))
+            .inputSchema(SchemaUtil.builder()
+                .programPath()
+                .requiredStringProperty("cDefinition", "C-style structure definition")
+                .stringProperty("category", "Category path (default: /)")
+                .build())
             .build();
 
         registerTool(tool, (exchange, request) -> {
@@ -193,17 +188,13 @@ public class StructureToolProvider extends AbstractToolProvider {
      * Register tool to validate C-style structure definitions without creating them
      */
     private void registerValidateCStructureTool() {
-        Map<String, Object> properties = new HashMap<>();
-        properties.put("cDefinition", SchemaUtil.createStringProperty("C-style structure definition to validate"));
-
-        List<String> required = new ArrayList<>();
-        required.add("cDefinition");
-
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("validate-c-structure")
             .title("Validate C Structure")
             .description("Validate C-style structure definition without creating it")
-            .inputSchema(createSchema(properties, required))
+            .inputSchema(SchemaUtil.builder()
+                .requiredStringProperty("cDefinition", "C-style structure definition to validate")
+                .build())
             .build();
 
         registerTool(tool, (exchange, request) -> {
@@ -256,19 +247,14 @@ public class StructureToolProvider extends AbstractToolProvider {
      * Register tool to get structure information
      */
     private void registerGetStructureInfoTool() {
-        Map<String, Object> properties = new HashMap<>();
-        properties.put("programPath", SchemaUtil.createStringProperty("Path of the program"));
-        properties.put("structureName", SchemaUtil.createStringProperty("Name of the structure"));
-
-        List<String> required = new ArrayList<>();
-        required.add("programPath");
-        required.add("structureName");
-
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("get-structure-info")
             .title("Get Structure Info")
             .description("Get detailed information about a structure or union, including a C representation of its layout")
-            .inputSchema(createSchema(properties, required))
+            .inputSchema(SchemaUtil.builder()
+                .programPath()
+                .requiredStringProperty("structureName", "Name of the structure")
+                .build())
             .build();
 
         registerTool(tool, (exchange, request) -> {
@@ -300,30 +286,17 @@ public class StructureToolProvider extends AbstractToolProvider {
      * Register tool to list structures
      */
     private void registerListStructuresTool() {
-        Map<String, Object> properties = new HashMap<>();
-        properties.put("programPath", SchemaUtil.createStringProperty("Path of the program"));
-        properties.put("category", SchemaUtil.createOptionalStringProperty("Filter by category path"));
-        properties.put("nameFilter", SchemaUtil.createOptionalStringProperty("Filter by name (substring match)"));
-        properties.put("includeBuiltIn", SchemaUtil.createOptionalBooleanProperty("Include built-in types (default: false)"));
-        properties.put("startIndex", Map.of(
-            "type", "integer",
-            "description", "Starting index for pagination (0-based)",
-            "default", 0
-        ));
-        properties.put("maxCount", Map.of(
-            "type", "integer",
-            "description", "Maximum number of structures to return",
-            "default", 100
-        ));
-
-        List<String> required = new ArrayList<>();
-        required.add("programPath");
-
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("list-structures")
             .title("List Structures")
             .description("List structures and unions in a program with optional filtering and pagination")
-            .inputSchema(createSchema(properties, required))
+            .inputSchema(SchemaUtil.builder()
+                .programPath()
+                .stringProperty("category", "Filter by category path")
+                .stringProperty("nameFilter", "Filter by name (substring match)")
+                .booleanProperty("includeBuiltIn", "Include built-in types (default: false)")
+                .pagination(100)
+                .build())
             .build();
 
         registerTool(tool, (exchange, request) -> {
@@ -396,22 +369,16 @@ public class StructureToolProvider extends AbstractToolProvider {
      * Register tool to apply structure at address
      */
     private void registerApplyStructureTool() {
-        Map<String, Object> properties = new HashMap<>();
-        properties.put("programPath", SchemaUtil.createStringProperty("Path of the program"));
-        properties.put("structureName", SchemaUtil.createStringProperty("Name of the structure"));
-        properties.put("addressOrSymbol", SchemaUtil.createStringProperty("Address or symbol name to apply structure"));
-        properties.put("clearExisting", SchemaUtil.createOptionalBooleanProperty("Clear existing data"));
-
-        List<String> required = new ArrayList<>();
-        required.add("programPath");
-        required.add("structureName");
-        required.add("addressOrSymbol");
-
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("apply-structure")
             .title("Apply Structure")
             .description("Apply a structure at a specific address")
-            .inputSchema(createSchema(properties, required))
+            .inputSchema(SchemaUtil.builder()
+                .programPath()
+                .requiredStringProperty("structureName", "Name of the structure")
+                .requiredStringProperty("addressOrSymbol", "Address or symbol name to apply structure")
+                .booleanProperty("clearExisting", "Clear existing data")
+                .build())
             .build();
 
         registerTool(tool, (exchange, request) -> {
@@ -479,22 +446,17 @@ public class StructureToolProvider extends AbstractToolProvider {
      * Register tool to delete a structure with reference checking
      */
     private void registerDeleteStructureTool() {
-        Map<String, Object> properties = new HashMap<>();
-        properties.put("programPath", SchemaUtil.createStringProperty("Path of the program"));
-        properties.put("structureName", SchemaUtil.createStringProperty("Name of the structure to delete"));
-        properties.put("force", SchemaUtil.createOptionalBooleanProperty("Force deletion even if structure is referenced (default: false)"));
-
-        List<String> required = new ArrayList<>();
-        required.add("programPath");
-        required.add("structureName");
-
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("delete-structure")
             .title("Delete Structure")
             .description("Delete a structure from the program. " +
                          "Checks for references (function signatures, variables, memory) before deletion. " +
                          "Use force=true to delete anyway despite references.")
-            .inputSchema(createSchema(properties, required))
+            .inputSchema(SchemaUtil.builder()
+                .programPath()
+                .requiredStringProperty("structureName", "Name of the structure to delete")
+                .booleanProperty("force", "Force deletion even if structure is referenced (default: false)")
+                .build())
             .build();
 
         registerTool(tool, (exchange, request) -> {
@@ -605,20 +567,15 @@ public class StructureToolProvider extends AbstractToolProvider {
      * Register tool to parse C header files
      */
     private void registerParseCHeaderTool() {
-        Map<String, Object> properties = new HashMap<>();
-        properties.put("programPath", SchemaUtil.createStringProperty("Path of the program"));
-        properties.put("headerContent", SchemaUtil.createStringProperty("C header file content"));
-        properties.put("category", SchemaUtil.createOptionalStringProperty("Category path (default: /)"));
-
-        List<String> required = new ArrayList<>();
-        required.add("programPath");
-        required.add("headerContent");
-
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("parse-c-header")
             .title("Parse C Header")
             .description("Parse an entire C header file and create all structures")
-            .inputSchema(createSchema(properties, required))
+            .inputSchema(SchemaUtil.builder()
+                .programPath()
+                .requiredStringProperty("headerContent", "C header file content")
+                .stringProperty("category", "Category path (default: /)")
+                .build())
             .build();
 
         registerTool(tool, (exchange, request) -> {

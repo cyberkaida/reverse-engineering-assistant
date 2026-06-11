@@ -39,6 +39,7 @@ import reva.tools.AbstractToolProvider;
 import reva.tools.ProgramValidationException;
 import reva.util.AddressUtil;
 import reva.util.DataTypeParserUtil;
+import reva.util.SchemaUtil;
 
 /**
  * Tool provider for accessing data at specific addresses or by symbol names in programs.
@@ -63,25 +64,15 @@ public class DataToolProvider extends AbstractToolProvider {
      * Register a unified tool to get data by address or symbol name
      */
     private void registerGetDataTool() {
-        // Define schema for the tool
-        Map<String, Object> properties = new HashMap<>();
-        properties.put("programPath", Map.of(
-            "type", "string",
-            "description", "Path in the Ghidra Project to the program containing the data"
-        ));
-        properties.put("addressOrSymbol", Map.of(
-            "type", "string",
-            "description", "Address or symbol name to get data from (e.g., '0x00400000' or 'main')"
-        ));
-
-        List<String> required = List.of("programPath", "addressOrSymbol");
-
         // Create the tool
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("get-data")
             .title("Get Data")
             .description("Get data at a specific address or symbol in a program")
-            .inputSchema(createSchema(properties, required))
+            .inputSchema(SchemaUtil.builder()
+                .programPath()
+                .requiredStringProperty("addressOrSymbol", "Address or symbol name to get data from (e.g., '0x00400000' or 'main')")
+                .build())
             .build();
 
         // Register the tool with a handler
@@ -101,34 +92,17 @@ public class DataToolProvider extends AbstractToolProvider {
      * Register a tool to apply a data type to an address or symbol
      */
     private void registerApplyDataTypeTool() {
-        // Define schema for the tool
-        Map<String, Object> properties = new HashMap<>();
-        properties.put("programPath", Map.of(
-            "type", "string",
-            "description", "Path in the Ghidra Project to the program"
-        ));
-        properties.put("addressOrSymbol", Map.of(
-            "type", "string",
-            "description", "Address or symbol name to apply the data type to (e.g., '0x00400000' or 'main')"
-        ));
-        properties.put("dataTypeString", Map.of(
-            "type", "string",
-            "description", "String representation of the data type (e.g., 'char**', 'int[10]')"
-        ));
-        properties.put("archiveName", Map.of(
-            "type", "string",
-            "description", "Optional name of the data type archive to search in. If not provided, all archives will be searched.",
-            "default", ""
-        ));
-
-        List<String> required = List.of("programPath", "addressOrSymbol", "dataTypeString");
-
         // Create the tool
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("apply-data-type")
             .title("Apply Data Type")
             .description("Apply a data type to a specific address or symbol in a program")
-            .inputSchema(createSchema(properties, required))
+            .inputSchema(SchemaUtil.builder()
+                .programPath()
+                .requiredStringProperty("addressOrSymbol", "Address or symbol name to apply the data type to (e.g., '0x00400000' or 'main')")
+                .requiredStringProperty("dataTypeString", "String representation of the data type (e.g., 'char**', 'int[10]')")
+                .stringProperty("archiveName", "Optional name of the data type archive to search in. If not provided, all archives will be searched.", "")
+                .build())
             .build();
 
         // Register the tool with a handler
@@ -210,34 +184,17 @@ public class DataToolProvider extends AbstractToolProvider {
      * Register a tool to create a label at a specific address in a program
      */
     private void registerCreateLabelTool() {
-        // Define schema for the tool
-        Map<String, Object> properties = new HashMap<>();
-        properties.put("programPath", Map.of(
-            "type", "string",
-            "description", "Path in the Ghidra Project to the program containing the address"
-        ));
-        properties.put("addressOrSymbol", Map.of(
-            "type", "string",
-            "description", "Address or symbol name to create label at (e.g., '0x00400000' or 'main')"
-        ));
-        properties.put("labelName", Map.of(
-            "type", "string",
-            "description", "Name for the label to create"
-        ));
-        properties.put("setAsPrimary", Map.of(
-            "type", "boolean",
-            "description", "Whether to set this label as primary if other labels exist at the address",
-            "default", true
-        ));
-
-        List<String> required = List.of("programPath", "addressOrSymbol", "labelName");
-
         // Create the tool
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("create-label")
             .title("Create Label")
             .description("Create a label at a specific address in a program")
-            .inputSchema(createSchema(properties, required))
+            .inputSchema(SchemaUtil.builder()
+                .programPath()
+                .requiredStringProperty("addressOrSymbol", "Address or symbol name to create label at (e.g., '0x00400000' or 'main')")
+                .requiredStringProperty("labelName", "Name for the label to create")
+                .booleanProperty("setAsPrimary", "Whether to set this label as primary if other labels exist at the address", true)
+                .build())
             .build();
 
         // Register the tool with a handler

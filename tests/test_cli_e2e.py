@@ -22,7 +22,7 @@ pytestmark = [
     pytest.mark.cli,
     pytest.mark.e2e,
     pytest.mark.slow,
-    pytest.mark.asyncio,
+    pytest.mark.asyncio(loop_scope="session"),
     pytest.mark.timeout(180)  # 3 minutes for full subprocess + PyGhidra + server startup
 ]
 

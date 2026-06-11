@@ -37,6 +37,43 @@ pytestmark = [
 ]
 
 
+def _extract_initialize_result(response, request_id=1):
+    """Extract the JSON-RPC initialize result from a JSON or SSE response.
+
+    The streamable transport may answer either with a plain JSON-RPC body or
+    with an SSE stream; both carry the same payload, so callers can run
+    identical assertions on the returned result dict.
+    """
+    content_type = response.headers.get("content-type", "")
+
+    if "application/json" in content_type:
+        result = response.json()
+        assert "jsonrpc" in result, f"Not a valid JSON-RPC response: {result}"
+        assert result.get("id") == request_id, f"Wrong response ID: {result}"
+        if "error" in result:
+            pytest.fail(f"Server returned JSON-RPC error: {result['error']}")
+        assert "result" in result, f"Missing result in response: {result}"
+        return result["result"]
+
+    if "text/event-stream" in content_type:
+        events = response.text.strip().split("\n\n")
+        for event in events:
+            if event.startswith("data:"):
+                data = event[5:].strip()
+                if data:
+                    parsed = json.loads(data)
+                    if parsed.get("id") == request_id:
+                        if "error" in parsed:
+                            pytest.fail(
+                                f"Server returned JSON-RPC error: {parsed['error']}"
+                            )
+                        if "result" in parsed:
+                            return parsed["result"]
+        pytest.fail(f"No valid result in SSE response: {response.text}")
+
+    pytest.fail(f"Unexpected content type {content_type!r}: {response.text}")
+
+
 # The exact initialize request from VS Code MCP client (from issue #249 logs)
 VSCODE_INITIALIZE_REQUEST = {
     "jsonrpc": "2.0",
@@ -181,9 +218,6 @@ class TestVSCodeMCPClientCompatibility:
             # These error patterns should NOT appear
             assert "unrecognized field" not in response_text, (
                 f"Server still rejecting unknown fields: {response.text}"
-            )
-            assert "form" not in response_text or response.status_code == 200, (
-                f"Server complaining about 'form' field: {response.text}"
             )
             assert "not marked as ignorable" not in response_text, (
                 f"Jackson serialization error: {response.text}"
@@ -385,22 +419,20 @@ class TestProtocolVersionNegotiation:
                 f"Failed to negotiate version: {response.text}"
             )
 
-            # Parse response to check negotiated version
-            content_type = response.headers.get("content-type", "")
-            if "application/json" in content_type:
-                result = response.json()
-                if "result" in result:
-                    negotiated_version = result["result"].get("protocolVersion")
-                    # Verify the server returned a valid version string
-                    assert negotiated_version is not None, "Server should negotiate a protocol version"
-                    try:
-                        datetime.date.fromisoformat(negotiated_version)
-                    except (ValueError, TypeError):
-                        pytest.fail(f"Protocol version should be a valid date, got: {negotiated_version}")
-                    # Verify it's a known MCP protocol version
-                    known_versions = {"2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25"}
-                    assert negotiated_version in known_versions, (
-                        f"Protocol version {negotiated_version} is not a known MCP version. "
-                        f"Known versions: {sorted(known_versions)}. "
-                        f"Update this set if a new protocol version was intentionally adopted."
-                    )
+            # JSON and SSE responses carry the same payload; validate the
+            # negotiated version regardless of which form the server chose.
+            init_result = _extract_initialize_result(response)
+            negotiated_version = init_result.get("protocolVersion")
+            # Verify the server returned a valid version string
+            assert negotiated_version is not None, "Server should negotiate a protocol version"
+            try:
+                datetime.date.fromisoformat(negotiated_version)
+            except (ValueError, TypeError):
+                pytest.fail(f"Protocol version should be a valid date, got: {negotiated_version}")
+            # Verify it's a known MCP protocol version
+            known_versions = {"2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25"}
+            assert negotiated_version in known_versions, (
+                f"Protocol version {negotiated_version} is not a known MCP version. "
+                f"Known versions: {sorted(known_versions)}. "
+                f"Update this set if a new protocol version was intentionally adopted."
+            )

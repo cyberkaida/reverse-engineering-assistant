@@ -1,136 +1,100 @@
 """
-Test ReVa MCP tool functionality.
+Validate the HTTP streamable transport and tool registration of the
+in-process RevaHeadlessLauncher.
 
-Verifies that:
-- Tools can be called and return results
-- list-project-files works
-- get-strings works
-- get-functions works
-- Other key tools are accessible
+The `server` fixture starts a launcher with NO active Ghidra project, so
+project-dependent tools return MCP error payloads here. These tests pin
+down exactly that contract:
+- tools/list over streamable HTTP exposes the full tool catalog
+- tool errors propagate through the transport as isError=True with
+  human-readable text
+
+Tool behavior against real programs is covered by the e2e suite
+(test_cli_e2e.py, test_e2e_workflow.py).
 """
 
 import pytest
-from tests.helpers import get_response_result
+
+from tests.helpers import list_mcp_tools
 
 # Mark all tests in this file as integration tests (require server)
 pytestmark = pytest.mark.integration
 
 
-class TestProgramTools:
-    """Test program-related MCP tools"""
+# Representative tools spanning several provider packages (project,
+# functions, strings, decompiler, analysis, xrefs).
+EXPECTED_TOOLS = {
+    "list-project-files",
+    "get-functions",
+    "get-strings",
+    "get-decompilation",
+    "analyze-program",
+    "find-cross-references",
+}
 
-    def test_list_project_files(self, mcp_client):
-        """list-project-files tool returns file list (may be empty)"""
+
+def _content_text(response):
+    """Concatenate the text of all content items in a make_mcp_request response."""
+    return "\n".join(
+        getattr(item, "text", "") or "" for item in (response.get("content") or [])
+    )
+
+
+class TestToolRegistration:
+    """Verify the tool catalog exposed over the streamable HTTP transport."""
+
+    def test_expected_tools_are_registered(self, server):
+        """tools/list includes the representative tools and a full catalog"""
+        tools = list_mcp_tools(server.getPort())
+
+        assert tools is not None, "tools/list request failed"
+
+        tool_names = {tool.name for tool in tools}
+        missing = EXPECTED_TOOLS - tool_names
+        assert not missing, (
+            f"Expected tools not registered: {sorted(missing)}. "
+            f"Registered tools: {sorted(tool_names)}"
+        )
+
+        # ReVa registers a large catalog across 19 provider packages.
+        assert len(tools) > 40, f"Expected > 40 tools, got {len(tools)}"
+
+
+class TestHttpTransportErrors:
+    """Verify tool errors surface through the transport as readable payloads.
+
+    The in-process server has no active project, so these are the error
+    paths project-dependent tools are guaranteed to hit.
+    """
+
+    def test_list_project_files_without_project_returns_error(self, mcp_client):
+        """list-project-files reports the missing project, not a transport failure"""
         response = mcp_client.call_tool("list-project-files", {"folderPath": "/"})
 
-        # Should get a response (even if no files in project)
-        assert response is not None
+        assert response is not None, "Server did not respond"
+        assert response["isError"] is True, (
+            f"Expected error payload with no active project, got: {response}"
+        )
+        text = _content_text(response)
+        assert "No active project" in text, (
+            f"Error text should mention the missing project: {text!r}"
+        )
 
-        # If it's an error response, check it's a valid error
-        if response.get("isError", False):
-            # Tool call completed, error is expected if project is empty
-            assert response is not None
-        else:
-            # If success, should have content that's a list
-            result = get_response_result(response)
-            assert "content" in result
-            content = result["content"]
-            assert isinstance(content, list)
-
-    def test_list_project_files_includes_format(self, mcp_client, test_program):
-        """list-project-files result has expected structure when programs are open"""
-        # This test uses test_program fixture to ensure at least one program is available
-        # Note: test_program may not be registered with MCP server's project manager
-        response = mcp_client.call_tool("list-project-files", {"folderPath": "/"})
-
-        # Handle case where no programs are open in the MCP server's project
-        if response.get("isError", False):
-            # Expected - test_program isn't registered with MCP server
-            assert response is not None
-            return
-
-        result = get_response_result(response)
-
-        # Should have content
-        assert "content" in result
-        content = result["content"]
-
-        # Content should be list of objects with type and text
-        # May be empty if program isn't registered with MCP server
-        if len(content) > 0:
-            for item in content:
-                assert "type" in item
-                assert "text" in item
-
-
-class TestStringTools:
-    """Test string analysis tools"""
-
-    def test_list_strings_requires_program(self, mcp_client):
-        """get-strings requires programPath argument"""
+    def test_get_strings_unknown_program_returns_error(self, mcp_client):
+        """get-strings reports the unresolvable programPath in the error text"""
         response = mcp_client.call_tool("get-strings", {
             "programPath": "/NonexistentProgram",
             "maxCount": 5
         })
 
-        # Should get a response (even if error due to missing program)
-        assert response is not None
-
-        # Will likely error since program doesn't exist, but that's okay
-        # We're just testing the tool is registered and callable
-
-    def test_list_strings_with_valid_program_path(self, mcp_client):
-        """get-strings accepts valid programPath format"""
-        # We don't have a real project, but we can verify the tool accepts
-        # properly formatted requests
-        response = mcp_client.call_tool("get-strings", {
-            "programPath": "/TestProgram.exe",
-            "maxCount": 10
-        })
-
-        # Should get response (even if error about program not existing)
-        assert response is not None
-
-
-class TestFunctionTools:
-    """Test function-related MCP tools"""
-
-    def test_list_functions_callable(self, mcp_client):
-        """get-functions tool is registered and callable"""
-        response = mcp_client.call_tool("get-functions", {
-            "programPath": "/TestProgram"
-        })
-
-        # Should get a response
-        assert response is not None
-
-    def test_get_decompilation_callable(self, mcp_client):
-        """get-decompilation tool is registered and callable"""
-        response = mcp_client.call_tool("get-decompilation", {
-            "programPath": "/TestProgram",
-            "address": "0x00401000"
-        })
-
-        # Should get a response (even if error)
-        assert response is not None
-
-
-class TestToolRegistration:
-    """Test that key tools are registered"""
-
-    @pytest.mark.parametrize("tool_name", [
-        "list-project-files",
-        "get-functions",
-        "get-strings",
-        "get-decompilation",
-        "analyze-program",
-        "find-cross-references"
-    ])
-    def test_tool_is_registered(self, mcp_client, tool_name):
-        """All expected tools are registered and callable"""
-        # Call with minimal args - we just want to verify tool exists
-        response = mcp_client.call_tool(tool_name, {})
-
-        # Should get some response (even if error due to missing required args)
-        # The key is that we get a response, not a connection error
-        assert response is not None
+        assert response is not None, "Server did not respond"
+        assert response["isError"] is True, (
+            f"Expected error payload for unknown program, got: {response}"
+        )
+        text = _content_text(response)
+        assert "/NonexistentProgram" in text, (
+            f"Error text should mention the requested program path: {text!r}"
+        )
+        assert "not found" in text.lower(), (
+            f"Error text should say the program was not found: {text!r}"
+        )

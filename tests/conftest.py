@@ -264,101 +264,11 @@ def isolated_workspace(tmp_path, monkeypatch):
             assert Path.cwd() == isolated_workspace
             # CLI will create .reva/ here
     """
-    original_cwd = Path.cwd()
+    # monkeypatch.chdir restores the original cwd on teardown.
     monkeypatch.chdir(tmp_path)
     print(f"\n[Fixture] Created isolated workspace: {tmp_path}")
 
     yield tmp_path
-
-    # Restore original cwd (cleanup)
-    monkeypatch.chdir(original_cwd)
-
-
-@pytest.fixture
-def test_binary(isolated_workspace):
-    """
-    Create a minimal test binary for import testing.
-
-    Generates a tiny valid executable that can be imported into Ghidra.
-    The binary is created in the isolated_workspace.
-
-    Scope: function (new binary for each test)
-
-    Yields:
-        Path: Path to the created binary file
-
-    Example:
-        def test_import_binary(test_binary):
-            assert test_binary.exists()
-            assert test_binary.stat().st_size > 0
-    """
-    from tests.helpers import create_minimal_binary
-
-    binary_path = isolated_workspace / "test.exe"
-    create_minimal_binary(binary_path)
-
-    print(f"[Fixture] Created test binary: {binary_path} ({binary_path.stat().st_size} bytes)")
-
-    yield binary_path
-
-
-@pytest.fixture
-def cli_process(isolated_workspace):
-    """
-    Start mcp-reva CLI as a subprocess.
-
-    Starts the CLI in the isolated workspace and automatically terminates
-    it after the test completes.
-
-    Scope: function (new process for each test)
-
-    Yields:
-        subprocess.Popen: Running mcp-reva process
-
-    Example:
-        def test_cli_startup(cli_process):
-            # Process is running
-            assert cli_process.poll() is None
-            # Can interact with stdin/stdout
-            cli_process.stdin.write('{"jsonrpc":"2.0"}\n')
-    """
-    import subprocess
-    import time
-
-    print(f"\n[Fixture] Starting mcp-reva CLI subprocess...")
-
-    proc = subprocess.Popen(
-        ["uv", "run", "mcp-reva"],
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        cwd=isolated_workspace
-    )
-
-    # Give it a moment to start
-    time.sleep(0.5)
-
-    if proc.poll() is not None:
-        # Process already exited - capture error
-        _, stderr = proc.communicate()
-        raise RuntimeError(f"mcp-reva failed to start: {stderr}")
-
-    print(f"[Fixture] mcp-reva started (PID: {proc.pid})")
-
-    yield proc
-
-    # Cleanup: Terminate process
-    print(f"[Fixture] Terminating mcp-reva (PID: {proc.pid})...")
-    proc.terminate()
-
-    try:
-        proc.wait(timeout=5)
-        print(f"[Fixture] Process terminated gracefully")
-    except subprocess.TimeoutExpired:
-        print(f"[Fixture] Process didn't terminate, killing...")
-        proc.kill()
-        proc.wait()
 
 
 @asynccontextmanager
@@ -416,15 +326,21 @@ async def _stdio_mcp_session(workspace, init_timeout: float = 120.0):
 
                 print("[Fixture] Closing MCP session...")
             finally:
-                # Manually exit the session context
+                # Manually exit the session context. Suppress only the
+                # teardown errors known to be benign here: anyio stream
+                # closure races (the subprocess pipes are already gone) and
+                # the pytest-asyncio/anyio "cancel scope" task mismatch.
+                # Anything else is a real failure and must propagate.
+                import anyio
+
                 try:
                     await session.__aexit__(None, None, None)
                 except RuntimeError as e:
                     if "cancel scope" not in str(e):
                         raise
                     print(f"[Fixture] Suppressed expected cancel scope error: {e}")
-                except Exception as e:
-                    print(f"[Fixture] Warning: Error during session cleanup: {e}")
+                except (anyio.ClosedResourceError, anyio.BrokenResourceError) as e:
+                    print(f"[Fixture] Suppressed closed-stream error during session cleanup: {e!r}")
     except RuntimeError as e:
         # Suppress "Attempted to exit cancel scope in a different task" error
         # This is a known pytest-asyncio/anyio compatibility issue

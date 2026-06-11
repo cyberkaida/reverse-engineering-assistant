@@ -71,28 +71,42 @@ class TestLauncherConfiguration:
     """Test launcher configuration options"""
 
     def test_launcher_with_default_config(self, ghidra_initialized):
-        """Launcher works with default configuration"""
+        """Default in-memory configuration uses port 8080.
+
+        Asserts the configured default without starting the server: binding
+        port 8080 would collide with any GUI Ghidra or other ReVa instance
+        on the machine. launcher.getPort() is only valid after start(), so
+        the default is read from ConfigManager (the same in-memory config a
+        no-args launcher uses).
+        """
         from reva.headless import RevaHeadlessLauncher
+        from reva.plugin import ConfigManager
 
         launcher = RevaHeadlessLauncher()
-        launcher.start()
+        assert not launcher.isRunning()
 
-        assert launcher.waitForServer(30000)
-
-        # Default port should be 8080
-        port = launcher.getPort()
-        assert port == 8080
-
-        launcher.stop()
+        config = ConfigManager()
+        try:
+            assert config.getServerPort() == 8080
+        finally:
+            config.dispose()
 
     def test_launcher_with_custom_config(self, ghidra_initialized, tmp_path):
         """Launcher respects configuration file"""
+        import socket
+
         from reva.headless import RevaHeadlessLauncher
 
-        # Create config file with custom port
+        # Pick a dynamically free port so the test cannot collide with
+        # other servers on the machine (or a parallel xdist worker).
+        with socket.socket() as sock:
+            sock.bind(("127.0.0.1", 0))
+            custom_port = sock.getsockname()[1]
+
+        # Create config file with the custom port
         config_file = tmp_path / "test.properties"
         config_file.write_text(
-            "reva.server.options.server.port=9999\n"
+            f"reva.server.options.server.port={custom_port}\n"
             "reva.server.options.server.host=127.0.0.1\n"
         )
 
@@ -104,7 +118,7 @@ class TestLauncherConfiguration:
 
         # Should use configured port
         port = launcher.getPort()
-        assert port == 9999
+        assert port == custom_port
 
         launcher.stop()
 

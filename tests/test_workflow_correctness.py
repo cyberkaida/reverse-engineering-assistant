@@ -12,6 +12,7 @@ These tests answer "did the tool give the right answer?", not just
 """
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -322,10 +323,9 @@ class TestVariableRenamePersistence:
         checkin_data = json.loads(checkin.content[0].text)
         assert checkin_data.get("success") is True, f"checkin not successful: {checkin_data}"
         # analyze-program's persist already added this program to version
-        # control, so this call must be a real checkin — not a silent local
-        # save (the regression shape of the selectAction in-memory-changes
-        # bug, where the rename would still survive reopen via the local
-        # save and this test would pass without testing checkin at all).
+        # control, so this call must be a real checkin. A silent local-save
+        # downgrade would still let the rename survive the reopen below,
+        # so success alone proves nothing about checkin.
         assert checkin_data.get("action") == "checked_in", (
             f"Expected a real checkin of the versioned program, got: {checkin_data}"
         )
@@ -442,6 +442,22 @@ class TestStructureWorkflow:
         )
         assert apply_data.get("size") == 16, (
             f"apply-structure should report size=16 for our 4-int struct; got {apply_data!r}"
+        )
+
+        # 4. Verify actual program state with an independent read: the
+        #    response above only echoes the request, so a handler that
+        #    reports success without writing would pass the checks so far.
+        verify = await mcp_stdio_client.call_tool(
+            "get-data",
+            arguments={"programPath": program_path, "addressOrSymbol": target_addr},
+        )
+        assert not getattr(verify, "isError", False), (
+            f"get-data after apply-structure failed: {_result_text(verify)}"
+        )
+        verify_data = json.loads(verify.content[0].text)
+        assert struct_name in (verify_data.get("dataType") or ""), (
+            f"get-data should report dataType {struct_name!r} at {target_addr} "
+            f"after apply-structure; got {verify_data!r}"
         )
 
 
@@ -602,6 +618,7 @@ class TestStringDiscovery:
         # multiple TextContent items). The first element is pagination
         # metadata; the rest are string entries.
         assert result.content and result.content[0].text, "Empty response body"
+        assert not getattr(result, "isError", False), _result_text(result)
         items = json.loads(result.content[0].text)
         assert isinstance(items, list) and len(items) >= 2, (
             f"Expected JSON array of [metadata, ...entries]; got {items!r}"
@@ -1038,6 +1055,7 @@ class TestBookmarkWorkflow:
                 "addressOrSymbol": add_func["address"],
             },
         )
+        assert not getattr(post_remove, "isError", False), _result_text(post_remove)
         post_data = json.loads(post_remove.content[0].text)
         post_comments = [b.get("comment") for b in post_data.get("bookmarks", [])]
         assert bookmark_comment not in post_comments, (
@@ -1118,6 +1136,7 @@ class TestFindVariableAccesses:
                 "limit": 100,
             },
         )
+        assert not getattr(decomp, "isError", False), _result_text(decomp)
         decomp_text = json.loads(decomp.content[0].text).get("decompilation", "")
         if "param_1" not in decomp_text:
             pytest.skip(
@@ -1231,6 +1250,7 @@ class TestChangeVariableDatatypes:
                 "limit": 100,
             },
         )
+        assert not getattr(before, "isError", False), _result_text(before)
         before_text = json.loads(before.content[0].text).get("decompilation", "")
         if "param_1" not in before_text:
             pytest.skip(
@@ -1264,6 +1284,7 @@ class TestChangeVariableDatatypes:
                 "limit": 100,
             },
         )
+        assert not getattr(after, "isError", False), _result_text(after)
         after_text = json.loads(after.content[0].text).get("decompilation", "")
         assert "short" in after_text, (
             f"Expected 'short' in decompilation after type change; got:\n{after_text}"
@@ -1342,6 +1363,7 @@ class TestCommentSearch:
                 "searchText": "ReVa-e2e-comment-sentinel",
             },
         )
+        assert not getattr(post_search, "isError", False), _result_text(post_search)
         post_data = json.loads(post_search.content[0].text)
         post_results = post_data.get("results", [])
         assert not any(sentinel in r.get("comment", "") for r in post_results), (
@@ -1542,6 +1564,7 @@ class TestSetDecompilationComment:
         assert decomp_read.content and decomp_read.content[0].text, (
             f"get-decompilation returned no content: {decomp_read!r}"
         )
+        assert not getattr(decomp_read, "isError", False), _result_text(decomp_read)
         decomp_read_data = json.loads(decomp_read.content[0].text)
         # Pick the first code body line.  The decompiler output is:
         #   line 1: (blank)  line 2: signature  line 3: (blank)  line 4: {
@@ -1663,11 +1686,13 @@ class TestFunctionsBySimilarity:
         assert "_add" in names, (
             f"Expected '_add' in similarity results for query 'add'; got {names!r}"
         )
-        # _add should be ranked among the top results (within the maxCount returned).
+        # The docstring promises _add is ranked FIRST for query 'add'; the
+        # fixture has only a handful of functions, so index 0 is achievable
+        # and anything less means the ranking is broken.
         add_idx = names.index("_add")
-        assert add_idx <= 2, (
-            f"Expected '_add' near the top of similarity results; ranked at index {add_idx} "
-            f"in {names!r}"
+        assert add_idx == 0, (
+            f"Expected '_add' ranked first in similarity results for 'add'; "
+            f"ranked at index {add_idx} in {names!r}"
         )
 
 
@@ -1815,9 +1840,21 @@ class TestFindConstantUses:
             f"Expected >= 1 use of constant 2 (mov w0, #0x2 in entry); got {data!r}"
         )
         results = data.get("results", [])
+        assert results, (
+            f"resultCount claims >= 1 but the results list is empty: {data!r}"
+        )
         for entry in results:
             for field in ("address", "mnemonic"):
                 assert field in entry, f"Result entry missing {field!r}: {entry!r}"
+        # The hits must actually be the searched constant — the schema loop
+        # above is satisfied by any shape. The tool formats values as
+        # "0x2 (2)" and echoes the search target in searchedValue.
+        searched = data.get("searchedValue")
+        assert searched == "0x2 (2)", f"Unexpected searchedValue: {data!r}"
+        assert all(e.get("value") == searched for e in results), (
+            f"Every result of find-constant-uses(2) must carry value "
+            f"{searched!r}; got {[e.get('value') for e in results]!r}"
+        )
 
 
 class TestFindConstantsInRange:
@@ -1905,6 +1942,7 @@ class TestApplyDataType:
                 "addressOrSymbol": "0x100000530",
             },
         )
+        assert not getattr(check, "isError", False), _result_text(check)
         check_data = json.loads(check.content[0].text)
         dt = (check_data.get("dataType") or "").lower()
         assert "char" in dt and ("[" in dt or "array" in dt), (
@@ -2058,6 +2096,25 @@ class TestStructureDeletion:
             f"Expected tag,size in fields; got {field_names!r}"
         )
 
+        # 2b. Positive control through the SAME tool used for the absence
+        #     check below: if list-structures' nameFilter were broken and
+        #     always returned [], the post-delete check would false-pass.
+        pre_list = await mcp_stdio_client.call_tool(
+            "list-structures",
+            arguments={"programPath": program_path, "nameFilter": struct_name},
+        )
+        assert not getattr(pre_list, "isError", False), (
+            f"list-structures failed: {_result_text(pre_list)}"
+        )
+        pre_names = [
+            s.get("name")
+            for s in json.loads(pre_list.content[0].text).get("structures", [])
+        ]
+        assert struct_name in pre_names, (
+            f"Struct {struct_name!r} not visible to list-structures before "
+            f"deletion; got {pre_names!r}"
+        )
+
         # 3. delete-structure (no references -> no force needed)
         delete_result = await mcp_stdio_client.call_tool(
             "delete-structure",
@@ -2078,6 +2135,7 @@ class TestStructureDeletion:
                 "nameFilter": struct_name,
             },
         )
+        assert not getattr(list_result, "isError", False), _result_text(list_result)
         list_data = json.loads(list_result.content[0].text)
         names = [s.get("name") for s in list_data.get("structures", [])]
         assert struct_name not in names, (
@@ -2182,13 +2240,32 @@ class TestDataTypeByString:
             f"get-data-type-by-string('int *') failed: {result.content[0].text}"
         )
         data = json.loads(result.content[0].text)
-        # DataTypeParserUtil.createDataTypeInfo populates name + length at minimum.
-        assert "name" in data, f"Expected 'name' in response; got {data!r}"
-        # Pointer width is architecture-dependent; ARM64 -> 8 bytes.
-        if "length" in data:
-            assert data["length"] == 8, (
-                f"int* on ARM64 should be 8 bytes; got {data['length']}"
-            )
+        # The resolved type must actually be a pointer, not merely have a
+        # 'name' key of any value.
+        name = data.get("name", "")
+        assert "*" in name or "pointer" in name.lower(), (
+            f"Expected a pointer type name for 'int *'; got {data!r}"
+        )
+        assert data.get("dataTypeName") == "PointerDataType", (
+            f"Expected a PointerDataType for 'int *'; got {data!r}"
+        )
+        # Pointer width on this ARM64 program is 8 bytes. The size must
+        # reflect the program's data organization for the model to reason
+        # about layouts; verify end-to-end by applying the type and reading
+        # the resulting data length back from the program.
+        apply_r = await mcp_stdio_client.call_tool(
+            "apply-data-type",
+            arguments={
+                "programPath": program_path,
+                "addressOrSymbol": "0x100000530",
+                "dataTypeString": "int *",
+            },
+        )
+        assert not getattr(apply_r, "isError", False), _result_text(apply_r)
+        applied = json.loads(apply_r.content[0].text)
+        assert applied.get("length") == 8, (
+            f"Applying 'int *' on ARM64 must create 8-byte data; got {applied!r}"
+        )
 
 
 class TestListExports:
@@ -2403,12 +2480,17 @@ class TestGetReferencersDecompiled:
             f"get-referencers-decompiled failed: {result.content[0].text}"
         )
 
-        # Response collects metadata + per-referencer decompilations across
-        # multiple content items. We just need to find one entry that names
-        # the calling function (entry, _main, start, etc).
-        all_text = "\n".join(c.text for c in result.content if hasattr(c, "text"))
-        assert "entry" in all_text or "_main" in all_text or "start" in all_text, (
-            f"Expected entry function in printf referencers output; got:\n{all_text[:1000]}"
+        # The response is one JSON object with a `referencers` list, each
+        # entry naming the decompiled calling function. Match the structured
+        # functionName field — substring checks on raw response text match
+        # metadata keys ("entry" is inside "entries", "start" inside
+        # "startIndex").
+        data = json.loads(result.content[0].text)
+        referencers = data.get("referencers", [])
+        assert referencers, f"Expected at least one printf referencer; got {data!r}"
+        ref_names = [r.get("functionName", "") for r in referencers]
+        assert any(n == "entry" or "main" in n.lower() for n in ref_names), (
+            f"Expected entry/main among printf referencers; got {ref_names!r}"
         )
 
 
@@ -2548,6 +2630,27 @@ class TestVtablesOnCppFixture:
                 f"Vtable entry missing required fields: {vt!r}"
             )
 
+        # The docstring says "must find at least Dog's vtable" — so verify a
+        # returned vtableAddress actually sits at the Dog vtable symbol (or
+        # just past it: the Itanium prelude puts the function-pointer block
+        # up to 0x10 after the _ZTV symbol). Any-vtable-at-all would pass
+        # the schema checks above without finding Dog's.
+        vt_sym = await _find_symbol_matching(
+            mcp_stdio_client, program_path, "vtable for Dog"
+        )
+        if vt_sym is None:
+            vt_sym = await _find_symbol_matching(
+                mcp_stdio_client, program_path, "_ZTV3Dog"
+            )
+        assert vt_sym is not None, "Could not find Dog vtable symbol for cross-check"
+        vt_base = int(vt_sym["address"], 16)
+        hits = [int(vt["vtableAddress"], 16) for vt in vtables]
+        assert any(0 <= h - vt_base <= 0x20 for h in hits), (
+            f"None of the returned vtables {[hex(h) for h in hits]} sits at "
+            f"Dog's vtable symbol {vt_sym['address']} (+0x20 window for the "
+            f"Itanium top-offset/typeinfo prelude)"
+        )
+
     @pytest.mark.parametrize(
         "fixture_name",
         ["test_cpp_arm64", "test_cpp_x86_64"],
@@ -2589,23 +2692,25 @@ class TestVtablesOnCppFixture:
         body = data.get("decompilation", "")
         assert body, f"Empty decompilation for dispatch on {fixture_name}: {data!r}"
 
-        # Both slot offsets must appear in the body. The decompiler may
-        # render them as `0x10`/`0x18` or via decimal/struct-field syntax
-        # depending on Ghidra version, so accept either notation.
-        for offset_hex, offset_dec in [("0x10", "16"), ("0x18", "24")]:
-            assert (offset_hex in body) or (offset_dec in body), (
-                f"Expected slot offset {offset_hex} ({offset_dec}) to appear "
-                f"in dispatch body on {fixture_name}; full body:\n{body}"
+        # Each virtual call loads a function pointer from a vtable slot.
+        # Match the slot offsets in dereference context (`+ 0x10)`), not as
+        # bare substrings — `0x10` matches every Mach-O address in the body
+        # and bare `16`/`24` match get-decompilation's line numbering.
+        for offset in ("0x10", "0x18"):
+            assert re.search(rf"\+\s*{offset}\)", body), (
+                f"Expected vtable slot dereference '+ {offset})' in dispatch "
+                f"body on {fixture_name}; full body:\n{body}"
             )
 
-        # The two distinct offsets imply two distinct call sites — match a
-        # range of indirect-call rendering styles Ghidra emits.
-        indirect_call_markers = ("(**(code", "(**(", "->", "(*pvt")
-        marker_hits = sum(body.count(m) for m in indirect_call_markers)
-        assert marker_hits >= 2, (
-            f"Expected at least 2 indirect-call markers in dispatch body on "
-            f"{fixture_name} (one per virtual method); got marker_hits={marker_hits} "
-            f"in body:\n{body}"
+        # The two distinct offsets imply two distinct indirect call sites.
+        # Count `(code *)`/`(code **)` casts — Ghidra emits one per virtual
+        # dispatch in every rendering style, and they appear only for calls
+        # through function pointers.
+        code_ptr_casts = re.findall(r"\(code\s*\*+\)", body)
+        assert len(code_ptr_casts) >= 2, (
+            f"Expected >= 2 code-pointer casts in dispatch body on "
+            f"{fixture_name} (one per virtual method); found "
+            f"{len(code_ptr_casts)} in body:\n{body}"
         )
 
     @pytest.mark.parametrize(
@@ -2710,6 +2815,23 @@ class TestChangeProcessorValidation:
             or "invalid" in msg
         ), f"Error message should mention language/lookup failure; got {msg!r}"
 
+        # The docstring promises "without altering state" — verify it. The
+        # failed call must not have swapped the program's language.
+        lang_r = await mcp_stdio_client.call_tool(
+            "run-script",
+            arguments={
+                "programPath": program_path,
+                "code": "print('LANG=' + str(currentProgram.getLanguageID()))\n",
+                "timeoutSeconds": 30,
+            },
+        )
+        assert not getattr(lang_r, "isError", False), _result_text(lang_r)
+        lang_out = json.loads(lang_r.content[0].text).get("stdout", "")
+        assert "LANG=AARCH64:LE:64:AppleSilicon" in lang_out, (
+            f"Program language changed by a FAILED change-processor call; "
+            f"script reported: {lang_out!r}"
+        )
+
 
 class TestCaptureRevaDebugInfo:
     """Verify capture-reva-debug-info produces a debug zip and reports its path."""
@@ -2791,13 +2913,15 @@ class TestGetDataTypes:
             if isinstance(entry, dict)
         ]
 
-        # Built-in archive always carries fundamental scalar types.
+        # Built-in archive always carries fundamental scalar types. Exact
+        # membership only — substring matching is satisfied by unrelated
+        # names ('pointer' contains 'int').
         names_lower = [n.lower() for n in names]
-        assert any("int" == n for n in names_lower) or any("int" in n for n in names_lower), (
-            f"Expected 'int' in built-in types; got first 30: {names[:30]!r}"
+        assert "int" in names_lower, (
+            f"Expected exact type 'int' in built-in types; got first 30: {names[:30]!r}"
         )
-        assert any("char" == n for n in names_lower) or any("char" in n for n in names_lower), (
-            f"Expected 'char' in built-in types; got first 30: {names[:30]!r}"
+        assert "char" in names_lower, (
+            f"Expected exact type 'char' in built-in types; got first 30: {names[:30]!r}"
         )
 
 
@@ -2972,6 +3096,7 @@ class TestMultiProgramIsolation:
             "get-comments",
             arguments={"programPath": path_a, "addressOrSymbol": "entry"},
         )
+        assert not getattr(comments_a, "isError", False), _result_text(comments_a)
         a_data = json.loads(comments_a.content[0].text)
         a_strs = [c.get("comment", "") for c in a_data.get("comments", [])]
         assert any(sentinel in s for s in a_strs), (
@@ -2983,6 +3108,7 @@ class TestMultiProgramIsolation:
             "get-comments",
             arguments={"programPath": path_b, "addressOrSymbol": "entry"},
         )
+        assert not getattr(comments_b, "isError", False), _result_text(comments_b)
         b_data = json.loads(comments_b.content[0].text)
         b_strs = [c.get("comment", "") for c in b_data.get("comments", [])]
         assert not any(sentinel in s for s in b_strs), (
@@ -3022,6 +3148,7 @@ class TestMultiProgramIsolation:
             "list-bookmark-categories",
             arguments={"programPath": path_a, "type": "Note"},
         )
+        assert not getattr(a_cats, "isError", False), _result_text(a_cats)
         a_data = json.loads(a_cats.content[0].text)
         a_names = [c.get("name") for c in a_data.get("categories", [])]
         assert category in a_names, f"Category not in A: {a_names!r}"
@@ -3031,6 +3158,7 @@ class TestMultiProgramIsolation:
             "list-bookmark-categories",
             arguments={"programPath": path_b, "type": "Note"},
         )
+        assert not getattr(b_cats, "isError", False), _result_text(b_cats)
         b_data = json.loads(b_cats.content[0].text)
         b_names = [c.get("name") for c in b_data.get("categories", [])]
         assert category not in b_names, (
@@ -3074,8 +3202,12 @@ class TestMultiProgramIsolation:
             f"{rename_r.content[0].text if rename_r.content else 'no content'}"
         )
         msg = (rename_r.content[0].text if rename_r.content else "").lower()
-        assert "read" in msg or "decompilation" in msg, (
-            f"Error should mention read-before-modify; got {msg!r}"
+        # Pin the exact guard phrase (DecompilerToolProvider: "You must read
+        # the decompilation for function ..."). A generic failure like
+        # 'variable not found in decompilation' also mentions
+        # 'decompilation' and would false-pass a looser check.
+        assert "must read the decompilation" in msg, (
+            f"Error should be the read-before-modify guard; got {msg!r}"
         )
 
 
@@ -3119,6 +3251,7 @@ class TestRoundTripIntegrity:
             "get-comments",
             arguments={"programPath": program_path, "addressOrSymbol": "entry"},
         )
+        assert not getattr(get_r, "isError", False), _result_text(get_r)
         data = json.loads(get_r.content[0].text)
         comments = [c.get("comment", "") for c in data.get("comments", [])]
         assert payload in comments, (
@@ -3134,7 +3267,7 @@ class TestRoundTripIntegrity:
         replaces the comment at that (address, type) pair; verify the tool
         does not accidentally bypass that by appending.
 
-        Defaults: set-comment uses commentType=PRE if not specified — so two
+        Defaults: set-comment uses commentType=eol if not specified — so two
         sequential calls hit the same slot and the second wins.
         """
         program_path = await _import_and_analyze(mcp_stdio_client)

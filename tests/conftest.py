@@ -463,11 +463,10 @@ async def mcp_stdio_client_isolated(isolated_workspace):
     """
     Function-scoped MCP client: a FRESH mcp-reva subprocess for one test.
 
-    This is the old (pre-shared-server) behavior. It costs a full JVM boot
-    per test, so reserve it for tests that genuinely need a pristine server
-    or project: server-startup assertions (e.g. lazy init must not create
-    .reva/ in cwd) and project-global assertions (e.g. list-project-files
-    item counts on a known-empty project).
+    Costs a full JVM boot per test, so reserve it for tests that genuinely
+    need a pristine server or project: server-startup assertions (e.g. lazy
+    init must not create .reva/ in cwd) and project-global assertions (e.g.
+    list-project-files item counts on a known-empty project).
 
     Runs in the session event loop (loop_scope="session") so it can be used
     inside modules marked pytest.mark.asyncio(loop_scope="session").

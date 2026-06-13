@@ -45,6 +45,8 @@ public class HeadlessLauncherToolGroupIntegrationTest {
     }
 
     private List<String> registeredToolNames() {
+        // Safe cast: every registered ToolProvider extends AbstractToolProvider
+        // (none implement the interface directly), so getRegisteredTools() is available.
         return launcher.getServerManager().getToolProviders().stream()
             .flatMap(p -> ((AbstractToolProvider) p).getRegisteredTools().stream())
             .map(Tool::name)

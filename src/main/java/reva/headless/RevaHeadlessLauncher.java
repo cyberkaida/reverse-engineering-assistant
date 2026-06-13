@@ -63,6 +63,7 @@ public class RevaHeadlessLauncher {
     private boolean useRandomPort;
     private File projectLocation;
     private String projectName;
+    private String apiKey;
     private GhidraProject ghidraProject;
 
     /**
@@ -137,6 +138,24 @@ public class RevaHeadlessLauncher {
     }
 
     /**
+     * Constructor with full control, project parameters, and an API key.
+     * When apiKey is non-null and non-empty, API key authentication is enabled
+     * with that key before the server starts.
+     *
+     * @param configFile The configuration file to load, or null for defaults
+     * @param autoInitializeGhidra Whether to auto-initialize Ghidra if needed
+     * @param useRandomPort Whether to use a random available port
+     * @param projectLocation The directory where projects are stored, or null
+     * @param projectName The project name to create/open, or null
+     * @param apiKey The API key to require, or null to leave auth unchanged
+     */
+    public RevaHeadlessLauncher(File configFile, boolean autoInitializeGhidra, boolean useRandomPort,
+                               File projectLocation, String projectName, String apiKey) {
+        this(configFile, autoInitializeGhidra, useRandomPort, projectLocation, projectName);
+        this.apiKey = apiKey;
+    }
+
+    /**
      * Start the MCP server in headless mode
      * @throws IOException if configuration file cannot be read
      * @throws IllegalStateException if Ghidra is not initialized and autoInitializeGhidra is false
@@ -176,6 +195,14 @@ public class RevaHeadlessLauncher {
         if (useRandomPort) {
             int randomPort = configManager.setRandomAvailablePort();
             Msg.info(this, "Using random port: " + randomPort);
+        }
+
+        // Apply a launcher-supplied API key before the server starts so the auth
+        // filter is installed. Used by mcp-reva to authenticate its private bridge.
+        if (apiKey != null && !apiKey.isEmpty()) {
+            configManager.setApiKey(apiKey);
+            configManager.setApiKeyEnabled(true);
+            Msg.info(this, "API key authentication enabled (key supplied by launcher)");
         }
 
         // Create/open persistent project if location and name specified

@@ -99,7 +99,8 @@ public class ConfigManager implements ConfigurationBackendListener {
         ToolOptionsBackend toolBackend = new ToolOptionsBackend(tool, SERVER_OPTIONS);
         this.backend = toolBackend;
 
-        // Register options with Ghidra
+        // registerOptionsWithGhidra MUST run before loadOptions: it lazily creates the
+        // secondary "ReVa Tool Groups" ToolOptions category that loadOptions then reads.
         registerOptionsWithGhidra(toolBackend);
 
         // Register as listener for backend changes
@@ -291,8 +292,8 @@ public class ConfigManager implements ConfigurationBackendListener {
         // Update our cache
         cachedOptions.put(name, newValue);
 
-        // Notify our custom listeners
-        notifyConfigChangeListeners(SERVER_OPTIONS, name, oldValue, newValue);
+        // Notify our custom listeners with the real category (SERVER_OPTIONS or TOOL_GROUP_OPTIONS)
+        notifyConfigChangeListeners(category, name, oldValue, newValue);
     }
 
     /**

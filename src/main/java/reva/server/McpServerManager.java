@@ -682,8 +682,8 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
 
     @Override
     public void onConfigChanged(String category, String name, Object oldValue, Object newValue) {
-        // Handle server configuration changes
-        if (ConfigManager.SERVER_OPTIONS.equals(category)) {
+        // Tool-group enable/disable lives in its own options category.
+        if (ConfigManager.TOOL_GROUP_OPTIONS.equals(category)) {
             ToolGroup group = ToolGroup.fromDisplayName(name);
             if (group != null) {
                 boolean enabled = Boolean.TRUE.equals(newValue);
@@ -694,8 +694,12 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
                 } else {
                     disableGroup(group);
                 }
-                return;
             }
+            return;
+        }
+
+        // Handle server configuration changes
+        if (ConfigManager.SERVER_OPTIONS.equals(category)) {
             // Note: ALLOW_PUBLIC_BINDING_NO_API_KEY intentionally does NOT trigger a restart.
             // It is consulted only at startServer() time (the public-binding guard); flipping it
             // must not bounce a running, already-consented server, and "Allow Always" sets it from

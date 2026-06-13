@@ -67,7 +67,14 @@ public class ConfigManagerSecurityTest extends RevaIntegrationTestBase {
 
     @Test
     public void testHostConfigurationUpdate() {
-        // Test updating the host configuration
+        // Test updating the host configuration to a public (non-localhost) interface.
+        // Enable API key auth first: setServerHost() notifies the live MCP server, which
+        // rebinds, and binding to a non-localhost host without auth trips the public-
+        // binding consent guard (a modal dialog that blocks the test). Enabling auth is
+        // the intended secure way to bind publicly, so the guard is satisfied and the
+        // rebind to 0.0.0.0 (always bindable) proceeds without prompting.
+        configManager.setApiKeyEnabled(true);
+
         String newHost = "0.0.0.0";
         configManager.setServerHost(newHost);
         assertEquals("Host should be updated", newHost, configManager.getServerHost());
@@ -103,14 +110,22 @@ public class ConfigManagerSecurityTest extends RevaIntegrationTestBase {
         // Test that configuration changes are persisted through the options system
         ToolOptions options = tool.getOptions(ConfigManager.SERVER_OPTIONS);
 
-        // Set values through ConfigManager
-        configManager.setServerHost("192.168.1.100");
+        // Set values through ConfigManager.
+        // setServerHost() notifies the live MCP server, which rebinds to the new host.
+        // The chosen value must therefore be (1) a loopback/localhost address so it does
+        // NOT trip the public-binding consent guard (a non-localhost host like 0.0.0.0
+        // pops a modal dialog that blocks the test), and (2) reliably bindable on every
+        // platform (a routable-but-unassigned literal like 192.168.1.100 fails with
+        // "Cannot assign requested address" on CI; 127.0.0.2 isn't bound by default on
+        // macOS). "localhost" satisfies both and is distinct from the default host
+        // (127.0.0.1), so it still proves the value round-trips through the options store.
+        configManager.setServerHost("localhost");
         configManager.setApiKeyEnabled(true);
         configManager.setApiKey("ReVa-test-persistence");
 
         // Verify values are stored in tool options
         assertEquals("Host should be persisted in options",
-                     "192.168.1.100", options.getString(ConfigManager.SERVER_HOST, null));
+                     "localhost", options.getString(ConfigManager.SERVER_HOST, null));
         assertTrue("API key enabled should be persisted in options",
                    options.getBoolean(ConfigManager.API_KEY_ENABLED, false));
         assertEquals("API key should be persisted in options",

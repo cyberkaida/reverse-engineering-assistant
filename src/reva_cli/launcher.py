@@ -17,7 +17,9 @@ class ReVaLauncher:
     """
 
     def __init__(self, config_file: Optional[Path] = None, use_random_port: bool = True,
-                 api_key: Optional[str] = None):
+                 api_key: Optional[str] = None,
+                 disabled_tool_groups: Optional[list] = None,
+                 enabled_tool_groups: Optional[list] = None):
         """
         Initialize ReVa launcher.
 
@@ -26,13 +28,30 @@ class ReVaLauncher:
             use_random_port: Whether to use random available port (default: True)
             api_key: Optional API key; when set, the Java server enables API key
                 auth with this exact key.
+            disabled_tool_groups: Optional list of tool-group ids to disable (e.g.
+                ["scripting", "diff"]). Mutually exclusive with enabled_tool_groups.
+            enabled_tool_groups: Optional allowlist of tool-group ids to enable; all
+                others are disabled. Mutually exclusive with disabled_tool_groups.
         """
         self.config_file = config_file
         self.use_random_port = use_random_port
         self.api_key = api_key
+        self.disabled_tool_groups = disabled_tool_groups
+        self.enabled_tool_groups = enabled_tool_groups
         self.java_launcher = None
         self.port = None
         self.temp_project_dir = None
+
+    def _apply_tool_group_config(self, java_launcher):
+        """Push tool-group enable/disable lists to the Java launcher before start().
+
+        Comma-joins the id lists into the CSV form the Java setters expect. The Java
+        side validates ids and mutual exclusivity (raises on conflict/unknown id).
+        """
+        if self.disabled_tool_groups:
+            java_launcher.setDisabledToolGroups(",".join(self.disabled_tool_groups))
+        if self.enabled_tool_groups:
+            java_launcher.setEnabledToolGroups(",".join(self.enabled_tool_groups))
 
     def start(self) -> int:
         """
@@ -83,6 +102,9 @@ class ReVaLauncher:
                 project_name,
                 self.api_key          # str or None (JPype maps None -> Java null)
             )
+
+            # Apply tool-group configuration before starting
+            self._apply_tool_group_config(self.java_launcher)
 
             # Start server
             print("Starting ReVa MCP server...", file=sys.stderr)

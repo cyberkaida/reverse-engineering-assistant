@@ -115,8 +115,8 @@ class ReVaCLI:
             self.cleanup()
 
 
-def main():
-    """Main entry point for mcp-reva command."""
+def _build_parser() -> argparse.ArgumentParser:
+    """Build the mcp-reva argument parser."""
     parser = argparse.ArgumentParser(
         description="ReVa MCP server with stdio transport for Claude CLI integration"
     )
@@ -136,6 +136,27 @@ def main():
         version="%(prog)s 3.0.0"
     )
 
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument(
+        "--disable-tool-group",
+        action="append",
+        metavar="GROUP",
+        help="Disable a tool group (repeatable). Ids: core-analysis, data-and-types, "
+             "advanced-analysis, diff, annotations, scripting."
+    )
+    group.add_argument(
+        "--tool-group",
+        action="append",
+        metavar="GROUP",
+        help="Enable ONLY this tool group, disabling all others (repeatable; allowlist). "
+             "Same ids as --disable-tool-group."
+    )
+    return parser
+
+
+def main():
+    """Main entry point for mcp-reva command."""
+    parser = _build_parser()
     args = parser.parse_args()
 
     # Validate config file if provided
@@ -171,7 +192,9 @@ def main():
         launcher = ReVaLauncher(
             config_file=args.config,
             use_random_port=True,
-            api_key=api_key
+            api_key=api_key,
+            disabled_tool_groups=args.disable_tool_group,
+            enabled_tool_groups=args.tool_group
         )
         port = launcher.start()
         print(f"ReVa server ready on port {port}", file=sys.stderr)

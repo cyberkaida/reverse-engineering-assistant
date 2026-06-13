@@ -46,6 +46,7 @@ You can ask questions like:
 - What does `mmap` return?
 - What does the function at address 0x80000 do?
 - This is a CTF problem. Write a pwntools script to get the flag.
+- Import these two binaries and diff them, explain the changes.
 
 # Installation
 
@@ -65,6 +66,12 @@ After installing the extension you need to activate it in two places:
 
 1. In the Project view, open the File menu and select "Configure". Click the "Configure all plugins" button on the top right of the menu (it looks like a plug). Check the "ReVa Application Plugin"
 2. In the Code Browser tool (Click the Dragon icon or open a File), open the File menu and select "Configure". Click the "Configure all plugins" button on the top right of the menu (it looks like a plug). Check the "ReVa Plugin". Then Press File and select "Save Tool". This will enable ReVa by default.
+
+> NOTE: ReVa provides access to the PyGhidra scripting environment. If
+> you allow ReVa to listen on a public interface, either enable the API
+> key authentication or disable the scripting tools in the settings.
+> The default configuration is to listen on localhost and allow the
+> scripting tools.
 
 # Usage
 

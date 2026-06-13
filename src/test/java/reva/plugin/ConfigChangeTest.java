@@ -75,8 +75,14 @@ public class ConfigChangeTest {
     }
     
     private void setupMockTool() {
-        // Mock the tool to return our mock ToolOptions
+        // Mock tool to return our mock ToolOptions for the primary category.
+        // The secondary "ReVa Tool Groups" category must also return a non-null ToolOptions so
+        // ToolOptionsBackend.getOrCreate() can register its change listener.
         when(mockTool.getOptions(eq(ConfigManager.SERVER_OPTIONS))).thenReturn(mockToolOptions);
+        when(mockTool.getOptions(eq(ConfigManager.TOOL_GROUP_OPTIONS))).thenReturn(mockToolOptions);
+
+        // options.getName() is used by ToolOptionsBackend.optionsChanged() to determine the category.
+        when(mockToolOptions.getName()).thenReturn(ConfigManager.SERVER_OPTIONS);
 
         // Setup default return values for ALL option getters (to avoid null values)
         when(mockToolOptions.getInt(eq(ConfigManager.SERVER_PORT), anyInt())).thenReturn(8080);
@@ -87,6 +93,8 @@ public class ConfigChangeTest {
         when(mockToolOptions.getBoolean(eq(ConfigManager.DEBUG_MODE), anyBoolean())).thenReturn(false);
         when(mockToolOptions.getInt(eq(ConfigManager.MAX_DECOMPILER_SEARCH_FUNCTIONS), anyInt())).thenReturn(1000);
         when(mockToolOptions.getInt(eq(ConfigManager.DECOMPILER_TIMEOUT_SECONDS), anyInt())).thenReturn(10);
+        // Tool group options — return enabled (true) for all boolean lookups under this same mock
+        when(mockToolOptions.getBoolean(anyString(), anyBoolean())).thenAnswer(inv -> inv.getArgument(1));
     }
 
     @Test

@@ -123,11 +123,11 @@ public class ToolOptionsBackend implements ConfigurationBackend, OptionsChangeLi
 
         Msg.debug(this, "ToolOptions changed: " + optionName + " from " + oldValue + " to " + newValue);
 
-        // Notify our listeners
-        // Note: We pass empty string as category since ToolOptions doesn't provide it
+        // The ToolOptions name IS the category (e.g. "ReVa Server Options" / "ReVa Tool Groups").
+        String category = options.getName();
         for (ConfigurationBackendListener listener : listeners) {
             try {
-                listener.onConfigurationChanged("", optionName, oldValue, newValue);
+                listener.onConfigurationChanged(category, optionName, oldValue, newValue);
             } catch (Exception e) {
                 Msg.error(this, "Error notifying configuration listener", e);
             }

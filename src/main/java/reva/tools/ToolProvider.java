@@ -44,4 +44,10 @@ public interface ToolProvider {
      * Clean up any resources or state
      */
     void cleanup();
+
+    /**
+     * Remove all tools this provider registered from the MCP server.
+     * Used when a tool group is disabled at runtime.
+     */
+    void unregisterTools();
 }

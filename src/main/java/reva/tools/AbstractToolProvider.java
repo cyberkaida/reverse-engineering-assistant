@@ -15,7 +15,6 @@
  */
 package reva.tools;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.function.BooleanSupplier;
@@ -54,7 +53,7 @@ import io.modelcontextprotocol.spec.McpSchema.JsonSchema;
 public abstract class AbstractToolProvider implements ToolProvider {
     protected static final ObjectMapper JSON = new ObjectMapper();
     protected final McpSyncServer server;
-    protected final List<Tool> registeredTools = new ArrayList<>();
+    protected final List<Tool> registeredTools = new java.util.concurrent.CopyOnWriteArrayList<>();
 
     /**
      * Constructor

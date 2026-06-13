@@ -15,6 +15,8 @@
  */
 package reva.plugin;
 
+import java.util.Locale;
+
 /**
  * Logical groupings of MCP tool providers that can be enabled/disabled as a unit
  * via configuration. The mapping from a group to its concrete tool providers lives
@@ -47,6 +49,38 @@ public enum ToolGroup {
      */
     public String getOptionName() {
         return "Enable Tool Group: " + displayName;
+    }
+
+    /**
+     * @return a stable lowercase-kebab identifier for this group (e.g. "core-analysis").
+     *         Suitable for CLI flags and error messages.
+     */
+    public String canonicalId() {
+        return name().toLowerCase(Locale.ROOT).replace('_', '-');
+    }
+
+    /**
+     * Resolve a group from a flexible identifier: the enum name in any case with
+     * '-', '_' or spaces as separators (e.g. "scripting", "SCRIPTING",
+     * "advanced-analysis", "advanced_analysis", "Core Analysis").
+     *
+     * @param id the identifier to parse
+     * @return the matching group, or null if none matches
+     */
+    public static ToolGroup fromId(String id) {
+        if (id == null) {
+            return null;
+        }
+        String norm = id.trim().toUpperCase(Locale.ROOT).replace('-', '_').replace(' ', '_');
+        if (norm.isEmpty()) {
+            return null;
+        }
+        for (ToolGroup group : values()) {
+            if (group.name().equals(norm)) {
+                return group;
+            }
+        }
+        return null;
     }
 
     /**

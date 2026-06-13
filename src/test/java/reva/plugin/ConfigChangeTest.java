@@ -43,7 +43,10 @@ public class ConfigChangeTest {
     
     @Mock
     private ToolOptions mockToolOptions;
-    
+
+    @Mock
+    private ToolOptions mockGroupOptions;
+
     private ConfigManager configManager;
     private AtomicBoolean changeNotified;
     private String lastChangedCategory;
@@ -75,16 +78,17 @@ public class ConfigChangeTest {
     }
     
     private void setupMockTool() {
-        // Mock tool to return our mock ToolOptions for the primary category.
-        // The secondary "ReVa Tool Groups" category must also return a non-null ToolOptions so
-        // ToolOptionsBackend.getOrCreate() can register its change listener.
+        // The "ReVa Server Options" and "ReVa Tool Groups" pages each get their OWN ToolOptions
+        // mock, with getName() returning the real category. ToolOptionsBackend.optionsChanged()
+        // uses options.getName() as the category, so using distinct mocks ensures tool-group
+        // changes are reported under TOOL_GROUP_OPTIONS — a shared mock would mask routing bugs.
         when(mockTool.getOptions(eq(ConfigManager.SERVER_OPTIONS))).thenReturn(mockToolOptions);
-        when(mockTool.getOptions(eq(ConfigManager.TOOL_GROUP_OPTIONS))).thenReturn(mockToolOptions);
-
-        // options.getName() is used by ToolOptionsBackend.optionsChanged() to determine the category.
+        when(mockTool.getOptions(eq(ConfigManager.TOOL_GROUP_OPTIONS))).thenReturn(mockGroupOptions);
         when(mockToolOptions.getName()).thenReturn(ConfigManager.SERVER_OPTIONS);
+        when(mockGroupOptions.getName()).thenReturn(ConfigManager.TOOL_GROUP_OPTIONS);
 
-        // Setup default return values for ALL option getters (to avoid null values)
+        // Server-option defaults (server page). No broad getBoolean stub here, so these
+        // specific stubs are never overridden.
         when(mockToolOptions.getInt(eq(ConfigManager.SERVER_PORT), anyInt())).thenReturn(8080);
         when(mockToolOptions.getString(eq(ConfigManager.SERVER_HOST), anyString())).thenReturn("127.0.0.1");
         when(mockToolOptions.getBoolean(eq(ConfigManager.SERVER_ENABLED), anyBoolean())).thenReturn(true);
@@ -93,8 +97,9 @@ public class ConfigChangeTest {
         when(mockToolOptions.getBoolean(eq(ConfigManager.DEBUG_MODE), anyBoolean())).thenReturn(false);
         when(mockToolOptions.getInt(eq(ConfigManager.MAX_DECOMPILER_SEARCH_FUNCTIONS), anyInt())).thenReturn(1000);
         when(mockToolOptions.getInt(eq(ConfigManager.DECOMPILER_TIMEOUT_SECONDS), anyInt())).thenReturn(10);
-        // Tool group options — return enabled (true) for all boolean lookups under this same mock
-        when(mockToolOptions.getBoolean(anyString(), anyBoolean())).thenAnswer(inv -> inv.getArgument(1));
+
+        // Tool-group options default to enabled — broad stub scoped to the tool-group page ONLY.
+        when(mockGroupOptions.getBoolean(anyString(), anyBoolean())).thenAnswer(inv -> inv.getArgument(1));
     }
 
     @Test
@@ -157,6 +162,23 @@ public class ConfigChangeTest {
         assertEquals("New value should be false", false, lastNewValue);
     }
     
+    @Test
+    public void testToolGroupChangeReportsToolGroupCategory() throws Exception {
+        // A change on the "ReVa Tool Groups" page must be reported to listeners under the
+        // TOOL_GROUP_OPTIONS category (not SERVER_OPTIONS) so McpServerManager routes it as a
+        // tool-group toggle. This guards the category-routing the separate page depends on.
+        changeNotified.set(false);
+
+        ToolOptionsBackend backend = (ToolOptionsBackend) configManager.getBackend();
+        backend.optionsChanged(mockGroupOptions, ToolGroup.SCRIPTING.getDisplayName(), true, false);
+
+        assertTrue("Config change listener should be notified", changeNotified.get());
+        assertEquals("Tool-group changes must carry the tool-group category",
+            ConfigManager.TOOL_GROUP_OPTIONS, lastChangedCategory);
+        assertEquals("Changed option should be the group display name",
+            ToolGroup.SCRIPTING.getDisplayName(), lastChangedName);
+    }
+
     @Test
     public void testRemoveConfigChangeListener() throws Exception {
         // Create a test listener

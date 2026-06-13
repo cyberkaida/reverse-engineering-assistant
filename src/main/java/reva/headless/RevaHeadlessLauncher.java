@@ -17,6 +17,8 @@ package reva.headless;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.EnumSet;
+import java.util.Set;
 
 import ghidra.base.project.GhidraProject;
 import ghidra.framework.Application;
@@ -28,6 +30,7 @@ import ghidra.util.Msg;
 import ghidra.GhidraApplicationLayout;
 
 import reva.plugin.ConfigManager;
+import reva.plugin.ToolGroup;
 import reva.server.McpServerManager;
 
 /**
@@ -64,6 +67,8 @@ public class RevaHeadlessLauncher {
     private File projectLocation;
     private String projectName;
     private String apiKey;
+    private String enabledToolGroupsCsv;
+    private String disabledToolGroupsCsv;
     private GhidraProject ghidraProject;
 
     /**
@@ -156,6 +161,25 @@ public class RevaHeadlessLauncher {
     }
 
     /**
+     * Allowlist: comma-separated tool-group ids; only these groups stay enabled,
+     * all others are disabled. Mutually exclusive with {@link #setDisabledToolGroups}.
+     * Applied at {@link #start()} time. Ids are parsed via {@link ToolGroup#fromId}.
+     * @param csv comma-separated group ids, or null/blank to leave all groups as-is
+     */
+    public void setEnabledToolGroups(String csv) {
+        this.enabledToolGroupsCsv = csv;
+    }
+
+    /**
+     * Disable-list: comma-separated tool-group ids to turn off; all others stay enabled.
+     * Mutually exclusive with {@link #setEnabledToolGroups}. Applied at {@link #start()} time.
+     * @param csv comma-separated group ids, or null/blank to leave all groups enabled
+     */
+    public void setDisabledToolGroups(String csv) {
+        this.disabledToolGroupsCsv = csv;
+    }
+
+    /**
      * Start the MCP server in headless mode
      * @throws IOException if configuration file cannot be read
      * @throws IllegalStateException if Ghidra is not initialized and autoInitializeGhidra is false
@@ -205,6 +229,9 @@ public class RevaHeadlessLauncher {
             Msg.info(this, "API key authentication enabled (key supplied by launcher)");
         }
 
+        // Apply tool-group enable/disable lists before the server registers tools.
+        applyToolGroupConfiguration();
+
         // Create/open persistent project if location and name specified
         if (projectLocation != null && projectName != null) {
             try {
@@ -220,6 +247,58 @@ public class RevaHeadlessLauncher {
         serverManager.startServer();
 
         Msg.info(this, "ReVa MCP server started in headless mode");
+    }
+
+    /**
+     * Apply launcher-supplied tool-group enable/disable lists to the config before
+     * the server registers tools. Throws if both lists are given or an id is unknown.
+     */
+    private void applyToolGroupConfiguration() throws IOException {
+        boolean hasEnabled = enabledToolGroupsCsv != null && !enabledToolGroupsCsv.isBlank();
+        boolean hasDisabled = disabledToolGroupsCsv != null && !disabledToolGroupsCsv.isBlank();
+        if (hasEnabled && hasDisabled) {
+            throw new IOException("Specify only one of enabled/disabled tool groups, not both.");
+        }
+        if (hasEnabled) {
+            Set<ToolGroup> keep = parseToolGroups(enabledToolGroupsCsv);
+            for (ToolGroup group : ToolGroup.values()) {
+                configManager.setToolGroupEnabled(group, keep.contains(group));
+            }
+            Msg.info(this, "Tool groups restricted to: " + enabledToolGroupsCsv);
+        } else if (hasDisabled) {
+            Set<ToolGroup> off = parseToolGroups(disabledToolGroupsCsv);
+            for (ToolGroup group : off) {
+                configManager.setToolGroupEnabled(group, false);
+            }
+            Msg.info(this, "Tool groups disabled: " + disabledToolGroupsCsv);
+        }
+    }
+
+    /**
+     * Parse a comma-separated list of tool-group ids into a set, failing loudly on
+     * any unknown id (listing the valid ids).
+     */
+    private Set<ToolGroup> parseToolGroups(String csv) throws IOException {
+        Set<ToolGroup> result = EnumSet.noneOf(ToolGroup.class);
+        for (String token : csv.split(",")) {
+            String trimmed = token.trim();
+            if (trimmed.isEmpty()) {
+                continue;
+            }
+            ToolGroup group = ToolGroup.fromId(trimmed);
+            if (group == null) {
+                StringBuilder valid = new StringBuilder();
+                for (ToolGroup g : ToolGroup.values()) {
+                    if (valid.length() > 0) {
+                        valid.append(", ");
+                    }
+                    valid.append(g.canonicalId());
+                }
+                throw new IOException("Unknown tool group id '" + trimmed + "'. Valid ids: " + valid);
+            }
+            result.add(group);
+        }
+        return result;
     }
 
     /**

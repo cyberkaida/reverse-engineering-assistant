@@ -87,6 +87,13 @@ public abstract class AbstractToolProvider implements ToolProvider {
     }
 
     /**
+     * @return the tools this provider has registered (live view, for diagnostics/tests)
+     */
+    public List<Tool> getRegisteredTools() {
+        return registeredTools;
+    }
+
+    /**
      * Create a JSON schema for a tool
      * @param properties The schema properties, with property name as key
      * @param required List of required property names

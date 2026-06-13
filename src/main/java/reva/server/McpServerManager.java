@@ -44,6 +44,7 @@ import io.modelcontextprotocol.server.McpSyncServer;
 import io.modelcontextprotocol.spec.McpSchema;
 import reva.plugin.ConfigManager;
 import reva.plugin.ConfigChangeListener;
+import reva.plugin.ToolGroup;
 import reva.plugin.FollowMeService;
 import reva.resources.ResourceProvider;
 import reva.resources.impl.ProgramListResource;
@@ -90,7 +91,8 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
     private final ConfigManager configManager;
 
     private final List<ResourceProvider> resourceProviders = new ArrayList<>();
-    private final List<ToolProvider> toolProviders = new ArrayList<>();
+    private final List<ToolProvider> toolProviders = new java.util.concurrent.CopyOnWriteArrayList<>();
+    private final Map<ToolGroup, List<ToolProvider>> providersByGroup = new ConcurrentHashMap<>();
     private volatile boolean serverReady = false;
 
     // Multi-tool tracking
@@ -204,35 +206,90 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
     }
 
     /**
-     * Initialize and register all tool providers
+     * Initialize and register all tool providers for enabled groups.
      */
     private void initializeToolProviders() {
-        // Create tool providers
-        toolProviders.add(new SymbolToolProvider(server));
-        toolProviders.add(new StringToolProvider(server));
-        toolProviders.add(new FunctionToolProvider(server));
-        toolProviders.add(new DataToolProvider(server));
-        toolProviders.add(new DecompilerToolProvider(server));
-        toolProviders.add(new MemoryToolProvider(server));
-        toolProviders.add(new ProjectToolProvider(server, headlessMode));
-        toolProviders.add(new CrossReferencesToolProvider(server));
-        toolProviders.add(new DataTypeToolProvider(server));
-        toolProviders.add(new StructureToolProvider(server));
-        toolProviders.add(new CommentToolProvider(server));
-        toolProviders.add(new BookmarkToolProvider(server));
-        toolProviders.add(new ImportExportToolProvider(server));
-        toolProviders.add(new DataFlowToolProvider(server));
-        toolProviders.add(new CallGraphToolProvider(server));
-        toolProviders.add(new ConstantSearchToolProvider(server));
-        toolProviders.add(new VtableToolProvider(server));
-        toolProviders.add(new DiffToolProvider(server));
-        toolProviders.add(ScriptToolProvider.fromGhidra(server, configManager));
-
-        // Register all tools with the server
-        // Note: As of MCP SDK v0.14.0, tool registration is idempotent and replaces duplicates
-        for (ToolProvider provider : toolProviders) {
-            provider.registerTools();
+        for (ToolGroup group : ToolGroup.values()) {
+            if (configManager.isToolGroupEnabled(group)) {
+                enableGroup(group);
+            }
         }
+    }
+
+    /**
+     * Construct the tool providers belonging to a group. New instances each call.
+     */
+    private List<ToolProvider> createProvidersForGroup(ToolGroup group) {
+        switch (group) {
+            case CORE_ANALYSIS:
+                return List.of(
+                    new SymbolToolProvider(server),
+                    new StringToolProvider(server),
+                    new FunctionToolProvider(server),
+                    new DecompilerToolProvider(server),
+                    new MemoryToolProvider(server),
+                    new CrossReferencesToolProvider(server),
+                    new ConstantSearchToolProvider(server),
+                    new ImportExportToolProvider(server),
+                    new ProjectToolProvider(server, headlessMode));
+            case DATA_AND_TYPES:
+                return List.of(
+                    new DataToolProvider(server),
+                    new DataTypeToolProvider(server),
+                    new StructureToolProvider(server));
+            case ADVANCED_ANALYSIS:
+                return List.of(
+                    new CallGraphToolProvider(server),
+                    new DataFlowToolProvider(server),
+                    new VtableToolProvider(server));
+            case DIFF:
+                return List.of(new DiffToolProvider(server));
+            case ANNOTATIONS:
+                return List.of(
+                    new CommentToolProvider(server),
+                    new BookmarkToolProvider(server));
+            case SCRIPTING:
+                return List.of(ScriptToolProvider.fromGhidra(server, configManager));
+            default:
+                return List.of();
+        }
+    }
+
+    /**
+     * Register a group's providers with the MCP server and track them. Idempotent:
+     * a group already enabled is left untouched.
+     */
+    private synchronized void enableGroup(ToolGroup group) {
+        if (providersByGroup.containsKey(group)) {
+            return;
+        }
+        List<ToolProvider> providers = new ArrayList<>(createProvidersForGroup(group));
+        for (ToolProvider provider : providers) {
+            provider.registerTools();
+            toolProviders.add(provider);
+            // Catch the new provider up on any already-open programs.
+            for (Program program : programToTools.keySet()) {
+                provider.programOpened(program);
+            }
+        }
+        providersByGroup.put(group, providers);
+        Msg.info(this, "Enabled tool group: " + group.getDisplayName());
+    }
+
+    /**
+     * Remove a group's providers from the MCP server. Idempotent.
+     */
+    private synchronized void disableGroup(ToolGroup group) {
+        List<ToolProvider> providers = providersByGroup.remove(group);
+        if (providers == null) {
+            return;
+        }
+        for (ToolProvider provider : providers) {
+            provider.unregisterTools();
+            provider.cleanup();
+            toolProviders.remove(provider);
+        }
+        Msg.info(this, "Disabled tool group: " + group.getDisplayName());
     }
 
     /**
@@ -549,6 +606,18 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
     public void onConfigChanged(String category, String name, Object oldValue, Object newValue) {
         // Handle server configuration changes
         if (ConfigManager.SERVER_OPTIONS.equals(category)) {
+            ToolGroup group = ToolGroup.fromOptionName(name);
+            if (group != null) {
+                boolean enabled = Boolean.TRUE.equals(newValue);
+                Msg.info(this, "Tool group '" + group.getDisplayName() + "' " +
+                    (enabled ? "enabled" : "disabled") + " — updating registered tools.");
+                if (enabled) {
+                    enableGroup(group);
+                } else {
+                    disableGroup(group);
+                }
+                return;
+            }
             if (ConfigManager.SERVER_PORT.equals(name)) {
                 Msg.info(this, "Server port changed from " + oldValue + " to " + newValue + ". Restarting server...");
                 restartServer();

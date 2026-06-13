@@ -79,6 +79,14 @@ public abstract class AbstractToolProvider implements ToolProvider {
         // Default implementation does nothing
     }
 
+    @Override
+    public void unregisterTools() {
+        for (Tool tool : registeredTools) {
+            server.removeTool(tool.name());
+        }
+        registeredTools.clear();
+    }
+
     /**
      * Create a JSON schema for a tool
      * @param properties The schema properties, with property name as key

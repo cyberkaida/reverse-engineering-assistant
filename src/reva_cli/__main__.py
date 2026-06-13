@@ -7,6 +7,7 @@ Usage: claude mcp add ReVa -- mcp-reva [--config PATH] [--verbose]
 """
 
 import sys
+import uuid
 import signal
 import asyncio
 import argparse
@@ -25,7 +26,8 @@ class ReVaCLI:
         self,
         launcher: ReVaLauncher,
         project_manager: ProjectManager,
-        server_port: int
+        server_port: int,
+        api_key: Optional[str] = None
     ):
         """
         Initialize ReVa CLI with pre-initialized components.
@@ -34,10 +36,12 @@ class ReVaCLI:
             launcher: Pre-initialized ReVa server launcher
             project_manager: Pre-initialized project manager
             server_port: Port number where ReVa server is running
+            api_key: Optional API key the stdio bridge must present to the server
         """
         self.launcher = launcher
         self.project_manager = project_manager
         self.server_port = server_port
+        self.api_key = api_key
         self.bridge = None
         self.cleanup_done = False
 
@@ -95,7 +99,7 @@ class ReVaCLI:
 
             # Start stdio bridge
             print(f"Starting stdio bridge on port {self.server_port}...", file=sys.stderr)
-            self.bridge = ReVaStdioBridge(self.server_port)
+            self.bridge = ReVaStdioBridge(self.server_port, api_key=self.api_key)
 
             # Run the bridge (this blocks until stopped)
             await self.bridge.run()
@@ -157,11 +161,17 @@ def main():
         project_manager = ProjectManager()
         print("Project manager ready (project will be created on first use)", file=sys.stderr)
 
+        # Generate a random API key so the private stdio-bridged HTTP server is
+        # authenticated end-to-end with zero user configuration. Skip when the
+        # user supplied a --config (they manage their own auth there).
+        api_key = None if args.config else f"ReVa-{uuid.uuid4()}"
+
         # Start ReVa server (blocking, 4-7 seconds)
         print("Starting ReVa server...", file=sys.stderr)
         launcher = ReVaLauncher(
             config_file=args.config,
-            use_random_port=True
+            use_random_port=True,
+            api_key=api_key
         )
         port = launcher.start()
         print(f"ReVa server ready on port {port}", file=sys.stderr)
@@ -179,7 +189,8 @@ def main():
     cli = ReVaCLI(
         launcher=launcher,
         project_manager=project_manager,
-        server_port=port
+        server_port=port,
+        api_key=api_key
     )
 
     # Run async event loop (stdio bridge starts immediately)

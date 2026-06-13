@@ -28,18 +28,26 @@ from mcp.types import (
 )
 
 
-def _no_keepalive_httpx_factory(headers=None, timeout=None, auth=None):
-    """Create an httpx client with keepalive connections disabled.
+def _make_httpx_factory(api_key=None):
+    """Build an httpx client factory that disables keepalive and (optionally)
+    injects an X-API-Key header on every request.
 
-    Prevents stale TCP connection reuse after SSE responses, which can
-    cause 'Server disconnected without sending a response' errors.
+    The MCP streamable-http client calls the returned factory with its own
+    headers; we MERGE the API key in rather than replacing them.
     """
-    return httpx.AsyncClient(
-        headers=headers,
-        timeout=timeout,
-        auth=auth,
-        limits=httpx.Limits(max_keepalive_connections=0),
-    )
+
+    def factory(headers=None, timeout=None, auth=None):
+        merged = dict(headers or {})
+        if api_key:
+            merged["X-API-Key"] = api_key
+        return httpx.AsyncClient(
+            headers=merged,
+            timeout=timeout,
+            auth=auth,
+            limits=httpx.Limits(max_keepalive_connections=0),
+        )
+
+    return factory
 
 
 def _is_transport_error(e: Exception) -> bool:
@@ -63,8 +71,9 @@ class ReconnectingBackend:
     On backend failure, disconnects, reconnects (new connection + initialize), and retries.
     """
 
-    def __init__(self, url: str):
+    def __init__(self, url: str, api_key: str | None = None):
         self.url = url
+        self.api_key = api_key
         self._session: ClientSession | None = None
         self._stack: AsyncExitStack | None = None
 
@@ -77,7 +86,7 @@ class ReconnectingBackend:
             streamablehttp_client(
                 self.url,
                 timeout=300.0,
-                httpx_client_factory=_no_keepalive_httpx_factory,
+                httpx_client_factory=_make_httpx_factory(self.api_key),
             )
         )
 
@@ -128,14 +137,16 @@ class ReVaStdioBridge:
     Uses ReconnectingBackend for resilient connection management.
     """
 
-    def __init__(self, port: int):
+    def __init__(self, port: int, api_key: str | None = None):
         """
         Initialize the stdio bridge.
 
         Args:
             port: ReVa server port to connect to
+            api_key: Optional API key sent as X-API-Key on every backend request
         """
         self.port = port
+        self.api_key = api_key
         self.url = f"http://localhost:{port}/mcp/message"
         self.server = Server("ReVa")
         self.backend: ReconnectingBackend | None = None
@@ -213,7 +224,7 @@ class ReVaStdioBridge:
         """
         print(f"Connecting to ReVa backend at {self.url}...", file=sys.stderr)
 
-        self.backend = ReconnectingBackend(self.url)
+        self.backend = ReconnectingBackend(self.url, api_key=self.api_key)
         try:
             await self.backend.connect()
 

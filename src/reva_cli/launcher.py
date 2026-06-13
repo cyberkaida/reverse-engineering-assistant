@@ -16,16 +16,20 @@ class ReVaLauncher:
     Projects are created per-session and cleaned up on exit.
     """
 
-    def __init__(self, config_file: Optional[Path] = None, use_random_port: bool = True):
+    def __init__(self, config_file: Optional[Path] = None, use_random_port: bool = True,
+                 api_key: Optional[str] = None):
         """
         Initialize ReVa launcher.
 
         Args:
             config_file: Optional configuration file path
             use_random_port: Whether to use random available port (default: True)
+            api_key: Optional API key; when set, the Java server enables API key
+                auth with this exact key.
         """
         self.config_file = config_file
         self.use_random_port = use_random_port
+        self.api_key = api_key
         self.java_launcher = None
         self.port = None
         self.temp_project_dir = None
@@ -61,26 +65,24 @@ class ReVaLauncher:
 
             print(f"Project location: {projects_dir}/{project_name}", file=sys.stderr)
 
-            # Create launcher with project parameters
+            # Create launcher with project parameters + optional API key.
+            # Always use the full 6-arg constructor so the api_key is threaded
+            # through regardless of whether a config file was supplied.
             if self.config_file:
                 print(f"Using config file: {self.config_file}", file=sys.stderr)
                 java_config_file = File(str(self.config_file))
-                self.java_launcher = RevaHeadlessLauncher(
-                    java_config_file,
-                    self.use_random_port,
-                    java_project_location,
-                    project_name
-                )
             else:
                 print("Using default configuration", file=sys.stderr)
-                # Use constructor with project parameters
-                self.java_launcher = RevaHeadlessLauncher(
-                    None,
-                    True,  # autoInitializeGhidra
-                    self.use_random_port,
-                    java_project_location,
-                    project_name
-                )
+                java_config_file = None
+
+            self.java_launcher = RevaHeadlessLauncher(
+                java_config_file,
+                True,                 # autoInitializeGhidra
+                self.use_random_port,
+                java_project_location,
+                project_name,
+                self.api_key          # str or None (JPype maps None -> Java null)
+            )
 
             # Start server
             print("Starting ReVa MCP server...", file=sys.stderr)

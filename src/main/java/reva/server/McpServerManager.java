@@ -72,6 +72,7 @@ import reva.tools.constants.ConstantSearchToolProvider;
 import reva.tools.scripts.ScriptToolProvider;
 import reva.tools.vtable.VtableToolProvider;
 import reva.tools.diff.DiffToolProvider;
+import reva.util.NetworkUtil;
 import reva.util.RevaInternalServiceRegistry;
 
 /**
@@ -311,6 +312,10 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
 
         int serverPort = configManager.getServerPort();
         String serverHost = configManager.getServerHost();
+        if (!approvePublicBinding(serverHost)) {
+            Msg.warn(this, "MCP server start aborted: public binding without API key was not approved.");
+            return;
+        }
         String baseUrl = "http://" + serverHost + ":" + serverPort;
         Msg.info(this, "Starting MCP server on " + baseUrl);
 
@@ -382,6 +387,54 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
             Msg.error(this, "Server failed to start within timeout");
         }
 
+    }
+
+    /**
+     * Guard against silently exposing ReVa on a public interface with no auth.
+     * Returns true if the server may proceed to bind.
+     */
+    private boolean approvePublicBinding(String serverHost) {
+        boolean risky = !configManager.isApiKeyEnabled()
+            && !NetworkUtil.isLocalhostAddress(serverHost);
+        if (!risky) {
+            return true;
+        }
+        if (configManager.isAllowPublicBindingWithoutApiKey()) {
+            return true;
+        }
+
+        boolean scripting = configManager.isToolGroupEnabled(ToolGroup.SCRIPTING);
+        String warning = buildPublicBindingWarning(serverHost, scripting);
+
+        if (headlessMode) {
+            Msg.error(this, warning + "\nRefusing to start. Bind to 127.0.0.1, enable API key " +
+                "authentication, or set '" + ConfigManager.ALLOW_PUBLIC_BINDING_NO_API_KEY +
+                "=true' in your configuration.");
+            return false;
+        }
+
+        int choice = PublicBindingConsentDialog.prompt(warning);
+        switch (choice) {
+            case PublicBindingConsentDialog.ALLOW_ALWAYS:
+                configManager.setAllowPublicBindingWithoutApiKey(true);
+                return true;
+            case PublicBindingConsentDialog.ALLOW_ONCE:
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private String buildPublicBindingWarning(String host, boolean scripting) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("ReVa is about to bind to ").append(host)
+            .append(" (a non-localhost interface) with API key authentication DISABLED.\n")
+            .append("Anyone who can reach this port can read and modify your Ghidra programs");
+        if (scripting) {
+            sb.append(" and RUN ARBITRARY PYTHON CODE on this host (the run-script tool is enabled)");
+        }
+        sb.append(".\n\nBind to 127.0.0.1, enable API key authentication, or disable the affected tool groups.");
+        return sb.toString();
     }
 
     @Override

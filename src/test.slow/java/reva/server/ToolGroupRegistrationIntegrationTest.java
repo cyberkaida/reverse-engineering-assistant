@@ -87,6 +87,14 @@ public class ToolGroupRegistrationIntegrationTest {
             registeredToolNames(manager).contains("run-script"));
     }
 
+    /**
+     * Stresses the CopyOnWriteArrayList iteration safety and final-state consistency:
+     * one thread rapidly toggles the Scripting group while another continuously
+     * snapshots and iterates the provider list. Asserts no exception escapes and that
+     * the registered tools match the final group state. (The programOpened/programClosed
+     * interleaving is closed separately by synchronizing those methods on the same
+     * monitor as enableGroup/disableGroup, so it is not re-exercised here.)
+     */
     @Test
     public void concurrentToggleAndIterationIsSafe() throws Exception {
         ConfigManager config = new ConfigManager();

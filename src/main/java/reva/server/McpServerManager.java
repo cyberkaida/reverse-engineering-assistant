@@ -16,6 +16,7 @@
 package reva.server;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Set;
 import java.util.Map;
@@ -92,7 +93,7 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
 
     private final List<ResourceProvider> resourceProviders = new ArrayList<>();
     private final List<ToolProvider> toolProviders = new java.util.concurrent.CopyOnWriteArrayList<>();
-    private final Map<ToolGroup, List<ToolProvider>> providersByGroup = new ConcurrentHashMap<>();
+    private final Map<ToolGroup, List<ToolProvider>> providersByGroup = new HashMap<>();
     private volatile boolean serverReady = false;
 
     // Multi-tool tracking
@@ -408,7 +409,7 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
     }
 
     @Override
-    public void programOpened(Program program, PluginTool tool) {
+    public synchronized void programOpened(Program program, PluginTool tool) {
         // Add to program-tool mapping
         programToTools.computeIfAbsent(program, k -> ConcurrentHashMap.newKeySet()).add(tool);
 
@@ -428,7 +429,7 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
     }
 
     @Override
-    public void programClosed(Program program, PluginTool tool) {
+    public synchronized void programClosed(Program program, PluginTool tool) {
         // Remove from program-tool mapping
         Set<PluginTool> tools = programToTools.get(program);
         if (tools != null) {
@@ -670,8 +671,10 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
             provider.cleanup();
         }
 
-        for (ToolProvider provider : toolProviders) {
-            provider.cleanup();
+        synchronized (this) {
+            for (ToolProvider provider : toolProviders) {
+                provider.cleanup();
+            }
         }
 
         // Shut down the HTTP server

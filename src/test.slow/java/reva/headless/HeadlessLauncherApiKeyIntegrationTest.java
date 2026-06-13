@@ -25,6 +25,12 @@ import reva.plugin.ConfigManager;
 /**
  * Verifies that an API key supplied to the launcher enables authentication with
  * that exact key before the server starts.
+ *
+ * <p>Unlike the tool-provider integration tests, this class does not extend
+ * {@code RevaIntegrationTestBase}: it drives {@link RevaHeadlessLauncher} directly,
+ * which self-initializes Ghidra headlessly via {@code autoInitializeGhidra=true} and
+ * needs no test {@code Program}. {@code forkEvery 1} gives each test class a fresh JVM,
+ * so {@code Application.isInitialized()} is false at start and the launcher owns init.
  */
 public class HeadlessLauncherApiKeyIntegrationTest {
 
@@ -55,6 +61,15 @@ public class HeadlessLauncherApiKeyIntegrationTest {
         launcher.start();
         assertTrue(launcher.waitForServer(60000));
         assertFalse("API key auth stays disabled when no key supplied",
+            launcher.getConfigManager().isApiKeyEnabled());
+    }
+
+    @Test
+    public void emptyApiKeyLeavesAuthDisabled() throws Exception {
+        launcher = new RevaHeadlessLauncher(null, true, true, null, null, "");
+        launcher.start();
+        assertTrue(launcher.waitForServer(60000));
+        assertFalse("API key auth stays disabled when an empty key is supplied",
             launcher.getConfigManager().isApiKeyEnabled());
     }
 }

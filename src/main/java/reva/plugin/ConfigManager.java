@@ -42,6 +42,7 @@ import reva.plugin.config.ToolOptionsBackend;
 public class ConfigManager implements ConfigurationBackendListener {
     // Configuration option categories
     public static final String SERVER_OPTIONS = "ReVa Server Options";
+    public static final String TOOL_GROUP_OPTIONS = "ReVa Tool Groups";
 
     // Option names
     public static final String SERVER_PORT = "Server Port";
@@ -219,8 +220,9 @@ public class ConfigManager implements ConfigurationBackendListener {
             "Allow the server to bind to a non-localhost interface without API key authentication. " +
             "When false (default), ReVa prompts (GUI) or refuses to start (headless) in that situation.");
 
+        var groupOptions = toolBackend.getToolOptions(TOOL_GROUP_OPTIONS);
         for (ToolGroup group : ToolGroup.values()) {
-            toolOptions.registerOption(group.getOptionName(), DEFAULT_TOOL_GROUP_ENABLED, help,
+            groupOptions.registerOption(group.getDisplayName(), DEFAULT_TOOL_GROUP_ENABLED, help,
                 "Enable the " + group.getDisplayName() + " MCP tool group");
         }
     }
@@ -272,8 +274,8 @@ public class ConfigManager implements ConfigurationBackendListener {
             backend.getBoolean(SERVER_OPTIONS, ALLOW_PUBLIC_BINDING_NO_API_KEY, DEFAULT_ALLOW_PUBLIC_BINDING_NO_API_KEY));
 
         for (ToolGroup group : ToolGroup.values()) {
-            cachedOptions.put(group.getOptionName(),
-                backend.getBoolean(SERVER_OPTIONS, group.getOptionName(), DEFAULT_TOOL_GROUP_ENABLED));
+            cachedOptions.put(group.getDisplayName(),
+                backend.getBoolean(TOOL_GROUP_OPTIONS, group.getDisplayName(), DEFAULT_TOOL_GROUP_ENABLED));
         }
 
         Msg.debug(this, "Loaded ReVa configuration settings");
@@ -669,7 +671,7 @@ public class ConfigManager implements ConfigurationBackendListener {
      * @return whether the given tool group is enabled
      */
     public boolean isToolGroupEnabled(ToolGroup group) {
-        return (Boolean) cachedOptions.getOrDefault(group.getOptionName(), DEFAULT_TOOL_GROUP_ENABLED);
+        return (Boolean) cachedOptions.getOrDefault(group.getDisplayName(), DEFAULT_TOOL_GROUP_ENABLED);
     }
 
     /**
@@ -678,7 +680,7 @@ public class ConfigManager implements ConfigurationBackendListener {
      * @param enabled true to enable
      */
     public void setToolGroupEnabled(ToolGroup group, boolean enabled) {
-        backend.setBoolean(SERVER_OPTIONS, group.getOptionName(), enabled);
+        backend.setBoolean(TOOL_GROUP_OPTIONS, group.getDisplayName(), enabled);
     }
 
     /**

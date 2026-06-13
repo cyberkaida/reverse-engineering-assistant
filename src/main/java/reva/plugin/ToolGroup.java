@@ -45,13 +45,6 @@ public enum ToolGroup {
     }
 
     /**
-     * @return the ConfigManager option name for this group's enable toggle
-     */
-    public String getOptionName() {
-        return "Enable Tool Group: " + displayName;
-    }
-
-    /**
      * @return a stable lowercase-kebab identifier for this group (e.g. "core-analysis").
      *         Suitable for CLI flags and error messages.
      */
@@ -84,17 +77,17 @@ public enum ToolGroup {
     }
 
     /**
-     * Resolve a group from its configuration option name.
+     * Resolve a group from its display name (the option label), or null if none matches.
      *
-     * @param optionName the option name to look up
-     * @return the matching group, or null if none matches
+     * @param displayName the display name to look up
+     * @return the matching group, or null
      */
-    public static ToolGroup fromOptionName(String optionName) {
-        if (optionName == null) {
+    public static ToolGroup fromDisplayName(String displayName) {
+        if (displayName == null) {
             return null;
         }
         for (ToolGroup group : values()) {
-            if (group.getOptionName().equals(optionName)) {
+            if (group.getDisplayName().equals(displayName)) {
                 return group;
             }
         }

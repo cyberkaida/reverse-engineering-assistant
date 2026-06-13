@@ -684,7 +684,7 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
     public void onConfigChanged(String category, String name, Object oldValue, Object newValue) {
         // Handle server configuration changes
         if (ConfigManager.SERVER_OPTIONS.equals(category)) {
-            ToolGroup group = ToolGroup.fromOptionName(name);
+            ToolGroup group = ToolGroup.fromDisplayName(name);
             if (group != null) {
                 boolean enabled = Boolean.TRUE.equals(newValue);
                 Msg.info(this, "Tool group '" + group.getDisplayName() + "' " +

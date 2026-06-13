@@ -27,22 +27,22 @@ public class ToolGroupTest {
     }
 
     @Test
-    public void optionNameUsesPrefix() {
-        assertEquals("Enable Tool Group: Core Analysis", ToolGroup.CORE_ANALYSIS.getOptionName());
-        assertEquals("Enable Tool Group: Scripting", ToolGroup.SCRIPTING.getOptionName());
+    public void displayNamesAreHumanReadable() {
+        assertEquals("Core Analysis", ToolGroup.CORE_ANALYSIS.getDisplayName());
+        assertEquals("Scripting", ToolGroup.SCRIPTING.getDisplayName());
     }
 
     @Test
-    public void fromOptionNameRoundTrips() {
+    public void fromDisplayNameRoundTrips() {
         for (ToolGroup group : ToolGroup.values()) {
-            assertEquals(group, ToolGroup.fromOptionName(group.getOptionName()));
+            assertEquals(group, ToolGroup.fromDisplayName(group.getDisplayName()));
         }
     }
 
     @Test
-    public void fromOptionNameReturnsNullForUnknown() {
-        assertNull(ToolGroup.fromOptionName("Server Port"));
-        assertNull(ToolGroup.fromOptionName(null));
+    public void fromDisplayNameReturnsNullForUnknown() {
+        assertNull(ToolGroup.fromDisplayName("Server Port"));
+        assertNull(ToolGroup.fromDisplayName(null));
     }
 
     @Test

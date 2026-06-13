@@ -15,6 +15,7 @@
  */
 package reva.plugin.config;
 
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -27,56 +28,65 @@ import ghidra.util.bean.opteditor.OptionsVetoException;
 /**
  * Configuration backend that uses Ghidra's ToolOptions.
  * This is used in GUI mode where configuration is persisted to Ghidra's tool options.
+ * Each distinct category maps to its own ToolOptions page in Ghidra's options tree.
  */
 public class ToolOptionsBackend implements ConfigurationBackend, OptionsChangeListener {
 
     private final PluginTool tool;
-    private final ToolOptions toolOptions;
+    private final String primaryCategory;
+    private final Map<String, ToolOptions> optionsByCategory = new ConcurrentHashMap<>();
     private final Set<ConfigurationBackendListener> listeners = ConcurrentHashMap.newKeySet();
 
     /**
      * Constructor
      * @param tool The plugin tool
-     * @param category The options category (e.g., "ReVa Server Options")
+     * @param category The primary options category (e.g., "ReVa Server Options")
      */
     public ToolOptionsBackend(PluginTool tool, String category) {
         this.tool = tool;
-        this.toolOptions = tool.getOptions(category);
+        this.primaryCategory = category;
+        // Eagerly create + listen on the primary category.
+        getOrCreate(category);
+    }
 
-        // Register as listener for Ghidra's option changes
-        toolOptions.addOptionsChangeListener(this);
+    private ToolOptions getOrCreate(String category) {
+        return optionsByCategory.computeIfAbsent(category, c -> {
+            ToolOptions opts = tool.getOptions(c);
+            opts.addOptionsChangeListener(this);
+            return opts;
+        });
     }
 
     @Override
     public int getInt(String category, String name, int defaultValue) {
-        return toolOptions.getInt(name, defaultValue);
+        return getOrCreate(category).getInt(name, defaultValue);
     }
 
     @Override
     public void setInt(String category, String name, int value) {
-        toolOptions.setInt(name, value);
+        getOrCreate(category).setInt(name, value);
         // optionsChanged() will be called automatically by Ghidra
     }
 
     @Override
     public String getString(String category, String name, String defaultValue) {
-        return toolOptions.getString(name, defaultValue);
+        return getOrCreate(category).getString(name, defaultValue);
     }
 
     @Override
     public void setString(String category, String name, String value) {
-        toolOptions.setString(name, value);
+        getOrCreate(category).setString(name, value);
         // optionsChanged() will be called automatically by Ghidra
     }
 
     @Override
     public boolean getBoolean(String category, String name, boolean defaultValue) {
-        return toolOptions.getBoolean(name, defaultValue);
+        return getOrCreate(category).getBoolean(name, defaultValue);
     }
 
     @Override
     public void setBoolean(String category, String name, boolean value) {
-        toolOptions.setBoolean(name, value);
+        getOrCreate(category).setBoolean(name, value);
         // optionsChanged() will be called automatically by Ghidra
     }
 
@@ -97,9 +107,10 @@ public class ToolOptionsBackend implements ConfigurationBackend, OptionsChangeLi
 
     @Override
     public void dispose() {
-        if (toolOptions != null) {
-            toolOptions.removeOptionsChangeListener(this);
+        for (ToolOptions opts : optionsByCategory.values()) {
+            opts.removeOptionsChangeListener(this);
         }
+        optionsByCategory.clear();
         listeners.clear();
     }
 
@@ -124,10 +135,19 @@ public class ToolOptionsBackend implements ConfigurationBackend, OptionsChangeLi
     }
 
     /**
-     * Get the underlying ToolOptions (for registering options)
-     * @return The ToolOptions instance
+     * Get the underlying ToolOptions for the primary category (for registering options).
+     * @return The ToolOptions instance for the primary category
      */
     public ToolOptions getToolOptions() {
-        return toolOptions;
+        return getOrCreate(primaryCategory);
+    }
+
+    /**
+     * Get (creating and listening if needed) the ToolOptions for a specific category.
+     * @param category the options category name
+     * @return The ToolOptions instance for that category
+     */
+    public ToolOptions getToolOptions(String category) {
+        return getOrCreate(category);
     }
 }

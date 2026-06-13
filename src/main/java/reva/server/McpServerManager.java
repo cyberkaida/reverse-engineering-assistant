@@ -97,6 +97,10 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
     private final Map<ToolGroup, List<ToolProvider>> providersByGroup = new HashMap<>();
     private volatile boolean serverReady = false;
 
+    // Set while we revert a bind-affecting option after refused consent, so the
+    // resulting re-entrant onConfigChanged does not re-handle/restart.
+    private volatile boolean suppressBindChangeHandling = false;
+
     // Multi-tool tracking
     private final Set<PluginTool> registeredTools = ConcurrentHashMap.newKeySet();
     private final Map<Program, Set<PluginTool>> programToTools = new ConcurrentHashMap<>();
@@ -295,9 +299,17 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
     }
 
     /**
-     * Start the MCP server
+     * Start the MCP server.
      */
     public void startServer() {
+        startServer(false);
+    }
+
+    /**
+     * Start the MCP server, optionally skipping the public-binding consent check.
+     * @param guardAlreadyApproved true if consent was already obtained before calling this
+     */
+    private void startServer(boolean guardAlreadyApproved) {
         // Check if server is enabled in config
         if (!configManager.isServerEnabled()) {
             Msg.info(this, "MCP server is disabled in configuration. Not starting server.");
@@ -312,7 +324,7 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
 
         int serverPort = configManager.getServerPort();
         String serverHost = configManager.getServerHost();
-        if (!approvePublicBinding(serverHost)) {
+        if (!guardAlreadyApproved && !approvePublicBinding(serverHost)) {
             Msg.warn(this, "MCP server start aborted: public binding without API key was not approved.");
             return;
         }
@@ -586,9 +598,17 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
 
     /**
      * Restart the MCP server with new configuration.
-     * This method gracefully stops the current server and starts a new one.
      */
     public void restartServer() {
+        restartServer(false);
+    }
+
+    /**
+     * Restart the MCP server with new configuration, optionally skipping the
+     * public-binding consent check on the subsequent startServer call.
+     * @param guardAlreadyApproved true if consent was already obtained before calling this
+     */
+    private void restartServer(boolean guardAlreadyApproved) {
         Msg.info(this, "Restarting MCP server...");
 
         // Check if server is enabled in config
@@ -605,7 +625,7 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
         recreateTransportProvider();
 
         // Start the server with new configuration
-        startServer();
+        startServer(guardAlreadyApproved);
 
         Msg.info(this, "MCP server restart complete");
     }
@@ -684,18 +704,55 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
                 Msg.info(this, "Server port changed from " + oldValue + " to " + newValue + ". Restarting server...");
                 restartServer();
             } else if (ConfigManager.SERVER_HOST.equals(name)) {
-                Msg.info(this, "Server host changed from " + oldValue + " to " + newValue + ". Restarting server...");
-                restartServer();
+                handleBindAffectingChange(name, oldValue,
+                    "Server host changed from " + oldValue + " to " + newValue);
             } else if (ConfigManager.SERVER_ENABLED.equals(name)) {
                 Msg.info(this, "Server enabled setting changed from " + oldValue + " to " + newValue + ". Restarting server...");
                 restartServer();
             } else if (ConfigManager.API_KEY_ENABLED.equals(name)) {
-                Msg.info(this, "API key authentication setting changed from " + oldValue + " to " + newValue + ". Restarting server...");
-                restartServer();
+                handleBindAffectingChange(name, oldValue,
+                    "API key authentication setting changed from " + oldValue + " to " + newValue);
             } else if (ConfigManager.API_KEY.equals(name)) {
                 Msg.info(this, "API key changed. Restarting server...");
                 restartServer();
             }
+        }
+    }
+
+    /**
+     * Handle a config change (host / api-key-auth) that may newly create a risky public
+     * bind. Obtains consent BEFORE tearing the running server down. On refusal/cancel,
+     * reverts the option to its previous value and leaves the running server untouched
+     * (a true no-op). On approval, restarts without re-prompting.
+     */
+    private void handleBindAffectingChange(String optionName, Object oldValue, String logMessage) {
+        if (suppressBindChangeHandling) {
+            return; // re-entrant notification triggered by our own revert
+        }
+        if (!approvePublicBinding(configManager.getServerHost())) {
+            Msg.info(this, "Public binding not approved; reverting " + optionName + " to " +
+                oldValue + " and leaving the running server unchanged.");
+            revertBindOption(optionName, oldValue);
+            return;
+        }
+        Msg.info(this, logMessage + ". Restarting server...");
+        restartServer(true); // consent already obtained — do not re-prompt in startServer
+    }
+
+    /**
+     * Revert a bind-affecting option to its previous value without re-triggering
+     * handleBindAffectingChange (and thus without restarting the running server).
+     */
+    private void revertBindOption(String optionName, Object oldValue) {
+        suppressBindChangeHandling = true;
+        try {
+            if (ConfigManager.SERVER_HOST.equals(optionName)) {
+                configManager.setServerHost((String) oldValue);
+            } else if (ConfigManager.API_KEY_ENABLED.equals(optionName)) {
+                configManager.setApiKeyEnabled((Boolean) oldValue);
+            }
+        } finally {
+            suppressBindChangeHandling = false;
         }
     }
 

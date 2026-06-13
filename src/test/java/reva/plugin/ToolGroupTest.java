@@ -63,6 +63,13 @@ public class ToolGroupTest {
     }
 
     @Test
+    public void fromIdCanonicalIdRoundTripsForAllGroups() {
+        for (ToolGroup group : ToolGroup.values()) {
+            assertEquals(group, ToolGroup.fromId(group.canonicalId()));
+        }
+    }
+
+    @Test
     public void canonicalIdIsLowercaseKebab() {
         assertEquals("core-analysis", ToolGroup.CORE_ANALYSIS.canonicalId());
         assertEquals("data-and-types", ToolGroup.DATA_AND_TYPES.canonicalId());

@@ -245,6 +245,27 @@ java -cp ghidra.jar:reva.jar reva.headless.RevaHeadlessLauncher reva.properties
 - Projects are ephemeral temp directories
 - Random ports avoid conflicts with GUI/other instances
 - Clean project cleanup on stop
+- An API key is auto-generated (`ReVa-{uuid4}`) and required on the private bridge unless `--config` is supplied
+
+### Tool-group configuration (CLI + Python API)
+
+`mcp-reva` can disable or allowlist MCP tool groups at startup (ids: `core-analysis`,
+`data-and-types`, `advanced-analysis`, `diff`, `annotations`, `scripting`):
+
+```bash
+mcp-reva --disable-tool-group scripting          # turn off run-script et al.
+mcp-reva --tool-group core-analysis --tool-group diff   # allowlist: only these
+```
+
+The two flags are mutually exclusive. Unknown ids fail loudly. Programmatic equivalent:
+
+```python
+ReVaLauncher(disabled_tool_groups=["scripting"])      # or
+ReVaLauncher(enabled_tool_groups=["core-analysis"])
+```
+
+Under the hood these call `RevaHeadlessLauncher.setDisabledToolGroups`/`setEnabledToolGroups`
+(comma-separated ids), applied to the `ConfigManager` before the server registers tools.
 
 ## Troubleshooting
 

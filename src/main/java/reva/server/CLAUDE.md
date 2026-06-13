@@ -153,6 +153,7 @@ currentTransportProvider = HttpServletStreamableServerTransportProvider.builder(
 
 1. **Configuration Validation** - Check if server is enabled via ConfigManager
 2. **Host/Port Binding** - Configure ServerConnector with host and port
+2a. **Public-binding guard** - If bound to a non-localhost interface with API key auth disabled and the `Allow Public Binding Without API Key` option is false: GUI mode prompts (Allow Once / Allow Always / Cancel via `PublicBindingConsentDialog`); headless mode logs an error and refuses to start. The Scripting (run-script) group being enabled escalates the warning text. Runs before any socket is bound.
 3. **Security Setup** - Add ApiKeyAuthFilter if authentication is enabled
 4. **Transport Initialization** - Configure streamable HTTP transport
 5. **Provider Registration** - Register all 18 tool providers and resource providers
@@ -190,6 +191,8 @@ public void restartServer() {
 ## Tool and Resource Providers
 
 ### Tool Provider Registration
+
+Tool providers are registered per `ToolGroup` (Core Analysis, Data & Types, Advanced Analysis, Diff, Annotations, Scripting). Disabled groups are skipped at startup; toggling a group's config option adds/removes its tools live via `McpSyncServer.addTool`/`removeTool` (no server restart). `enableGroup`/`disableGroup` are `synchronized` on the same monitor as `programOpened`/`programClosed`, and `toolProviders` is a `CopyOnWriteArrayList`, so live toggles stay consistent with program-lifecycle notifications. The mapping below predates the grouping refactor and is illustrative; the live mapping lives in `createProvidersForGroup`.
 
 ```java
 private void initializeToolProviders() {

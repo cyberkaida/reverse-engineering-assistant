@@ -115,6 +115,8 @@ public class ConfigManager implements OptionsChangeListener {
 | `DEBUG_MODE` | false | Enable debug logging |
 | `MAX_DECOMPILER_SEARCH_FUNCTIONS` | 1000 | Function limit for search operations |
 | `DECOMPILER_TIMEOUT_SECONDS` | 10 | Decompiler operation timeout |
+| `ALLOW_PUBLIC_BINDING_NO_API_KEY` | false | Pre-approve binding to a non-localhost interface without API key auth |
+| `Enable Tool Group: <name>` | true | One per `ToolGroup` (Core Analysis, Data & Types, Advanced Analysis, Diff, Annotations, Scripting) |
 
 ### Configuration Change Handling
 

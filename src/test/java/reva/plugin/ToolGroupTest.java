@@ -44,4 +44,28 @@ public class ToolGroupTest {
         assertNull(ToolGroup.fromOptionName("Server Port"));
         assertNull(ToolGroup.fromOptionName(null));
     }
+
+    @Test
+    public void fromIdAcceptsFlexibleForms() {
+        assertEquals(ToolGroup.SCRIPTING, ToolGroup.fromId("scripting"));
+        assertEquals(ToolGroup.SCRIPTING, ToolGroup.fromId("SCRIPTING"));
+        assertEquals(ToolGroup.ADVANCED_ANALYSIS, ToolGroup.fromId("advanced-analysis"));
+        assertEquals(ToolGroup.ADVANCED_ANALYSIS, ToolGroup.fromId("advanced_analysis"));
+        assertEquals(ToolGroup.CORE_ANALYSIS, ToolGroup.fromId("  Core Analysis  "));
+        assertEquals(ToolGroup.DATA_AND_TYPES, ToolGroup.fromId("data-and-types"));
+    }
+
+    @Test
+    public void fromIdReturnsNullForUnknownOrNull() {
+        assertNull(ToolGroup.fromId("nope"));
+        assertNull(ToolGroup.fromId(null));
+        assertNull(ToolGroup.fromId(""));
+    }
+
+    @Test
+    public void canonicalIdIsLowercaseKebab() {
+        assertEquals("core-analysis", ToolGroup.CORE_ANALYSIS.canonicalId());
+        assertEquals("data-and-types", ToolGroup.DATA_AND_TYPES.canonicalId());
+        assertEquals("scripting", ToolGroup.SCRIPTING.canonicalId());
+    }
 }

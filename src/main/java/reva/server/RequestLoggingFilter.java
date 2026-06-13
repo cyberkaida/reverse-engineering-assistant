@@ -77,7 +77,10 @@ public class RequestLoggingFilter implements Filter {
         Enumeration<String> headerNames = req.getHeaderNames();
         while (headerNames.hasMoreElements()) {
             String name = headerNames.nextElement();
-            headers.append(name).append("=").append(req.getHeader(name)).append("; ");
+            // Redact authorization headers from logs for security (matches extractHeaders)
+            String value = (name.equalsIgnoreCase("Authorization") || name.equalsIgnoreCase("X-API-Key"))
+                ? "[REDACTED]" : req.getHeader(name);
+            headers.append(name).append("=").append(value).append("; ");
         }
 
         Msg.debug(this, String.format("MCP Request: %s %s Headers: %s",

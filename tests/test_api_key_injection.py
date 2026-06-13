@@ -23,7 +23,7 @@ async def test_factory_without_key_adds_no_header():
     factory = _make_httpx_factory(None)
     client = factory(headers={"Content-Type": "application/json"})
     async with client:
-        assert "x-api-key" not in client.headers
+        assert "X-API-Key" not in client.headers
 
 
 def test_bridge_passes_key_to_backend():
@@ -34,3 +34,12 @@ def test_bridge_passes_key_to_backend():
 def test_reconnecting_backend_stores_key():
     backend = ReconnectingBackend("http://localhost:1/mcp/message", api_key="ReVa-xyz")
     assert backend.api_key == "ReVa-xyz"
+
+
+@pytest.mark.asyncio
+async def test_backend_key_produces_injecting_factory():
+    backend = ReconnectingBackend("http://localhost:1/mcp/message", api_key="ReVa-xyz")
+    factory = _make_httpx_factory(backend.api_key)
+    client = factory()
+    async with client:
+        assert client.headers["X-API-Key"] == "ReVa-xyz"

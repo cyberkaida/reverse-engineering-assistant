@@ -28,7 +28,7 @@ from mcp.types import (
 )
 
 
-def _make_httpx_factory(api_key=None):
+def _make_httpx_factory(api_key: str | None = None):
     """Build an httpx client factory that disables keepalive and (optionally)
     injects an X-API-Key header on every request.
 

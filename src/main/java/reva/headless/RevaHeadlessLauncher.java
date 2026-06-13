@@ -246,7 +246,14 @@ public class RevaHeadlessLauncher {
         serverManager = new McpServerManager(configManager);
         serverManager.startServer();
 
-        Msg.info(this, "ReVa MCP server started in headless mode");
+        // startServer() can return without binding (server disabled, or public-binding
+        // guard refused), so report the actual outcome rather than always claiming success.
+        if (serverManager.isServerRunning()) {
+            Msg.info(this, "ReVa MCP server started in headless mode");
+        } else {
+            Msg.warn(this, "ReVa MCP server did not start (disabled in config, or public " +
+                "binding without API key was not approved)");
+        }
     }
 
     /**

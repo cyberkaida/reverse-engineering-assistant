@@ -17,14 +17,20 @@
 /*
  * Forked from MCP Java SDK's HttpServletStreamableServerTransportProvider (v1.1.0).
  *
- * FIX: The upstream sendMessage() catches bare Exception and unconditionally removes
- * the session from the sessions map. A serialization error on a single message
- * permanently kills the entire session. This fork splits the catch block to separate
- * serialization failures (non-fatal) from connection failures (fatal).
+ * Upstream's sendMessage() catches bare Exception and unconditionally calls
+ * sessions.remove(), so ANY failure on a single message permanently kills the whole
+ * session for the client. This fork keeps the session alive in two cases:
  *
- * No upstream issue filed yet — the bug is in HttpServletStreamableServerTransportProvider.sendMessage()
- * which catches bare Exception and unconditionally calls sessions.remove(), so any serialization
- * error permanently kills the session.
+ *   1. Serialization failures are non-fatal: a message that cannot be serialized is
+ *      logged and dropped, but the session survives.
+ *   2. A dead listening SSE stream is non-fatal: the streamable-HTTP session is keyed
+ *      by Mcp-Session-Id and is resumable across GET reconnects, so a failed write
+ *      closes only that stream and the session stays in the map. The client reconnects
+ *      with Last-Event-ID and replays. Removing the session would turn a routine
+ *      GET-stream recycle into a 404 on reconnect and a full re-initialize, dropping
+ *      every registered tool in the interim.
+ *
+ * No upstream issue filed yet.
  */
 package reva.server;
 
@@ -75,10 +81,11 @@ import reactor.core.publisher.Mono;
  *
  * <p>
  * The upstream implementation catches bare {@code Exception} in {@code sendMessage()}
- * and unconditionally removes the session, which means a single serialization error
- * permanently kills the session for ALL clients. This fork splits the catch block to
- * separate serialization failures (session stays alive) from connection failures
- * (session is properly removed).
+ * and unconditionally removes the session, so a single serialization error or a
+ * transient listening-stream write failure permanently kills the session for the
+ * client. This fork keeps the session alive in both cases: serialization failures
+ * drop only the offending message, and a failed write to the listening SSE stream
+ * closes only that stream while the session stays resumable across GET reconnects.
  *
  * @see io.modelcontextprotocol.server.transport.HttpServletStreamableServerTransportProvider
  */
@@ -627,8 +634,10 @@ public class ResilientStreamableServerTransportProvider extends HttpServlet
 	}
 
 	/**
-	 * Resilient session transport that separates serialization errors from connection
-	 * errors in sendMessage(). Serialization failures don't kill the session.
+	 * Resilient session transport for a single listening SSE stream. Neither a
+	 * serialization error nor a write failure on this stream removes the session:
+	 * serialization errors drop only the message, and a dead connection closes only
+	 * this stream, leaving the session resumable across GET reconnects.
 	 */
 	private class ResilientMcpSessionTransport implements McpStreamableServerTransport {
 
@@ -657,10 +666,11 @@ public class ResilientStreamableServerTransportProvider extends HttpServlet
 		/**
 		 * Sends a JSON-RPC message with resilient error handling.
 		 *
-		 * <p>FIX: The upstream MCP SDK catches bare Exception and removes the session
-		 * on ANY error, including serialization failures. This implementation splits
-		 * the operation: serialization errors are logged but don't kill the session,
-		 * while actual connection failures properly remove the session.
+		 * <p>The upstream MCP SDK catches bare Exception and removes the session on ANY
+		 * error. This implementation splits the operation: serialization errors are
+		 * logged and the message dropped, while a write failure closes only this
+		 * listening stream. Neither removes the session, so the client can reconnect
+		 * the GET stream (with Last-Event-ID) and resume.
 		 */
 		@Override
 		public Mono<Void> sendMessage(McpSchema.JSONRPCMessage message, String messageId) {
@@ -690,17 +700,21 @@ public class ResilientStreamableServerTransportProvider extends HttpServlet
 					}
 
 					// Step 2: Send the serialized message over the wire. If this fails,
-					// the client has actually disconnected and the session should be removed.
+					// the listening SSE connection is gone -- but the SESSION is not.
+					// Streamable-HTTP keys sessions on Mcp-Session-Id and they are
+					// resumable across GET reconnects, so close only THIS stream and
+					// leave the session in the map. Removing it would make the client's
+					// reconnect (same id) hit a 404 and force a full re-initialize,
+					// dropping every registered tool until that completes.
 					try {
 						ResilientStreamableServerTransportProvider.this.sendEvent(writer, MESSAGE_EVENT_TYPE, jsonText,
 								messageId != null ? messageId : this.sessionId);
 						logger.debug("Message sent to session {} with ID {}", this.sessionId, messageId);
 					}
 					catch (Exception e) {
-						logger.error("Failed to send message to session {}: {}",
-								this.sessionId, e.getMessage());
-						ResilientStreamableServerTransportProvider.this.sessions.remove(this.sessionId);
-						this.asyncContext.complete();
+						logger.debug("Listening stream for session {} failed to send; closing stream but keeping "
+								+ "session for reconnect: {}", this.sessionId, e.getMessage());
+						this.close();
 					}
 				}
 				finally {

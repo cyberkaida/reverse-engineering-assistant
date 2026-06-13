@@ -433,7 +433,11 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
         if (scripting) {
             sb.append(" and RUN ARBITRARY PYTHON CODE on this host (the run-script tool is enabled)");
         }
-        sb.append(".\n\nBind to 127.0.0.1, enable API key authentication, or disable the affected tool groups.");
+        sb.append(".\n\nTo secure it: bind to 127.0.0.1, or enable API key authentication.");
+        if (scripting) {
+            sb.append(" Disabling the Scripting tool group removes the remote code-execution risk, " +
+                "but the server remains reachable on this interface.");
+        }
         return sb.toString();
     }
 
@@ -672,6 +676,10 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
                 }
                 return;
             }
+            // Note: ALLOW_PUBLIC_BINDING_NO_API_KEY intentionally does NOT trigger a restart.
+            // It is consulted only at startServer() time (the public-binding guard); flipping it
+            // must not bounce a running, already-consented server, and "Allow Always" sets it from
+            // within startServer() itself — restarting there would re-enter server startup.
             if (ConfigManager.SERVER_PORT.equals(name)) {
                 Msg.info(this, "Server port changed from " + oldValue + " to " + newValue + ". Restarting server...");
                 restartServer();

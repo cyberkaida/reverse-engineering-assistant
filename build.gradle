@@ -187,6 +187,16 @@ task integrationTest(type: Test) {
 
 	// Exclude suite classes
 	exclude '**/*Suite*'
+
+	// Stream test failures with full stack traces to stdout — CI artifacts
+	// (HTML/XML reports) are not always reachable, and silent `2 failed`
+	// summaries are useless for triage.
+	testLogging {
+		events 'failed', 'standardError'
+		exceptionFormat 'full'
+		showStackTraces true
+		showCauses true
+	}
 }
 
 // Make check depend on integrationTest

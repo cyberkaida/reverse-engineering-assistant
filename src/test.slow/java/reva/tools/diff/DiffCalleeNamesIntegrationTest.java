@@ -154,7 +154,10 @@ public class DiffCalleeNamesIntegrationTest extends RevaIntegrationTestBase {
             callMcpTool("diff-create-session", args);
 
             // 1. Positive match guard: caller_fn must have been matched (not listed as removed).
+            //    diff-list-functions does not accept `correlators` — strip it from the inherited
+            //    map so MCP SDK 2.0 schema validation (additionalProperties=false) doesn't reject.
             Map<String, Object> removedArgs = new HashMap<>(args);
+            removedArgs.remove("correlators");
             removedArgs.put("category", "removed");
             JsonNode removed = parseJsonContent(callMcpTool("diff-list-functions", removedArgs));
             for (JsonNode row : removed.get("functions")) {
@@ -167,6 +170,7 @@ public class DiffCalleeNamesIntegrationTest extends RevaIntegrationTestBase {
             //    The only difference across programs is (a) a shifted FUN_* callee (now filtered)
             //    and (b) a different call displacement (body-bytes, opt-in off by default).
             Map<String, Object> changedArgs = new HashMap<>(args);
+            changedArgs.remove("correlators");
             changedArgs.put("category", "changed");
             JsonNode changed = parseJsonContent(callMcpTool("diff-list-functions", changedArgs));
             for (JsonNode row : changed.get("functions")) {

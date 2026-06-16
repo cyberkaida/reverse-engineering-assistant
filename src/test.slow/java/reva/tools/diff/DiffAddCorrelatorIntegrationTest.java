@@ -199,7 +199,9 @@ public class DiffAddCorrelatorIntegrationTest extends RevaIntegrationTestBase {
 
     /**
      * A bad correlator key must produce a synchronous error response (not a job).
-     * Note: a valid session must exist first, since requireSession() runs before correlatorForKey().
+     * Under MCP SDK 2.0 the schema-level enum constraint rejects unknown
+     * correlator names before the handler runs; verify the error references the
+     * offending `correlator` field rather than the literal value the user passed.
      */
     @Test
     public void testAddCorrelatorBadCorrelatorErrors() throws Exception {
@@ -217,12 +219,13 @@ public class DiffAddCorrelatorIntegrationTest extends RevaIntegrationTestBase {
             baseArgs.put("correlators", List.of("symbol-name"));
             parseJsonContent(callMcpTool("diff-create-session", baseArgs));
 
-            // Now try a bad correlator key — should error from correlatorForKey().
+            // Now try a bad correlator key — SDK enum validation rejects with a
+            // message that names the offending field.
             Map<String, Object> addArgs = new HashMap<>();
             addArgs.put("sourceProgramPath", srcPath);
             addArgs.put("destinationProgramPath", dstPath);
             addArgs.put("correlator", "not-a-correlator");
-            verifyMcpToolFailsWithError("diff-add-correlator", addArgs, "not-a-correlator");
+            verifyMcpToolFailsWithError("diff-add-correlator", addArgs, "correlator");
         } finally {
             serverManager.programClosed(src, tool);
             serverManager.programClosed(dst, tool);

@@ -84,7 +84,8 @@ public class ScriptToolProviderTest {
         provider.registerTools();
         Tool runScript = findTool(provider, "run-script");
         assertNotNull(runScript);
-        List<String> required = runScript.inputSchema().required();
+        @SuppressWarnings("unchecked")
+        List<String> required = (List<String>) runScript.inputSchema().get("required");
         assertTrue(
             "run-script must require programPath",
             required.contains("programPath"));
@@ -96,10 +97,9 @@ public class ScriptToolProviderTest {
         Tool readScript = findTool(provider, "read-script");
         assertNotNull(readScript);
         // offset & limit are optional, so they appear in properties but not required
-        Object props = readScript.inputSchema().properties();
         @SuppressWarnings("unchecked")
         java.util.Map<String, Object> properties =
-            (java.util.Map<String, Object>) props;
+            (java.util.Map<String, Object>) readScript.inputSchema().get("properties");
         assertTrue("read-script schema should include offset",
             properties.containsKey("offset"));
         assertTrue("read-script schema should include limit",
@@ -111,7 +111,8 @@ public class ScriptToolProviderTest {
         provider.registerTools();
         Tool editScript = findTool(provider, "edit-script");
         assertNotNull(editScript);
-        List<String> required = editScript.inputSchema().required();
+        @SuppressWarnings("unchecked")
+        List<String> required = (List<String>) editScript.inputSchema().get("required");
         assertTrue(required.contains("old_string"));
         assertTrue(required.contains("new_string"));
     }
@@ -123,7 +124,7 @@ public class ScriptToolProviderTest {
         assertNotNull(writeScript);
         @SuppressWarnings("unchecked")
         java.util.Map<String, Object> properties =
-            (java.util.Map<String, Object>) writeScript.inputSchema().properties();
+            (java.util.Map<String, Object>) writeScript.inputSchema().get("properties");
         assertTrue("write-script must expose overwrite flag",
             properties.containsKey("overwrite"));
     }
@@ -152,7 +153,7 @@ public class ScriptToolProviderTest {
         assertNotNull(editScript);
         @SuppressWarnings("unchecked")
         java.util.Map<String, Object> properties =
-            (java.util.Map<String, Object>) editScript.inputSchema().properties();
+            (java.util.Map<String, Object>) editScript.inputSchema().get("properties");
         @SuppressWarnings("unchecked")
         java.util.Map<String, Object> scriptNameProperty =
             (java.util.Map<String, Object>) properties.get("scriptName");

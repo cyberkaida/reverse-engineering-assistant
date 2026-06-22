@@ -29,7 +29,7 @@ jobs:
     name: Test on Ghidra ${{ matrix.ghidra-version }}
     runs-on: ${{ matrix.os }}
     steps:
-    - uses: actions/checkout@v6
+    - uses: actions/checkout@v7
       with:
         lfs: true
 
@@ -94,7 +94,7 @@ jobs:
     name: Lint and Check 🔍
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v6
+    - uses: actions/checkout@v7
       with:
         lfs: true
 
@@ -138,7 +138,7 @@ jobs:
       security-events: write
 
     steps:
-    - uses: actions/checkout@v6
+    - uses: actions/checkout@v7
       with:
         lfs: true
 

@@ -63,7 +63,7 @@ jobs:
         python-version: "3.10"
 
     - name: Install Ghidra ${{ matrix.ghidra-version }}
-      uses: antoniovazquezblanco/setup-ghidra@v2.1.2
+      uses: antoniovazquezblanco/setup-ghidra@v2.1.3
       with:
         version: ${{ matrix.ghidra-version }}
         auth_token: ${{ secrets.GITHUB_TOKEN }}

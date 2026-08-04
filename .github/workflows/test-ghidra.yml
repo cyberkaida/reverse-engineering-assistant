@@ -53,7 +53,7 @@ jobs:
 
 
     - name: Setup Gradle 🔧
-      uses: gradle/actions/setup-gradle@v6
+      uses: gradle/actions/setup-gradle@v6.2.0
       with:
         gradle-version: "8.14"
 
@@ -117,7 +117,7 @@ jobs:
         echo "DISPLAY=:99" >> $GITHUB_ENV
 
     - name: Setup Gradle 🔧
-      uses: gradle/actions/setup-gradle@v6
+      uses: gradle/actions/setup-gradle@v6.2.0
       with:
         gradle-version: "8.14"
         dependency-graph: generate-and-submit
@@ -162,7 +162,7 @@ jobs:
         auth_token: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Setup Gradle for CodeQL 🔧
-      uses: gradle/actions/setup-gradle@v6
+      uses: gradle/actions/setup-gradle@v6.2.0
       with:
         gradle-version: "8.14"
 

@@ -43,6 +43,14 @@ public class revaExporter extends Exporter {
 	}
 
 	@Override
+	public boolean canExportDomainObject(Class<? extends DomainObject> domainObjectClass) {
+
+		// Return true if this exporter can export the given domain object type.
+
+		return false;
+	}
+
+	@Override
 	public boolean supportsAddressRestrictedExport() {
 
 		// Return true if addrSet export parameter can be used to restrict export

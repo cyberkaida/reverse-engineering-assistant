@@ -36,7 +36,7 @@ jobs:
         distribution: "microsoft"
 
     - name: Install Ghidra 🐉
-      uses: antoniovazquezblanco/setup-ghidra@v2.1.4
+      uses: antoniovazquezblanco/setup-ghidra@v2.1.6
       with:
         version: ${{ matrix.ghidra-version }}
         auth_token: ${{ secrets.GITHUB_TOKEN }}
@@ -101,7 +101,7 @@ jobs:
         distribution: "microsoft"
 
     - name: Install Ghidra 🐉
-      uses: antoniovazquezblanco/setup-ghidra@v2.1.4
+      uses: antoniovazquezblanco/setup-ghidra@v2.1.6
       with:
         version: "latest"
         auth_token: ${{ secrets.GITHUB_TOKEN }}
@@ -152,7 +152,7 @@ jobs:
         queries: security-extended,security-and-quality
 
     - name: Install Ghidra 🐉
-      uses: antoniovazquezblanco/setup-ghidra@v2.1.4
+      uses: antoniovazquezblanco/setup-ghidra@v2.1.6
       with:
         version: "latest"
         auth_token: ${{ secrets.GITHUB_TOKEN }}

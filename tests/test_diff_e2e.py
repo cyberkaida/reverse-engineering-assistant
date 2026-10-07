@@ -69,7 +69,7 @@ def _result_text(result) -> str:
 def _parse(result, context: str) -> dict:
     """Assert the tool call succeeded, then parse its JSON body."""
     assert result is not None, f"{context}: returned None — server unreachable?"
-    assert not getattr(result, "isError", False), (
+    assert not getattr(result, "is_error", False), (
         f"{context} failed: {_result_text(result)}"
     )
     return json.loads(result.content[0].text)
@@ -370,7 +370,7 @@ class TestDiffErrorPaths:
         result = await mcp_stdio_client.call_tool(
             "diff-status", arguments={"jobId": bogus}
         )
-        assert getattr(result, "isError", False), (
+        assert getattr(result, "is_error", False), (
             f"diff-status with unknown jobId must be an error; got: {_result_text(result)}"
         )
         assert "No diff job" in _result_text(result), (
@@ -384,7 +384,7 @@ class TestDiffErrorPaths:
         result = await mcp_stdio_client.call_tool(
             "diff-cancel", arguments={"jobId": bogus}
         )
-        assert getattr(result, "isError", False), (
+        assert getattr(result, "is_error", False), (
             f"diff-cancel with unknown jobId must be an error; got: {_result_text(result)}"
         )
         assert "No diff job" in _result_text(result), (
@@ -402,7 +402,7 @@ class TestDiffErrorPaths:
                 "destinationProgramPath": f"/no_such_dst_{token}",
             },
         )
-        assert getattr(result, "isError", False), (
+        assert getattr(result, "is_error", False), (
             f"diff-summary without a session must be an error; got: {_result_text(result)}"
         )
         assert "diff-create-session" in _result_text(result), (

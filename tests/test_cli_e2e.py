@@ -69,11 +69,11 @@ class TestCLIStartup:
         # session); assert on the stored InitializeResult.
         info = mcp_stdio_client.reva_init_result
 
-        assert info.serverInfo.name == "ReVa"
-        # The version tracks the MCP SDK release; require a sane semver-ish
-        # shape rather than pinning a specific release.
-        assert re.match(r"\d+\.\d+", info.serverInfo.version), (
-            f"Unexpected server version format: {info.serverInfo.version!r}"
+        assert info.server_info.name == "ReVa"
+        # The bridge reports its own CLI version under MCP SDK v2 (v1 defaulted to
+        # the SDK's version); require a sane semver-ish shape rather than pinning.
+        assert re.match(r"\d+\.\d+", info.server_info.version), (
+            f"Unexpected server version format: {info.server_info.version!r}"
         )
 
     async def test_server_capabilities(self, mcp_stdio_client):
@@ -110,7 +110,7 @@ class TestMCPToolCalls:
         )
 
         assert result is not None
-        assert not result.isError, (
+        assert not result.is_error, (
             f"list-project-files failed: "
             f"{result.content[0].text if result.content else 'no content'}"
         )
@@ -164,7 +164,7 @@ class TestProjectCreation:
 
         # A real fixture binary must import cleanly; an error here would make
         # the .reva assertion below meaningless.
-        assert not getattr(import_result, "isError", False), (
+        assert not getattr(import_result, "is_error", False), (
             f"Import failed: {import_result.content[0].text if import_result.content else 'no content'}"
         )
 
@@ -210,7 +210,7 @@ class TestBinaryImportRoundTrip:
         )
 
         assert import_result is not None
-        assert not getattr(import_result, "isError", False), (
+        assert not getattr(import_result, "is_error", False), (
             f"Import failed: {import_result.content[0].text if import_result.content else 'no content'}"
         )
 
@@ -226,7 +226,7 @@ class TestBinaryImportRoundTrip:
         )
 
         assert list_result is not None
-        assert not getattr(list_result, "isError", False)
+        assert not getattr(list_result, "is_error", False)
         assert len(list_result.content) > 0
 
         metadata = json.loads(list_result.content[0].text)
@@ -260,29 +260,29 @@ def _result_error_text(result) -> str:
 class TestErrorHandling:
     """Test error handling in CLI.
 
-    Server must signal failure either by raising an MCP exception (e.g., McpError)
+    Server must signal failure either by raising an MCP exception (e.g., MCPError)
     or by returning a CallToolResult with isError=True. A silent success on a
     nonexistent tool or missing required args would be a regression.
     """
 
     async def test_handles_unknown_tool(self, mcp_stdio_client):
-        """Unknown tool name surfaces as isError or McpError, never silent success."""
-        from mcp import McpError  # canonical import path used elsewhere in repo
+        """Unknown tool name surfaces as is_error or MCPError, never silent success."""
+        from mcp import MCPError  # canonical import path used elsewhere in repo
 
         try:
             result = await mcp_stdio_client.call_tool(
                 "nonexistent-tool",
                 arguments={}
             )
-        except McpError as exc:
+        except MCPError as exc:
             # Acceptable: SDK surfaced server-side method/tool-not-found
             assert "nonexistent-tool" in str(exc) or "tool" in str(exc).lower(), (
-                f"McpError did not mention the unknown tool: {exc}"
+                f"MCPError did not mention the unknown tool: {exc}"
             )
             return
 
         assert result is not None, "Server must respond, even for unknown tools"
-        assert getattr(result, "isError", False) is True, (
+        assert getattr(result, "is_error", False) is True, (
             f"Unknown tool must return isError=True, got result={result}"
         )
         error_text = _result_error_text(result)
@@ -290,22 +290,22 @@ class TestErrorHandling:
 
     async def test_handles_invalid_tool_arguments(self, mcp_stdio_client):
         """Calling get-functions without required programPath surfaces a clear error."""
-        from mcp import McpError  # canonical import path used elsewhere in repo
+        from mcp import MCPError  # canonical import path used elsewhere in repo
 
         try:
             result = await mcp_stdio_client.call_tool(
                 "get-functions",
                 arguments={}  # missing required programPath
             )
-        except McpError as exc:
+        except MCPError as exc:
             # Acceptable: SDK surfaced schema-validation rejection
             assert "programPath" in str(exc) or "required" in str(exc).lower(), (
-                f"McpError must mention the missing argument: {exc}"
+                f"MCPError must mention the missing argument: {exc}"
             )
             return
 
         assert result is not None
-        assert getattr(result, "isError", False) is True, (
+        assert getattr(result, "is_error", False) is True, (
             f"Missing required programPath must return isError=True, got result={result}"
         )
         error_text = _result_error_text(result)

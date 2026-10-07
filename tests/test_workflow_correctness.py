@@ -79,7 +79,7 @@ async def _import_and_analyze(client, fixture_name: str = "test_arm64") -> str:
         },
     )
     assert result is not None, "import-file returned None — server unreachable?"
-    assert not getattr(result, "isError", False), (
+    assert not getattr(result, "is_error", False), (
         f"Import failed: {_result_text(result)}"
     )
     data = json.loads(result.content[0].text)
@@ -96,7 +96,7 @@ async def _import_and_analyze(client, fixture_name: str = "test_arm64") -> str:
         },
     )
     assert analyze_result is not None, "analyze-program returned None — server unreachable?"
-    assert not getattr(analyze_result, "isError", False), (
+    assert not getattr(analyze_result, "is_error", False), (
         f"analyze-program failed: {_result_text(analyze_result)}"
     )
     return program_path
@@ -124,7 +124,7 @@ async def _find_function(client, program_path: str, name_substr: str) -> dict:
             },
         )
         assert result is not None, "get-functions returned None — server unreachable?"
-        assert not getattr(result, "isError", False), (
+        assert not getattr(result, "is_error", False), (
             f"get-functions failed: {_result_text(result)}"
         )
         funcs_this_round = json.loads(result.content[0].text).get("functions", [])
@@ -164,7 +164,7 @@ class TestDecompilationCorrectness:
             },
         )
 
-        assert decomp_result is not None and not getattr(decomp_result, "isError", False), (
+        assert decomp_result is not None and not getattr(decomp_result, "is_error", False), (
             f"get-decompilation failed: {decomp_result.content[0].text if decomp_result.content else 'no content'}"
         )
 
@@ -213,7 +213,7 @@ class TestCrossReferenceDiscovery:
             },
         )
 
-        assert xref_result is not None and not getattr(xref_result, "isError", False), (
+        assert xref_result is not None and not getattr(xref_result, "is_error", False), (
             f"find-cross-references failed: {xref_result.content[0].text if xref_result.content else 'no content'}"
         )
 
@@ -270,7 +270,7 @@ class TestVariableRenamePersistence:
                 "limit": 200,
             },
         )
-        assert not getattr(first_decomp, "isError", False), (
+        assert not getattr(first_decomp, "is_error", False), (
             f"Initial get-decompilation failed: {first_decomp.content[0].text}"
         )
         first_data = json.loads(first_decomp.content[0].text)
@@ -297,7 +297,7 @@ class TestVariableRenamePersistence:
                 "variableMappings": {original_name: new_name},
             },
         )
-        assert not getattr(rename_result, "isError", False), (
+        assert not getattr(rename_result, "is_error", False), (
             f"rename-variables failed: {rename_result.content[0].text}"
         )
         rename_data = json.loads(rename_result.content[0].text)
@@ -317,7 +317,7 @@ class TestVariableRenamePersistence:
                 "keepCheckedOut": False,
             },
         )
-        assert not getattr(checkin, "isError", False), (
+        assert not getattr(checkin, "is_error", False), (
             f"checkin-program failed: {checkin.content[0].text}"
         )
         checkin_data = json.loads(checkin.content[0].text)
@@ -339,7 +339,7 @@ class TestVariableRenamePersistence:
                 "limit": 200,
             },
         )
-        assert not getattr(second_decomp, "isError", False), (
+        assert not getattr(second_decomp, "is_error", False), (
             f"Second get-decompilation failed: {second_decomp.content[0].text}"
         )
         second_data = json.loads(second_decomp.content[0].text)
@@ -391,7 +391,7 @@ class TestStructureWorkflow:
                 "cDefinition": c_def,
             },
         )
-        assert not getattr(parse_result, "isError", False), (
+        assert not getattr(parse_result, "is_error", False), (
             f"parse-c-structure failed: {parse_result.content[0].text if parse_result.content else 'no content'}"
         )
         parse_data = json.loads(parse_result.content[0].text)
@@ -411,7 +411,7 @@ class TestStructureWorkflow:
                 "nameFilter": struct_name,
             },
         )
-        assert not getattr(list_result, "isError", False), (
+        assert not getattr(list_result, "is_error", False), (
             f"list-structures failed: {list_result.content[0].text if list_result.content else 'no content'}"
         )
         list_data = json.loads(list_result.content[0].text)
@@ -433,7 +433,7 @@ class TestStructureWorkflow:
                 "clearExisting": True,
             },
         )
-        assert not getattr(apply_result, "isError", False), (
+        assert not getattr(apply_result, "is_error", False), (
             f"apply-structure failed: {apply_result.content[0].text if apply_result.content else 'no content'}"
         )
         apply_data = json.loads(apply_result.content[0].text)
@@ -451,7 +451,7 @@ class TestStructureWorkflow:
             "get-data",
             arguments={"programPath": program_path, "addressOrSymbol": target_addr},
         )
-        assert not getattr(verify, "isError", False), (
+        assert not getattr(verify, "is_error", False), (
             f"get-data after apply-structure failed: {_result_text(verify)}"
         )
         verify_data = json.loads(verify.content[0].text)
@@ -484,7 +484,7 @@ class TestSearchDecompilation:
                 "caseSensitive": True,
             },
         )
-        assert not getattr(result, "isError", False), (
+        assert not getattr(result, "is_error", False), (
             f"search-decompilation failed: {result.content[0].text if result.content else 'no content'}"
         )
         data = json.loads(result.content[0].text)
@@ -542,7 +542,7 @@ class TestSetFunctionPrototype:
                 "limit": 100,
             },
         )
-        assert not getattr(before, "isError", False), (
+        assert not getattr(before, "is_error", False), (
             f"Initial get-decompilation failed: {before.content[0].text}"
         )
         before_text = json.loads(before.content[0].text).get("decompilation", "")
@@ -560,7 +560,7 @@ class TestSetFunctionPrototype:
                 "signature": prototype,
             },
         )
-        assert not getattr(proto_result, "isError", False), (
+        assert not getattr(proto_result, "is_error", False), (
             f"set-function-prototype failed: {proto_result.content[0].text if proto_result.content else 'no content'}"
         )
         proto_data = json.loads(proto_result.content[0].text)
@@ -577,7 +577,7 @@ class TestSetFunctionPrototype:
                 "limit": 100,
             },
         )
-        assert not getattr(after, "isError", False), (
+        assert not getattr(after, "is_error", False), (
             f"Post-prototype get-decompilation failed: {after.content[0].text}"
         )
         after_text = json.loads(after.content[0].text).get("decompilation", "")
@@ -609,7 +609,7 @@ class TestStringDiscovery:
                 "maxCount": 50,
             },
         )
-        assert not getattr(result, "isError", False), (
+        assert not getattr(result, "is_error", False), (
             f"get-strings failed: {result.content[0].text if result.content else 'no content'}"
         )
 
@@ -618,7 +618,7 @@ class TestStringDiscovery:
         # multiple TextContent items). The first element is pagination
         # metadata; the rest are string entries.
         assert result.content and result.content[0].text, "Empty response body"
-        assert not getattr(result, "isError", False), _result_text(result)
+        assert not getattr(result, "is_error", False), _result_text(result)
         items = json.loads(result.content[0].text)
         assert isinstance(items, list) and len(items) >= 2, (
             f"Expected JSON array of [metadata, ...entries]; got {items!r}"
@@ -665,7 +665,7 @@ class TestCallersDecompiled:
                 "includeCallContext": True,
             },
         )
-        assert not getattr(result, "isError", False), (
+        assert not getattr(result, "is_error", False), (
             f"get-callers-decompiled failed: {result.content[0].text if result.content else 'no content'}"
         )
         data = json.loads(result.content[0].text)
@@ -719,7 +719,7 @@ class TestImportReferences:
                 "maxResults": 100,
             },
         )
-        assert not getattr(result, "isError", False), (
+        assert not getattr(result, "is_error", False), (
             f"find-import-references failed: {result.content[0].text if result.content else 'no content'}"
         )
         data = json.loads(result.content[0].text)
@@ -767,7 +767,7 @@ class TestCallGraph:
                 "depth": 1,
             },
         )
-        assert not getattr(result, "isError", False), (
+        assert not getattr(result, "is_error", False), (
             f"get-call-graph failed: {result.content[0].text if result.content else 'no content'}"
         )
         data = json.loads(result.content[0].text)
@@ -814,7 +814,7 @@ class TestListImports:
                 "maxResults": 100,
             },
         )
-        assert not getattr(result, "isError", False), (
+        assert not getattr(result, "is_error", False), (
             f"list-imports failed: {result.content[0].text if result.content else 'no content'}"
         )
         data = json.loads(result.content[0].text)
@@ -860,7 +860,7 @@ class TestFunctionTags:
                 "tags": [tag_name],
             },
         )
-        assert not getattr(add_result, "isError", False), (
+        assert not getattr(add_result, "is_error", False), (
             f"function-tags add failed: {add_result.content[0].text}"
         )
         add_data = json.loads(add_result.content[0].text)
@@ -877,7 +877,7 @@ class TestFunctionTags:
                 "mode": "list",
             },
         )
-        assert not getattr(list_result, "isError", False), (
+        assert not getattr(list_result, "is_error", False), (
             f"function-tags list failed: {list_result.content[0].text}"
         )
         list_data = json.loads(list_result.content[0].text)
@@ -898,7 +898,7 @@ class TestFunctionTags:
                 "maxCount": 50,
             },
         )
-        assert not getattr(filtered, "isError", False), (
+        assert not getattr(filtered, "is_error", False), (
             f"get-functions with filterByTag failed: {filtered.content[0].text}"
         )
         filtered_names = [
@@ -934,7 +934,7 @@ class TestReadMemory:
                 "format": "both",
             },
         )
-        assert not getattr(result, "isError", False), (
+        assert not getattr(result, "is_error", False), (
             f"read-memory failed: {result.content[0].text if result.content else 'no content'}"
         )
         data = json.loads(result.content[0].text)
@@ -985,7 +985,7 @@ class TestBookmarkWorkflow:
                 "comment": bookmark_comment,
             },
         )
-        assert not getattr(set_result, "isError", False), (
+        assert not getattr(set_result, "is_error", False), (
             f"set-bookmark failed: {set_result.content[0].text}"
         )
         set_data = json.loads(set_result.content[0].text)
@@ -1004,7 +1004,7 @@ class TestBookmarkWorkflow:
                 "addressOrSymbol": add_func["address"],
             },
         )
-        assert not getattr(get_result, "isError", False), (
+        assert not getattr(get_result, "is_error", False), (
             f"get-bookmarks failed: {get_result.content[0].text}"
         )
         get_data = json.loads(get_result.content[0].text)
@@ -1024,7 +1024,7 @@ class TestBookmarkWorkflow:
                 "searchText": "ReVa e2e bookmark",
             },
         )
-        assert not getattr(search_result, "isError", False), (
+        assert not getattr(search_result, "is_error", False), (
             f"search-bookmarks failed: {search_result.content[0].text}"
         )
         search_data = json.loads(search_result.content[0].text)
@@ -1043,7 +1043,7 @@ class TestBookmarkWorkflow:
                 "category": "e2e",
             },
         )
-        assert not getattr(remove_result, "isError", False), (
+        assert not getattr(remove_result, "is_error", False), (
             f"remove-bookmark failed: {remove_result.content[0].text}"
         )
 
@@ -1055,7 +1055,7 @@ class TestBookmarkWorkflow:
                 "addressOrSymbol": add_func["address"],
             },
         )
-        assert not getattr(post_remove, "isError", False), _result_text(post_remove)
+        assert not getattr(post_remove, "is_error", False), _result_text(post_remove)
         post_data = json.loads(post_remove.content[0].text)
         post_comments = [b.get("comment") for b in post_data.get("bookmarks", [])]
         assert bookmark_comment not in post_comments, (
@@ -1087,7 +1087,7 @@ class TestCallTree:
                 "maxDepth": 2,
             },
         )
-        assert not getattr(result, "isError", False), (
+        assert not getattr(result, "is_error", False), (
             f"get-call-tree failed: {result.content[0].text if result.content else 'no content'}"
         )
         data = json.loads(result.content[0].text)
@@ -1136,7 +1136,7 @@ class TestFindVariableAccesses:
                 "limit": 100,
             },
         )
-        assert not getattr(decomp, "isError", False), _result_text(decomp)
+        assert not getattr(decomp, "is_error", False), _result_text(decomp)
         decomp_text = json.loads(decomp.content[0].text).get("decompilation", "")
         if "param_1" not in decomp_text:
             pytest.skip(
@@ -1152,7 +1152,7 @@ class TestFindVariableAccesses:
                 "variableName": "param_1",
             },
         )
-        assert not getattr(result, "isError", False), (
+        assert not getattr(result, "is_error", False), (
             f"find-variable-accesses failed: {result.content[0].text if result.content else 'no content'}"
         )
         data = json.loads(result.content[0].text)
@@ -1197,7 +1197,7 @@ class TestDataFlowBackward:
                 "address": "0x100000474",
             },
         )
-        assert not getattr(result, "isError", False), (
+        assert not getattr(result, "is_error", False), (
             f"trace-data-flow-backward failed: {result.content[0].text if result.content else 'no content'}"
         )
         data = json.loads(result.content[0].text)
@@ -1250,7 +1250,7 @@ class TestChangeVariableDatatypes:
                 "limit": 100,
             },
         )
-        assert not getattr(before, "isError", False), _result_text(before)
+        assert not getattr(before, "is_error", False), _result_text(before)
         before_text = json.loads(before.content[0].text).get("decompilation", "")
         if "param_1" not in before_text:
             pytest.skip(
@@ -1267,7 +1267,7 @@ class TestChangeVariableDatatypes:
                 "datatypeMappings": {"param_1": "short"},
             },
         )
-        assert not getattr(change_result, "isError", False), (
+        assert not getattr(change_result, "is_error", False), (
             f"change-variable-datatypes failed: {change_result.content[0].text}"
         )
         change_data = json.loads(change_result.content[0].text)
@@ -1284,7 +1284,7 @@ class TestChangeVariableDatatypes:
                 "limit": 100,
             },
         )
-        assert not getattr(after, "isError", False), _result_text(after)
+        assert not getattr(after, "is_error", False), _result_text(after)
         after_text = json.loads(after.content[0].text).get("decompilation", "")
         assert "short" in after_text, (
             f"Expected 'short' in decompilation after type change; got:\n{after_text}"
@@ -1317,7 +1317,7 @@ class TestCommentSearch:
                 "comment": sentinel,
             },
         )
-        assert not getattr(set_result, "isError", False), (
+        assert not getattr(set_result, "is_error", False), (
             f"set-comment failed: {set_result.content[0].text}"
         )
         set_data = json.loads(set_result.content[0].text)
@@ -1332,7 +1332,7 @@ class TestCommentSearch:
                 "caseSensitive": False,
             },
         )
-        assert not getattr(search_result, "isError", False), (
+        assert not getattr(search_result, "is_error", False), (
             f"search-comments failed: {search_result.content[0].text}"
         )
         search_data = json.loads(search_result.content[0].text)
@@ -1351,7 +1351,7 @@ class TestCommentSearch:
                 "commentType": "eol",
             },
         )
-        assert not getattr(remove_result, "isError", False), (
+        assert not getattr(remove_result, "is_error", False), (
             f"remove-comment failed: {remove_result.content[0].text}"
         )
 
@@ -1363,7 +1363,7 @@ class TestCommentSearch:
                 "searchText": "ReVa-e2e-comment-sentinel",
             },
         )
-        assert not getattr(post_search, "isError", False), _result_text(post_search)
+        assert not getattr(post_search, "is_error", False), _result_text(post_search)
         post_data = json.loads(post_search.content[0].text)
         post_results = post_data.get("results", [])
         assert not any(sentinel in r.get("comment", "") for r in post_results), (
@@ -1391,7 +1391,7 @@ class TestCounts:
             if args:
                 payload.update(args)
             res = await mcp_stdio_client.call_tool(tool, arguments=payload)
-            assert not getattr(res, "isError", False), (
+            assert not getattr(res, "is_error", False), (
                 f"{tool} failed: {res.content[0].text if res.content else 'no content'}"
             )
             data = json.loads(res.content[0].text)
@@ -1434,7 +1434,7 @@ class TestUndefinedFunctionCandidates:
             "get-undefined-function-candidates",
             arguments={"programPath": program_path},
         )
-        assert not getattr(result, "isError", False), (
+        assert not getattr(result, "is_error", False), (
             f"get-undefined-function-candidates failed: {result.content[0].text if result.content else 'no content'}"
         )
         data = json.loads(result.content[0].text)
@@ -1474,7 +1474,7 @@ class TestResolveThunk:
                 "address": "0x100000524",
             },
         )
-        assert not getattr(result, "isError", False), (
+        assert not getattr(result, "is_error", False), (
             f"resolve-thunk failed: {result.content[0].text if result.content else 'no content'}"
         )
         data = json.loads(result.content[0].text)
@@ -1516,7 +1516,7 @@ class TestGetData:
                 "addressOrSymbol": "0x100000530",
             },
         )
-        assert not getattr(result, "isError", False), (
+        assert not getattr(result, "is_error", False), (
             f"get-data failed: {result.content[0].text if result.content else 'no content'}"
         )
         data = json.loads(result.content[0].text)
@@ -1564,7 +1564,7 @@ class TestSetDecompilationComment:
         assert decomp_read.content and decomp_read.content[0].text, (
             f"get-decompilation returned no content: {decomp_read!r}"
         )
-        assert not getattr(decomp_read, "isError", False), _result_text(decomp_read)
+        assert not getattr(decomp_read, "is_error", False), _result_text(decomp_read)
         decomp_read_data = json.loads(decomp_read.content[0].text)
         # Pick the first code body line.  The decompiler output is:
         #   line 1: (blank)  line 2: signature  line 3: (blank)  line 4: {
@@ -1613,7 +1613,7 @@ class TestSetDecompilationComment:
         # almost always return a JSON success body. A plain-text error here
         # would mean the function has no addressable code at all, which is
         # a real failure — surface it explicitly rather than masking it.
-        if getattr(set_result, "isError", False):
+        if getattr(set_result, "is_error", False):
             pytest.fail(
                 f"set-decompilation-comment returned isError=True: {set_text!r}"
             )
@@ -1634,7 +1634,7 @@ class TestSetDecompilationComment:
                 "includeComments": True,
             },
         )
-        assert not getattr(decomp, "isError", False), (
+        assert not getattr(decomp, "is_error", False), (
             f"get-decompilation failed: {decomp.content[0].text}"
         )
         decomp_data = json.loads(decomp.content[0].text)
@@ -1671,7 +1671,7 @@ class TestFunctionsBySimilarity:
                 "maxCount": 10,
             },
         )
-        assert not getattr(result, "isError", False), (
+        assert not getattr(result, "is_error", False), (
             f"get-functions-by-similarity failed: {result.content[0].text if result.content else 'no content'}"
         )
 
@@ -1712,7 +1712,7 @@ class TestValidateCStructure:
                 "cDefinition": c_def,
             },
         )
-        assert not getattr(result, "isError", False), (
+        assert not getattr(result, "is_error", False), (
             f"validate-c-structure failed: {result.content[0].text if result.content else 'no content'}"
         )
         data = json.loads(result.content[0].text)
@@ -1734,7 +1734,7 @@ class TestValidateCStructure:
         )
         # Tool may return isError=True OR valid=False JSON. Both are acceptable;
         # the unacceptable outcome is a JSON body with valid=True.
-        if getattr(result, "isError", False):
+        if getattr(result, "is_error", False):
             return
         data = json.loads(result.content[0].text)
         assert data.get("valid") is False, (
@@ -1763,7 +1763,7 @@ class TestFindCommonCallers:
                 "functionAddresses": ["_add", "_multiply"],
             },
         )
-        assert not getattr(result, "isError", False), (
+        assert not getattr(result, "is_error", False), (
             f"find-common-callers failed: {result.content[0].text if result.content else 'no content'}"
         )
         data = json.loads(result.content[0].text)
@@ -1794,7 +1794,7 @@ class TestListAnalyzers:
             "list-analyzers",
             arguments={"programPath": program_path},
         )
-        assert not getattr(result, "isError", False), (
+        assert not getattr(result, "is_error", False), (
             f"list-analyzers failed: {result.content[0].text if result.content else 'no content'}"
         )
         data = json.loads(result.content[0].text)
@@ -1831,7 +1831,7 @@ class TestFindConstantUses:
                 "maxResults": 100,
             },
         )
-        assert not getattr(result, "isError", False), (
+        assert not getattr(result, "is_error", False), (
             f"find-constant-uses failed: {result.content[0].text if result.content else 'no content'}"
         )
         data = json.loads(result.content[0].text)
@@ -1879,7 +1879,7 @@ class TestFindConstantsInRange:
                 "maxResults": 200,
             },
         )
-        assert not getattr(result, "isError", False), (
+        assert not getattr(result, "is_error", False), (
             f"find-constants-in-range failed: {result.content[0].text if result.content else 'no content'}"
         )
         data = json.loads(result.content[0].text)
@@ -1925,7 +1925,7 @@ class TestApplyDataType:
                 "dataTypeString": "char[19]",
             },
         )
-        assert not getattr(apply_result, "isError", False), (
+        assert not getattr(apply_result, "is_error", False), (
             f"apply-data-type failed: {apply_result.content[0].text if apply_result.content else 'no content'}"
         )
         apply_data = json.loads(apply_result.content[0].text)
@@ -1942,7 +1942,7 @@ class TestApplyDataType:
                 "addressOrSymbol": "0x100000530",
             },
         )
-        assert not getattr(check, "isError", False), _result_text(check)
+        assert not getattr(check, "is_error", False), _result_text(check)
         check_data = json.loads(check.content[0].text)
         dt = (check_data.get("dataType") or "").lower()
         assert "char" in dt and ("[" in dt or "array" in dt), (
@@ -1976,7 +1976,7 @@ class TestGetCurrentProgram:
             "get-current-program",
             arguments={},
         )
-        assert not getattr(result, "isError", False), (
+        assert not getattr(result, "is_error", False), (
             f"get-current-program failed: {result.content[0].text if result.content else 'no content'}"
         )
         data = json.loads(result.content[0].text)
@@ -2020,7 +2020,7 @@ class TestListOpenPrograms:
             "list-open-programs",
             arguments={},
         )
-        assert not getattr(result, "isError", False), (
+        assert not getattr(result, "is_error", False), (
             f"list-open-programs failed: {result.content[0].text if result.content else 'no content'}"
         )
 
@@ -2068,7 +2068,7 @@ class TestStructureDeletion:
                 "cDefinition": c_def,
             },
         )
-        assert not getattr(parse_result, "isError", False), (
+        assert not getattr(parse_result, "is_error", False), (
             f"parse-c-structure failed: {parse_result.content[0].text}"
         )
 
@@ -2080,7 +2080,7 @@ class TestStructureDeletion:
                 "structureName": struct_name,
             },
         )
-        assert not getattr(info_result, "isError", False), (
+        assert not getattr(info_result, "is_error", False), (
             f"get-structure-info failed: {info_result.content[0].text}"
         )
         info_data = json.loads(info_result.content[0].text)
@@ -2103,7 +2103,7 @@ class TestStructureDeletion:
             "list-structures",
             arguments={"programPath": program_path, "nameFilter": struct_name},
         )
-        assert not getattr(pre_list, "isError", False), (
+        assert not getattr(pre_list, "is_error", False), (
             f"list-structures failed: {_result_text(pre_list)}"
         )
         pre_names = [
@@ -2123,7 +2123,7 @@ class TestStructureDeletion:
                 "structureName": struct_name,
             },
         )
-        assert not getattr(delete_result, "isError", False), (
+        assert not getattr(delete_result, "is_error", False), (
             f"delete-structure failed: {delete_result.content[0].text}"
         )
 
@@ -2135,7 +2135,7 @@ class TestStructureDeletion:
                 "nameFilter": struct_name,
             },
         )
-        assert not getattr(list_result, "isError", False), _result_text(list_result)
+        assert not getattr(list_result, "is_error", False), _result_text(list_result)
         list_data = json.loads(list_result.content[0].text)
         names = [s.get("name") for s in list_data.get("structures", [])]
         assert struct_name not in names, (
@@ -2155,7 +2155,7 @@ class TestMemoryBlocks:
             "get-memory-blocks",
             arguments={"programPath": program_path},
         )
-        assert not getattr(result, "isError", False), (
+        assert not getattr(result, "is_error", False), (
             f"get-memory-blocks failed: {result.content[0].text if result.content else 'no content'}"
         )
         data = json.loads(result.content[0].text)
@@ -2192,7 +2192,7 @@ class TestDataTypeArchives:
             "get-data-type-archives",
             arguments={"programPath": program_path},
         )
-        assert not getattr(result, "isError", False), (
+        assert not getattr(result, "is_error", False), (
             f"get-data-type-archives failed: {result.content[0].text}"
         )
 
@@ -2236,7 +2236,7 @@ class TestDataTypeByString:
                 "dataTypeString": "int *",
             },
         )
-        assert not getattr(result, "isError", False), (
+        assert not getattr(result, "is_error", False), (
             f"get-data-type-by-string('int *') failed: {result.content[0].text}"
         )
         data = json.loads(result.content[0].text)
@@ -2261,7 +2261,7 @@ class TestDataTypeByString:
                 "dataTypeString": "int *",
             },
         )
-        assert not getattr(apply_r, "isError", False), _result_text(apply_r)
+        assert not getattr(apply_r, "is_error", False), _result_text(apply_r)
         applied = json.loads(apply_r.content[0].text)
         assert applied.get("length") == 8, (
             f"Applying 'int *' on ARM64 must create 8-byte data; got {applied!r}"
@@ -2285,7 +2285,7 @@ class TestListExports:
             "list-exports",
             arguments={"programPath": program_path},
         )
-        assert not getattr(result, "isError", False), (
+        assert not getattr(result, "is_error", False), (
             f"list-exports failed: {result.content[0].text}"
         )
         data = json.loads(result.content[0].text)
@@ -2327,7 +2327,7 @@ class TestListBookmarkCategories:
                 "comment": "category lookup smoke test",
             },
         )
-        assert not getattr(set_result, "isError", False), (
+        assert not getattr(set_result, "is_error", False), (
             f"set-bookmark failed: {set_result.content[0].text}"
         )
 
@@ -2338,7 +2338,7 @@ class TestListBookmarkCategories:
                 "type": bookmark_type,
             },
         )
-        assert not getattr(list_result, "isError", False), (
+        assert not getattr(list_result, "is_error", False), (
             f"list-bookmark-categories failed: {list_result.content[0].text}"
         )
         data = json.loads(list_result.content[0].text)
@@ -2379,7 +2379,7 @@ class TestListCommonConstants:
                 "includeSmallValues": True,
             },
         )
-        assert not getattr(result, "isError", False), (
+        assert not getattr(result, "is_error", False), (
             f"list-common-constants failed: {result.content[0].text}"
         )
         data = json.loads(result.content[0].text)
@@ -2434,7 +2434,7 @@ class TestParseCHeader:
                 "headerContent": header,
             },
         )
-        assert not getattr(parse_result, "isError", False), (
+        assert not getattr(parse_result, "is_error", False), (
             f"parse-c-header failed: {parse_result.content[0].text}"
         )
         parse_data = json.loads(parse_result.content[0].text)
@@ -2450,7 +2450,7 @@ class TestParseCHeader:
                 "nameFilter": struct_name,
             },
         )
-        assert not getattr(list_result, "isError", False), (
+        assert not getattr(list_result, "is_error", False), (
             f"list-structures failed: {list_result.content[0].text}"
         )
         list_data = json.loads(list_result.content[0].text)
@@ -2476,7 +2476,7 @@ class TestGetReferencersDecompiled:
                 "maxReferencers": 10,
             },
         )
-        assert not getattr(result, "isError", False), (
+        assert not getattr(result, "is_error", False), (
             f"get-referencers-decompiled failed: {result.content[0].text}"
         )
 
@@ -2506,7 +2506,7 @@ async def _find_symbol_matching(client, program_path: str, needle: str, max_coun
         "get-symbols",
         arguments={"programPath": program_path, "maxCount": max_count},
     )
-    if getattr(result, "isError", False):
+    if getattr(result, "is_error", False):
         return None
     for sym in json.loads(result.content[0].text).get("symbols", []):
         name = (sym.get("name") or "").lower()
@@ -2569,7 +2569,7 @@ class TestVtablesOnCppFixture:
                     "maxEntries": 50,
                 },
             )
-            assert not getattr(result, "isError", False), (
+            assert not getattr(result, "is_error", False), (
                 f"analyze-vtable @ {addr} failed: {result.content[0].text}"
             )
             data = json.loads(result.content[0].text)
@@ -2615,7 +2615,7 @@ class TestVtablesOnCppFixture:
                 "functionAddress": sym["address"],
             },
         )
-        assert not getattr(result, "isError", False), (
+        assert not getattr(result, "is_error", False), (
             f"find-vtables-containing-function failed: {result.content[0].text}"
         )
         data = json.loads(result.content[0].text)
@@ -2683,7 +2683,7 @@ class TestVtablesOnCppFixture:
                 "limit": 100,
             },
         )
-        assert not getattr(result, "isError", False), (
+        assert not getattr(result, "is_error", False), (
             f"get-decompilation failed on {fixture_name}: "
             f"{result.content[0].text if result.content else 'no content'}"
         )
@@ -2755,7 +2755,7 @@ class TestVtablesOnCppFixture:
                 "maxResults": 50,
             },
         )
-        assert not getattr(result, "isError", False), (
+        assert not getattr(result, "is_error", False), (
             f"find-vtable-callers failed on {fixture_name}: {result.content[0].text}"
         )
         data = json.loads(result.content[0].text)
@@ -2799,7 +2799,7 @@ class TestChangeProcessorValidation:
                 "languageId": "NONEXISTENT:LE:64:default",
             },
         )
-        assert getattr(result, "isError", False), (
+        assert getattr(result, "is_error", False), (
             f"change-processor with bogus languageId should return isError=True; "
             f"got isError=False with body: "
             f"{result.content[0].text if result.content else 'no content'}"
@@ -2825,7 +2825,7 @@ class TestChangeProcessorValidation:
                 "timeoutSeconds": 30,
             },
         )
-        assert not getattr(lang_r, "isError", False), _result_text(lang_r)
+        assert not getattr(lang_r, "is_error", False), _result_text(lang_r)
         lang_out = json.loads(lang_r.content[0].text).get("stdout", "")
         assert "LANG=AARCH64:LE:64:AppleSilicon" in lang_out, (
             f"Program language changed by a FAILED change-processor call; "
@@ -2849,7 +2849,7 @@ class TestCaptureRevaDebugInfo:
             "capture-reva-debug-info",
             arguments={"message": "e2e characterization run"},
         )
-        assert not getattr(result, "isError", False), (
+        assert not getattr(result, "is_error", False), (
             f"capture-reva-debug-info failed: {result.content[0].text}"
         )
         data = json.loads(result.content[0].text)
@@ -2897,7 +2897,7 @@ class TestGetDataTypes:
                 "maxCount": 500,
             },
         )
-        assert not getattr(result, "isError", False), (
+        assert not getattr(result, "is_error", False), (
             f"get-data-types failed: {result.content[0].text if result.content else 'no content'}"
         )
 
@@ -2948,7 +2948,7 @@ class TestCreateFunctionValidation:
         )
         # Expecting an error path. With MCP isError convention the body is
         # plain text, so we only need to check isError + the error message.
-        assert getattr(result, "isError", False), (
+        assert getattr(result, "is_error", False), (
             f"create-function on an existing function should error; "
             f"got isError=False with body: {result.content[0].text if result.content else 'no content'}"
         )
@@ -2981,7 +2981,7 @@ class TestTraceDataFlowForward:
                 "address": "0x100000474",
             },
         )
-        assert not getattr(result, "isError", False), (
+        assert not getattr(result, "is_error", False), (
             f"trace-data-flow-forward failed: {result.content[0].text if result.content else 'no content'}"
         )
         data = json.loads(result.content[0].text)
@@ -3043,7 +3043,7 @@ class TestMultiProgramIsolation:
                 "get-decompilation",
                 arguments={"programPath": path, "functionNameOrAddress": "entry", "limit": 50},
             )
-            assert not getattr(r, "isError", False), (
+            assert not getattr(r, "is_error", False), (
                 f"get-decompilation failed on {path}: {r.content[0].text}"
             )
             return json.loads(r.content[0].text)
@@ -3087,7 +3087,7 @@ class TestMultiProgramIsolation:
                 "comment": sentinel,
             },
         )
-        assert not getattr(set_r, "isError", False), (
+        assert not getattr(set_r, "is_error", False), (
             f"set-comment failed on {path_a}: {set_r.content[0].text}"
         )
 
@@ -3096,7 +3096,7 @@ class TestMultiProgramIsolation:
             "get-comments",
             arguments={"programPath": path_a, "addressOrSymbol": "entry"},
         )
-        assert not getattr(comments_a, "isError", False), _result_text(comments_a)
+        assert not getattr(comments_a, "is_error", False), _result_text(comments_a)
         a_data = json.loads(comments_a.content[0].text)
         a_strs = [c.get("comment", "") for c in a_data.get("comments", [])]
         assert any(sentinel in s for s in a_strs), (
@@ -3108,7 +3108,7 @@ class TestMultiProgramIsolation:
             "get-comments",
             arguments={"programPath": path_b, "addressOrSymbol": "entry"},
         )
-        assert not getattr(comments_b, "isError", False), _result_text(comments_b)
+        assert not getattr(comments_b, "is_error", False), _result_text(comments_b)
         b_data = json.loads(comments_b.content[0].text)
         b_strs = [c.get("comment", "") for c in b_data.get("comments", [])]
         assert not any(sentinel in s for s in b_strs), (
@@ -3139,7 +3139,7 @@ class TestMultiProgramIsolation:
                 "comment": "isolation canary",
             },
         )
-        assert not getattr(set_r, "isError", False), (
+        assert not getattr(set_r, "is_error", False), (
             f"set-bookmark failed: {set_r.content[0].text}"
         )
 
@@ -3148,7 +3148,7 @@ class TestMultiProgramIsolation:
             "list-bookmark-categories",
             arguments={"programPath": path_a, "type": "Note"},
         )
-        assert not getattr(a_cats, "isError", False), _result_text(a_cats)
+        assert not getattr(a_cats, "is_error", False), _result_text(a_cats)
         a_data = json.loads(a_cats.content[0].text)
         a_names = [c.get("name") for c in a_data.get("categories", [])]
         assert category in a_names, f"Category not in A: {a_names!r}"
@@ -3158,7 +3158,7 @@ class TestMultiProgramIsolation:
             "list-bookmark-categories",
             arguments={"programPath": path_b, "type": "Note"},
         )
-        assert not getattr(b_cats, "isError", False), _result_text(b_cats)
+        assert not getattr(b_cats, "is_error", False), _result_text(b_cats)
         b_data = json.loads(b_cats.content[0].text)
         b_names = [c.get("name") for c in b_data.get("categories", [])]
         assert category not in b_names, (
@@ -3182,7 +3182,7 @@ class TestMultiProgramIsolation:
             "get-decompilation",
             arguments={"programPath": path_a, "functionNameOrAddress": "entry", "limit": 50},
         )
-        assert not getattr(r_a, "isError", False), (
+        assert not getattr(r_a, "is_error", False), (
             f"get-decompilation A failed: {r_a.content[0].text}"
         )
 
@@ -3196,7 +3196,7 @@ class TestMultiProgramIsolation:
                 "variableMappings": {"_does_not_exist_": "_renamed_"},
             },
         )
-        assert getattr(rename_r, "isError", False), (
+        assert getattr(rename_r, "is_error", False), (
             f"rename on B should have been rejected (B never read), "
             f"but got isError=False with body: "
             f"{rename_r.content[0].text if rename_r.content else 'no content'}"
@@ -3243,7 +3243,7 @@ class TestRoundTripIntegrity:
                 "comment": payload,
             },
         )
-        assert not getattr(set_r, "isError", False), (
+        assert not getattr(set_r, "is_error", False), (
             f"set-comment failed: {set_r.content[0].text}"
         )
 
@@ -3251,7 +3251,7 @@ class TestRoundTripIntegrity:
             "get-comments",
             arguments={"programPath": program_path, "addressOrSymbol": "entry"},
         )
-        assert not getattr(get_r, "isError", False), _result_text(get_r)
+        assert not getattr(get_r, "is_error", False), _result_text(get_r)
         data = json.loads(get_r.content[0].text)
         comments = [c.get("comment", "") for c in data.get("comments", [])]
         assert payload in comments, (
@@ -3284,7 +3284,7 @@ class TestRoundTripIntegrity:
                     "comment": text,
                 },
             )
-            assert not getattr(r, "isError", False), (
+            assert not getattr(r, "is_error", False), (
                 f"set-comment({text!r}) failed: {r.content[0].text}"
             )
 
@@ -3330,7 +3330,7 @@ class TestRoundTripIntegrity:
             "set-bookmark",
             arguments={**bookmark_args, "comment": "to be removed"},
         )
-        assert not getattr(set_r, "isError", False), (
+        assert not getattr(set_r, "is_error", False), (
             f"set-bookmark failed: {set_r.content[0].text}"
         )
 
@@ -3338,7 +3338,7 @@ class TestRoundTripIntegrity:
         rm1 = await mcp_stdio_client.call_tool(
             "remove-bookmark", arguments=bookmark_args
         )
-        assert not getattr(rm1, "isError", False), (
+        assert not getattr(rm1, "is_error", False), (
             f"first remove-bookmark failed: {rm1.content[0].text}"
         )
 
@@ -3348,7 +3348,7 @@ class TestRoundTripIntegrity:
         rm2 = await mcp_stdio_client.call_tool(
             "remove-bookmark", arguments=bookmark_args
         )
-        assert getattr(rm2, "isError", False), (
+        assert getattr(rm2, "is_error", False), (
             f"Second remove-bookmark on a removed bookmark should error; "
             f"got isError=False with body: "
             f"{rm2.content[0].text if rm2.content else 'no content'}"
@@ -3382,7 +3382,7 @@ class TestPaginationEdgeCases:
             "get-functions",
             arguments={"programPath": program_path, "maxCount": 500},
         )
-        assert not getattr(baseline, "isError", False), (
+        assert not getattr(baseline, "is_error", False), (
             f"baseline get-functions failed: {baseline.content[0].text}"
         )
         meta = json.loads(baseline.content[0].text)
@@ -3399,7 +3399,7 @@ class TestPaginationEdgeCases:
                 "maxCount": 50,
             },
         )
-        assert not getattr(result, "isError", False), (
+        assert not getattr(result, "is_error", False), (
             f"get-functions with startIndex past end should NOT error; got "
             f"isError=True with body: {result.content[0].text}"
         )
@@ -3430,7 +3430,7 @@ class TestPaginationEdgeCases:
             "get-functions",
             arguments={"programPath": program_path, "maxCount": 1},
         )
-        assert not getattr(result, "isError", False), (
+        assert not getattr(result, "is_error", False), (
             f"get-functions maxCount=1 failed: {result.content[0].text}"
         )
 
@@ -3457,7 +3457,7 @@ class TestPaginationEdgeCases:
             "get-strings",
             arguments={"programPath": program_path, "maxCount": 1000},
         )
-        assert not getattr(full_r, "isError", False), (
+        assert not getattr(full_r, "is_error", False), (
             f"get-strings full failed: {full_r.content[0].text}"
         )
         # get-strings packs metadata + entries into a single JSON list in
@@ -3489,7 +3489,7 @@ class TestPaginationEdgeCases:
                     "maxCount": count,
                 },
             )
-            assert not getattr(r, "isError", False), (
+            assert not getattr(r, "is_error", False), (
                 f"get-strings(start={start}, count={count}) failed: "
                 f"{r.content[0].text}"
             )
@@ -3545,7 +3545,7 @@ class TestInputValidation:
             "get-functions",
             arguments={"programPath": bogus, "maxCount": 10},
         )
-        assert getattr(result, "isError", False), (
+        assert getattr(result, "is_error", False), (
             f"get-functions on a nonexistent programPath should return isError=True; "
             f"got isError=False with body: "
             f"{result.content[0].text if result.content else 'no content'}"
@@ -3580,7 +3580,7 @@ class TestInputValidation:
                 "limit": 10,
             },
         )
-        assert getattr(result, "isError", False), (
+        assert getattr(result, "is_error", False), (
             f"get-decompilation on bogus function should error; got isError=False "
             f"with body: {result.content[0].text if result.content else 'no content'}"
         )
@@ -3606,7 +3606,7 @@ class TestInputValidation:
                 "comment": "should never land",
             },
         )
-        assert getattr(result, "isError", False), (
+        assert getattr(result, "is_error", False), (
             f"set-comment without addressOrSymbol should error; got isError=False "
             f"with body: {result.content[0].text if result.content else 'no content'}"
         )
@@ -3627,7 +3627,7 @@ class TestInputValidation:
             "get-functions",
             arguments={"programPath": "", "maxCount": 10},
         )
-        assert getattr(result, "isError", False), (
+        assert getattr(result, "is_error", False), (
             f"get-functions with empty programPath should error; got isError=False "
             f"with body: {result.content[0].text if result.content else 'no content'}"
         )

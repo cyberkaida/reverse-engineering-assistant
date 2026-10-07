@@ -1,53 +1,63 @@
 """
-Stdio to HTTP MCP bridge using official MCP SDK Server abstraction.
+Stdio to HTTP MCP bridge using the official MCP SDK Server abstraction.
 
 Provides a proper MCP Server that forwards all requests to ReVa's StreamableHTTP endpoint.
 Uses the MCP SDK's stdio transport and Pydantic serialization - no manual JSON-RPC handling.
 
 Includes a ReconnectingBackend that automatically reconnects to the ReVa server on
 connection failures, and disables HTTP keepalive to avoid stale TCP connections.
+
+Migrated to MCP Python SDK v2:
+- lowlevel Server handlers are constructor on_* params returning full result types
+  (v1 decorator registration and automatic return wrapping are gone)
+- streamablehttp_client -> streamable_http_client, which takes a pre-built
+  httpx2.AsyncClient instead of timeout/httpx_client_factory params and yields a
+  2-tuple (the get_session_id callback was removed)
+- McpError -> MCPError; protocol-model fields are snake_case (server_info, is_error)
+- request timeouts surface as MCPError(-32001 REQUEST_TIMEOUT) instead of raw
+  httpx exceptions, so the reconnect classifier checks the JSON-RPC code
 """
 
 import sys
 from contextlib import AsyncExitStack
 from typing import Any
 
-import httpx
-from mcp.server import Server
+import httpx2
+from mcp import ClientSession, MCPError
+from mcp.client.streamable_http import streamable_http_client
+from mcp.server import Server, ServerRequestContext
 from mcp.server.stdio import stdio_server
-from mcp.client.streamable_http import streamablehttp_client
-from mcp import ClientSession, McpError
 from mcp.types import (
-    Tool,
-    Resource,
-    Prompt,
-    TextContent,
-    ImageContent,
-    EmbeddedResource,
+    REQUEST_TIMEOUT,
+    CallToolRequestParams,
     CallToolResult,
+    ListPromptsResult,
+    ListResourcesResult,
+    ListToolsResult,
+    PaginatedRequestParams,
+    ReadResourceRequestParams,
+    ReadResourceResult,
+    TextContent,
 )
 
+from reva_cli import __version__
 
-def _make_httpx_factory(api_key: str | None = None):
-    """Build an httpx client factory that disables keepalive and (optionally)
-    injects an X-API-Key header on every request.
 
-    The MCP streamable-http client calls the returned factory with its own
-    headers; we MERGE the API key in rather than replacing them.
+def _make_http_client(api_key: str | None = None, timeout: float = 300.0) -> httpx2.AsyncClient:
+    """Build the httpx2 client handed to streamable_http_client.
+
+    MCP v2 replaced the v1 timeout/headers/httpx_client_factory parameters with a
+    single pre-built client. Keepalive is disabled to avoid stale TCP connections
+    after SSE responses; the API key, when set, rides on every request as a
+    client-level default header (the transport's own per-request headers — Accept,
+    MCP-Protocol-Version, session id — are merged over these, not replaced).
     """
-
-    def factory(headers=None, timeout=None, auth=None):
-        merged = dict(headers or {})
-        if api_key:
-            merged["X-API-Key"] = api_key
-        return httpx.AsyncClient(
-            headers=merged,
-            timeout=timeout,
-            auth=auth,
-            limits=httpx.Limits(max_keepalive_connections=0),
-        )
-
-    return factory
+    headers = {"X-API-Key": api_key} if api_key else None
+    return httpx2.AsyncClient(
+        headers=headers,
+        timeout=httpx2.Timeout(timeout),
+        limits=httpx2.Limits(max_keepalive_connections=0),
+    )
 
 
 def _is_transport_error(e: Exception) -> bool:
@@ -55,10 +65,14 @@ def _is_transport_error(e: Exception) -> bool:
 
     MCP-level errors (like tool not found) are valid protocol responses and should
     NOT trigger reconnection. Only network/transport failures should reconnect.
+
+    In MCP SDK v2, request timeouts and non-2xx HTTP responses surface as MCPError
+    carrying a JSON-RPC code instead of raw httpx exceptions; a REQUEST_TIMEOUT
+    (-32001) is still a transport-level failure worth reconnecting for.
     """
-    if isinstance(e, McpError):
-        return False
-    if isinstance(e, (httpx.HTTPError, ConnectionError, OSError, TimeoutError)):
+    if isinstance(e, MCPError):
+        return getattr(getattr(e, "error", None), "code", None) == REQUEST_TIMEOUT
+    if isinstance(e, (httpx2.HTTPError, ConnectionError, OSError, TimeoutError)):
         return True
     return False
 
@@ -67,7 +81,7 @@ class ReconnectingBackend:
     """
     Manages a connection to the ReVa StreamableHTTP backend with automatic reconnection.
 
-    Uses AsyncExitStack to manage the streamablehttp_client and ClientSession lifecycle.
+    Uses AsyncExitStack to manage the streamable_http_client and ClientSession lifecycle.
     On backend failure, disconnects, reconnects (new connection + initialize), and retries.
     """
 
@@ -82,12 +96,13 @@ class ReconnectingBackend:
         self._stack = AsyncExitStack()
         await self._stack.__aenter__()
 
-        read_stream, write_stream, _ = await self._stack.enter_async_context(
-            streamablehttp_client(
-                self.url,
-                timeout=300.0,
-                httpx_client_factory=_make_httpx_factory(self.api_key),
-            )
+        http_client = _make_http_client(self.api_key)
+        # The transport does not own the caller-provided client; close it after the
+        # transport context unwinds (aclose is idempotent if the SDK ever closes too).
+        self._stack.push_async_callback(http_client.aclose)
+
+        read_stream, write_stream = await self._stack.enter_async_context(
+            streamable_http_client(self.url, http_client=http_client)
         )
 
         self._session = await self._stack.enter_async_context(
@@ -95,7 +110,7 @@ class ReconnectingBackend:
         )
 
         init_result = await self._session.initialize()
-        print(f"Connected to {init_result.serverInfo.name} v{init_result.serverInfo.version}", file=sys.stderr)
+        print(f"Connected to {init_result.server_info.name} v{init_result.server_info.version}", file=sys.stderr)
 
     async def disconnect(self):
         """Disconnect from the backend, cleaning up all resources."""
@@ -148,72 +163,84 @@ class ReVaStdioBridge:
         self.port = port
         self.api_key = api_key
         self.url = f"http://localhost:{port}/mcp/message"
-        self.server = Server("ReVa")
         self.backend: ReconnectingBackend | None = None
+        # MCP SDK v2: lowlevel handlers are constructor on_* params (v1 decorator
+        # registration is gone). An explicit version is required — v2 reports an
+        # empty string for unversioned servers instead of the SDK version.
+        self.server = Server(
+            "ReVa",
+            version=__version__,
+            on_list_tools=self._list_tools,
+            on_call_tool=self._call_tool,
+            on_list_resources=self._list_resources,
+            on_read_resource=self._read_resource,
+            on_list_prompts=self._list_prompts,
+        )
 
-        # Register handlers
-        self._register_handlers()
+    async def _backend(self) -> ReconnectingBackend:
+        if not self.backend:
+            raise RuntimeError("Backend not initialized")
+        return self.backend
 
-    def _register_handlers(self):
-        """Register MCP protocol handlers that forward to ReVa backend."""
+    async def _list_tools(
+        self, ctx: ServerRequestContext, params: PaginatedRequestParams | None
+    ) -> ListToolsResult:
+        """Forward list_tools request to ReVa backend."""
+        backend = await self._backend()
+        result = await backend.forward("list_tools")
+        return ListToolsResult(tools=result.tools)
 
-        @self.server.list_tools()
-        async def list_tools() -> list[Tool]:
-            """Forward list_tools request to ReVa backend."""
-            if not self.backend:
-                raise RuntimeError("Backend not initialized")
+    async def _call_tool(
+        self, ctx: ServerRequestContext, params: CallToolRequestParams
+    ) -> CallToolResult:
+        """Forward call_tool request to ReVa backend.
 
-            result = await self.backend.forward("list_tools")
-            return result.tools
+        Returns the backend's CallToolResult verbatim — content + is_error +
+        structured_content — so that errors raised via createErrorResult on the Java
+        side propagate with their is_error=True flag intact.
 
-        @self.server.call_tool()
-        async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
-            """Forward call_tool request to ReVa backend.
+        v2 no longer converts handler exceptions into is_error results (they become
+        top-level JSON-RPC errors that most clients just raise, hiding the text from
+        the LLM), so this handler does that wrapping itself to keep v1 behavior:
+        local/backend failures stay LLM-visible and self-correctable.
+        """
+        try:
+            backend = await self._backend()
+            return await backend.forward("call_tool", params.name, params.arguments or {})
+        except Exception as e:
+            return CallToolResult(
+                content=[TextContent(type="text", text=str(e))],
+                is_error=True,
+            )
 
-            Returns the full CallToolResult — content + isError + structuredContent
-            — so that errors raised via createErrorResult on the Java side propagate
-            with their isError=True flag intact. Returning only .content here would
-            cause the SDK to wrap the list with a default isError=False, masking
-            tool-level errors as successful responses with error text in body.
-            """
-            if not self.backend:
-                raise RuntimeError("Backend not initialized")
+    async def _list_resources(
+        self, ctx: ServerRequestContext, params: PaginatedRequestParams | None
+    ) -> ListResourcesResult:
+        """Forward list_resources request to ReVa backend."""
+        backend = await self._backend()
+        result = await backend.forward("list_resources")
+        return ListResourcesResult(resources=result.resources)
 
-            return await self.backend.forward("call_tool", name, arguments)
+    async def _read_resource(
+        self, ctx: ServerRequestContext, params: ReadResourceRequestParams
+    ) -> ReadResourceResult:
+        """Forward read_resource request to ReVa backend.
 
-        @self.server.list_resources()
-        async def list_resources() -> list[Resource]:
-            """Forward list_resources request to ReVa backend."""
-            if not self.backend:
-                raise RuntimeError("Backend not initialized")
+        Passes the backend's ReadResourceResult through verbatim (v1 unwrapped the
+        first content item to str/bytes and let the decorator re-wrap it, losing
+        mime types and extra contents; v2 removed that wrapping, and pass-through
+        is both simpler and more faithful).
+        """
+        backend = await self._backend()
+        return await backend.forward("read_resource", params.uri)
 
-            result = await self.backend.forward("list_resources")
-            return result.resources
-
-        @self.server.read_resource()
-        async def read_resource(uri: str) -> str | bytes:
-            """Forward read_resource request to ReVa backend."""
-            if not self.backend:
-                raise RuntimeError("Backend not initialized")
-
-            result = await self.backend.forward("read_resource", uri)
-            # Return the first content item's text or blob
-            if result.contents and len(result.contents) > 0:
-                content = result.contents[0]
-                if hasattr(content, 'text') and content.text:
-                    return content.text
-                elif hasattr(content, 'blob') and content.blob:
-                    return content.blob
-            return ""
-
-        @self.server.list_prompts()
-        async def list_prompts() -> list[Prompt]:
-            """Forward list_prompts request to ReVa backend."""
-            if not self.backend:
-                raise RuntimeError("Backend not initialized")
-
-            result = await self.backend.forward("list_prompts")
-            return result.prompts
+    async def _list_prompts(
+        self, ctx: ServerRequestContext, params: PaginatedRequestParams | None
+    ) -> ListPromptsResult:
+        """Forward list_prompts request to ReVa backend."""
+        backend = await self._backend()
+        result = await backend.forward("list_prompts")
+        return ListPromptsResult(prompts=result.prompts)
 
     async def run(self):
         """

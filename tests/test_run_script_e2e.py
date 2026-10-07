@@ -70,7 +70,7 @@ async def _import_test_program(client, analyze: bool = False) -> str:
         arguments=args,
     )
     assert result is not None
-    assert not (hasattr(result, "isError") and result.isError), (
+    assert not (hasattr(result, "is_error") and result.is_error), (
         f"Import failed: {result.content[0].text if result.content else 'no content'}"
     )
     data = json.loads(result.content[0].text)
@@ -87,7 +87,7 @@ def _parse(result) -> dict:
     isError result here means the tool itself broke — surface its error text
     instead of a downstream KeyError/JSONDecodeError.
     """
-    assert not getattr(result, "isError", False), (
+    assert not getattr(result, "is_error", False), (
         f"tool returned an error result: "
         f"{result.content[0].text if getattr(result, 'content', None) else 'no content'}"
     )
@@ -113,7 +113,7 @@ class TestRunScriptE2E:
         )
 
         assert result is not None
-        assert not (hasattr(result, "isError") and result.isError), (
+        assert not (hasattr(result, "is_error") and result.is_error), (
             f"run-script reported tool error: {result.content[0].text}"
         )
         data = _parse(result)
@@ -168,7 +168,7 @@ class TestRunScriptE2E:
         )
 
         # Tool itself ran successfully — the script error is not an MCP error.
-        assert not (hasattr(result, "isError") and result.isError), (
+        assert not (hasattr(result, "is_error") and result.is_error), (
             f"script failures must not surface as MCP errors: "
             f"{result.content[0].text}"
         )
@@ -406,7 +406,7 @@ class TestScriptFileManagementE2E:
                 "new_string": "anything",
             },
         )
-        assert getattr(edit, "isError", False), (
+        assert getattr(edit, "is_error", False), (
             f"edit-script with a missing old_string must be an error; got: "
             f"{edit.content[0].text if getattr(edit, 'content', None) else 'no content'}"
         )

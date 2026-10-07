@@ -34,9 +34,11 @@
  */
 package reva.server;
 
-import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.PrintWriter;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -62,7 +64,6 @@ import io.modelcontextprotocol.spec.McpSchema;
 import io.modelcontextprotocol.spec.McpStreamableServerSession;
 import io.modelcontextprotocol.spec.McpStreamableServerTransport;
 import io.modelcontextprotocol.spec.McpStreamableServerTransportProvider;
-import io.modelcontextprotocol.spec.ProtocolVersions;
 import io.modelcontextprotocol.util.Assert;
 import io.modelcontextprotocol.json.McpJsonDefaults;
 import io.modelcontextprotocol.json.McpJsonMapper;
@@ -109,6 +110,12 @@ public class ResilientStreamableServerTransportProvider extends HttpServlet
 
 	public static final String FAILED_TO_SEND_ERROR_RESPONSE = "Failed to send error response: {}";
 
+	/**
+	 * Default maximum size, in bytes, of a single request body. Matches the upstream
+	 * SDK's default.
+	 */
+	private static final int DEFAULT_REQUEST_MAX_SIZE = 16 * 1024 * 1024;
+
 	private final String mcpEndpoint;
 
 	private final boolean disallowDelete;
@@ -127,19 +134,26 @@ public class ResilientStreamableServerTransportProvider extends HttpServlet
 
 	private final ServerTransportSecurityValidator securityValidator;
 
+	/**
+	 * Maximum size, in bytes, of a single request body accepted by this transport.
+	 */
+	private final int requestMaxSize;
+
 	private ResilientStreamableServerTransportProvider(McpJsonMapper jsonMapper, String mcpEndpoint,
 			boolean disallowDelete, McpTransportContextExtractor<HttpServletRequest> contextExtractor,
-			Duration keepAliveInterval, ServerTransportSecurityValidator securityValidator) {
+			Duration keepAliveInterval, ServerTransportSecurityValidator securityValidator, int requestMaxSize) {
 		Assert.notNull(jsonMapper, "JsonMapper must not be null");
 		Assert.notNull(mcpEndpoint, "MCP endpoint must not be null");
 		Assert.notNull(contextExtractor, "Context extractor must not be null");
 		Assert.notNull(securityValidator, "Security validator must not be null");
+		Assert.isTrue(requestMaxSize > 0, "requestMaxSize must be positive");
 
 		this.jsonMapper = jsonMapper;
 		this.mcpEndpoint = mcpEndpoint;
 		this.disallowDelete = disallowDelete;
 		this.contextExtractor = contextExtractor;
 		this.securityValidator = securityValidator;
+		this.requestMaxSize = requestMaxSize;
 
 		if (keepAliveInterval != null) {
 			this.keepAliveScheduler = KeepAliveScheduler
@@ -163,10 +177,35 @@ public class ResilientStreamableServerTransportProvider extends HttpServlet
 		return headers;
 	}
 
-	@Override
-	public List<String> protocolVersions() {
-		return List.of(ProtocolVersions.MCP_2024_11_05, ProtocolVersions.MCP_2025_03_26,
-				ProtocolVersions.MCP_2025_06_18, ProtocolVersions.MCP_2025_11_25);
+	// Inlined from the package-private HttpServletRequestUtils (SDK 2.0.1): bounded body
+	// read with a UTF-8 fallback. The fork previously read via request.getReader(), which
+	// defaults to ISO-8859-1 when clients omit the charset — mangling non-ASCII JSON — and
+	// buffered without any size bound.
+	static String readBody(HttpServletRequest request, int maxSize) throws MaxSizeExceededException, IOException {
+		InputStream inputStream = request.getInputStream();
+		ByteArrayOutputStream bodyBytes = new ByteArrayOutputStream();
+		byte[] buf = new byte[8192];
+		int totalBytes = 0;
+		int readBytes;
+		while ((readBytes = inputStream.read(buf, 0, buf.length)) != -1) {
+			totalBytes += readBytes;
+			if (totalBytes > maxSize) {
+				throw new MaxSizeExceededException(
+						"Request body exceeds the maximum allowed size of " + maxSize + " bytes");
+			}
+			bodyBytes.write(buf, 0, readBytes);
+		}
+		String charset = request.getCharacterEncoding() != null ? request.getCharacterEncoding()
+				: StandardCharsets.UTF_8.name();
+		return bodyBytes.toString(charset);
+	}
+
+	/** Thrown by {@link #readBody} when the request body exceeds the configured limit. */
+	static final class MaxSizeExceededException extends Exception {
+
+		MaxSizeExceededException(String message) {
+			super(message);
+		}
 	}
 
 	@Override
@@ -378,6 +417,12 @@ public class ResilientStreamableServerTransportProvider extends HttpServlet
 			return;
 		}
 
+		// Cheap rejection of oversized bodies before any buffering (upstream SDK 2.0.1).
+		if (request.getContentLengthLong() > this.requestMaxSize) {
+			response.sendError(HttpServletResponse.SC_REQUEST_ENTITY_TOO_LARGE);
+			return;
+		}
+
 		try {
 			Map<String, List<String>> headers = extractHeaders(request);
 			this.securityValidator.validateHeaders(headers);
@@ -400,14 +445,9 @@ public class ResilientStreamableServerTransportProvider extends HttpServlet
 		McpTransportContext transportContext = this.contextExtractor.extract(request);
 
 		try {
-			BufferedReader reader = request.getReader();
-			StringBuilder body = new StringBuilder();
-			String line;
-			while ((line = reader.readLine()) != null) {
-				body.append(line);
-			}
+			String body = readBody(request, this.requestMaxSize);
 
-			McpSchema.JSONRPCMessage message = McpSchema.deserializeJsonRpcMessage(jsonMapper, body.toString());
+			McpSchema.JSONRPCMessage message = McpSchema.deserializeJsonRpcMessage(jsonMapper, body);
 
 			// Handle initialization request
 			if (message instanceof McpSchema.JSONRPCRequest jsonrpcRequest
@@ -526,6 +566,9 @@ public class ResilientStreamableServerTransportProvider extends HttpServlet
 				this.responseError(response, HttpServletResponse.SC_INTERNAL_SERVER_ERROR,
 						McpError.builder(McpSchema.ErrorCodes.INVALID_REQUEST).message("Unknown message type").build());
 			}
+		}
+		catch (MaxSizeExceededException e) {
+			response.sendError(HttpServletResponse.SC_REQUEST_ENTITY_TOO_LARGE);
 		}
 		catch (IllegalArgumentException | IOException e) {
 			logger.error("Failed to deserialize message: {}", e.getMessage());
@@ -795,6 +838,8 @@ public class ResilientStreamableServerTransportProvider extends HttpServlet
 
 		private ServerTransportSecurityValidator securityValidator = ServerTransportSecurityValidator.NOOP;
 
+		private int requestMaxSize = DEFAULT_REQUEST_MAX_SIZE;
+
 		public Builder jsonMapper(McpJsonMapper jsonMapper) {
 			Assert.notNull(jsonMapper, "JsonMapper must not be null");
 			this.jsonMapper = jsonMapper;
@@ -829,11 +874,16 @@ public class ResilientStreamableServerTransportProvider extends HttpServlet
 			return this;
 		}
 
+		public Builder maxRequestSize(int requestMaxSize) {
+			this.requestMaxSize = requestMaxSize;
+			return this;
+		}
+
 		public ResilientStreamableServerTransportProvider build() {
 			Assert.notNull(this.mcpEndpoint, "MCP endpoint must be set");
 			return new ResilientStreamableServerTransportProvider(
 					jsonMapper == null ? McpJsonDefaults.getMapper() : jsonMapper, mcpEndpoint, disallowDelete,
-					contextExtractor, keepAliveInterval, securityValidator);
+					contextExtractor, keepAliveInterval, securityValidator, requestMaxSize);
 		}
 
 	}

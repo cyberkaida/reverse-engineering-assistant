@@ -81,7 +81,7 @@ class TestArchiveImport:
         assert hasattr(result, 'content'), "Result missing content attribute"
         assert len(result.content) > 0, "Result content is empty"
 
-        if hasattr(result, 'isError') and result.isError:
+        if hasattr(result, 'is_error') and result.is_error:
             error_text = result.content[0].text if result.content else "Unknown error"
             pytest.fail(f"Import failed: {error_text}")
 
@@ -116,7 +116,7 @@ class TestArchiveImport:
         )
 
         assert result is not None
-        assert not getattr(result, "isError", False), (
+        assert not getattr(result, "is_error", False), (
             f"Import failed: {result.content[0].text if result.content else 'no content'}"
         )
         data = json.loads(result.content[0].text)
@@ -161,7 +161,7 @@ class TestFatMachoBinaryImport:
         assert result is not None
         assert hasattr(result, 'content'), "Result missing content attribute"
 
-        if hasattr(result, 'isError') and result.isError:
+        if hasattr(result, 'is_error') and result.is_error:
             error_text = result.content[0].text if result.content else "Unknown error"
             pytest.fail(f"Import failed: {error_text}")
 
@@ -582,7 +582,7 @@ class TestImportResponseFields:
         )
 
         assert result is not None
-        assert not getattr(result, "isError", False), (
+        assert not getattr(result, "is_error", False), (
             f"Import failed: {result.content[0].text if result.content else 'no content'}"
         )
         data = json.loads(result.content[0].text)
@@ -640,7 +640,7 @@ class TestImportResponseFields:
                 "stripAllContainerPath": False,
             }
         )
-        assert not getattr(default_result, "isError", False), (
+        assert not getattr(default_result, "is_error", False), (
             f"Import failed: {default_result.content[0].text if default_result.content else 'no content'}"
         )
         default_data = json.loads(default_result.content[0].text)
@@ -663,7 +663,7 @@ class TestImportResponseFields:
                 "stripAllContainerPath": True,
             }
         )
-        assert not getattr(stripped_result, "isError", False), (
+        assert not getattr(stripped_result, "is_error", False), (
             f"Import failed: {stripped_result.content[0].text if stripped_result.content else 'no content'}"
         )
         stripped_data = json.loads(stripped_result.content[0].text)
@@ -706,7 +706,7 @@ class TestImportErrorHandling:
         )
         body = result.content[0].text
 
-        if getattr(result, "isError", False):
+        if getattr(result, "is_error", False):
             # MCP error response is acceptable; the body is the error message.
             return
 

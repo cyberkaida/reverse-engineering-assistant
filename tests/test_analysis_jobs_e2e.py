@@ -62,7 +62,7 @@ def _result_text(result) -> str:
 def _parse(result, context: str) -> dict:
     """Assert the tool call succeeded, then parse its JSON body."""
     assert result is not None, f"{context}: returned None — server unreachable?"
-    assert not getattr(result, "isError", False), (
+    assert not getattr(result, "is_error", False), (
         f"{context} failed: {_result_text(result)}"
     )
     return json.loads(result.content[0].text)
@@ -188,7 +188,7 @@ class TestAnalysisJobErrorPaths:
         result = await mcp_stdio_client.call_tool(
             "analysis-status", arguments={"jobId": bogus}
         )
-        assert getattr(result, "isError", False), (
+        assert getattr(result, "is_error", False), (
             f"analysis-status with unknown jobId must be an error; "
             f"got: {_result_text(result)}"
         )
@@ -203,7 +203,7 @@ class TestAnalysisJobErrorPaths:
         result = await mcp_stdio_client.call_tool(
             "analysis-cancel", arguments={"jobId": bogus}
         )
-        assert getattr(result, "isError", False), (
+        assert getattr(result, "is_error", False), (
             f"analysis-cancel with unknown jobId must be an error; "
             f"got: {_result_text(result)}"
         )
@@ -216,7 +216,7 @@ class TestAnalysisJobErrorPaths:
     ):
         # Neither jobId nor programPath.
         neither = await mcp_stdio_client.call_tool("analysis-status", arguments={})
-        assert getattr(neither, "isError", False), (
+        assert getattr(neither, "is_error", False), (
             f"analysis-status without identifiers must be an error; "
             f"got: {_result_text(neither)}"
         )
@@ -229,7 +229,7 @@ class TestAnalysisJobErrorPaths:
             "analysis-status",
             arguments={"jobId": "analysis-1", "programPath": "/whatever"},
         )
-        assert getattr(both, "isError", False), (
+        assert getattr(both, "is_error", False), (
             f"analysis-status with both identifiers must be an error; "
             f"got: {_result_text(both)}"
         )

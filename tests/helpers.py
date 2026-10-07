@@ -52,46 +52,42 @@ async def _make_mcp_request_async(
     """
     Async implementation of MCP request using StreamableHTTP transport.
     """
-    from mcp.client.streamable_http import streamablehttp_client
+    from mcp.client.streamable_http import streamable_http_client
     from mcp import ClientSession
-    import httpx
+    import httpx2
 
     url = f"http://localhost:{port}/mcp/message"
 
-    def _no_keepalive_factory(headers=None, timeout=None, auth=None):
-        """Disable keepalive to avoid stale TCP connections after SSE responses."""
-        return httpx.AsyncClient(
-            headers=headers,
-            timeout=timeout,
-            auth=auth,
-            limits=httpx.Limits(max_keepalive_connections=0),
-        )
-
     try:
-        # Use the streamable HTTP client from MCP SDK
-        async with streamablehttp_client(
-            url,
-            timeout=float(timeout),
-            httpx_client_factory=_no_keepalive_factory,
-        ) as (read_stream, write_stream, get_session_id):
-            async with ClientSession(read_stream, write_stream) as session:
-                # Initialize the session
-                init_result = await session.initialize()
-                print(f"DEBUG: Initialized session, server info: {init_result}")
+        # MCP v2: the transport takes a pre-built httpx2.AsyncClient (the v1
+        # timeout/httpx_client_factory params are gone). Keepalive stays disabled
+        # to avoid stale TCP connections after SSE responses.
+        async with httpx2.AsyncClient(
+            timeout=httpx2.Timeout(float(timeout)),
+            limits=httpx2.Limits(max_keepalive_connections=0),
+        ) as http_client:
+            async with streamable_http_client(url, http_client=http_client) as (
+                read_stream, write_stream
+            ):
+                async with ClientSession(read_stream, write_stream) as session:
+                    # Initialize the session
+                    init_result = await session.initialize()
+                    print(f"DEBUG: Initialized session, server info: {init_result}")
 
-                # Call the tool
-                print(f"DEBUG: Calling tool '{tool_name}' with arguments {arguments}")
-                result = await session.call_tool(
-                    name=tool_name,
-                    arguments=arguments or {}
-                )
-                print(f"DEBUG: Tool call result: {result}")
+                    # Call the tool
+                    print(f"DEBUG: Calling tool '{tool_name}' with arguments {arguments}")
+                    result = await session.call_tool(
+                        name=tool_name,
+                        arguments=arguments or {}
+                    )
+                    print(f"DEBUG: Tool call result: {result}")
 
-                # Return the tool call result
-                return {
-                    "content": result.content,
-                    "isError": result.isError if hasattr(result, 'isError') else False
-                }
+                    # Return the tool call result. The "isError" dict key is kept:
+                    # consumers read this raw wire-shaped dict.
+                    return {
+                        "content": result.content,
+                        "isError": result.is_error if hasattr(result, 'is_error') else False
+                    }
 
     except Exception as e:
         print(f"Async MCP request failed: {e}")
@@ -134,33 +130,26 @@ async def _list_mcp_tools_async(port: int, timeout: int) -> Optional[list]:
     """
     Async implementation of tools/list using StreamableHTTP transport.
     """
-    from mcp.client.streamable_http import streamablehttp_client
+    from mcp.client.streamable_http import streamable_http_client
     from mcp import ClientSession
-    import httpx
+    import httpx2
 
     url = f"http://localhost:{port}/mcp/message"
 
-    def _no_keepalive_factory(headers=None, timeout=None, auth=None):
-        """Disable keepalive to avoid stale TCP connections after SSE responses."""
-        return httpx.AsyncClient(
-            headers=headers,
-            timeout=timeout,
-            auth=auth,
-            limits=httpx.Limits(max_keepalive_connections=0),
-        )
-
     try:
-        async with streamablehttp_client(
-            url,
-            timeout=float(timeout),
-            httpx_client_factory=_no_keepalive_factory,
-        ) as (read_stream, write_stream, get_session_id):
-            async with ClientSession(read_stream, write_stream) as session:
-                init_result = await session.initialize()
-                print(f"DEBUG: Initialized session, server info: {init_result}")
+        async with httpx2.AsyncClient(
+            timeout=httpx2.Timeout(float(timeout)),
+            limits=httpx2.Limits(max_keepalive_connections=0),
+        ) as http_client:
+            async with streamable_http_client(url, http_client=http_client) as (
+                read_stream, write_stream
+            ):
+                async with ClientSession(read_stream, write_stream) as session:
+                    init_result = await session.initialize()
+                    print(f"DEBUG: Initialized session, server info: {init_result}")
 
-                result = await session.list_tools()
-                return list(result.tools)
+                    result = await session.list_tools()
+                    return list(result.tools)
 
     except Exception as e:
         print(f"Async MCP tools/list request failed: {e}")

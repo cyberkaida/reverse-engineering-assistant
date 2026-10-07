@@ -89,7 +89,7 @@ class TestE2EWorkflow:
         assert len(import_result.content) > 0, "Result content is empty"
 
         # Check if it's an error
-        if hasattr(import_result, 'isError') and import_result.isError:
+        if hasattr(import_result, 'is_error') and import_result.is_error:
             error_text = import_result.content[0].text if import_result.content else "Unknown error"
             pytest.fail(f"Import failed: {error_text}")
 
@@ -126,7 +126,7 @@ class TestE2EWorkflow:
         )
 
         assert decomp_result is not None
-        assert not getattr(decomp_result, "isError", False), (
+        assert not getattr(decomp_result, "is_error", False), (
             f"get-decompilation failed: "
             f"{decomp_result.content[0].text if decomp_result.content else 'no content'}"
         )
@@ -245,7 +245,7 @@ class TestE2EWorkflow:
         assert hasattr(import_result, 'content'), "Result missing content attribute"
         assert len(import_result.content) > 0, "Result content is empty"
 
-        if hasattr(import_result, 'isError') and import_result.isError:
+        if hasattr(import_result, 'is_error') and import_result.is_error:
             error_text = import_result.content[0].text if import_result.content else "Unknown error"
             pytest.fail(f"Import failed: {error_text}")
 
@@ -284,7 +284,7 @@ class TestE2EWorkflow:
                 "maxCount": 500,
             },
         )
-        assert not getattr(symbols_result, "isError", False), (
+        assert not getattr(symbols_result, "is_error", False), (
             f"get-symbols failed: {symbols_result.content[0].text if symbols_result.content else 'no content'}"
         )
 
@@ -321,7 +321,7 @@ class TestE2EWorkflow:
 
         assert import_result is not None
         assert len(import_result.content) > 0
-        if hasattr(import_result, 'isError') and import_result.isError:
+        if hasattr(import_result, 'is_error') and import_result.is_error:
             pytest.fail(f"Import failed: {import_result.content[0].text}")
 
         content_text = import_result.content[0].text
@@ -342,7 +342,7 @@ class TestE2EWorkflow:
                 "limit": 5
             }
         )
-        assert not getattr(decomp_result, "isError", False), (
+        assert not getattr(decomp_result, "is_error", False), (
             f"get-decompilation failed: "
             f"{decomp_result.content[0].text if decomp_result.content else 'no content'}"
         )
@@ -363,7 +363,7 @@ class TestE2EWorkflow:
                 "comment": "Cache release test"
             }
         )
-        assert not getattr(comment_result, "isError", False), (
+        assert not getattr(comment_result, "is_error", False), (
             f"set-comment failed: "
             f"{comment_result.content[0].text if comment_result.content else 'no content'}"
         )

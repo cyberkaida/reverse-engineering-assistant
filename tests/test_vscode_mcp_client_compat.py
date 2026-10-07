@@ -26,7 +26,7 @@ FAIL_ON_UNKNOWN_PROPERTIES=false.
 import datetime
 
 import pytest
-import httpx
+import httpx2
 import json
 
 # Mark all tests in this file
@@ -131,7 +131,7 @@ class TestVSCodeMCPClientCompatibility:
         port = server.getPort()
         url = f"http://localhost:{port}/mcp/message"
 
-        async with httpx.AsyncClient() as client:
+        async with httpx2.AsyncClient() as client:
             response = await client.post(
                 url,
                 json=VSCODE_INITIALIZE_REQUEST,
@@ -202,7 +202,7 @@ class TestVSCodeMCPClientCompatibility:
         port = server.getPort()
         url = f"http://localhost:{port}/mcp/message"
 
-        async with httpx.AsyncClient() as client:
+        async with httpx2.AsyncClient() as client:
             response = await client.post(
                 url,
                 json=VSCODE_INITIALIZE_REQUEST,
@@ -250,7 +250,7 @@ class TestVSCodeMCPClientCompatibility:
             }
         }
 
-        async with httpx.AsyncClient() as client:
+        async with httpx2.AsyncClient() as client:
             response = await client.post(
                 url,
                 json=request,
@@ -295,7 +295,7 @@ class TestVSCodeMCPClientCompatibility:
             }
         }
 
-        async with httpx.AsyncClient() as client:
+        async with httpx2.AsyncClient() as client:
             response = await client.post(
                 url,
                 json=request,
@@ -340,7 +340,7 @@ class TestVSCodeMCPClientCompatibility:
             }
         }
 
-        async with httpx.AsyncClient() as client:
+        async with httpx2.AsyncClient() as client:
             response = await client.post(
                 url,
                 json=request,
@@ -381,7 +381,7 @@ class TestProtocolVersionNegotiation:
             }
         }
 
-        async with httpx.AsyncClient() as client:
+        async with httpx2.AsyncClient() as client:
             response = await client.post(
                 url,
                 json=request,
@@ -404,7 +404,7 @@ class TestProtocolVersionNegotiation:
         port = server.getPort()
         url = f"http://localhost:{port}/mcp/message"
 
-        async with httpx.AsyncClient() as client:
+        async with httpx2.AsyncClient() as client:
             response = await client.post(
                 url,
                 json=VSCODE_INITIALIZE_REQUEST,

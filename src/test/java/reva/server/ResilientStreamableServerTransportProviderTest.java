@@ -15,7 +15,9 @@
  */
 package reva.server;
 
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -25,12 +27,12 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import java.io.BufferedReader;
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.PrintWriter;
-import java.io.StringReader;
 import java.io.StringWriter;
 import java.io.Writer;
+import java.nio.charset.StandardCharsets;
 import java.lang.reflect.Field;
 import java.time.Duration;
 import java.util.Collections;
@@ -44,6 +46,8 @@ import io.modelcontextprotocol.spec.HttpHeaders;
 import io.modelcontextprotocol.spec.McpSchema;
 import io.modelcontextprotocol.spec.McpStreamableServerSession;
 import jakarta.servlet.AsyncContext;
+import jakarta.servlet.ReadListener;
+import jakarta.servlet.ServletInputStream;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 
@@ -146,15 +150,110 @@ public class ResilientStreamableServerTransportProviderTest {
 		when(request.getRequestURI()).thenReturn(ENDPOINT);
 		when(request.getHeader("Accept")).thenReturn("text/event-stream, application/json");
 		when(request.getHeaderNames()).thenReturn(Collections.enumeration(Collections.emptyList()));
-		when(request.getReader()).thenReturn(new BufferedReader(new StringReader(
+		when(request.getInputStream()).thenReturn(servletInput((
 				"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{"
 						+ "\"protocolVersion\":\"2025-06-18\",\"capabilities\":{},"
-						+ "\"clientInfo\":{\"name\":\"test-client\",\"version\":\"1.0\"}}}")));
+						+ "\"clientInfo\":{\"name\":\"test-client\",\"version\":\"1.0\"}}}")
+				.getBytes(StandardCharsets.UTF_8)));
 
 		HttpServletResponse response = mock(HttpServletResponse.class);
 		unwired.doPost(request, response);
 
 		verify(response).sendError(eq(HttpServletResponse.SC_SERVICE_UNAVAILABLE), anyString());
+	}
+
+	@Test
+	public void oversizedContentLengthRejectedWith413() throws Exception {
+		// Upstream SDK 2.0.1 hardening the fork was missing: a body declaring an
+		// oversized Content-Length is rejected before anything is buffered.
+		ResilientStreamableServerTransportProvider limited = ResilientStreamableServerTransportProvider.builder()
+			.mcpEndpoint(ENDPOINT)
+			.maxRequestSize(64)
+			.build();
+
+		HttpServletRequest request = mock(HttpServletRequest.class);
+		when(request.getRequestURI()).thenReturn(ENDPOINT);
+		when(request.getContentLengthLong()).thenReturn(4096L);
+
+		HttpServletResponse response = mock(HttpServletResponse.class);
+		limited.doPost(request, response);
+
+		verify(response).sendError(HttpServletResponse.SC_REQUEST_ENTITY_TOO_LARGE);
+		verify(request, never()).getInputStream();
+	}
+
+	@Test
+	public void chunkedBodyOverLimitRejectedWith413() throws Exception {
+		// Chunked requests (Content-Length: -1) bypass the pre-check; the bounded read
+		// itself must stop at the limit and produce a 413.
+		ResilientStreamableServerTransportProvider limited = ResilientStreamableServerTransportProvider.builder()
+			.mcpEndpoint(ENDPOINT)
+			.maxRequestSize(64)
+			.build();
+
+		HttpServletRequest request = mock(HttpServletRequest.class);
+		when(request.getRequestURI()).thenReturn(ENDPOINT);
+		when(request.getContentLengthLong()).thenReturn(-1L);
+		when(request.getHeaderNames()).thenReturn(Collections.enumeration(Collections.emptyList()));
+		when(request.getInputStream()).thenReturn(servletInput(new byte[100]));
+
+		HttpServletResponse response = mock(HttpServletResponse.class);
+		limited.doPost(request, response);
+
+		verify(response).sendError(HttpServletResponse.SC_REQUEST_ENTITY_TOO_LARGE);
+	}
+
+	@Test
+	public void readBodyFallsBackToUtf8AndEnforcesLimit() throws Exception {
+		// The fork previously decoded via request.getReader(), which defaults to
+		// ISO-8859-1 when clients omit the charset — mangling non-ASCII JSON (e.g.
+		// Japanese strings in tool arguments). readBody must default to UTF-8.
+		HttpServletRequest request = mock(HttpServletRequest.class);
+		when(request.getCharacterEncoding()).thenReturn(null);
+		when(request.getInputStream()).thenReturn(
+				servletInput("{\"name\":\"日本語\"}".getBytes(StandardCharsets.UTF_8)));
+
+		assertEquals("{\"name\":\"日本語\"}", ResilientStreamableServerTransportProvider.readBody(request, 1024));
+
+		// And it must enforce the byte cap while streaming.
+		when(request.getInputStream()).thenReturn(servletInput(new byte[65]));
+		try {
+			ResilientStreamableServerTransportProvider.readBody(request, 64);
+			fail("readBody must throw MaxSizeExceededException past the limit");
+		}
+		catch (ResilientStreamableServerTransportProvider.MaxSizeExceededException expected) {
+			// expected
+		}
+	}
+
+	/** Wraps bytes as a ServletInputStream for mocks (what readBody consumes). */
+	private static ServletInputStream servletInput(byte[] bytes) {
+		ByteArrayInputStream delegate = new ByteArrayInputStream(bytes);
+		return new ServletInputStream() {
+			@Override
+			public boolean isFinished() {
+				return delegate.available() == 0;
+			}
+
+			@Override
+			public boolean isReady() {
+				return true;
+			}
+
+			@Override
+			public void setReadListener(ReadListener readListener) {
+			}
+
+			@Override
+			public int read() {
+				return delegate.read();
+			}
+
+			@Override
+			public int read(byte[] b, int off, int len) {
+				return delegate.read(b, off, len);
+			}
+		};
 	}
 
 	// --- helpers ---------------------------------------------------------------

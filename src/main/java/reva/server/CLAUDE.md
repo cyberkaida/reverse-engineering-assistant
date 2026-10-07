@@ -155,7 +155,7 @@ currentTransportProvider = HttpServletStreamableServerTransportProvider.builder(
 2. **Host/Port Binding** - Configure ServerConnector with host and port
 2a. **Public-binding guard** - If bound to a non-localhost interface with API key auth disabled and the `Allow Public Binding Without API Key` option is false: GUI mode prompts (Allow Once / Allow Always / Cancel via `PublicBindingConsentDialog`); headless mode logs an error and refuses to start. The Scripting (run-script) group being enabled escalates the warning text. Runs before any socket is bound.
 3. **Security Setup** - Add ApiKeyAuthFilter if authentication is enabled
-4. **Transport Initialization** - Configure streamable HTTP transport
+4. **Transport Mounting** - Mount the streamable HTTP transport provider servlet (created once in the constructor — see Dynamic Restart)
 5. **Provider Registration** - Register all 18 tool providers and resource providers
 6. **Server Launch** - Start Jetty server in background GThreadPool thread
 7. **Readiness Check** - Wait up to 10 seconds for server to be ready
@@ -176,10 +176,18 @@ The server supports dynamic restart for configuration changes:
 ```java
 public void restartServer() {
     stopServer();
-    recreateTransportProvider();
     startServer();
 }
 ```
+
+The transport provider instance is **not** recreated on restart. The `McpServer`
+wires its session factory into exactly the provider built in the constructor and
+cannot be re-wired — a recreated provider answers every `initialize` with HTTP 500
+(`sessionFactory is null`, issue #366). The provider holds no host/port state (those
+live on the Jetty connector built in `startServer()`) and survives Jetty stop/start:
+its servlet `destroy()` deliberately does not close the transport, so `isClosing`
+stays false and the keep-alive scheduler keeps running. Graceful session shutdown
+happens once, via `McpServer.closeGracefully()` in `shutdown()`.
 
 **Configuration changes that trigger restart:**
 - Server port

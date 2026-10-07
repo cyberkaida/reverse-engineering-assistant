@@ -115,7 +115,7 @@ public class ResilientStreamableServerTransportProvider extends HttpServlet
 
 	private final McpJsonMapper jsonMapper;
 
-	private McpStreamableServerSession.Factory sessionFactory;
+	private volatile McpStreamableServerSession.Factory sessionFactory;
 
 	private final ConcurrentHashMap<String, McpStreamableServerSession> sessions = new ConcurrentHashMap<>();
 
@@ -419,10 +419,21 @@ public class ResilientStreamableServerTransportProvider extends HttpServlet
 					return;
 				}
 
+				// Defensive: fail retryable with 503 instead of an NPE-driven 500 if the
+				// McpServer has not wired the session factory into this provider instance.
+				// (Issue #366: restartServer() once swapped in a provider the already-built
+				// server never wired, so every initialize hit a NullPointerException here.)
+				McpStreamableServerSession.Factory factory = this.sessionFactory;
+				if (factory == null) {
+					logger.error("Received initialize before the session factory was set; server not ready");
+					response.sendError(HttpServletResponse.SC_SERVICE_UNAVAILABLE, "Server is not ready");
+					return;
+				}
+
 				McpSchema.InitializeRequest initializeRequest = jsonMapper.convertValue(jsonrpcRequest.params(),
 						new TypeRef<McpSchema.InitializeRequest>() {
 						});
-				McpStreamableServerSession.McpStreamableServerSessionInit init = this.sessionFactory
+				McpStreamableServerSession.McpStreamableServerSessionInit init = factory
 					.startSession(initializeRequest);
 				this.sessions.put(init.session().getId(), init.session());
 
@@ -629,7 +640,13 @@ public class ResilientStreamableServerTransportProvider extends HttpServlet
 
 	@Override
 	public void destroy() {
-		closeGracefully().block();
+		// Deliberately does NOT call closeGracefully(): this provider instance outlives
+		// individual Jetty lifecycles — McpServerManager reuses it across restartServer()
+		// calls, and the McpServer wired its session factory into exactly this instance
+		// at build time. Closing here would set isClosing and stop the keep-alive
+		// scheduler for good, making every request after a restart fail with 503.
+		// Graceful session shutdown happens once, via McpServer.closeGracefully() in
+		// McpServerManager.shutdown().
 		super.destroy();
 	}
 

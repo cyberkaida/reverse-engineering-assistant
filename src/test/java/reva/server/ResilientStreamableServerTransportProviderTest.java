@@ -25,8 +25,10 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.PrintWriter;
+import java.io.StringReader;
 import java.io.StringWriter;
 import java.io.Writer;
 import java.lang.reflect.Field;
@@ -114,6 +116,45 @@ public class ResilientStreamableServerTransportProviderTest {
 		verify(reconnect, never()).sendError(anyInt());
 		verify(reconnect, never()).sendError(anyInt(), anyString());
 		verify(reconnectRequest).startAsync();
+	}
+
+	@Test
+	public void serializationFailureDropsMessageButKeepsSessionAndStream() throws Exception {
+		// The other half of the fork's contract: upstream removes the session and
+		// completes the stream on ANY sendMessage exception, so one unserializable
+		// message permanently kills the session. The fork must drop only the message.
+		AsyncContext asyncContext = establishListeningStream(new PrintWriter(new StringWriter()));
+
+		// Bare Object has no serializer (FAIL_ON_EMPTY_BEANS is on by default), so
+		// building the notification JSON fails inside transport.sendMessage.
+		provider.notifyClients(McpSchema.METHOD_NOTIFICATION_TOOLS_LIST_CHANGED, new Object()).block();
+
+		assertTrue("Session must remain after a serialization failure",
+				sessions(provider).containsKey(SESSION_ID));
+		verify(asyncContext, never()).complete();
+	}
+
+	@Test
+	public void initializeBeforeSessionFactoryWiredReturns503() throws Exception {
+		// Issue #366: a provider the built McpServer never wired (restartServer() used to
+		// swap in a fresh instance under the already-built server) NPE'd on initialize and
+		// answered 500. It must instead fail retryable with 503 until the factory is set.
+		ResilientStreamableServerTransportProvider unwired =
+				ResilientStreamableServerTransportProvider.builder().mcpEndpoint(ENDPOINT).build();
+
+		HttpServletRequest request = mock(HttpServletRequest.class);
+		when(request.getRequestURI()).thenReturn(ENDPOINT);
+		when(request.getHeader("Accept")).thenReturn("text/event-stream, application/json");
+		when(request.getHeaderNames()).thenReturn(Collections.enumeration(Collections.emptyList()));
+		when(request.getReader()).thenReturn(new BufferedReader(new StringReader(
+				"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{"
+						+ "\"protocolVersion\":\"2025-06-18\",\"capabilities\":{},"
+						+ "\"clientInfo\":{\"name\":\"test-client\",\"version\":\"1.0\"}}}")));
+
+		HttpServletResponse response = mock(HttpServletResponse.class);
+		unwired.doPost(request, response);
+
+		verify(response).sendError(eq(HttpServletResponse.SC_SERVICE_UNAVAILABLE), anyString());
 	}
 
 	// --- helpers ---------------------------------------------------------------

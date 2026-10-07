@@ -87,7 +87,7 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
     private static final String MCP_SERVER_VERSION = "1.0.0";
 
     private final McpSyncServer server;
-    private ResilientStreamableServerTransportProvider currentTransportProvider;
+    private final ResilientStreamableServerTransportProvider currentTransportProvider;
     private Server httpServer;
     private final GThreadPool threadPool;
     private final ConfigManager configManager;
@@ -154,8 +154,9 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
         threadPool = GThreadPool.getPrivateThreadPool("ReVa");
         RevaInternalServiceRegistry.registerService(GThreadPool.class, threadPool);
 
-        // Initialize MCP transport provider with baseUrl
-        recreateTransportProvider();
+        // Initialize MCP transport provider. Created exactly once — the McpServer below
+        // wires its session factory into this instance (see createTransportProvider()).
+        currentTransportProvider = createTransportProvider();
 
         // Configure server capabilities
         McpSchema.ServerCapabilities serverCapabilities = McpSchema.ServerCapabilities.builder()
@@ -621,8 +622,12 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
         // Stop the current server
         stopServer();
 
-        // Recreate transport provider with new port configuration
-        recreateTransportProvider();
+        // Do NOT recreate the transport provider here: the McpServer wired its session
+        // factory into the current instance at build time and cannot be re-wired, so a
+        // recreated provider would answer every initialize with an NPE-driven HTTP 500
+        // (issue #366). The provider holds no host/port state — those live on the Jetty
+        // connector built in startServer() — and it survives Jetty stop/start because
+        // its servlet destroy() deliberately does not close the transport.
 
         // Start the server with new configuration
         startServer(guardAlreadyApproved);
@@ -631,14 +636,16 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
     }
 
     /**
-     * Recreate the transport provider with updated configuration.
-     * This is necessary when configuration changes during server restart.
+     * Create the single transport provider instance for this manager's lifetime.
+     * Called exactly once, before the McpServer is built: McpServer wires its session
+     * factory into precisely this instance at build time, so it must never be replaced
+     * afterwards (issue #366 — a restart-time replacement left the served provider
+     * unwired and every initialize failed with "sessionFactory is null").
+     *
+     * <p>Uses ResilientStreamableServerTransportProvider (forked from the MCP SDK) to
+     * fix a bug where serialization errors permanently kill the session.
      */
-    private void recreateTransportProvider() {
-        int serverPort = configManager.getServerPort();
-        String serverHost = configManager.getServerHost();
-        String baseUrl = "http://" + serverHost + ":" + serverPort;
-
+    private static ResilientStreamableServerTransportProvider createTransportProvider() {
         // Create ObjectMapper configured to ignore unknown properties
         // This is a workaround for MCP SDK issue #724 where the SDK doesn't handle
         // newer protocol fields (e.g., from VS Code MCP client using protocol 2025-11-25)
@@ -647,10 +654,7 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
         objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
         JacksonMcpJsonMapper jsonMapper = new JacksonMcpJsonMapper(objectMapper);
 
-        // Create new transport provider with updated configuration
-        // Uses ResilientStreamableServerTransportProvider (forked from MCP SDK) to fix
-        // a bug where serialization errors permanently kill the session.
-        currentTransportProvider = ResilientStreamableServerTransportProvider.builder()
+        return ResilientStreamableServerTransportProvider.builder()
             .mcpEndpoint(MCP_MSG_ENDPOINT)
             .jsonMapper(jsonMapper)
             .keepAliveInterval(java.time.Duration.ofSeconds(30))

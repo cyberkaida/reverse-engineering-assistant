@@ -41,7 +41,9 @@ classifiers = [
 
 dependencies = [
     "pyghidra>=3.1.0",
-    "mcp",
+    # mcp 2.x is a breaking SDK rewrite (client/server module restructure);
+    # migrating reva_cli is tracked separately. 1.28.1 fixes all open advisories.
+    "mcp>=1.28.1,<2",
     "httpx>=0.27.0,<1.0",
     "httpx-sse>=0.4.0",
 ]
@@ -63,7 +65,7 @@ test = [
     "pytest-timeout>=2.0.0",
     "pytest-sugar>=0.9.0",
     "pytest-xdist>=3.0.0",
-    "mcp",
+    "mcp>=1.28.1,<2",
     "httpx>=0.27.0,<1.0",
     "httpx-sse>=0.4.0",
 ]
@@ -97,7 +99,7 @@ dev = [
     "pytest-asyncio>=0.21.0",
     "pytest-timeout>=2.0.0",
     "pytest-sugar>=0.9.0",
-    "mcp",
+    "mcp>=1.28.1,<2",
     "httpx>=0.27.0,<1.0",
     "httpx-sse>=0.4.0",
     "pytest-xdist>=3.8.0",

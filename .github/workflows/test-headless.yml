@@ -21,6 +21,7 @@ jobs:
           - "12.0"
           - "12.1"
           - "12.1.4"
+          - "12.2"
           - "latest"
         # macOS hosted runners are ~4x slower per e2e test and far scarcer
         # (7 concurrent macOS jobs queued for hours). Linux carries full
@@ -29,6 +30,8 @@ jobs:
         exclude:
           - os: macos-latest
             ghidra-version: "12.1"
+          - os: macos-latest
+            ghidra-version: "12.2"  # covered by "latest" until 12.3 ships
       fail-fast: false  # Continue other tests if one fails
 
     name: Test on ${{ matrix.os }} / Ghidra ${{ matrix.ghidra-version }}
@@ -40,10 +43,10 @@ jobs:
       with:
         lfs: true
 
-    - name: Set up Java 21
+    - name: Set up Java 25
       uses: actions/setup-java@v6
       with:
-        java-version: "21"
+        java-version: "25"
         distribution: "microsoft"
 
     - name: Set up Python 3.10
@@ -60,7 +63,7 @@ jobs:
     - name: Setup Gradle
       uses: gradle/actions/setup-gradle@v6.4.0
       with:
-        gradle-version: "8.14"
+        gradle-version: "9.8.1"
 
     # Ghidra releases ship prebuilt decompiler natives for Linux and Windows but
     # NOT macOS. Without this, decompilation silently returns nothing on macOS

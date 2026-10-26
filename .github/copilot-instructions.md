@@ -10,4 +10,4 @@ Some good resources include:
 - We don't use a gradle wrapper, so just run `gradle` in the root directory to build the project. We do have the Java tools installed in VSCode so you can just check for errors with VSCode instead.
 - When writing tests, use the Ghidra test framework. The tests are in the `src/test` directory. It is easy to run them with `gradle test --info` and the integration tests with `gradle integrationTest --info`.
 - You can use standard gradle test filtering to run specific tests with both of the test targets.
-- We target Ghidra 12.0 and later. Note we should use Java 21.
+- We target Ghidra 12.0 and later. Source must stay Java 21 compatible; building against Ghidra 12.2 requires Java 25 and Gradle 9.1+.

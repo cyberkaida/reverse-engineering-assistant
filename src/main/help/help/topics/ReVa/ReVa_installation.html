@@ -51,8 +51,8 @@
 
         <BLOCKQUOTE>
           <P><IMG border="0" src="help/shared/note.png" alt=""> The extension
-          must match the Ghidra version. ReVa requires Ghidra 12.0+ and
-          Java 21+.</P>
+          must match the Ghidra version. ReVa requires Ghidra 12.0+.
+          Ghidra 12.2+ requires Java 25; earlier versions require Java 21.</P>
         </BLOCKQUOTE>
 
       </BLOCKQUOTE>
@@ -429,7 +429,8 @@ MCP server started successfully</PRE>
 
       <BLOCKQUOTE>
 
-        <P>Requirements: Java 21+ (JDK), Gradle 9.x+, Ghidra 12.0+.</P>
+        <P>Requirements: Ghidra 12.0+, Gradle 9.1+, and a JDK matching your
+          Ghidra version (Java 25+ for Ghidra 12.2, Java 21+ for 12.0/12.1).</P>
 
         <OL>
           <LI>Set <CODE>GHIDRA_INSTALL_DIR</CODE>:

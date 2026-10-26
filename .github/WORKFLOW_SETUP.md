@@ -74,10 +74,10 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v5
 
-    - name: Set up Java 21
+    - name: Set up Java 25
       uses: actions/setup-java@v5
       with:
-        java-version: "21"
+        java-version: "25"
         distribution: "microsoft"
 
     - name: Set up Python ${{ matrix.python-version }}
@@ -93,7 +93,7 @@ jobs:
     - name: Setup Gradle
       uses: gradle/actions/setup-gradle@v5
       with:
-        gradle-version: "8.14"
+        gradle-version: "9.8.1"
 
     - name: Build ReVa Extension
       run: gradle buildExtension
@@ -173,10 +173,10 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v5
 
-    - name: Set up Java 21
+    - name: Set up Java 25
       uses: actions/setup-java@v5
       with:
-        java-version: "21"
+        java-version: "25"
         distribution: "microsoft"
 
     - name: Set up Python 3.12
@@ -192,7 +192,7 @@ jobs:
     - name: Setup Gradle
       uses: gradle/actions/setup-gradle@v5
       with:
-        gradle-version: "8.14"
+        gradle-version: "9.8.1"
 
     - name: Build ReVa Extension
       run: gradle buildExtension

@@ -11,7 +11,7 @@ This document describes the CI/CD workflows for the ReVa project.
 **What it does**:
 - Tests ReVa as a Ghidra extension (GUI mode)
 - Runs unit tests and integration tests
-- Tests on multiple Ghidra versions (12.0, latest)
+- Tests on multiple Ghidra versions (12.0, 12.1, 12.1.4, 12.2, latest)
 - Includes lint checks and CodeQL security analysis
 
 **Jobs**:
@@ -31,7 +31,7 @@ This document describes the CI/CD workflows for the ReVa project.
 - Tests ReVa in headless Ghidra mode via pyghidra
 - Runs Python-based headless server tests
 - Tests on multiple OS (Ubuntu, macOS, Windows)
-- Tests on multiple Ghidra versions (12.0, latest)
+- Tests on multiple Ghidra versions (12.0, 12.1, 12.1.4, 12.2, latest)
 - Tests on multiple Python versions (3.9, 3.11, 3.12)
 
 **Jobs**:
@@ -73,9 +73,10 @@ This document describes the CI/CD workflows for the ReVa project.
 ```
 Matrix:
   OS: ubuntu-latest
-  Ghidra: [12.0, latest]
+  Ghidra: [12.0, 12.1, 12.1.4, 12.2, latest]
+  Java: 25, Gradle: 9.8.1
 
-Total: 2 jobs
+Total: 5 jobs
 ```
 
 ### Headless Mode Tests (`test-headless.yml`)
@@ -83,7 +84,7 @@ Total: 2 jobs
 ```
 Unix/Mac Matrix:
   OS: [ubuntu-latest, macos-latest]
-  Ghidra: [12.0, latest]
+  Ghidra: [12.0, 12.1, 12.1.4, 12.2, latest]
   Python: [3.9, 3.11, 3.12]
   Excludes: (12.0 + older Python versions)
 

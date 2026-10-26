@@ -45,6 +45,7 @@ import ghidra.program.model.listing.FunctionIterator;
 import ghidra.program.model.listing.FunctionManager;
 import ghidra.program.model.listing.Instruction;
 import ghidra.program.model.listing.Listing;
+import ghidra.program.model.listing.Parameter;
 import ghidra.program.model.listing.Program;
 import ghidra.program.model.mem.MemoryBlock;
 import ghidra.util.UndefinedFunction;
@@ -832,14 +833,17 @@ public class DecompilerToolProvider extends AbstractToolProvider {
 
             // Get parameters info
             List<Map<String, String>> parameters = new ArrayList<>();
-            for (int i = 0; i < function.getParameterCount(); i++) {
+            // getParameters() rather than getParameter(i): on Ghidra 12.2+ getParameter(int) does
+            // not delegate to the thunked function, so it returns null for thunks
+            Parameter[] functionParams = function.getParameters();
+            for (int i = 0; i < functionParams.length; i++) {
                 Map<String, String> paramInfo = new HashMap<>();
-                paramInfo.put("name", function.getParameter(i).getName());
-                paramInfo.put("dataType", function.getParameter(i).getDataType().toString());
+                paramInfo.put("name", functionParams[i].getName());
+                paramInfo.put("dataType", functionParams[i].getDataType().toString());
                 paramInfo.put("ordinal", Integer.toString(i));
                 parameters.add(paramInfo);
             }
-            metadata.put("parameterCount", Integer.toString(function.getParameterCount()));
+            metadata.put("parameterCount", Integer.toString(functionParams.length));
             resultData.put("metadata", metadata);
             resultData.put("parameters", parameters);
 

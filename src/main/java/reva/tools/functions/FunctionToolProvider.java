@@ -830,11 +830,13 @@ public class FunctionToolProvider extends AbstractToolProvider {
 
         // Add parameters info (as immutable list of immutable maps)
         List<Map<String, String>> parameters = new ArrayList<>();
-        for (int i = 0; i < function.getParameterCount(); i++) {
+        // getParameters() rather than getParameter(i): on Ghidra 12.2+ getParameter(int) does not
+        // delegate to the thunked function, so it returns null for thunks
+        for (Parameter param : function.getParameters()) {
             // Use Map.of for immutable parameter info
             parameters.add(Map.of(
-                "name", function.getParameter(i).getName(),
-                "dataType", function.getParameter(i).getDataType().toString()
+                "name", param.getName(),
+                "dataType", param.getDataType().toString()
             ));
         }
         functionInfo.put("parameters", List.copyOf(parameters));

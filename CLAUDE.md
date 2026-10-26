@@ -263,8 +263,9 @@ Install via: `claude plugin marketplace add cyberkaida/reverse-engineering-assis
 ## External Dependencies
 
 ### Java
-- Ghidra: 12.0+ (source at `../ghidra`)
-- Java: 21+
+- Ghidra: 12.0+, 12.2 recommended (source at `../ghidra`)
+- Java: 25+ for Ghidra 12.2 (21+ for 12.0/12.1)
+- Gradle: 9.1+ (required by Ghidra 12.2)
 - MCP SDK: io.modelcontextprotocol.sdk v1.1.1 (BOM-managed)
 - Jackson: 2.21.x (force-resolved for MCP SDK compatibility)
 - Jetty: 11.0.26 (embedded servlet server)
@@ -299,7 +300,7 @@ Install via: `claude plugin marketplace add cyberkaida/reverse-engineering-assis
 - **Port Strategy**: Random ports for CLI mode to avoid conflicts
 
 ### Development Constraints
-- **Java**: Target Java 21, minimum Ghidra 12.0+
+- **Java**: Source must stay Java 21 compatible (Ghidra 12.0/12.1); the build targets whatever level the installed Ghidra uses (Java 25 for 12.2), so release zips are per-Ghidra-version and not interchangeable
 - **Python**: 3.10+, uv for dependency management
 - **Testing (Java)**: Integration tests require `java.awt.headless=false`, fork=1
 - **Testing (Python)**: pytest with markers (unit/integration/e2e/cli)

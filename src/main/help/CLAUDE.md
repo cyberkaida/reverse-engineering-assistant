@@ -38,7 +38,7 @@ Pages reference shared assets as `help/shared/foo.png` in HTML — JavaHelp reso
 
 ## Verifying before commit
 
-- `GHIDRA_INSTALL_DIR=$HOME/.local/opt/ghidra_12.0.4_PUBLIC gradle buildModuleHelp` runs the validator standalone (faster than full `install`).
+- `GHIDRA_INSTALL_DIR=$HOME/.local/opt/ghidra_12.2_PUBLIC gradle buildModuleHelp` runs the validator standalone (faster than full `install`).
 - A green `BUILD SUCCESSFUL` is not enough on its own — scan stdout for `JavaHelp.*errors? = [1-9]` or `Duplicate anchor` / `Broken link` warnings before assuming the build is clean.
 - After fixing anchors, also re-grep across all module HTML to confirm uniqueness:
   `grep -rEho 'name="[^"]+"' src/main/help/help/topics | sort | uniq -d`

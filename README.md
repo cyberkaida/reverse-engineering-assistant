@@ -50,7 +50,8 @@ You can ask questions like:
 
 # Installation
 
-> NOTE: ReVa only supports Ghidra 12.0 and above!
+> NOTE: ReVa supports Ghidra 12.0 and above. Ghidra 12.2+ requires Java 25; earlier
+> versions require Java 21. Download the release built for your exact Ghidra version.
 
 ReVa is a Ghidra extension. To install it, you can download the release for your
 version of Ghidra from the releases page and install it using the Ghidra extension manager.

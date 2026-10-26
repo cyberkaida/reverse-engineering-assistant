@@ -20,7 +20,6 @@ Scripts live in registered directories. `list-scripts` enumerates all of them. C
 - `~/ghidra_scripts/` — the **user dir**. Writeable. This is where `write-script` puts new files when you pass `scriptName` instead of an absolute `scriptPath`.
 - `<Ghidra install>/Ghidra/Features/.../ghidra_scripts/` — bundled system scripts. **Read-only.** `write-script` / `edit-script` will refuse paths here.
 - Bundle script dirs configured in the Ghidra Bundle Manager — usually read-only.
-- ReVa's own `ghidra_scripts/` directory (shipped with the extension) — sample scripts; read-only.
 
 `list-scripts` returns each entry with a `writeable` boolean so you can tell at a glance which directory it's in.
 
@@ -110,7 +109,7 @@ Read the file with `read-script` first, find a chunk that's clearly unique (ofte
 
 ## What gets shipped with ReVa
 
-ReVa's repo has a `ghidra_scripts/` directory (`reverse-engineering-assistant/ghidra_scripts/`) with a `sample_script.py`. Those ship with the extension and end up in Ghidra's script search path — they're read-only via `read-script`/`run-script` (you can't `write-script` to them). Drop new public-facing scripts there in the repo (not via the MCP tool) if you're a contributor; the MCP tool is for user-authored, runtime scripts.
+ReVa does not currently ship any Ghidra scripts. If a contributor adds a `ghidra_scripts/` directory to the repo, those scripts ship with the extension and end up in Ghidra's script search path — they're read-only via `read-script`/`run-script` (you can't `write-script` to them). The MCP tools are for user-authored, runtime scripts.
 
 ## Discoverability tips
 

@@ -137,9 +137,9 @@ ReVa is designed to handle the Ghidra lifecycle correctly:
 
 | Requirement | Version | Notes |
 |-------------|---------|-------|
-| Java | 21+ | Required by Ghidra 12.0+ |
-| Gradle | 8.x+ | Use `gradle` directly, NOT `./gradlew` |
-| Ghidra | 12.0+ | Set `GHIDRA_INSTALL_DIR` environment variable |
+| Java | 25+ (21+ for Ghidra 12.0/12.1) | Ghidra 12.2 requires Java 25 |
+| Gradle | 9.1+ | Required by Ghidra 12.2. Use `gradle` directly, NOT `./gradlew` |
+| Ghidra | 12.0+ (12.2 recommended) | Set `GHIDRA_INSTALL_DIR` environment variable |
 | Python | 3.10+ | For CLI and headless mode |
 | uv | Latest | Python package manager |
 

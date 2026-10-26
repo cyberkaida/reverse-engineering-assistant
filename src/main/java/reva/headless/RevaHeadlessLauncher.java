@@ -20,6 +20,7 @@ import java.io.IOException;
 import java.util.EnumSet;
 import java.util.Set;
 
+import ghidra.app.script.GhidraScriptUtil;
 import ghidra.base.project.GhidraProject;
 import ghidra.framework.Application;
 import ghidra.framework.ApplicationConfiguration;
@@ -70,6 +71,7 @@ public class RevaHeadlessLauncher {
     private String enabledToolGroupsCsv;
     private String disabledToolGroupsCsv;
     private GhidraProject ghidraProject;
+    private boolean holdsBundleHostReference;
 
     /**
      * Constructor with default settings (in-memory configuration)
@@ -204,6 +206,19 @@ public class RevaHeadlessLauncher {
                     "Ghidra application is not initialized. " +
                     "Call Application.initializeApplication() first or set autoInitializeGhidra=true");
             }
+        }
+
+        // Hold a reference to Ghidra's script BundleHost for the launcher's lifetime.
+        // Analyzers such as WindowsResourceReferenceAnalyzer run Ghidra scripts via
+        // GhidraScriptUtil.findScriptByName(), which dereferences the bundle host and
+        // throws NullPointerException when none exists. In the GUI the script manager
+        // plugin holds a reference; headless, nothing does, so we take one the same way
+        // Ghidra's HeadlessAnalyzer does. The call is refcounted (the first reference
+        // creates the host and adds the user and system script directories), so it is
+        // harmless if another component already holds one.
+        if (!holdsBundleHostReference) {
+            GhidraScriptUtil.acquireBundleHostReference();
+            holdsBundleHostReference = true;
         }
 
         // Create config manager based on mode
@@ -365,6 +380,17 @@ public class RevaHeadlessLauncher {
                 Msg.error(this, "Error closing project: " + e.getMessage(), e);
             } finally {
                 ghidraProject = null;
+            }
+        }
+
+        // Release our bundle host reference (taken in start()); the last release
+        // stops the OSGi framework.
+        if (holdsBundleHostReference) {
+            holdsBundleHostReference = false;
+            try {
+                GhidraScriptUtil.releaseBundleHostReference();
+            } catch (Exception e) {
+                Msg.error(this, "Error releasing script bundle host: " + e.getMessage(), e);
             }
         }
 

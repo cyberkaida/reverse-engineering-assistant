@@ -20,3 +20,4 @@ __pycache__
 
 # Local superpowers spec workspace
 docs/superpowers/
+.worktrees/

@@ -13,14 +13,14 @@ The StringToolProvider implements two tools (registered in `registerTools()`):
 ### 1. get-strings-count
 - **Purpose**: Get total count of strings in a program (use before pagination)
 - **Parameters**:
-  - `programPath` (required) - Path in the Ghidra Project to the program
+  - `programPath` (optional when exactly one program is open) - Path in the Ghidra Project to the program
 - **Returns**: JSON object with `count` field
 - **Use Case**: Planning pagination strategy for large binaries
 
 ### 2. get-strings
 - **Purpose**: Unified string retrieval with optional filtering/sorting
 - **Parameters**:
-  - `programPath` (required) - Path in the Ghidra Project to the program
+  - `programPath` (optional when exactly one program is open) - Path in the Ghidra Project to the program
   - `searchString` (optional) - Sort results by similarity to this string (LCS-based scoring). Mutually exclusive with `regexPattern`.
   - `regexPattern` (optional) - Filter results to strings matching this regex pattern. Mutually exclusive with `searchString`.
   - `startIndex` (optional, default: 0) - Starting index for pagination (0-based)

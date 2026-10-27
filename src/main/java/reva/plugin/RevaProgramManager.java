@@ -16,9 +16,9 @@
 package reva.plugin;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 import ghidra.app.plugin.core.progmgr.ProgramLocator;
 import ghidra.app.services.ProgramManager;
@@ -40,10 +40,10 @@ import reva.util.RevaInternalServiceRegistry;
  */
 public class RevaProgramManager {
     // Cache of opened programs by path to avoid repeatedly opening the same program
-    private static final Map<String, Program> programCache = new HashMap<>();
+    private static final Map<String, Program> programCache = new ConcurrentHashMap<>();
 
     // Registry of directly opened programs (mainly for test environments)
-    private static final Map<String, Program> registeredPrograms = new HashMap<>();
+    private static final Map<String, Program> registeredPrograms = new ConcurrentHashMap<>();
 
     /**
      * Get all currently open programs in any Ghidra tool
@@ -110,6 +110,28 @@ public class RevaProgramManager {
 
         Msg.debug(RevaProgramManager.class, "Total open programs found: " + openPrograms.size());
         return openPrograms;
+    }
+
+    /**
+     * Every open, non-closed program ReVa can see: those open in a Ghidra tool, those ReVa
+     * opened itself (the program cache; this is all there is when running headless) and
+     * those registered directly. Deduplicated by canonical program path, in that order.
+     * Project files that are not open (headless import-file saves without opening; a
+     * check-in releases the cached program) are not included; sole-program resolution
+     * in {@code ProgramLookupUtil} falls back to them when this list is empty.
+     * @return List of known programs
+     */
+    public static synchronized List<Program> getAllKnownPrograms() {
+        Map<String, Program> byPath = new java.util.LinkedHashMap<>();
+        List<Program> candidates = new ArrayList<>(getOpenPrograms());
+        candidates.addAll(programCache.values());
+        candidates.addAll(registeredPrograms.values());
+        for (Program program : candidates) {
+            if (program != null && !program.isClosed()) {
+                byPath.putIfAbsent(getCanonicalProgramPath(program), program);
+            }
+        }
+        return new ArrayList<>(byPath.values());
     }
 
     /**
@@ -267,21 +289,23 @@ public class RevaProgramManager {
         Msg.debug(RevaProgramManager.class, "Looking for program with path: " + programPath);
 
         // Check registered programs first (for test environments)
-        if (registeredPrograms.containsKey(programPath)) {
-            Program registeredProgram = registeredPrograms.get(programPath);
+        // Single get() per map: the maps are concurrent and another thread may remove
+        // an entry between a containsKey() and a get().
+        Program registeredProgram = registeredPrograms.get(programPath);
+        if (registeredProgram != null) {
             if (!registeredProgram.isClosed()) {
                 Msg.debug(RevaProgramManager.class, "Found program in registry: " + programPath);
                 ensureCheckedOut(registeredProgram, programPath);
                 return registeredProgram;
             } else {
                 // Remove invalid programs from registry
-                registeredPrograms.remove(programPath);
+                registeredPrograms.remove(programPath, registeredProgram);
             }
         }
 
         // Check cache next
-        if (programCache.containsKey(programPath)) {
-            Program cachedProgram = programCache.get(programPath);
+        Program cachedProgram = programCache.get(programPath);
+        if (cachedProgram != null) {
             // Ensure the program is still valid
             if (!cachedProgram.isClosed()) {
                 Msg.debug(RevaProgramManager.class, "Found program in cache: " + programPath);
@@ -289,7 +313,7 @@ public class RevaProgramManager {
                 return cachedProgram;
             } else {
                 // Remove invalid programs from cache
-                programCache.remove(programPath);
+                programCache.remove(programPath, cachedProgram);
             }
         }
 
@@ -403,8 +427,7 @@ public class RevaProgramManager {
             return false;
         }
         String canonicalPath = getCanonicalProgramPath(program);
-        return programCache.containsKey(canonicalPath) &&
-               programCache.get(canonicalPath) == program;
+        return programCache.get(canonicalPath) == program;
     }
 
     /**

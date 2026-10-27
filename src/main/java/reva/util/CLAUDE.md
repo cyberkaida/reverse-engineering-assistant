@@ -4,7 +4,7 @@ This file provides guidance for working with the foundational utility classes in
 
 ## Package Overview
 
-The `reva.util` package contains 11 critical utility classes that provide:
+The `reva.util` package contains these critical utility classes (among others) that provide:
 - **AddressUtil** - Consistent address formatting and parsing with "0x" prefix
 - **ProgramLookupUtil** - Program validation and lookup with helpful error messages
 - **DataTypeParserUtil** - Data type parsing from string representations (e.g., "char*", "int[10]")
@@ -24,7 +24,7 @@ The `reva.util` package contains 11 critical utility classes that provide:
 | Utility | Key Methods | Purpose |
 |---------|------------|---------|
 | **AddressUtil** | `formatAddress()`, `parseAddress()`, `resolveAddressOrSymbol()`, `isUndefinedFunctionAddress()` | Address formatting and parsing with "0x" prefix |
-| **ProgramLookupUtil** | `getValidatedProgram()` | Program validation with helpful error messages |
+| **ProgramLookupUtil** | `getValidatedProgram()`, `resolveSoleOpenProgram()` | Program validation with helpful error messages; a null/blank path resolves to the only program |
 | **DataTypeParserUtil** | `parseDataTypeObjectFromString()`, `parseDataTypeFromString()`, `createDataTypeInfo()` | Parse data types from strings like "char*" or "int[10]" |
 | **DecompilationContextUtil** | `getLineNumberForAddress()`, `getDecompilationContext()`, `getEnhancedIncomingReferences()`, `getEnhancedReferencesTo()` | Map addresses to line numbers with context |
 | **MemoryUtil** | `readMemoryBytes()`, `formatHexString()`, `byteArrayToIntList()`, `processMemoryInChunks()` | Safe memory access and formatting |
@@ -118,21 +118,31 @@ try {
 }
 ```
 
+#### Missing programPath (null or blank)
+`getValidatedProgram(null)` (and `"  "`) calls `resolveSoleOpenProgram()`, which never picks for the caller:
+
+1. Programs ReVa knows to be open (`RevaProgramManager.getAllKnownPrograms()`: tool-open, the program cache, registered programs). Exactly one -> it; several -> `programPath is required when several programs are open:` followed by one `\n  - <canonical path>` line each.
+2. When none is open, the active project's program files (headless `import-file` saves without opening; `checkin-program` without `keepCheckedOut` releases the cached program). Exactly one -> opened with `RevaProgramManager.getProgramByPath` (cached, versioned files checked out first) and returned; several -> the same listing error, project paths sorted; none (or no project) -> `No program is open. Import one with import-file.`
+
+The fallback runs under a lock so two concurrent calls do not open the same file twice. `ProgramLookupUtilProjectTest` covers it against a real temporary `GhidraProject` (a test project directory under the repository may contain `.worktrees`, which `ProjectLocator` rejects, so it uses a system temp directory).
+
 #### Features:
 - **Automatic program discovery** from open programs and project
-- **Helpful error messages** with suggestions for similar program names
+- **Helpful error messages**: a not-found `programPath` error always lists the closest programs first (`rankBySimilarity`: exact file name, `prefix...suffix` ellipsis, prefix, substring, then Levenshtein; directories, case and a short extension ignored): up to 3 under `Did you mean (closest first)?`, plus `All programs (<n>):` in ranked order when there are more
 - **Consistent error formatting** across all tools
 
 #### Example Error Messages:
 ```
 Program not found: /Hatchery.ex
 
-Did you mean one of these?
+Did you mean (closest first)?
   - /Hatchery.exe
   - /Hatchery_backup.exe
+  - /Sample.exe
 
-Available programs:
+All programs (4):
   - /Hatchery.exe
+  - /Hatchery_backup.exe
   - /Sample.exe
   - /folder/program.exe
 ```
@@ -395,11 +405,10 @@ import io.modelcontextprotocol.spec.McpSchema;
 
 // Create schema using builder pattern
 McpSchema.JsonSchema schema = SchemaUtil.builder()
-    .stringProperty("programPath", "Path to the program")
+    .programPath()                      // canonical programPath property, never required
     .stringProperty("address", "Address to analyze")
     .booleanProperty("includeContext", "Include decompilation context", false)
     .integerProperty("maxResults", "Maximum number of results", 100)
-    .required("programPath")
     .required("address")
     .build();
 
@@ -412,6 +421,9 @@ properties.put("caseSensitive", SchemaUtil.booleanPropertyWithDefault(
 McpSchema.JsonSchema manualSchema = SchemaUtil.createSchema(
     properties, List.of("name"));
 ```
+
+#### programPath is never required
+`SchemaUtil.createSchema` (which `builder().build()` and `AbstractToolProvider.createSchema` both go through) strips `programPath` from the required list (`optionalRequired`) and appends `PROGRAM_PATH_OPTIONAL` ("Optional when exactly one program is open.") to its description (`optionalProgramPath`): after ". " when the description does not end in punctuation (`.!?;:`), after a space when it does, alone when it is empty, and not at all when the description already starts with "Optional" or contains the note. So `.required("programPath")` or `List.of("programPath", ...)` in old code is harmless but has no effect; handlers resolve a missing one through `getProgramFromArgs` / `ProgramLookupUtil.getValidatedProgram`.
 
 #### Schema Helper Methods:
 ```java
@@ -727,7 +739,7 @@ public void testProgramLookupErrorMessages() {
         fail("Expected ProgramValidationException");
     } catch (ProgramValidationException e) {
         // Error message should include suggestions
-        assertTrue(e.getMessage().contains("Available programs:"));
+        assertTrue(e.getMessage().contains("Did you mean (closest first)?"));
     }
 }
 ```

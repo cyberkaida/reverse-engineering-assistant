@@ -23,11 +23,35 @@ import io.modelcontextprotocol.spec.McpSchema.JsonSchema;
 public class SchemaUtilBuilderTest {
 
     @Test
-    public void testProgramPathAddsRequiredProperty() {
+    public void testProgramPathAddsOptionalProperty() {
         JsonSchema schema = SchemaUtil.builder().programPath().build();
         Map<String, Object> props = schema.properties();
         assertTrue("programPath property present", props.containsKey("programPath"));
-        assertTrue("programPath is required", schema.required().contains("programPath"));
+        assertFalse("programPath is optional: a missing one resolves to the only open program", schema.required().contains("programPath"));
+    }
+
+    @SuppressWarnings("unchecked")
+    private static String programPathDescription(String description) {
+        Map<String, Object> props = SchemaUtil.optionalProgramPath(
+            Map.of("programPath", SchemaUtil.stringProperty(description)));
+        return (String) ((Map<String, Object>) props.get("programPath")).get("description");
+    }
+
+    @Test
+    public void optionalNoteGetsASentenceBreakAfterUnpunctuatedDescription() {
+        assertEquals("Path to the program in the Ghidra Project. Optional when exactly one program is open.",
+            programPathDescription("Path to the program in the Ghidra Project"));
+    }
+
+    @Test
+    public void optionalNoteFollowsPunctuatedDescriptionWithASpace() {
+        assertEquals("Path to the program. Optional when exactly one program is open.",
+            programPathDescription("Path to the program."));
+    }
+
+    @Test
+    public void optionalNoteAloneWhenDescriptionIsEmpty() {
+        assertEquals("Optional when exactly one program is open.", programPathDescription(""));
     }
 
     @Test

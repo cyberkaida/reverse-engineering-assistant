@@ -71,6 +71,8 @@ import reva.services.AnalysisJobManager;
 import reva.services.AnalyzeRequest;
 import reva.services.JobLog;
 import reva.tools.AbstractToolProvider;
+import reva.tools.ProgramValidationException;
+import reva.util.ProgramLookupUtil;
 import reva.util.ProgramPersistenceUtil;
 import reva.util.ProgramPersistenceUtil.PersistMode;
 import reva.util.SchemaUtil;
@@ -335,10 +337,8 @@ public class ProjectToolProvider extends AbstractToolProvider {
         // Register the tool with a handler
         registerTool(tool, (exchange, request) -> {
             // Get parameters
-            String programPath;
             String message;
             try {
-                programPath = getString(request, "programPath");
                 message = getString(request, "message");
             } catch (IllegalArgumentException e) {
                 return createErrorResult(e.getMessage());
@@ -355,6 +355,8 @@ public class ProjectToolProvider extends AbstractToolProvider {
             }
 
             DomainFile domainFile = program.getDomainFile();
+            // A missing programPath resolved to the only open program; use its canonical path.
+            String programPath = domainFile.getPathname();
 
             try {
                 // Pre-validation: reject versioned files that cannot be persisted via
@@ -891,10 +893,11 @@ public class ProjectToolProvider extends AbstractToolProvider {
         Map<String, Object> properties = new HashMap<>();
         properties.put("jobId", SchemaUtil.stringProperty(
             "The analysis job to poll (e.g., 'analysis-3'), as returned by analyze-program. "
-            + "Provide exactly one of jobId or programPath."));
+            + "Provide at most one of jobId or programPath."));
         properties.put("programPath", SchemaUtil.stringProperty(
             "Alternative to jobId: the program path (e.g., '/Hatchery.exe') whose LATEST analysis "
-            + "job should be polled. Provide exactly one of jobId or programPath."));
+            + "job should be polled. Provide at most one of jobId or programPath; with neither, "
+            + "the only open program is used. Optional when exactly one program is open."));
 
         Map<String, Object> sinceProp = new HashMap<>();
         sinceProp.put("type", "integer");
@@ -953,10 +956,15 @@ public class ProjectToolProvider extends AbstractToolProvider {
             boolean hasProgramPath = programPath != null && !programPath.isBlank();
 
             if (hasJobId && hasProgramPath) {
-                return createErrorResult("Provide exactly one of jobId or programPath, not both");
+                return createErrorResult("Provide at most one of jobId or programPath, not both");
             }
             if (!hasJobId && !hasProgramPath) {
-                return createErrorResult("provide jobId or programPath");
+                try {
+                    programPath = ProgramLookupUtil.resolveSoleOpenProgram().getDomainFile().getPathname();
+                } catch (ProgramValidationException e) {
+                    return createErrorResult(e.getMessage());
+                }
+                hasProgramPath = true;
             }
 
             AnalysisJob job;

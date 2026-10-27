@@ -13,7 +13,7 @@ The DataFlowToolProvider implements three main tools:
 ### 1. trace-data-flow-backward
 - **Purpose**: Trace where a value at an address comes from
 - **Parameters**:
-  - `programPath` (required) - Path to the program in Ghidra project
+  - `programPath` (optional when exactly one program is open) - Path to the program in Ghidra project
   - `address` (required) - Address within a function to trace backward from
 - **Returns**: JSON object with operation list and terminators showing origins
 - **Use Case**: Finding the source of a value (constants, parameters, memory loads, etc.)
@@ -21,7 +21,7 @@ The DataFlowToolProvider implements three main tools:
 ### 2. trace-data-flow-forward
 - **Purpose**: Trace where a value at an address flows to
 - **Parameters**:
-  - `programPath` (required) - Path to the program in Ghidra project
+  - `programPath` (optional when exactly one program is open) - Path to the program in Ghidra project
   - `address` (required) - Address within a function to trace forward from
 - **Returns**: JSON object with operation list and terminators showing uses
 - **Use Case**: Finding where a value is used (stores, function calls, returns, etc.)
@@ -29,7 +29,7 @@ The DataFlowToolProvider implements three main tools:
 ### 3. find-variable-accesses
 - **Purpose**: Find all reads and writes to a variable within a function
 - **Parameters**:
-  - `programPath` (required) - Path to the program in Ghidra project
+  - `programPath` (optional when exactly one program is open) - Path to the program in Ghidra project
   - `functionAddress` (required) - Address of the function to analyze
   - `variableName` (required) - Name of the variable to find accesses for
 - **Returns**: JSON object with all read/write accesses to the variable

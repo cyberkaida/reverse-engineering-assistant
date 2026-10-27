@@ -956,7 +956,7 @@ public class DecompilerToolProvider extends AbstractToolProvider {
                 resultData.put("decompSignature", decompiledFunction.getSignature());
 
                 // Track that this function's decompilation has been read
-                String programPath = getString(request, "programPath");
+                String programPath = program.getDomainFile().getPathname();
                 String functionKey = programPath + ":" + AddressUtil.formatAddress(function.getEntryPoint());
                 readDecompilationTracker.put(functionKey, System.currentTimeMillis());
 
@@ -1112,7 +1112,7 @@ public class DecompilerToolProvider extends AbstractToolProvider {
             }
 
             // Validate that the LLM has read the decompilation for this function first
-            String programPath = getString(request, "programPath");
+            String programPath = program.getDomainFile().getPathname();
             String functionKey = programPath + ":" + AddressUtil.formatAddress(function.getEntryPoint());
             if (!hasReadDecompilation(functionKey)) {
                 return createErrorResult("You must read the decompilation for function '" + function.getName() +
@@ -1254,7 +1254,7 @@ public class DecompilerToolProvider extends AbstractToolProvider {
             }
 
             // Validate that the LLM has read the decompilation for this function first
-            String programPath = getString(request, "programPath");
+            String programPath = program.getDomainFile().getPathname();
             String functionKey = programPath + ":" + AddressUtil.formatAddress(function.getEntryPoint());
             if (!hasReadDecompilation(functionKey)) {
                 return createErrorResult("You must read the decompilation for function '" + function.getName() +
@@ -1880,7 +1880,7 @@ public class DecompilerToolProvider extends AbstractToolProvider {
             }
 
             // Validate that the LLM has read the decompilation for this function first
-            String programPath = getString(request, "programPath");
+            String programPath = program.getDomainFile().getPathname();
             String functionKey = programPath + ":" + AddressUtil.formatAddress(function.getEntryPoint());
             if (!hasReadDecompilation(functionKey)) {
                 return createErrorResult("You must read the decompilation for function '" + function.getName() +

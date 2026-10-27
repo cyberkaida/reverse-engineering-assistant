@@ -100,7 +100,9 @@ public abstract class AbstractToolProvider implements ToolProvider {
      * @return A JsonSchema object
      */
     protected JsonSchema createSchema(Map<String, Object> properties, List<String> required) {
-        return new JsonSchema("object", properties, required, false, null, null);
+        // programPath is never required: a missing one resolves to the only open program.
+        return new JsonSchema("object", reva.util.SchemaUtil.optionalProgramPath(properties),
+            reva.util.SchemaUtil.optionalRequired(required), false, null, null);
     }
 
     /**
@@ -590,8 +592,7 @@ public abstract class AbstractToolProvider implements ToolProvider {
      * @throws ProgramValidationException if the program is not found, invalid, or in an invalid state
      */
     protected Program getProgramFromArgs(CallToolRequest request) throws IllegalArgumentException, ProgramValidationException {
-        String programPath = getString(request, "programPath");
-        return getValidatedProgram(programPath);
+        return getProgramFromArgs(request.arguments());
     }
 
     /**
@@ -602,8 +603,9 @@ public abstract class AbstractToolProvider implements ToolProvider {
      * @throws ProgramValidationException if the program is not found, invalid, or in an invalid state
      */
     protected Program getProgramFromArgs(Map<String, Object> args) throws IllegalArgumentException, ProgramValidationException {
-        String programPath = getString(args, "programPath");
-        return getValidatedProgram(programPath);
+        // A missing programPath resolves to the only open program (or errors, listing them).
+        Object value = args == null ? null : args.get("programPath");
+        return getValidatedProgram(value == null ? null : value.toString());
     }
 
 

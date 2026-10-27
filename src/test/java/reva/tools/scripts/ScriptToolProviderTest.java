@@ -88,14 +88,14 @@ public class ScriptToolProviderTest {
     }
 
     @Test
-    public void runScriptSchemaRequiresProgramPath() throws Exception {
+    public void runScriptSchemaDoesNotRequireProgramPath() throws Exception {
         provider.registerTools();
         Tool runScript = findTool(provider, "run-script");
         assertNotNull(runScript);
         @SuppressWarnings("unchecked")
         List<String> required = (List<String>) runScript.inputSchema().get("required");
-        assertTrue(
-            "run-script must require programPath",
+        assertFalse(
+            "programPath is optional: a missing one resolves to the only open program",
             required.contains("programPath"));
     }
 

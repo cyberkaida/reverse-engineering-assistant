@@ -18,7 +18,7 @@ The `reva.tools.datatypes` package provides MCP tools for data type management a
 Lists all available data type archives for a program.
 
 **Parameters:**
-- `programPath` (required): Path in the Ghidra Project
+- `programPath` (optional when exactly one program is open): Path in the Ghidra Project
 
 **Returns:** Single JSON object: `{count, archives: [...]}`. Each entry covers
 - Built-in data type manager (always first)
@@ -30,7 +30,7 @@ Lists all available data type archives for a program.
 Retrieves data types from a specific archive with pagination and filtering.
 
 **Parameters:**
-- `programPath` (required): Path in the Ghidra Project
+- `programPath` (optional when exactly one program is open): Path in the Ghidra Project
 - `archiveName` (required): Name of the data type archive
 - `categoryPath` (optional): Category path to list from (default: "/")
 - `includeSubcategories` (optional): Include subcategories (default: false)
@@ -41,7 +41,7 @@ Retrieves data types from a specific archive with pagination and filtering.
 Finds a data type by its string representation (e.g., "char**", "int[10]").
 
 **Parameters:**
-- `programPath` (required): Path in the Ghidra Project
+- `programPath` (optional when exactly one program is open): Path in the Ghidra Project
 - `dataTypeString` (required): String representation of the data type
 - `archiveName` (optional): Specific archive to search in
 

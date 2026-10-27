@@ -22,7 +22,7 @@ The `reva.tools.data` package provides MCP tools for data operations in Ghidra p
 Retrieves data information at a specific address or symbol location.
 
 **Parameters:**
-- `programPath` (string, required) - Path to the Ghidra program
+- `programPath` (string, optional when exactly one program is open) - Path to the Ghidra program
 - `addressOrSymbol` (string, required) - Address (e.g., "0x00400000") or symbol name (e.g., "main")
 
 **Response includes:**
@@ -36,7 +36,7 @@ Retrieves data information at a specific address or symbol location.
 Applies a data type to a specific address or symbol location.
 
 **Parameters:**
-- `programPath` (string, required) - Path to the Ghidra program
+- `programPath` (string, optional when exactly one program is open) - Path to the Ghidra program
 - `addressOrSymbol` (string, required) - Target address or symbol
 - `dataTypeString` (string, required) - Data type specification (e.g., "char**", "int[10]")
 - `archiveName` (string, optional) - Specific data type archive to search
@@ -50,7 +50,7 @@ Applies a data type to a specific address or symbol location.
 Creates a new label/symbol at a specific address.
 
 **Parameters:**
-- `programPath` (string, required) - Path to the Ghidra program
+- `programPath` (string, optional when exactly one program is open) - Path to the Ghidra program
 - `addressOrSymbol` (string, required) - Target address or existing symbol
 - `labelName` (string, required) - Name for the new label
 - `setAsPrimary` (boolean, optional, default: true) - Whether to make this the primary symbol

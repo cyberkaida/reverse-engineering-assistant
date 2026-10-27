@@ -211,20 +211,14 @@ class TestAnalysisJobErrorPaths:
             f"Error should name the missing job: {_result_text(result)!r}"
         )
 
-    async def test_analysis_status_requires_exactly_one_identifier(
+    async def test_analysis_status_both_identifiers_rejected_and_neither_resolves(
         self, mcp_stdio_client, isolated_workspace
     ):
-        # Neither jobId nor programPath.
-        neither = await mcp_stdio_client.call_tool("analysis-status", arguments={})
-        assert getattr(neither, "is_error", False), (
-            f"analysis-status without identifiers must be an error; "
-            f"got: {_result_text(neither)}"
-        )
-        assert "jobId or programPath" in _result_text(neither), (
-            f"Error should explain the identifier requirement: {_result_text(neither)!r}"
-        )
-
-        # Both at once.
+        # Documented contract (tool schema, project/CLAUDE.md): both identifiers
+        # at once is always an error; with neither, the sole open program is
+        # used (none open: the project's only program; several: the error lists
+        # them). The session-scoped server shares one project across modules,
+        # so the with-neither call may legitimately take either branch.
         both = await mcp_stdio_client.call_tool(
             "analysis-status",
             arguments={"jobId": "analysis-1", "programPath": "/whatever"},
@@ -236,3 +230,14 @@ class TestAnalysisJobErrorPaths:
         assert "not both" in _result_text(both), (
             f"Error should reject providing both identifiers: {_result_text(both)!r}"
         )
+
+        neither = await mcp_stdio_client.call_tool("analysis-status", arguments={})
+        if getattr(neither, "is_error", False):
+            assert "programPath is required when several programs are open" in _result_text(
+                neither
+            ), f"the with-neither error must list the candidates: {_result_text(neither)!r}"
+        else:
+            data = json.loads(_result_text(neither))
+            assert data.get("success") is True and data.get("programPath"), (
+                f"sole-program resolution should return that program's job: {data!r}"
+            )

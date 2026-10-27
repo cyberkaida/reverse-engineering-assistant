@@ -19,7 +19,7 @@ The `reva.tools.constants` package provides MCP tools for searching and analyzin
 Searches for all instruction operands matching a specific constant value.
 
 **Parameters:**
-- `programPath` (required) - Path to the program
+- `programPath` (optional when exactly one program is open) - Path to the program
 - `value` (required) - Constant to search for (supports decimal, hex with 0x prefix, or negative)
 - `maxResults` (optional) - Maximum results to return (default: 500, max: 10000)
 
@@ -32,7 +32,7 @@ Searches for all instruction operands matching a specific constant value.
 Finds all constant values within a numeric range.
 
 **Parameters:**
-- `programPath` (required) - Path to the program
+- `programPath` (optional when exactly one program is open) - Path to the program
 - `minValue` (required) - Minimum value (inclusive, supports decimal/hex)
 - `maxValue` (required) - Maximum value (inclusive, supports decimal/hex)
 - `maxResults` (optional) - Maximum results to return (default: 500, max: 10000)
@@ -50,7 +50,7 @@ Finds all constant values within a numeric range.
 Identifies the most frequently used constants in the program.
 
 **Parameters:**
-- `programPath` (required) - Path to the program
+- `programPath` (optional when exactly one program is open) - Path to the program
 - `topN` (optional) - Number of constants to return (default: 50, max: 10000)
 - `minValue` (optional) - Explicit minimum value filter
 - `includeSmallValues` (optional) - Include values 0-255 (default: false, filters noise)

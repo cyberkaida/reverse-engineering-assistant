@@ -41,7 +41,8 @@ private void registerMyTool() {
         "default", 100
     ));
 
-    // 2. Define required parameters
+    // 2. Define required parameters (programPath is stripped from this list centrally;
+    //    a missing one resolves to the only program)
     List<String> required = List.of("programPath");
 
     // 3. Create tool with schema
@@ -106,6 +107,16 @@ private void registerMyTool() {
 ```java
 // Required parameters (auto-converts types)
 String programPath = getString(request, "programPath");  // Converts non-strings via toString()
+// Exception: programPath itself. getProgramFromArgs(...) treats a missing programPath as "the only
+// open program" (ProgramLookupUtil.resolveSoleOpenProgram); none open -> the project's program
+// files: exactly one is opened (cached) and used, several -> an error listing them, none ->
+// "No program is open. Import one with import-file."; several open -> an error listing them
+// (never picks one). SchemaUtil.builder().programPath() is
+// therefore never in a schema's required list: AbstractToolProvider.createSchema and
+// SchemaUtil.createSchema strip it centrally (and append "Optional when exactly one program is
+// open." to its description), so this holds for every tool. Handlers must reach the program via
+// getProgramFromArgs / getValidatedProgram, never a bare getString(request, "programPath");
+// use program.getDomainFile().getPathname() when the path string is needed.
 int count = getInt(request, "maxCount");                 // Parses strings, converts Number types
 boolean includeThunks = getBoolean(args, "includeThunks"); // Handles "true"/"false" strings
 
@@ -129,8 +140,9 @@ List<String> tags = getStringList(args, "tags");  // Required string list
 ```java
 // NO try-catch needed for IllegalArgumentException or ProgramValidationException!
 // The registerTool() method automatically catches and converts to error responses
-String programPath = getString(request, "programPath");  // Throws if missing
-Program program = getValidatedProgram(programPath);     // Throws if invalid
+Program program = getProgramFromArgs(request);  // Throws if invalid; a missing programPath
+                                                // resolves to the only known program (or the
+                                                // project's only program when none is open)
 // ... tool logic
 
 // Only catch for custom error handling or cleanup

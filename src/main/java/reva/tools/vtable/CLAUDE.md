@@ -13,7 +13,7 @@ The VtableToolProvider implements three main tools:
 ### 1. analyze-vtable
 - **Purpose**: Analyze a vtable at a given address to extract function pointers
 - **Parameters**:
-  - `programPath` (required)
+  - `programPath` (optional when exactly one program is open)
   - `vtableAddress` (required) - Address of the vtable to analyze
   - `maxEntries` (optional, default: 200, max: 1000) - Maximum vtable entries to read
 - **Returns**: JSON object with vtable structure, slot indices, offsets, and function information
@@ -22,7 +22,7 @@ The VtableToolProvider implements three main tools:
 ### 2. find-vtable-callers
 - **Purpose**: Find all indirect calls that could invoke a function via its vtable slot
 - **Parameters**:
-  - `programPath` (required)
+  - `programPath` (optional when exactly one program is open)
   - `functionAddress` (required) - Address or name of the virtual function
   - `vtableAddress` (optional) - Specific vtable address (will search if not provided)
   - `maxResults` (optional, default: 500, max: 10000) - Maximum caller results
@@ -33,7 +33,7 @@ The VtableToolProvider implements three main tools:
 ### 3. find-vtables-containing-function
 - **Purpose**: Find all vtables that contain a pointer to a given function
 - **Parameters**:
-  - `programPath` (required)
+  - `programPath` (optional when exactly one program is open)
   - `functionAddress` (required) - Address or name of function to search for
 - **Returns**: JSON with all vtables containing the function, slot indices, and possible class names
 - **Use Case**: Identifying which classes implement a particular virtual method

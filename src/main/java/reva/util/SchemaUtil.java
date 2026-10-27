@@ -169,7 +169,48 @@ public class SchemaUtil {
      * @return JsonSchema object
      */
     public static McpSchema.JsonSchema createSchema(Map<String, Object> properties, List<String> required) {
-        return new McpSchema.JsonSchema("object", properties, required, false, null, null);
+        return new McpSchema.JsonSchema("object", optionalProgramPath(properties), optionalRequired(required),
+            false, null, null);
+    }
+
+    /** Sentence appended to every programPath description. */
+    public static final String PROGRAM_PATH_OPTIONAL = "Optional when exactly one program is open.";
+
+    /**
+     * A missing programPath resolves to the only open program in the handlers, and the MCP
+     * server validates required properties before a handler runs, so programPath is never
+     * required in a schema.
+     */
+    public static List<String> optionalRequired(List<String> required) {
+        if (required == null || !required.contains("programPath")) {
+            return required;
+        }
+        List<String> out = new java.util.ArrayList<>(required);
+        out.remove("programPath");
+        return out;
+    }
+
+    /** Append {@link #PROGRAM_PATH_OPTIONAL} to the programPath property's description. */
+    @SuppressWarnings("unchecked")
+    public static Map<String, Object> optionalProgramPath(Map<String, Object> properties) {
+        if (properties == null || !(properties.get("programPath") instanceof Map)) {
+            return properties;
+        }
+        Map<String, Object> prop = new java.util.LinkedHashMap<>((Map<String, Object>) properties.get("programPath"));
+        Object desc = prop.get("description");
+        String text = desc == null ? "" : desc.toString();
+        if (!text.contains(PROGRAM_PATH_OPTIONAL) && !text.startsWith("Optional")) {
+            String sep = text.isEmpty() ? "" : endsWithPunctuation(text) ? " " : ". ";
+            prop.put("description", text + sep + PROGRAM_PATH_OPTIONAL);
+        }
+        Map<String, Object> out = new java.util.LinkedHashMap<>(properties);
+        out.put("programPath", prop);
+        return out;
+    }
+
+    private static boolean endsWithPunctuation(String text) {
+        String trimmed = text.stripTrailing();
+        return !trimmed.isEmpty() && ".!?;:".indexOf(trimmed.charAt(trimmed.length() - 1)) >= 0;
     }
 
     /**
@@ -271,13 +312,14 @@ public class SchemaUtil {
         }
 
         /**
-         * Add the canonical programPath string property and mark it required.
+         * Add the canonical programPath string property. It is NOT in the schema's required
+     * list: the MCP layer validates required properties before the handler runs, and a
+     * missing programPath resolves to the only open program in the handler.
          * @return This builder for method chaining
          */
         public SchemaBuilder programPath() {
             properties.put("programPath", SchemaUtil.stringProperty(
-                "Path in the Ghidra Project to the program"));
-            required.add("programPath");
+                "Path in the Ghidra Project to the program."));
             return this;
         }
 

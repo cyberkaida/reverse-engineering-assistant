@@ -117,8 +117,8 @@ terminal — at which point `analysis-status` also returns the full `result`.
 
 | Param           | Default | Meaning |
 |-----------------|---------|---------|
-| `jobId`         | —       | The job to poll. Provide **exactly one** of `jobId` or `programPath`. |
-| `programPath`   | —       | Resolves to that program's **latest** job (`analysis-<N>`, greatest N). |
+| `jobId`         | —       | The job to poll. Provide **at most one** of `jobId` or `programPath` (both is an error). |
+| `programPath`   | —       | Resolves to that program's **latest** job (`analysis-<N>`, greatest N). With neither `jobId` nor `programPath`, the only open program is used (`ProgramLookupUtil.resolveSoleOpenProgram()`; when none is open, the project's only program); with several the error lists them. Both given: "Provide at most one of jobId or programPath, not both". |
 | `sinceLogSeq`   | `0`     | Cursor — return only entries with `seq > sinceLogSeq`. Feed back `logCursor`. |
 | `waitSeconds`   | `10`    | Long-poll window; returns **the instant** the job terminates, else holds until it expires. |
 | `maxLogEntries` | `50`    | Page size. When more entries remain, `truncated:true`. |

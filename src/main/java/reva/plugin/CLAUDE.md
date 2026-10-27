@@ -148,6 +148,18 @@ public class RevaProgramManager {
     // Get all open programs from any tool
     public static List<Program> getOpenPrograms()
 
+    // Every open program ReVa can see: tool-open, then the program cache (ReVa-opened;
+    // all there is headless), then registered programs. Deduplicated by canonical path.
+    // Used by sole-program resolution (a call without programPath). Does not include
+    // project files that are not open: headless import-file saves without opening, and
+    // checkin-program (keepCheckedOut false) releases the cached program;
+    // ProgramLookupUtil.resolveSoleOpenProgram falls back to the project for those.
+    public static synchronized List<Program> getAllKnownPrograms()
+
+    // Release / restore the cache's consumer (around version control operations)
+    public static boolean releaseProgramFromCache(Program program)
+    public static Program reopenProgramToCache(String programPath)
+
     // Program lifecycle management
     public static void programOpened(Program program)
     public static void programClosed(Program program)
@@ -165,6 +177,8 @@ public class RevaProgramManager {
 | 2 | Program cache | Cached by canonical path |
 | 3 | Tool manager lookup | Active programs in running tools |
 | 4 | Domain file opening | Open from project files on demand |
+
+`programCache` and `registeredPrograms` are `ConcurrentHashMap`s: every call without `programPath` iterates them (via `getAllKnownPrograms`) while other request threads add and remove entries. Look entries up with a single `get()` and a null check, not `containsKey()` then `get()`. Values are never null (a `ConcurrentHashMap` refuses them).
 
 ### Program Path Resolution
 

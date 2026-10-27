@@ -172,7 +172,13 @@ args.put("force", true);  // Override safety check
 ## Key APIs and Utilities
 
 ### Essential Ghidra APIs
-- `CParser` - Parse C-style structure definitions
+- `CParser` - Parse C-style structure definitions. parse-c-structure and parse-c-header build it with
+  `newParser(program)`: stored in the program's own manager, but names resolve against the read-only
+  archives from `reva.util.TypeArchives.forProgram(program)`: `typeinfo/win32/windows_vs12_32.gdt` or
+  `windows_vs12_64.gdt` (by pointer size, Windows compiler spec only) and
+  `typeinfo/generic/generic_clib.gdt` or `generic_clib_64.gdt` (always), so `HANDLE`, `DWORD`, `size_t`
+  resolve. Archives are opened once per JVM; a missing file is logged and skipped.
+  validate-c-structure uses the same archives for its optional `programPath`, else the 64-bit pair.
 - `DataTypeManager` - Manage program data types and categories
 - `CategoryPath` - Organize structures in hierarchical categories
 - `BitFieldDataType` - Handle bitfield components in structures

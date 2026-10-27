@@ -35,6 +35,7 @@ import reva.tools.AbstractToolProvider;
 import reva.util.AddressUtil;
 import reva.util.DataTypeParserUtil;
 import reva.util.SchemaUtil;
+import reva.util.TypeArchives;
 
 /**
  * Tool provider for structure definition and manipulation operations.
@@ -86,7 +87,7 @@ public class StructureToolProvider extends AbstractToolProvider {
                 String category = getOptionalString(request, "category", "/");
 
                 DataTypeManager dtm = program.getDataTypeManager();
-                CParser cparser = new CParser(dtm);
+                CParser cparser = newParser(program);
 
                 int txId = program.startTransaction("Parse C Structure");
                 try {
@@ -194,6 +195,7 @@ public class StructureToolProvider extends AbstractToolProvider {
             .description("Validate C-style structure definition without creating it")
             .inputSchema(SchemaUtil.builder()
                 .requiredStringProperty("cDefinition", "C-style structure definition to validate")
+                .stringProperty("programPath", "Optional program whose Win32/C library type archives to validate against (default: 64-bit Win32 and C library archives)")
                 .build())
             .build();
 
@@ -201,9 +203,15 @@ public class StructureToolProvider extends AbstractToolProvider {
             try {
                 String cDefinition = getString(request, "cDefinition");
 
+                // Same archives as parse-c-structure when a program is named
+                DataTypeManager[] archives = TypeArchives.defaults();
+                if (getOptionalString(request, "programPath", null) != null) {
+                    archives = TypeArchives.forProgram(getProgramFromArgs(request));
+                }
+
                 // Create a temporary parser with a standalone DTM
                 DataTypeManager tempDtm = new StandAloneDataTypeManager("temp");
-                CParser parser = new CParser(tempDtm);
+                CParser parser = new CParser(tempDtm, false, archives);
 
                 try {
                     DataType dt = parser.parse(cDefinition);
@@ -586,7 +594,7 @@ public class StructureToolProvider extends AbstractToolProvider {
                 String category = getOptionalString(request, "category", "/");
 
                 DataTypeManager dtm = program.getDataTypeManager();
-                CParser parser = new CParser(dtm);
+                CParser parser = newParser(program);
 
                 int txId = program.startTransaction("Parse C Header");
                 List<Map<String, Object>> createdTypes = new ArrayList<>();
@@ -781,6 +789,14 @@ public class StructureToolProvider extends AbstractToolProvider {
         info.put("cRepresentation", generateCRepresentation(composite));
 
         return info;
+    }
+
+    /**
+     * Parser that stores into the program's own manager but resolves names
+     * against the Win32 and C library archives (HANDLE, DWORD, size_t, ...).
+     */
+    static CParser newParser(Program program) {
+        return new CParser(program.getDataTypeManager(), false, TypeArchives.forProgram(program));
     }
 
     /**

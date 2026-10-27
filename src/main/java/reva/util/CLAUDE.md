@@ -16,6 +16,7 @@ The `reva.util` package contains these critical utility classes (among others) t
 - **DebugLogger** - Configuration-aware debug logging
 - **DecompilationDiffUtil** - Decompilation comparison and diffing with snippets
 - **SimilarityComparator** - String similarity analysis using longest common substring (LCS)
+- **TypeArchives** - Read-only, JVM-shared Win32 and C library data type archives for C parsing
 
 **CRITICAL**: All tool providers MUST use these utilities instead of direct Ghidra API calls to ensure consistency across the entire ReVa ecosystem.
 
@@ -34,6 +35,7 @@ The `reva.util` package contains these critical utility classes (among others) t
 | **DebugLogger** | `debug()`, `debugConnection()`, `debugPerformance()`, `debugToolExecution()`, `isDebugEnabled()` | Configuration-aware debug logging |
 | **DecompilationDiffUtil** | `createDiff()`, `toMap()` | Compare decompilation before/after with snippets |
 | **SimilarityComparator** | `SimilarityComparator(searchString, extractor)`, `calculateLcsSimilarity()` | Sort by string similarity using LCS algorithm |
+| **TypeArchives** | `forProgram()`, `defaults()` | Win32 (Windows compiler spec only, by pointer size) and C library archives to resolve HANDLE, DWORD, size_t when parsing C |
 
 ## Core Utility Classes
 

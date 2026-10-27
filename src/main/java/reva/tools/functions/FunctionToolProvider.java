@@ -26,6 +26,8 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import ghidra.app.cmd.disassemble.DisassembleCommand;
 import ghidra.app.cmd.function.CreateFunctionCmd;
@@ -64,6 +66,7 @@ import reva.tools.AbstractToolProvider;
 import reva.util.AddressUtil;
 import reva.util.SimilarityComparator;
 import reva.util.SymbolUtil;
+import reva.util.TypeArchives;
 
 /**
  * Tool provider for function-related operations.
@@ -101,6 +104,20 @@ public class FunctionToolProvider extends AbstractToolProvider {
 
     /** Valid modes for the function-tags tool */
     private static final Set<String> VALID_TAG_MODES = Set.of("get", "set", "add", "remove", "list");
+
+    /**
+     * Calling-convention keywords accepted in a signature string. Ghidra's own
+     * parser treats an unrecognised keyword as part of the return type, so these
+     * are removed before parsing and applied to the function afterwards.
+     */
+    private static final Pattern CALLING_CONVENTION_KEYWORD =
+        Pattern.compile("\\b__(fastcall|stdcall|cdecl|thiscall)\\b");
+
+    /**
+     * A signature with its calling-convention keyword removed, plus the keyword.
+     * {@code callingConvention} is null when the signature had none.
+     */
+    record CallingConventionSplit(String signature, String callingConvention) {}
 
     /**
      * Cache key for similarity search results.
@@ -936,6 +953,110 @@ public class FunctionToolProvider extends AbstractToolProvider {
     }
 
     /**
+     * Parser that stores into the program's own manager but resolves names
+     * against the Win32 and C library archives (HANDLE, FILE, size_t, ...).
+     * Mirrors {@code StructureToolProvider.newParser} for signature parsing.
+     */
+    static FunctionSignatureParser newSignatureParser(Program program) {
+        return new FunctionSignatureParser(program.getDataTypeManager(),
+            TypeArchives.queryService(program));
+    }
+
+    /**
+     * Separate a calling-convention keyword from a C-style signature.
+     *
+     * Ghidra's signature parser only understands a convention when it is one of
+     * the program's known calling convention names, and otherwise folds the
+     * keyword into the return type, producing a bare ParseException. Removing the
+     * keyword first makes parsing independent of the program's language; the
+     * caller applies it to the function once the signature has parsed.
+     *
+     * @param signature C-style signature, may contain one keyword
+     * @return the signature without the first keyword and the keyword itself
+     *         (null when the signature contained none)
+     */
+    static CallingConventionSplit splitCallingConvention(String signature) {
+        if (signature == null) {
+            return new CallingConventionSplit(null, null);
+        }
+        Matcher matcher = CALLING_CONVENTION_KEYWORD.matcher(signature);
+        if (!matcher.find()) {
+            return new CallingConventionSplit(signature, null);
+        }
+        String callingConvention = matcher.group();
+        String stripped = (signature.substring(0, matcher.start()) + " " +
+            signature.substring(matcher.end())).replaceAll("\\s+", " ").trim();
+        return new CallingConventionSplit(stripped, callingConvention);
+    }
+
+    /**
+     * Apply a signature's calling-convention keyword to the function.
+     *
+     * @param function function to update
+     * @param callingConvention keyword such as {@code __fastcall}; null does nothing
+     * @return null on success, or the error message when the program cannot use
+     *         the convention
+     */
+    static String applyCallingConvention(Function function, String callingConvention) {
+        if (callingConvention == null) {
+            return null;
+        }
+        try {
+            function.setCallingConvention(callingConvention);
+            return null;
+        }
+        catch (InvalidInputException e) {
+            return "Calling convention '" + callingConvention +
+                "' is not part of the signature string: " + e.getMessage() +
+                ". The prototype was left unchanged.";
+        }
+    }
+
+    /**
+     * Error text for a failed signature parse.
+     *
+     * When Ghidra names an unresolvable datatype, teach the fix: name the type
+     * and the tools that define it. Other failures keep their message but still
+     * point at the custom-type tools, the most common cause.
+     */
+    static String parseSignatureError(String ghidraMessage) {
+        String message = ghidraMessage == null ? "" : ghidraMessage;
+        String undefinedType = undefinedTypeName(message);
+        if (undefinedType != null) {
+            return "Failed to parse function signature: " + message +
+                "\n\nUndefined type '" + undefinedType +
+                "': define it first with parse-c-structure or apply-data-type, or use a basic type.";
+        }
+        return "Failed to parse function signature: " + message +
+            "\n\n(define custom types first with parse-c-structure or apply-data-type)";
+    }
+
+    /**
+     * The datatype name from a Ghidra parse message that could not resolve a type,
+     * or null when the message is not about datatype resolution.
+     */
+    private static String undefinedTypeName(String message) {
+        List<String> markers = List.of(
+            "Can't resolve datatype:",
+            "Can't resolve return type:",
+            "Unrecognized data type of");
+        for (String marker : markers) {
+            int index = message.indexOf(marker);
+            if (index < 0) {
+                continue;
+            }
+            String name = message.substring(index + marker.length()).trim();
+            if (name.length() >= 2 && name.startsWith("\"") && name.endsWith("\"")) {
+                name = name.substring(1, name.length() - 1);
+            }
+            if (!name.isEmpty()) {
+                return name;
+            }
+        }
+        return null;
+    }
+
+    /**
      * Register a tool to set or update a function prototype using C-style signatures
      */
     private void registerSetFunctionPrototypeTool() {
@@ -965,7 +1086,9 @@ public class FunctionToolProvider extends AbstractToolProvider {
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("set-function-prototype")
             .title("Set Function Prototype")
-            .description("Set or update a function prototype using C-style function signatures. Can create new functions or update existing ones.")
+            .description("Set or update a function prototype using C-style function signatures. Can create new functions or update existing ones. " +
+                "Type names resolve against the program's own types and the Win32/C library type archives. " +
+                "A calling-convention keyword in the signature (__fastcall, __stdcall, __cdecl, __thiscall) is applied to the function and reported as callingConvention.")
             .inputSchema(createSchema(properties, required))
             .build();
 
@@ -979,7 +1102,9 @@ public class FunctionToolProvider extends AbstractToolProvider {
                 boolean createIfNotExists = getOptionalBoolean(request, "createIfNotExists", true);
 
                 // Normalize signature to handle whitespace issues
-                String normalizedSignature = normalizeFunctionSignature(signature);
+                CallingConventionSplit split = splitCallingConvention(signature);
+                String normalizedSignature = normalizeFunctionSignature(split.signature());
+                String callingConvention = split.callingConvention();
 
                 // Resolve the address from location
                 Address address = getAddressFromArgs(request, program, "location");
@@ -994,8 +1119,7 @@ public class FunctionToolProvider extends AbstractToolProvider {
                 Function existingFunction = functionManager.getFunctionAt(address);
 
                 // Parse the function signature using Ghidra's parser
-                FunctionSignatureParser parser = new FunctionSignatureParser(
-                    program.getDataTypeManager(), null);
+                FunctionSignatureParser parser = newSignatureParser(program);
 
                 FunctionDefinitionDataType functionDef;
                 try {
@@ -1017,13 +1141,7 @@ public class FunctionToolProvider extends AbstractToolProvider {
 
                     functionDef = parser.parse(originalSignature, normalizedSignature);
                 } catch (ParseException e) {
-                    // Check if the error is about missing datatypes
-                    String errorMsg = e.getMessage();
-                    if (errorMsg != null && errorMsg.contains("Can't resolve datatype")) {
-                        return createErrorResult("Failed to parse function signature: " + errorMsg +
-                            "\n\nHint: The datatype may not be defined in the program. Consider using a basic type (e.g., 'void*' instead of 'FILE*') or import the necessary type definitions.");
-                    }
-                    return createErrorResult("Failed to parse function signature: " + errorMsg);
+                    return createErrorResult(parseSignatureError(e.getMessage()));
                 } catch (CancelledException e) {
                     return createErrorResult("Function signature parsing was cancelled");
                 }
@@ -1035,6 +1153,10 @@ public class FunctionToolProvider extends AbstractToolProvider {
                     // Create function if it doesn't exist and creation is allowed
                     if (function == null) {
                         if (!createIfNotExists) {
+                            // An unterminated entry would keep the program
+                            // locked: later writers would be refused as busy
+                            // and the final persist could not save.
+                            program.endTransaction(txId, false);
                             return createErrorResult("Function does not exist at " +
                                 AddressUtil.formatAddress(address) + " and createIfNotExists is false");
                         }
@@ -1045,9 +1167,24 @@ public class FunctionToolProvider extends AbstractToolProvider {
                             functionDef.getName(), address, body, SourceType.USER_DEFINED);
 
                         if (function == null) {
+                            program.endTransaction(txId, false);
                             return createErrorResult("Failed to create function at " +
                                 AddressUtil.formatAddress(address));
                         }
+                    }
+
+                    // Apply the signature's calling convention before storage is assigned
+                    // so auto-parameters follow it. A convention the program's language
+                    // cannot represent rolls the whole update back.
+                    String callingConventionError =
+                        applyCallingConvention(function, callingConvention);
+                    if (callingConventionError != null) {
+                        program.endTransaction(txId, false);
+                        return createErrorResult(callingConventionError);
+                    }
+                    if (callingConvention != null) {
+                        logInfo("Applied calling convention " + callingConvention + " to " +
+                            function.getName());
                     }
 
                     // Check if we need to enable custom storage to modify auto-parameters
@@ -1119,6 +1256,9 @@ public class FunctionToolProvider extends AbstractToolProvider {
                     result.put("function", createFunctionInfo(function, null));
                     result.put("address", AddressUtil.formatAddress(address));
                     result.put("parsedSignature", functionDef.toString());
+                    if (callingConvention != null) {
+                        result.put("callingConvention", callingConvention);
+                    }
                     result.put("customStorageEnabled", needsCustomStorage && !wasUsingCustomStorage);
                     result.put("usingCustomStorage", function.hasCustomVariableStorage());
 

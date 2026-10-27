@@ -162,9 +162,11 @@ Function createdFunc = program.getFunctionManager().getFunctionAt(address);
 ```java
 import ghidra.app.util.parser.FunctionSignatureParser;
 
-// set-function-prototype tool uses this approach
-FunctionSignatureParser parser = new FunctionSignatureParser(
-    program.getDataTypeManager(), null);
+// set-function-prototype builds its parser through newSignatureParser, which is
+// new FunctionSignatureParser(program.getDataTypeManager(),
+//     TypeArchives.queryService(program)) — program types first, then the
+//     Win32 and C library archives (HANDLE, FILE, size_t, ...).
+FunctionSignatureParser parser = newSignatureParser(program);
 
 // Parse with normalization (handles whitespace issues)
 String normalizedSignature = normalizeFunctionSignature(signature);
@@ -174,6 +176,19 @@ FunctionDefinitionDataType functionDef = parser.parse(
 
 // Note: parser.parse() can throw ParseException
 ```
+
+**Calling Conventions**: Ghidra signature strings cannot carry a calling convention
+reliably (an unknown keyword is folded into the return type). `splitCallingConvention`
+removes the first `__fastcall`, `__stdcall`, `__cdecl` or `__thiscall` keyword before
+parsing; `applyCallingConvention` sets it on the function inside the same transaction
+and the result reports it as `callingConvention`. When the program's language does not
+define the convention, the tool returns an explanatory error and rolls back.
+
+**Undefined Types**: `parseSignatureError` turns a parse failure that names an
+unresolvable datatype (`Can't resolve datatype:`, `Can't resolve return type:`) into
+teaching text naming the type and the fix tools (`parse-c-structure`,
+`apply-data-type`, or a basic type). Other failures keep their message and append the
+custom-type hint.
 
 **Signature Normalization**: The `normalizeFunctionSignature` method fixes whitespace issues:
 - `"char *func("` → `"char* func("` (space before * causes parsing failures)

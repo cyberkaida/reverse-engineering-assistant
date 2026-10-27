@@ -107,10 +107,14 @@ private boolean hasReadDecompilation(String functionKey) {
 
 // Validate in modify tools
 if (!hasReadDecompilation(functionKey)) {
-    return createErrorResult("You must read the decompilation for function '" +
-        function.getName() + "' using get-decompilation tool before making changes.");
+    return createErrorResult(readGateMessage(functionNameOrAddress));
 }
 ```
+
+The gate message (`readGateMessage`, shared by rename-variables, change-variable-datatypes and
+set-decompilation-comment) names the exact call: `Read the decompilation first: call get-decompilation
+with functionNameOrAddress "<value the caller passed>" (it returns the variable names to use), then retry.
+Decompiling inside run-script does not count.`
 
 **Cleanup on program close**:
 ```java

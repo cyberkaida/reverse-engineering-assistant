@@ -1115,8 +1115,7 @@ public class DecompilerToolProvider extends AbstractToolProvider {
             String programPath = program.getDomainFile().getPathname();
             String functionKey = programPath + ":" + AddressUtil.formatAddress(function.getEntryPoint());
             if (!hasReadDecompilation(functionKey)) {
-                return createErrorResult("You must read the decompilation for function '" + function.getName() +
-                    "' using get-decompilation tool before making variable changes. This ensures you understand the current state of the code.");
+                return createErrorResult(readGateMessage(functionNameOrAddress));
             }
 
             // Navigate first so demo viewers see the cursor land before the renames apply.
@@ -1257,8 +1256,7 @@ public class DecompilerToolProvider extends AbstractToolProvider {
             String programPath = program.getDomainFile().getPathname();
             String functionKey = programPath + ":" + AddressUtil.formatAddress(function.getEntryPoint());
             if (!hasReadDecompilation(functionKey)) {
-                return createErrorResult("You must read the decompilation for function '" + function.getName() +
-                    "' using get-decompilation tool before making datatype changes. This ensures you understand the current state of the code.");
+                return createErrorResult(readGateMessage(functionNameOrAddress));
             }
 
             // Navigate first so demo viewers see the cursor land before the type changes apply.
@@ -1688,6 +1686,17 @@ public class DecompilerToolProvider extends AbstractToolProvider {
     }
 
     /**
+     * The error returned when a write tool is called before get-decompilation.
+     * @param functionNameOrAddress The function as the caller named it
+     * @return the message naming the exact get-decompilation call to make
+     */
+    static String readGateMessage(String functionNameOrAddress) {
+        return "Read the decompilation first: call get-decompilation with functionNameOrAddress \""
+            + functionNameOrAddress + "\" (it returns the variable names to use), then retry. "
+            + "Decompiling inside run-script does not count.";
+    }
+
+    /**
      * Check if the LLM has read the decompilation for a specific function
      * @param functionKey The function key (programPath:functionName)
      * @return true if decompilation has been read recently, false otherwise
@@ -1883,8 +1892,7 @@ public class DecompilerToolProvider extends AbstractToolProvider {
             String programPath = program.getDomainFile().getPathname();
             String functionKey = programPath + ":" + AddressUtil.formatAddress(function.getEntryPoint());
             if (!hasReadDecompilation(functionKey)) {
-                return createErrorResult("You must read the decompilation for function '" + function.getName() +
-                    "' using get-decompilation tool before setting comments. This ensures you understand the current state of the code.");
+                return createErrorResult(readGateMessage(functionNameOrAddress));
             }
 
             // Initialize the decompiler using helper methods

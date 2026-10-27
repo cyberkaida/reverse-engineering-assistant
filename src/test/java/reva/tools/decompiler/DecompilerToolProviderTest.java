@@ -172,6 +172,14 @@ public class DecompilerToolProviderTest {
         }
     }
     
+    @Test
+    public void readGateMessageNamesTheExactCall() {
+        assertEquals("Read the decompilation first: call get-decompilation with functionNameOrAddress \"main\" "
+            + "(it returns the variable names to use), then retry. "
+            + "Decompiling inside run-script does not count.",
+            DecompilerToolProvider.readGateMessage("main"));
+    }
+
     // Helper methods to simulate parameter validation from the tool handlers
     private void validateChangeDataTypesArgs(Map<String, Object> args) {
         if (args.get("programPath") == null) {

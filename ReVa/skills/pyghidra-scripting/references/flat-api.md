@@ -4,6 +4,8 @@ Reference for the `FlatProgramAPI` + `FlatDecompilerAPI` + `GhidraScript` surfac
 
 For the underlying managers (`FunctionManager`, `SymbolTable`, `Listing`, `ReferenceManager`, `Memory`, `DataTypeManager`) reach through `currentProgram.getFunctionManager()` etc. — those have richer APIs when the Flat helpers don't fit.
 
+`run-script` wraps each execution in one transaction, so the "Needs transaction" notes below only mean "this call mutates state": you do not have to open one, and wrapping a call in `startTransaction(...)/endTransaction(..., True)` changes nothing. Ending your own entry with `commit=False` aborts the whole run.
+
 ## Program & memory
 
 | Call | Returns | Notes |

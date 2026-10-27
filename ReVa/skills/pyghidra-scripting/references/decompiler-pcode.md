@@ -274,6 +274,8 @@ while it.hasNext():
 
 Pass `None` for the data type to keep the current type and only rename. Pass a `DataType` to change both.
 
+`run-script` already runs inside one transaction, so the wrapper in that snippet is optional: mutating calls apply directly, and ending an entry with `commit=False` aborts the whole run.
+
 For function signatures, the related helpers are `HighFunctionDBUtil.commitParamsToDatabase(hf, useDataTypes, sourceType)` and `commitReturnToDatabase(hf, sourceType)`. These take everything the decompiler inferred for parameters / return type and write it back permanently — useful after running data-flow analysis that improved signatures.
 
 ## Clang AST: the rendered C tree

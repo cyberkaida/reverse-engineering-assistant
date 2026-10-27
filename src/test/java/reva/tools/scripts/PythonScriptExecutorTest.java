@@ -19,14 +19,17 @@ import static org.junit.Assert.*;
 import static org.mockito.Mockito.*;
 
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.Before;
 import org.junit.Test;
 
 import generic.jar.ResourceFile;
+import ghidra.framework.model.TransactionInfo;
 import ghidra.framework.plugintool.PluginTool;
 import ghidra.program.model.listing.Program;
+import reva.tools.ProgramBusyException;
 import reva.tools.scripts.PythonScriptExecutor.Result;
 import reva.tools.scripts.PythonScriptExecutor.ScriptRunner;
 
@@ -170,6 +173,257 @@ public class PythonScriptExecutorTest {
             "execute() returned in " + elapsedMs + "ms but timeout was 60s; "
             + "expected prompt return after runner completed",
             elapsedMs < 5_000);
+    }
+
+    @Test
+    public void successCommitsParentTransactionOnce() throws Exception {
+        when(program.startTransaction(anyString())).thenReturn(7);
+        PythonScriptExecutor exec = new PythonScriptExecutor(
+            (f, p, t, out, err, monitor) -> out.print("ok"));
+        Result r = exec.execute(scriptFile, program, null, 60, 1024);
+        verify(program).startTransaction(argThat(s -> s.startsWith("run-script:")));
+        verify(program).endTransaction(7, true);
+        assertTrue(r.parentCommitted());
+    }
+
+    @Test
+    public void exceptionRollsBackParentTransaction() throws Exception {
+        when(program.startTransaction(anyString())).thenReturn(9);
+        PythonScriptExecutor exec = new PythonScriptExecutor(
+            (f, p, t, out, err, monitor) -> {
+                throw new RuntimeException("boom");
+            });
+        Result r = exec.execute(scriptFile, program, null, 60, 1024);
+        verify(program).endTransaction(9, false);
+        assertFalse(r.parentCommitted());
+        assertNotNull(r.executionError());
+    }
+
+    @Test
+    public void pythonTracebackInStderrRollsBackParentTransaction() throws Exception {
+        // PyGhidra's runner catches Python exceptions, writes the traceback to
+        // the error writer and returns normally: execError stays null. The
+        // traceback must still abort the parent entry, or the failed script's
+        // partial edits would be committed.
+        when(program.startTransaction(anyString())).thenReturn(11);
+        PythonScriptExecutor exec = new PythonScriptExecutor(
+            (f, p, t, out, err, monitor) -> {
+                err.print("Traceback (most recent call last):\n"
+                    + "  File \"<string>\", line 1, in <module>\n"
+                    + "ValueError: intentional test failure\n");
+                // intentionally no flush: the executor must flush before it
+                // decides whether to commit
+            });
+        Result r = exec.execute(scriptFile, program, null, 60, 1024);
+
+        verify(program).endTransaction(11, false);
+        assertFalse("a Python traceback must not commit", r.parentCommitted());
+        assertNotNull("the swallowed exception is still reported", r.executionError());
+        assertTrue(r.executionError().getMessage().contains("Python exception"));
+        assertTrue("the traceback is in the captured stderr: " + r.stderr(),
+            r.stderr().contains("ValueError"));
+    }
+
+    @Test
+    public void plainStderrWithoutTracebackStillCommits() throws Exception {
+        when(program.startTransaction(anyString())).thenReturn(12);
+        PythonScriptExecutor exec = new PythonScriptExecutor(
+            (f, p, t, out, err, monitor) -> {
+                err.print("warning: deprecated API used\n");
+                out.print("ok\n");
+            });
+        Result r = exec.execute(scriptFile, program, null, 60, 1024);
+
+        verify(program).endTransaction(12, true);
+        assertTrue(r.parentCommitted());
+        assertNull(r.executionError());
+    }
+
+    @Test
+    public void timeoutRollsBackParentTransaction() throws Exception {
+        when(program.startTransaction(anyString())).thenReturn(3);
+        PythonScriptExecutor exec = new PythonScriptExecutor(
+            (f, p, t, out, err, monitor) -> monitor.cancel());
+        Result r = exec.execute(scriptFile, program, null, 60, 1024);
+        verify(program).endTransaction(3, false);
+        assertTrue(r.timedOut());
+        assertNotNull(r.executionError());
+        assertTrue(r.executionError().getMessage(), r.executionError().getMessage().contains("60"));
+    }
+
+    @Test
+    public void lockedProgramIsRefusedAsBusyForTheSaveLock() throws Exception {
+        // The availability wait cannot see the save lock — it is only
+        // observable by attempting the transaction — so the catch still maps
+        // it to the busy result the tool layer marks busy:true.
+        when(program.startTransaction(anyString()))
+            .thenThrow(new ghidra.framework.model.DomainObjectLockedException("save"));
+        AtomicReference<Boolean> ran = new AtomicReference<>(false);
+        PythonScriptExecutor exec = new PythonScriptExecutor(
+            (f, p, t, out, err, monitor) -> ran.set(true));
+        Result r = exec.execute(scriptFile, program, null, 60, 1024);
+
+        assertFalse("the script must not run while the program is locked", ran.get());
+        assertNotNull("a lock must not escape as an MCP error", r.executionError());
+        assertTrue(r.executionError() instanceof ProgramBusyException);
+        String message = r.executionError().getMessage();
+        assertTrue(message, message.contains("lock"));
+        assertFalse(r.parentCommitted());
+    }
+
+    @Test
+    public void readOnlyProgramIsRefusedAsUnmodifiable() throws Exception {
+        when(program.startTransaction(anyString()))
+            .thenThrow(new db.TerminatedTransactionException(
+                "Transaction not permitted: read-only"));
+        AtomicReference<Boolean> ran = new AtomicReference<>(false);
+        PythonScriptExecutor exec = new PythonScriptExecutor(
+            (f, p, t, out, err, monitor) -> ran.set(true));
+        Result r = exec.execute(scriptFile, program, null, 60, 1024);
+
+        assertFalse("the script must not run against a read-only program", ran.get());
+        assertNotNull("the refusal is a normal result, not an MCP error",
+            r.executionError());
+        String message = r.executionError().getMessage();
+        assertTrue(message, message.contains("cannot be modified"));
+        assertTrue(message, message.contains("read-only"));
+    }
+
+    @Test
+    public void transactionAppearingBeforeStartIsRefused() throws Exception {
+        TransactionInfo stranger = mock(TransactionInfo.class);
+        when(stranger.getDescription()).thenReturn("ReVa: Auto Analysis");
+        // availability check, then the re-check right before startTransaction
+        when(program.getCurrentTransactionInfo()).thenReturn(null, stranger);
+        AtomicReference<Boolean> ran = new AtomicReference<>(false);
+        PythonScriptExecutor exec = new PythonScriptExecutor(
+            (f, p, t, out, err, monitor) -> ran.set(true));
+
+        Result r = exec.execute(scriptFile, program, null, 60, 1024);
+
+        assertFalse(ran.get());
+        verify(program, never()).startTransaction(anyString());
+        assertNotNull(r.executionError());
+        assertTrue(r.executionError() instanceof ProgramBusyException);
+        assertTrue(r.executionError().getMessage(),
+            r.executionError().getMessage().contains("ReVa: Auto Analysis"));
+    }
+
+    @Test
+    public void joinedStrangerTransactionIsReleasedAndRefused() throws Exception {
+        // Nothing open at either check, but a stranger's transaction appeared
+        // between the re-check and startTransaction, so our entry joined it.
+        TransactionInfo joined = mock(TransactionInfo.class);
+        when(joined.getOpenSubTransactions())
+            .thenReturn(new java.util.ArrayList<>(java.util.List.of(
+                "stranger", "run-script: test.py")));
+        // busy check, re-check, cleanup snapshot, post-start check
+        when(program.getCurrentTransactionInfo()).thenReturn(null, null, null, joined);
+        when(program.startTransaction(anyString())).thenReturn(7);
+        AtomicReference<Boolean> ran = new AtomicReference<>(false);
+        PythonScriptExecutor exec = new PythonScriptExecutor(
+            (f, p, t, out, err, monitor) -> ran.set(true));
+
+        Result r = exec.execute(scriptFile, program, null, 60, 1024);
+
+        assertFalse("nothing runs when the start joined a stranger", ran.get());
+        // Our empty entry is released with commit=true: commit=false would
+        // abort the stranger's transaction.
+        verify(program).endTransaction(7, true);
+        verify(program, never()).endTransaction(7, false);
+        assertNotNull(r.executionError());
+        assertTrue(r.executionError() instanceof ProgramBusyException);
+        assertTrue(r.executionError().getMessage().contains("another writer"));
+        assertFalse(r.parentCommitted());
+    }
+
+    @Test
+    public void waitDeadlineExpiredLeavesBusyResultWithoutRunning() throws Exception {
+        // The writer never finishes: the bounded wait must end in the
+        // structured busy result, not in a run stacked on top of it.
+        TransactionInfo info = mock(TransactionInfo.class);
+        when(info.getDescription()).thenReturn("ReVa: Auto Analysis");
+        when(program.getCurrentTransactionInfo()).thenReturn(info);
+        AtomicReference<Boolean> ran = new AtomicReference<>(false);
+        PythonScriptExecutor exec = new PythonScriptExecutor(
+            (f, p, t, out, err, monitor) -> ran.set(true),
+            p -> false, 120, 15);
+
+        Result r = exec.execute(scriptFile, program, null, 60, 1024);
+
+        assertFalse("a busy program must not run the script", ran.get());
+        verify(program, never()).startTransaction(anyString());
+        assertNotNull(r.executionError());
+        assertTrue(r.executionError() instanceof ProgramBusyException);
+        assertEquals("a transaction is open (ReVa: Auto Analysis)",
+            r.executionError().getMessage());
+        assertFalse(r.parentCommitted());
+        assertFalse(r.transactionRolledBack());
+    }
+
+    @Test
+    public void waitLetsTheRunProceedOnceTheWriterClears() throws Exception {
+        when(program.startTransaction(anyString())).thenReturn(5);
+        TransactionInfo busy = mock(TransactionInfo.class);
+        when(busy.getDescription()).thenReturn("ReVa: Auto Analysis");
+        // The first two availability checks see the sibling writer; the third
+        // one, after two polls, does not.
+        when(program.getCurrentTransactionInfo()).thenReturn(busy, busy, null);
+        AtomicReference<Boolean> ran = new AtomicReference<>(false);
+        PythonScriptExecutor exec = new PythonScriptExecutor(
+            (f, p, t, out, err, monitor) -> ran.set(true),
+            p -> false, 5_000, 20);
+
+        long startNs = System.nanoTime();
+        Result r = exec.execute(scriptFile, program, null, 60, 1024);
+        long waitedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNs);
+
+        assertTrue("the run must proceed once the writer finished", ran.get());
+        verify(program).endTransaction(5, true);
+        assertTrue(r.parentCommitted());
+        assertNull(r.executionError());
+        assertTrue("the wait must survive at least one poll interval, waited "
+            + waitedMs + "ms", waitedMs >= 40);
+    }
+
+    @Test
+    public void waitLetsTheRunProceedOnceAnalysisFinishes() throws Exception {
+        when(program.startTransaction(anyString())).thenReturn(6);
+        // No transaction open, but auto-analysis was running at the first
+        // check and stopped by the second.
+        AtomicInteger checks = new AtomicInteger();
+        AtomicReference<Boolean> ran = new AtomicReference<>(false);
+        PythonScriptExecutor exec = new PythonScriptExecutor(
+            (f, p, t, out, err, monitor) -> ran.set(true),
+            p -> checks.getAndIncrement() == 0, 5_000, 20);
+
+        Result r = exec.execute(scriptFile, program, null, 60, 1024);
+
+        assertTrue("the run must proceed once analysis finished", ran.get());
+        verify(program).endTransaction(6, true);
+        assertTrue(r.parentCommitted());
+        assertNull(r.executionError());
+    }
+
+    @Test
+    public void programBusyExceptionCarriesTheReason() {
+        ProgramBusyException e = new ProgramBusyException("auto-analysis is running");
+        assertEquals("auto-analysis is running", e.reason());
+        assertEquals("auto-analysis is running", e.getMessage());
+    }
+
+    @Test
+    public void timeoutErrorOverridesPythonCancellationTraceback() throws Exception {
+        when(program.startTransaction(anyString())).thenReturn(3);
+        PythonScriptExecutor exec = new PythonScriptExecutor(
+            (f, p, t, out, err, monitor) -> {
+                monitor.cancel();
+                err.print("Traceback (most recent call last):\nCancelledException: cancelled\n");
+            });
+        Result r = exec.execute(scriptFile, program, null, 60, 1024);
+        verify(program).endTransaction(3, false);
+        assertTrue(r.timedOut());
+        assertEquals("script timed out after 60 seconds", r.executionError().getMessage());
     }
 
     @Test

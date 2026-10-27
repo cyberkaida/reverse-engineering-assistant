@@ -37,6 +37,7 @@ import io.modelcontextprotocol.spec.McpSchema.Tool;
 import reva.plugin.ConfigManager;
 import reva.server.McpServerManager;
 import reva.tools.AbstractToolProvider;
+import reva.tools.ProgramBusyException;
 import reva.tools.scripts.PythonScriptExecutor.Result;
 import reva.tools.scripts.ScriptFileEditor.EditResult;
 import reva.tools.scripts.ScriptFileEditor.RenderedView;
@@ -150,11 +151,16 @@ public class ScriptToolProvider extends AbstractToolProvider {
         properties.put("code", SchemaUtil.stringProperty(
             "Inline Python source. The script runs as a Ghidra script with "
             + "currentProgram, FlatProgramAPI helpers, and monitor available. "
-            + "Wrap state changes in currentProgram.startTransaction(...) / "
-            + "endTransaction(...) yourself — the tool does not open a "
-            + "transaction. Provide exactly one of: code, scriptPath, scriptName."));
+            + "ReVa wraps the run in one transaction: edits need no "
+            + "startTransaction call, a clean run commits as a single undo "
+            + "entry, and a run that throws or times out rolls back "
+            + "completely. A script may still open its own transaction; its "
+            + "entries join that unit, and ending one with commit=false rolls "
+            + "the whole run back. "
+            + "Provide exactly one of: code, scriptPath, scriptName."));
         properties.put("scriptPath", SchemaUtil.stringProperty(
-            "Absolute path to an existing .py script to run."));
+            "Absolute path to an existing .py script to run. A bare file "
+            + "name (no directory) is treated as scriptName."));
         properties.put("scriptName", SchemaUtil.stringProperty(
             "Name of a script (e.g., 'MyAnalysis.py') resolved across "
             + "registered Ghidra script directories."));
@@ -171,27 +177,44 @@ public class ScriptToolProvider extends AbstractToolProvider {
                 + "via PyGhidra (mcp-reva or pyghidra-gui). Returns captured "
                 + "stdout/stderr, duration, and timeout flag. Script failures "
                 + "appear in stderr with success=false; tool failures (bad "
-                + "args, PyGhidra unavailable) are MCP errors. Cancellation is "
-                + "cooperative: long-running scripts should periodically check "
-                + "monitor.isCancelled() so the timeout can fire on tight loops.")
+                + "args, PyGhidra unavailable) are MCP errors. The whole run is "
+                + "one transaction: edits need no startTransaction call, a "
+                + "clean run commits as a single undo entry, and a run that "
+                + "throws or times out rolls back every change. The result's "
+                + "transaction field is committed, rolled back (also when the "
+                + "script aborted the run itself), or open (a transaction left "
+                + "to running auto-analysis). Entries a "
+                + "script left open are ended after the run and reported as "
+                + "transactionLeaked=true with a note in stderr; the run's own "
+                + "entry is ended first, so a failed run's changes are rolled "
+                + "back, not committed. If auto-analysis is still running when "
+                + "the script returns, an open transaction is left to it and "
+                + "reported as transactionOpen=true. run-script waits up to 30 "
+                + "seconds for an in-flight operation (another writer's "
+                + "transaction, running auto-analysis) to finish; a result that "
+                + "is still busy carries success=false, busy=true and "
+                + "transaction=\"refused\" — wait for the in-flight operation to "
+                + "finish and retry rather than retrying immediately. "
+                + "Cancellation is "
+                + "cooperative: every loop needs a bounded exit and a call to "
+                + "monitor.checkCancelled() inside it and after long native calls; "
+                + "timeoutSeconds takes effect only when control returns to Python. "
+                + "A script that never returns to the monitor cannot be forcibly stopped.")
             .inputSchema(createSchema(properties, List.of("programPath")))
             .build();
 
         registerTool(tool, (exchange, request) -> {
-            Program program = getProgramFromArgs(request);
             String code = getOptionalString(request, "code", null);
-            String scriptPath = getOptionalString(request, "scriptPath", null);
-            String scriptName = getOptionalString(request, "scriptName", null);
+            // Same rule as the other script tools: a bare file name given as
+            // scriptPath is a scriptName, not a path against the JVM cwd.
+            String[] merged = mergeBareName(
+                getOptionalString(request, "scriptPath", null),
+                getOptionalString(request, "scriptName", null));
+            String scriptPath = merged[0];
+            String scriptName = merged[1];
 
-            int sources = 0;
-            if (code != null) sources++;
-            if (scriptPath != null) sources++;
-            if (scriptName != null) sources++;
-            if (sources != 1) {
-                throw new IllegalArgumentException(
-                    "Provide exactly one of: code, scriptPath, scriptName "
-                    + "(got " + sources + ")");
-            }
+            validateRunSources(code, scriptPath, scriptName);
+            Program program = getProgramFromArgs(request);
 
             int timeoutSeconds = getOptionalInt(
                 request, "timeoutSeconds", defaultTimeoutSupplier.get());
@@ -255,44 +278,135 @@ public class ScriptToolProvider extends AbstractToolProvider {
         });
     }
 
+    private static final String LEAK_NOTE_FORMAT =
+        "ReVa closed %d transaction(s) the script left open; changes were "
+        + "committed. Scripts must end every transaction they start (try/finally).";
+    private static final String ROLLED_BACK_NOTE_FORMAT =
+        "ReVa closed %d transaction(s) the script left open; the run's "
+        + "transaction was aborted (a failed or cancelled run, or an entry "
+        + "ended with commit=false), so its changes were rolled back. "
+        + "Scripts must end every transaction they start (try/finally).";
+    private static final String ABORTED_RUN_NOTE =
+        "The run's transaction was aborted (a failed or cancelled run, or the "
+        + "script ended an entry with commit=false), so its changes were rolled "
+        + "back.";
+    private static final String LEFT_OPEN_FOR_ANALYSIS_NOTE =
+        "A transaction is still open while auto-analysis runs; ReVa did not close it.";
+    private static final String TERMINATED_NOTE =
+        "ReVa could not close a transaction the script terminated with "
+        + "forceLock; the program may stay locked until the session ends.";
+
     /**
-     * Exact marker PyGhidra writes to stderr when a Python exception escapes
-     * the script. Detect it so the result's {@code success} field reflects
-     * script semantics, not just executor health. If PyGhidra ever changes
-     * this marker, {@code ScriptToolProviderTest.detectsPythonTracebackMarker}
-     * will flip and we know to revisit.
+     * Error text for a busy refusal: the reason the program was still busy,
+     * plus what to do about it. A model that only sees "busy" retries at once
+     * (trial 3: every busy refusal was answered by an immediate retry), so
+     * the guidance rides along with the result.
      */
-    static final String PYTHON_TRACEBACK_MARKER = "Traceback (most recent call last)";
+    static final String BUSY_ERROR_FORMAT =
+        "Program is busy: %s. Wait for the in-flight operation to finish, then "
+        + "call run-script again. analysis-status shows auto-analysis "
+        + "progress. Do not retry in a tight loop.";
 
-    /** Visible to tests so a future PyGhidra prefix change is loud, not silent. */
-    static boolean detectsPythonRaise(String stderr) {
-        return stderr != null && stderr.contains(PYTHON_TRACEBACK_MARKER);
-    }
-
-    private static Map<String, Object> buildRunResult(
+    /** Package-private for tests. */
+    static Map<String, Object> buildRunResult(
             Program program, Result r, String sourceType, String sourceValue) {
         Map<String, Object> source = new HashMap<>();
         source.put("type", sourceType);
         source.put("value", sourceValue);
 
-        boolean pythonRaised = detectsPythonRaise(r.stderr());
+        // One shared check with the executor's commit decision: PyGhidra
+        // reports Python failures only through the traceback text, so using
+        // the same predicate here keeps success:false and transaction
+        // "rolled back" from ever disagreeing.
+        boolean pythonRaised = PythonScriptExecutor.containsPythonTraceback(r.stderr());
+
+        // A busy refusal is not a run that failed: nothing ran, and the
+        // caller may retry once the in-flight writer finishes. Marking it
+        // keeps "wait and retry" distinguishable from "the script broke".
+        ProgramBusyException busy = r.executionError() instanceof ProgramBusyException b
+            ? b : null;
 
         Map<String, Object> out = new HashMap<>();
         out.put("success",
             r.executionError() == null && !r.timedOut() && !pythonRaised);
         out.put("programPath", program.getDomainFile().getPathname());
         out.put("stdout", r.stdout());
-        out.put("stderr", r.stderr());
+        String stderr = r.stderr();
+        if (r.leakedTransactions() > 0) {
+            out.put("transactionLeaked", true);
+            stderr = appendLine(stderr, String.format(
+                r.transactionRolledBack() ? ROLLED_BACK_NOTE_FORMAT : LEAK_NOTE_FORMAT,
+                r.leakedTransactions()));
+        } else if (r.transactionRolledBack()) {
+            // Nothing to close, but the transaction was aborted: say so, or
+            // the model sees only success:false without knowing why.
+            stderr = appendLine(stderr, ABORTED_RUN_NOTE);
+        }
+        if (r.transactionLeftOpen()) {
+            out.put("transactionOpen", true);
+            stderr = appendLine(stderr, LEFT_OPEN_FOR_ANALYSIS_NOTE);
+        }
+        if (r.transactionTerminated()) {
+            out.put("transactionTerminated", true);
+            stderr = appendLine(stderr, TERMINATED_NOTE);
+        }
+        // The parent entry's own commit flag is not the outcome: Ghidra aborts
+        // the whole transaction when any entry ends with commit=false, so a
+        // script's own rollback wins over a committed parent entry. A refused
+        // run started no transaction at all — reporting it as "rolled back"
+        // would describe an abort that never happened.
+        if (busy != null) {
+            out.put("busy", true);
+            out.put("transaction", "refused");
+        } else {
+            out.put("transaction",
+                r.transactionLeftOpen() ? "open"
+                    : (r.parentCommitted() && !r.transactionRolledBack()
+                        ? "committed" : "rolled back"));
+        }
+        out.put("stderr", stderr);
         out.put("stdoutTruncated", r.stdoutTruncated());
         out.put("stderrTruncated", r.stderrTruncated());
         out.put("durationMs", r.durationMs());
         out.put("timedOut", r.timedOut());
         out.put("scriptSource", source);
-        if (r.executionError() != null) {
-            out.put("error", r.executionError().getClass().getSimpleName()
-                + ": " + r.executionError().getMessage());
+        if (busy != null) {
+            out.put("error", String.format(BUSY_ERROR_FORMAT, busy.reason()));
+        } else if (r.executionError() != null) {
+            out.put("error", pythonRaised && !r.timedOut()
+                ? "Python exception: " + raisedLine(r.stderr())
+                : describe(r.executionError()));
         }
         return out;
+    }
+
+    /**
+     * The exception line of the traceback in {@code stderr} — type and
+     * message, e.g. {@code TypeError: No matching overloads found for ...} —
+     * which is what actually says why the script failed. The whole traceback
+     * stays in the result's stderr field.
+     */
+    private static String raisedLine(String stderr) {
+        String line = PythonTracebacks.summary(stderr);
+        return line == null ? "(unrecognized traceback; see stderr)" : line;
+    }
+
+    /**
+     * {@code SimpleName: message}. A null message renders as an explicit
+     * note instead of {@code SimpleName: null}, which reads like a bug in
+     * the tool and says nothing about the failure.
+     */
+    private static String describe(Throwable error) {
+        String message = error.getMessage();
+        if (message == null || message.isBlank()) {
+            return error.getClass().getSimpleName() + ": (no message; see stderr)";
+        }
+        return error.getClass().getSimpleName() + ": " + message;
+    }
+
+    private static String appendLine(String text, String line) {
+        String sep = text.isEmpty() || text.endsWith("\n") ? "" : "\n";
+        return text + sep + line;
     }
 
     // -------- list-scripts --------
@@ -413,9 +527,11 @@ public class ScriptToolProvider extends AbstractToolProvider {
     private Path resolveReadTarget(io.modelcontextprotocol.spec.McpSchema.CallToolRequest request) {
         String scriptPath = getOptionalString(request, "scriptPath", null);
         String scriptName = getOptionalString(request, "scriptName", null);
+        String[] merged = mergeBareName(scriptPath, scriptName);
+        scriptPath = merged[0];
+        scriptName = merged[1];
         if ((scriptPath == null) == (scriptName == null)) {
-            throw new IllegalArgumentException(
-                "Provide exactly one of: scriptPath, scriptName");
+            throw new IllegalArgumentException(missingOrBothScriptMessage());
         }
         if (scriptPath != null) {
             Path p = Paths.get(scriptPath).toAbsolutePath().normalize();
@@ -429,9 +545,10 @@ public class ScriptToolProvider extends AbstractToolProvider {
             }
             return p;
         }
-        return dirManager.findScriptByName(scriptName)
+        final String nameFinal = scriptName;
+        return dirManager.findScriptByName(nameFinal)
             .orElseThrow(() -> new IllegalArgumentException(
-                "Script not found: " + scriptName));
+                "Script not found: " + nameFinal));
     }
 
     // -------- write-script --------
@@ -444,6 +561,9 @@ public class ScriptToolProvider extends AbstractToolProvider {
         properties.put("scriptPath", SchemaUtil.stringProperty(
             "Absolute path; must resolve under a writeable script directory."));
         properties.put("code", SchemaUtil.stringProperty("Script source to write."));
+        properties.put("programPath", SchemaUtil.stringProperty(
+            "Optional. Echoed into the result run hint so the follow-up "
+            + "run-script call is ready to send."));
         properties.put("overwrite", SchemaUtil.booleanPropertyWithDefault(
             "Overwrite existing file. Default false: errors if file exists.",
             false));
@@ -477,6 +597,11 @@ public class ScriptToolProvider extends AbstractToolProvider {
                 resp.put("absolutePath", target.toString());
                 resp.put("bytesWritten", code.getBytes(StandardCharsets.UTF_8).length);
                 resp.put("overwrote", existed);
+                String runName = target.getFileName().toString();
+                resp.put("run", buildRunHint(runName,
+                    getOptionalString(request, "programPath", null)));
+                resp.put("note", "Run it with run-script, scriptName=\""
+                    + runName + "\".");
                 return createJsonResult(resp);
             } catch (IOException e) {
                 throw new RuntimeException("Failed to write script: " + e.getMessage(), e);
@@ -484,12 +609,20 @@ public class ScriptToolProvider extends AbstractToolProvider {
         });
     }
 
-    private Path resolveWriteTarget(io.modelcontextprotocol.spec.McpSchema.CallToolRequest request) {
+    Path resolveWriteTarget(io.modelcontextprotocol.spec.McpSchema.CallToolRequest request) {
         String scriptPath = getOptionalString(request, "scriptPath", null);
         String scriptName = getOptionalString(request, "scriptName", null);
-        if ((scriptPath == null) == (scriptName == null)) {
+        String[] merged = mergeBareName(scriptPath, scriptName);
+        scriptPath = merged[0];
+        scriptName = merged[1];
+        if (scriptPath == null && scriptName == null) {
             throw new IllegalArgumentException(
-                "Provide exactly one of: scriptPath, scriptName");
+                "Provide scriptName (a bare file name; it goes in "
+                + dirManager.getDefaultWriteDirectory()
+                + ") or scriptPath.");
+        }
+        if (scriptPath != null && scriptName != null) {
+            throw new IllegalArgumentException(missingOrBothScriptMessage());
         }
         Path p;
         if (scriptPath != null) {
@@ -499,10 +632,69 @@ public class ScriptToolProvider extends AbstractToolProvider {
                 .toAbsolutePath().normalize();
         }
         if (!dirManager.isInsideWriteableDirectory(p)) {
+            String dirs = dirManager.getWriteableDirectories().stream()
+                .map(Path::toString)
+                .collect(java.util.stream.Collectors.joining(", "));
+            Path base = p.getFileName();
             throw new IllegalArgumentException(
-                "Refusing to write outside a writeable script directory: " + p);
+                "Refusing to write outside the writeable script directories ("
+                + dirs + "): " + p + ". Use scriptName: \""
+                + (base == null ? p.toString() : base.toString())
+                + "\" to write it there.");
         }
         return p;
+    }
+
+    private static boolean hasSeparator(String s) {
+        return s.indexOf('/') >= 0 || s.indexOf('\\') >= 0;
+    }
+
+    /**
+     * A scriptPath without a directory separator is a bare file name: treat
+     * it as scriptName. If scriptName is also given and equal, accept; if it
+     * differs, leave both set so the caller reports the conflict.
+     */
+    private static String[] mergeBareName(String scriptPath, String scriptName) {
+        if (scriptPath != null && !hasSeparator(scriptPath)) {
+            if (scriptName == null || scriptName.equals(scriptPath)) {
+                return new String[] {null, scriptPath};
+            }
+        }
+        return new String[] {scriptPath, scriptName};
+    }
+
+    private static String missingOrBothScriptMessage() {
+        return "Provide exactly one of: scriptPath, scriptName (a bare file "
+            + "name is accepted as either).";
+    }
+
+    static void validateRunSources(String code, String scriptPath, String scriptName) {
+        List<String> given = new java.util.ArrayList<>();
+        if (code != null) given.add("code");
+        if (scriptPath != null) given.add("scriptPath");
+        if (scriptName != null) given.add("scriptName");
+        if (given.isEmpty()) {
+            throw new IllegalArgumentException(
+                "Provide exactly one of: code (inline Python), scriptName "
+                + "(a file written with write-script, e.g. scriptName: "
+                + "\"annotate.py\"), or scriptPath (an absolute path). "
+                + "Got none.");
+        }
+        if (given.size() > 1) {
+            throw new IllegalArgumentException(
+                "Provide exactly one of: code, scriptPath, scriptName. Got: "
+                + String.join(", ", given) + ". Drop the others.");
+        }
+    }
+
+    static Map<String, Object> buildRunHint(String name, String programPath) {
+        Map<String, Object> run = new java.util.LinkedHashMap<>();
+        run.put("tool", "run-script");
+        run.put("scriptName", name);
+        if (programPath != null) {
+            run.put("programPath", programPath);
+        }
+        return run;
     }
 
     // -------- edit-script --------

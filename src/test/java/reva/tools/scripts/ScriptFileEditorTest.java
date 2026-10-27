@@ -29,6 +29,8 @@ import reva.tools.scripts.ScriptFileEditor.RenderedView;
  *       formatting with chunked offset/limit and truncation flag</li>
  *   <li>{@code applyEdit} — exact {@code old_string}/{@code new_string}
  *       replacement with uniqueness check and {@code replace_all} mode</li>
+ *   <li>{@code nearMissLines} — closest-line hints reported when an edit
+ *       pattern is not found</li>
  * </ul>
  */
 public class ScriptFileEditorTest {
@@ -181,5 +183,66 @@ public class ScriptFileEditorTest {
         EditResult r = ScriptFileEditor.applyEdit("foo bar baz", "bar ", "", false);
         assertEquals("foo baz", r.newContent());
         assertEquals(1, r.replacements());
+    }
+
+    // -------- near-miss reporting --------
+
+    @Test
+    public void missReportsNearMatchingLines() {
+        try {
+            ScriptFileEditor.applyEdit(
+                "line one\nimport os\nline three\n", "import  os", "import os", false);
+            fail("expected IllegalArgumentException");
+        } catch (IllegalArgumentException expected) {
+            String message = expected.getMessage();
+            assertTrue(message, message.contains("Pattern not found"));
+            assertTrue(message, message.contains("2: import os"));
+            assertTrue(message, message.contains("read-script"));
+            assertTrue(message, message.contains("copy the exact text"));
+        }
+    }
+
+    @Test
+    public void nearMissPrefersSubstringHitsOverCloserDistances() {
+        String content = "abc deg\nunrelated\nzzz abc def ghi\n";
+        assertEquals("3: zzz abc def ghi",
+            ScriptFileEditor.nearMissLines(content, "abc def"));
+    }
+
+    @Test
+    public void nearMissUsesFirstNonBlankLineOfOldString() {
+        String content = "line one\nimport os\nline three\n";
+        assertEquals("2: import os",
+            ScriptFileEditor.nearMissLines(content, "\n  \nimport  os"));
+    }
+
+    @Test
+    public void nearMissReportsAtMostThreeLinesTiesGoToLowerNumbers() {
+        String content = "abcdefgX\nabcdefXh\nabcdeXgh\nabcdXfgh\nabcXefgh\n";
+        assertEquals("1: abcdefgX\n2: abcdefXh\n3: abcdeXgh",
+            ScriptFileEditor.nearMissLines(content, "abcdefgh"));
+    }
+
+    @Test
+    public void nearMissCapsSubstringHitsAtThreeLines() {
+        String content = "import osA\nimport osB\nimport osC\nimport osD\n";
+        assertEquals("1: import osA\n2: import osB\n3: import osC",
+            ScriptFileEditor.nearMissLines(content, "import os"));
+    }
+
+    @Test
+    public void nearMissIgnoresLinesPastHalfTheTargetLength() {
+        assertEquals("", ScriptFileEditor.nearMissLines(
+            "zzzzzzzz\nqqqqqqqq\n", "import os"));
+    }
+
+    @Test
+    public void missWithoutCloseLinesKeepsOnlyThePreview() {
+        try {
+            ScriptFileEditor.applyEdit("zzzzzzzz\nqqqqqqqq\n", "import os", "X", false);
+            fail("expected IllegalArgumentException");
+        } catch (IllegalArgumentException expected) {
+            assertEquals("Pattern not found: import os", expected.getMessage());
+        }
     }
 }

@@ -23,6 +23,8 @@ package reva.tools.scripts;
  */
 public final class ScriptFileEditor {
 
+    private static final int MAX_NEAR_MISSES = 3;
+
     private ScriptFileEditor() {}
 
     /**
@@ -112,8 +114,15 @@ public final class ScriptFileEditor {
             String preview = oldString.length() > 80
                 ? oldString.substring(0, 80) + "..."
                 : oldString;
+            String nearMisses = nearMissLines(content, oldString);
+            if (nearMisses.isEmpty()) {
+                throw new IllegalArgumentException(
+                    "Pattern not found: " + preview);
+            }
             throw new IllegalArgumentException(
-                "Pattern not found: " + preview);
+                "Pattern not found: " + preview
+                    + "\nClosest lines in the script:\n" + nearMisses
+                    + "\nNext: re-read the script with read-script and copy the exact text.");
         }
         if (count > 1 && !replaceAll) {
             throw new IllegalArgumentException(
@@ -134,6 +143,152 @@ public final class ScriptFileEditor {
             replacements = 1;
         }
         return new EditResult(newContent, replacements);
+    }
+
+    /**
+     * Describe the file lines that most resemble the first non-blank line of a
+     * missed {@code old_string}, for {@code edit-script} error messages.
+     * <p>
+     * Lines containing that text as a substring win; otherwise the lines with
+     * the smallest Levenshtein distance are used, counting only lines within
+     * half the target's length. At most {@value #MAX_NEAR_MISSES} lines are
+     * reported, each as {@code <1-based line number>: <line text>}, separated
+     * by newlines. Ties keep the lower line number first.
+     *
+     * @param content   the file content the edit was attempted against
+     * @param oldString the {@code old_string} that did not match
+     * @return the formatted near misses, or an empty string when none qualify
+     */
+    static String nearMissLines(String content, String oldString) {
+        if (content == null || content.isEmpty() || oldString == null) {
+            return "";
+        }
+        String target = firstNonBlankLine(oldString);
+        if (target == null) {
+            return "";
+        }
+
+        String[] lines = content.split("\n", -1);
+        int lineCount = lines.length;
+        if (lineCount > 0 && lines[lineCount - 1].isEmpty()) {
+            lineCount--;
+        }
+
+        StringBuilder hits = new StringBuilder();
+        int hitCount = 0;
+        for (int i = 0; i < lineCount && hitCount < MAX_NEAR_MISSES; i++) {
+            if (lines[i].contains(target)) {
+                appendNearMiss(hits, i + 1, lines[i]);
+                hitCount++;
+            }
+        }
+        if (hitCount > 0) {
+            return hits.toString();
+        }
+
+        int cutoff = target.length() / 2;
+        if (cutoff == 0) {
+            return "";
+        }
+        int maxLineLength = target.length();
+        for (int i = 0; i < lineCount; i++) {
+            maxLineLength = Math.max(maxLineLength, lines[i].length());
+        }
+        int[] prev = new int[maxLineLength + 1];
+        int[] cur = new int[maxLineLength + 1];
+        int[] bestDistances = new int[MAX_NEAR_MISSES];
+        int[] bestLineNumbers = new int[MAX_NEAR_MISSES];
+        int bestCount = 0;
+
+        for (int i = 0; i < lineCount; i++) {
+            String line = lines[i];
+            if (Math.abs(line.length() - target.length()) > cutoff) {
+                continue;
+            }
+            int distance = levenshtein(target, line, prev, cur);
+            if (distance > cutoff) {
+                continue;
+            }
+            if (bestCount == MAX_NEAR_MISSES
+                    && distance >= bestDistances[MAX_NEAR_MISSES - 1]) {
+                continue;
+            }
+            int pos = bestCount == MAX_NEAR_MISSES
+                ? MAX_NEAR_MISSES - 1
+                : bestCount;
+            while (pos > 0 && distance < bestDistances[pos - 1]) {
+                bestDistances[pos] = bestDistances[pos - 1];
+                bestLineNumbers[pos] = bestLineNumbers[pos - 1];
+                pos--;
+            }
+            bestDistances[pos] = distance;
+            bestLineNumbers[pos] = i + 1;
+            if (bestCount < MAX_NEAR_MISSES) {
+                bestCount++;
+            }
+        }
+
+        StringBuilder result = new StringBuilder();
+        for (int i = 0; i < bestCount; i++) {
+            appendNearMiss(result, bestLineNumbers[i], lines[bestLineNumbers[i] - 1]);
+        }
+        return result.toString();
+    }
+
+    private static String firstNonBlankLine(String text) {
+        int length = text.length();
+        int lineStart = 0;
+        while (lineStart <= length) {
+            int lineEnd = text.indexOf('\n', lineStart);
+            if (lineEnd < 0) {
+                lineEnd = length;
+            }
+            boolean blank = true;
+            for (int i = lineStart; i < lineEnd; i++) {
+                if (!Character.isWhitespace(text.charAt(i))) {
+                    blank = false;
+                    break;
+                }
+            }
+            if (!blank) {
+                return text.substring(lineStart, lineEnd);
+            }
+            if (lineEnd == length) {
+                return null;
+            }
+            lineStart = lineEnd + 1;
+        }
+        return null;
+    }
+
+    private static void appendNearMiss(StringBuilder sb, int lineNumber, String lineText) {
+        if (sb.length() > 0) {
+            sb.append('\n');
+        }
+        sb.append(lineNumber).append(": ").append(lineText);
+    }
+
+    private static int levenshtein(String a, String b, int[] prev, int[] cur) {
+        int aLength = a.length();
+        int bLength = b.length();
+        for (int j = 0; j <= bLength; j++) {
+            prev[j] = j;
+        }
+        for (int i = 1; i <= aLength; i++) {
+            cur[0] = i;
+            char aChar = a.charAt(i - 1);
+            for (int j = 1; j <= bLength; j++) {
+                int cost = aChar == b.charAt(j - 1) ? 0 : 1;
+                int replace = prev[j - 1] + cost;
+                int delete = prev[j] + 1;
+                int insert = cur[j - 1] + 1;
+                cur[j] = Math.min(replace, Math.min(delete, insert));
+            }
+            int[] swap = prev;
+            prev = cur;
+            cur = swap;
+        }
+        return prev[bLength];
     }
 
     private static int countOccurrences(String haystack, String needle) {

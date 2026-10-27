@@ -1,6 +1,6 @@
 # `run-script` recipes
 
-Copy-pasteable inline `code` for the well-trodden tasks. Each recipe is a complete script body — pass it as `run-script(programPath=..., code=...)`. They assume the contract documented in SKILL.md (globals bound, no auto-transaction, monitor cancellation cooperative).
+Copy-pasteable inline `code` for the well-trodden tasks. Each recipe is a complete script body — pass it as `run-script(programPath=..., code=...)`. They assume the contract documented in SKILL.md (globals bound, the run's parent transaction owns every edit, monitor cancellation cooperative). Recipes that still open their own `startTransaction`/`endTransaction` pair remain valid as legacy-compatible code: their entries join the run's unit, so nothing commits until a clean run and any `commit=False` rolls the whole run back.
 
 ## Iterate functions with a predicate
 

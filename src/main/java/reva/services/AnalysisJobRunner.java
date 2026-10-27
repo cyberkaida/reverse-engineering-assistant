@@ -22,6 +22,7 @@ import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 import ghidra.app.plugin.core.analysis.AutoAnalysisManager;
+import ghidra.framework.model.TransactionInfo;
 import ghidra.framework.options.Options;
 import ghidra.program.model.listing.Program;
 import ghidra.program.util.GhidraProgramUtilities;
@@ -57,6 +58,21 @@ public class AnalysisJobRunner implements Runnable {
     @Override
     public void run() {
         Program program = req.program;
+
+        // Never join another writer's transaction: the analysis opens its own
+        // entries, and sharing a unit with a running script or edit call would
+        // make the analysis's outcome depend on theirs (and could abort their
+        // work). The tool layer can be retried once the writer finishes.
+        TransactionInfo open = program.getCurrentTransactionInfo();
+        if (open != null) {
+            String message = "Program is busy: a transaction is open ("
+                + open.getDescription() + "); retry when run-script or the "
+                + "editing tool finishes.";
+            job.setError(message);
+            job.appendLog("Analysis failed: " + message);
+            job.markTerminal(JobStatus.FAILED);
+            return;
+        }
 
         AutoAnalysisManager aam = AutoAnalysisManager.getAnalysisManager(program);
         if (aam == null) {

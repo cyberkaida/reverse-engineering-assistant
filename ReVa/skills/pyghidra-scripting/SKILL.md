@@ -47,33 +47,30 @@ This is the contract your inline `code` (or saved script) runs under. Internalis
 
 **Pre-bound globals.** The script runs as a Ghidra PyGhidra script, so the standard `GhidraScript` globals are already defined: `currentProgram`, `currentAddress`, `currentSelection`, `currentHighlight`, `monitor`, `state`, plus `FlatProgramAPI` helpers like `toAddr`, `getFunctionAt`, `getFunctionContaining`, `getSymbolAt`, `getInstructionAt`, `getDataAt`, `getReferencesTo`, `getReferencesFrom`, `createLabel`, `setEOLComment`, `find`, `findBytes`, `clearListing`. You do **not** need to import or set these up. `currentProgram` is the program identified by the `programPath` argument.
 
-**No automatic transaction.** Unlike GhidraScripts run from inside Ghidra's GUI, ReVa's `run-script` deliberately does **not** open a transaction around your code. Any mutation (rename, retype, comment, label, create function, etc.) must be wrapped manually:
+**One transaction per run.** ReVa wraps every `run-script` call in a single parent transaction, so you do **not** need to open one: any mutation (rename, retype, comment, label, create function, etc.) applies directly, and a clean run commits every change as one undo entry in Ghidra's history. The run is all-or-nothing:
 
-```python
-tx = currentProgram.startTransaction("Describe the edit")
-try:
-    # ... do stuff that mutates state ...
-    currentProgram.endTransaction(tx, True)   # commit
-except Exception:
-    currentProgram.endTransaction(tx, False)  # roll back
-    raise
-```
+- a clean exit commits — one undo step covers everything the script did;
+- a Python exception or a timeout (`timedOut: true`) rolls every change back;
+- a script that opens its own transaction and ends it with `commit=False` aborts the whole run too: nothing sticks, and the result says so (`success: false`, `transaction: "rolled back"`).
 
-This is intentional — auto-wrapping at the tool layer would create nested-transaction footguns when scripts already handle their own. Read-only scripts (printing, counting, dumping) need no transaction at all.
+Scripts written for older ReVa builds that open their own transaction still work: those entries join the same unit, so nothing is committed until the run itself succeeds, and one `endTransaction(tx, False)` anywhere rolls the entire run back. Never leave an entry open — ReVa closes it after the run and reports `transactionLeaked: true`, and its changes then follow the run's outcome.
+
+Read-only scripts (printing, counting, dumping) need no transaction at all.
+
+**Busy programs are refused.** If a transaction is already open on the program (another tool call, a background `analyze-program` job, an unfinished earlier script) or auto-analysis is running, `run-script` does not run your code at all: it returns `success: false` with an error naming `analysis-status` (`Program is busy: a transaction is open (...)`). Wait for the other writer to finish — `analysis-status` shows auto-analysis progress — then call again; do not retry in a tight loop.
 
 **Inline header.** When you pass `code`, the tool prepends `# @runtime PyGhidra\n` automatically. Don't add it yourself.
 
-**Cancellation is cooperative.** The configured timeout (default 60s, overridable per-call via `timeoutSeconds`) only fires if your code yields to the monitor. In long loops, call `monitor.isCancelled()` regularly and break:
+**Cancellation is cooperative.** The configured timeout (default 60s, overridable per-call via `timeoutSeconds`) takes effect only when control returns to Python. Every loop needs a bounded exit and a monitor check inside it and after expensive native calls:
 
 ```python
 fm = currentProgram.getFunctionManager()
 for func in fm.getFunctions(True):
-    if monitor.isCancelled():
-        break
+    monitor.checkCancelled()  # raises CancelledException after timeoutSeconds
     # ... work ...
 ```
 
-A tight Python loop without a monitor check will run past the timeout. The result will then come back with `timedOut: true` and partial output but the Ghidra session may still be busy for a moment.
+A script that never returns to the monitor cannot be forcibly stopped. Its transaction remains open, so later writes are refused and `checkin-program` fails. `timeoutSeconds` is not a hard kill.
 
 **Output is captured and capped.** `stdout` and `stderr` are each capped at 64K chars by default (configurable via `SCRIPT_OUTPUT_CHAR_LIMIT`). If you blow the cap, the result has `stdoutTruncated: true` or `stderrTruncated: true`. Design output for an LLM consumer — terse, structured, line-per-record. Reach for JSON if downstream parsing matters:
 
@@ -81,7 +78,7 @@ A tight Python loop without a monitor check will run past the timeout. The resul
 import json
 results = []
 for func in currentProgram.getFunctionManager().getFunctions(True):
-    if monitor.isCancelled(): break
+    monitor.checkCancelled()
     if some_predicate(func):
         results.append({"addr": str(func.getEntryPoint()), "name": func.getName()})
 print(json.dumps(results))
@@ -99,12 +96,22 @@ print(json.dumps(results))
   "stderrTruncated": false,
   "durationMs": 1234,
   "timedOut": false,
+  "transaction": "committed",     // "committed" | "rolled back" | "open"
+  "transactionLeaked": true,      // only when set: see below
+  "transactionTerminated": true,  // only when set: see below
+  "transactionOpen": true,        // only when set: see below
   "scriptSource": {"type": "inline|path|name", "value": "..."},
-  "error": "ClassName: message"   // only when the executor itself threw
+  "error": "ClassName: message"   // only when set: busy refusal, aborted run, or executor failure
 }
 ```
 
-`success` is `false` if the script raised a Python exception (detected via the `Traceback (most recent call last)` marker in stderr), if it hit the timeout, or if the executor threw. Read `stderr` to see the actual traceback — Python exceptions don't surface as MCP errors, they come back in `stderr` with `success: false`.
+`success` is `false` if the script raised a Python exception (detected via the `Traceback (most recent call last)` marker in stderr), if it hit the timeout, if the executor threw, if the program was busy, or if the run's transaction was aborted (for example by the script's own `commit=False`). Read `stderr` to see the actual traceback — Python exceptions don't surface as MCP errors, they come back in `stderr` with `success: false`.
+
+`transaction` is the outcome of the run's own transaction: `committed` for a clean run, `rolled back` when the run raised, timed out, or the script aborted it with `commit=False`, and `open` when a transaction a running auto-analysis owns was left alone. A `rolled back` value means **nothing** the script changed is in the database — re-run the fixed script from scratch rather than assuming partial results.
+
+`transactionLeaked` is set when the script left a transaction open and ReVa closed it after the run; whether those changes stuck follows the run's parent entry — committed with a clean run, rolled back when the run failed or was aborted (the `stderr` note says which). Because `run-script` refuses to start while a transaction is already open (see above), the entries it closes are always the script's own. `transactionTerminated` is set when a `forceLock` terminated a transaction that ReVa could not close. `transactionOpen` is set when a transaction is still open after the script while auto-analysis runs (in the GUI, creating functions sets analysis off): ReVa leaves it to the analysis, and `stderr` says so.
+
+`run-script` needs exactly one of `code`, `scriptName`, `scriptPath`. `programPath` may be left out when exactly one program is open (or, when none is open, the project holds exactly one); with several, the error lists their paths. `write-script` returns a `run` hint (`{"tool": "run-script", "scriptName": ..., "programPath": ...}`, `programPath` only if you passed it to `write-script`) and a `note`; send that call as is. A bare `scriptPath` such as `x.py` is treated as `scriptName`.
 
 ## What you can call from inside
 
@@ -144,7 +151,7 @@ fm = currentProgram.getFunctionManager()
 total = 0
 huge = []
 for f in fm.getFunctions(True):
-    if monitor.isCancelled(): break
+    monitor.checkCancelled()
     size = f.getBody().getNumAddresses()
     total += size
     if size > 4096:
@@ -176,11 +183,11 @@ Read the stdout, draw conclusions, move on. Nothing persisted.
 
 These are the ones that account for most "why did my script misbehave."
 
-### Forgot the transaction
-Mutations without `startTransaction` throw `IllegalStateException: not in transaction`. If a `run-script` call mutates and you see this in `stderr`, that's the cause. Wrap the mutating block — see the contract section above.
+### `IllegalStateException: not in transaction`
+`run-script` opens the transaction for you, so mutations apply directly and this should not happen through this tool. If it does appear in `stderr`, the code is not running under `run-script`'s wrapper (a stale ReVa build, or code invoked some other way) — check the launch mode before adding `startTransaction` calls. Opening your own transaction is only useful to abort early with `commit=False`, and that rolls the whole run back — see the contract section above.
 
-### `monitor.isCancelled()` check missing
-Tight loops that never check the monitor blow past the timeout silently — the `timedOut` flag still flips, but your script may have already done damage. Always check the monitor inside any loop touching every function / instruction / address.
+### `monitor.checkCancelled()` check missing
+Tight loops that never check the monitor cannot be stopped by `timeoutSeconds`; the transaction stays open and the final save fails. Call `monitor.checkCancelled()` inside every loop touching every function / instruction / address.
 
 ### Java `Iterator` vs Python iterable
 Most Ghidra iterators are Python-iterable thanks to JPype, but a few (notably `SymbolIterator` from some accessors and the older `ReferenceIterator`) only expose `hasNext()` / `next()`. If a `for x in it:` loop silently yields nothing, fall back to `while it.hasNext(): x = it.next()`. `FunctionManager.getFunctions(True)` is iterable directly.
@@ -200,7 +207,7 @@ decomp = DecompInterface()
 decomp.openProgram(currentProgram)
 try:
     for f in currentProgram.getFunctionManager().getFunctions(True):
-        if monitor.isCancelled(): break
+        monitor.checkCancelled()
         res = decomp.decompileFunction(f, 30, monitor)
         if res.decompileCompleted():
             # process res.getDecompiledFunction().getC()
@@ -235,6 +242,6 @@ A few things that keep PyGhidra-via-ReVa pleasant:
 
 - **Prefer dedicated ReVa tools first.** `run-script` is powerful but free-form; the structured tools (decompiler, functions, strings, xrefs, …) have schemas the assistant can reason about more reliably. Reach for `run-script` only when the structured tools don't cover the question.
 - **Print structured output.** When a `run-script` result is going to be re-consumed by an LLM, prefer JSON or fixed columns over prose. The 64K cap is per-stream — design for it.
-- **Keep transactions narrow.** Open one per logical edit, not one wrapping the whole script. Smaller transactions undo cleanly in Ghidra's history and survive errors better.
+- **Let `run-script` own the transaction.** Don't wrap your edits in `startTransaction`: a clean run commits everything as one undo entry, and a failure rolls it all back. Open an entry only if you intend to abort the run with `commit=False`.
 - **Iterate with `edit-script`, not `write-script`.** Once a saved script exists, targeted edits produce reviewable diffs; full overwrites don't.
 - **Read before you edit.** `read-script` first to see the current state and pick `old_string` slices that are unique. Editing blind almost always picks too-short a slice and either misses or hits multiple lines.

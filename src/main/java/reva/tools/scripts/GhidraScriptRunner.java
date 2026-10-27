@@ -41,6 +41,12 @@ import ghidra.util.task.TaskMonitor;
  * {@link UnsupportedScriptProvider}, or a {@link GhidraScriptLoadException}
  * thrown from {@code getScriptInstance} all become
  * {@link PyGhidraNotAvailableException} with launch guidance.
+ *
+ * <p>Opens no transaction of its own: {@link PythonScriptExecutor} wraps the
+ * whole run in one parent transaction, and any entries the script opens join
+ * it. Entries the script leaves open are closed by
+ * {@link PythonScriptExecutor} after this returns or throws (see
+ * {@link TransactionCleanup}).
  */
 public class GhidraScriptRunner implements PythonScriptExecutor.ScriptRunner {
 

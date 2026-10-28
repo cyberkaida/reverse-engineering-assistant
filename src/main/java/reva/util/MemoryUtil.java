@@ -30,6 +30,8 @@ import ghidra.program.model.mem.MemoryBlock;
  */
 public class MemoryUtil {
 
+    private static final char[] HEX_DIGITS = "0123456789ABCDEF".toCharArray();
+
     /**
      * Format a byte array as a hex string
      * @param bytes The byte array
@@ -45,6 +47,94 @@ public class MemoryUtil {
             hexBuilder.append(String.format("%02X ", b & 0xFF));
         }
         return hexBuilder.toString().trim();
+    }
+
+    /**
+     * Format a byte array as escaped ASCII text. Printable bytes (0x20-0x7E)
+     * are rendered as-is, except newline (0x0A) and tab (0x09) which render
+     * as {@code \n} and {@code \t}. Every other byte renders as {@code \xNN}
+     * with uppercase hex digits.
+     * @param bytes The byte array
+     * @return An escaped text representation
+     */
+    public static String formatAscii(byte[] bytes) {
+        if (bytes == null || bytes.length == 0) {
+            return "";
+        }
+
+        StringBuilder text = new StringBuilder(bytes.length);
+        for (byte b : bytes) {
+            int value = b & 0xFF;
+            if (value == '\n') {
+                text.append("\\n");
+            } else if (value == '\t') {
+                text.append("\\t");
+            } else if (value >= 0x20 && value <= 0x7E) {
+                text.append((char) value);
+            } else {
+                appendHexByte(text, value);
+            }
+        }
+        return text.toString();
+    }
+
+    /**
+     * Format a byte array as escaped UTF-16LE text. Bytes are consumed in
+     * little-endian pairs; a printable BMP code unit renders as-is (newline
+     * and tab as {@code \n} and {@code \t}), any other code unit renders as a
+     * four-digit backslash-u escape with uppercase hex digits. A lone
+     * trailing byte renders as {@code \xNN}.
+     * @param bytes The byte array
+     * @return An escaped UTF-16LE text representation
+     */
+    public static String formatUtf16(byte[] bytes) {
+        if (bytes == null || bytes.length == 0) {
+            return "";
+        }
+
+        StringBuilder text = new StringBuilder(bytes.length / 2);
+        int i = 0;
+        while (i + 1 < bytes.length) {
+            char unit = (char) ((bytes[i] & 0xFF) | ((bytes[i + 1] & 0xFF) << 8));
+            if (unit == '\n') {
+                text.append("\\n");
+            } else if (unit == '\t') {
+                text.append("\\t");
+            } else if (isPrintableBmpCodeUnit(unit)) {
+                text.append(unit);
+            } else {
+                appendHexCodeUnit(text, unit);
+            }
+            i += 2;
+        }
+        if (i < bytes.length) {
+            appendHexByte(text, bytes[i] & 0xFF);
+        }
+        return text.toString();
+    }
+
+    /**
+     * A printable BMP code unit is a defined, non-control, non-surrogate
+     * UTF-16 unit; newline and tab are handled separately by the caller.
+     */
+    private static boolean isPrintableBmpCodeUnit(char unit) {
+        return Character.isDefined(unit)
+            && !Character.isISOControl(unit)
+            && !Character.isSurrogate(unit);
+    }
+
+    private static void appendHexByte(StringBuilder text, int value) {
+        text.append("\\x")
+            .append(HEX_DIGITS[(value >> 4) & 0xF])
+            .append(HEX_DIGITS[value & 0xF]);
+    }
+
+    private static void appendHexCodeUnit(StringBuilder text, char unit) {
+        text.append("\\u")
+            .append(HEX_DIGITS[(unit >> 12) & 0xF])
+            .append(HEX_DIGITS[(unit >> 8) & 0xF])
+            .append(HEX_DIGITS[(unit >> 4) & 0xF])
+            .append(HEX_DIGITS[unit & 0xF]);
     }
 
     /**

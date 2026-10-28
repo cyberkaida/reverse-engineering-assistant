@@ -37,6 +37,9 @@ import reva.util.SchemaUtil;
  */
 public class MemoryToolProvider extends AbstractToolProvider {
 
+    private static final List<String> READ_FORMATS =
+        List.of("hex", "bytes", "both", "ascii", "utf16");
+
     /**
      * Constructor
      * @param server The MCP server
@@ -112,7 +115,9 @@ public class MemoryToolProvider extends AbstractToolProvider {
         properties.put("programPath", SchemaUtil.stringProperty("Path to the program in the Ghidra Project"));
         properties.put("addressOrSymbol", SchemaUtil.stringProperty("Address or symbol name to read from (e.g. '00400000' or 'main')"));
         properties.put("length", SchemaUtil.integerPropertyWithDefault("Number of bytes to read", 16));
-        properties.put("format", SchemaUtil.stringPropertyWithDefault("Output format: 'hex', 'bytes', or 'both'", "hex"));
+        properties.put("format", SchemaUtil.stringPropertyWithDefault(
+            "Output format: 'hex' (default), 'bytes', 'both', 'ascii', or 'utf16' (little-endian)",
+            "hex"));
 
         List<String> required = List.of("programPath", "addressOrSymbol");
 
@@ -120,30 +125,35 @@ public class MemoryToolProvider extends AbstractToolProvider {
         McpSchema.Tool tool = McpSchema.Tool.builder()
             .name("read-memory")
             .title("Read Memory")
-            .description("Read memory at a specific address")
+            .description("Read memory at a specific address. 'hex' (default) returns "
+                + "space-separated bytes, 'bytes' returns a byte-value list, and 'both' "
+                + "returns both. 'ascii' and 'utf16' (little-endian) return text with "
+                + "non-printables escaped as \\xNN or \\uNNNN")
             .inputSchema(createSchema(properties, required))
             .build();
 
         // Add the tool using the parent's method
         super.registerTool(tool, (exchange, request) -> {
+            // Validate the format and length before resolving the program so a
+            // bad argument always names its own fix.
+            String format = getOptionalString(request, "format", "hex");
+            if (!READ_FORMATS.contains(format)) {
+                return createErrorResult("Unknown format: " + format
+                    + " (must be 'hex', 'bytes', 'both', 'ascii', or 'utf16')");
+            }
+
+            int length = getOptionalInt(request, "length", 16);
+            if (length < 1 || length > 8192) {
+                return createErrorResult("Invalid length: " + length
+                    + " (must be 1-8192; omit for the default 16)");
+            }
+
             // Get program and address using helper methods
             Program program = getProgramFromArgs(request);
             Address address = getAddressFromArgs(request, program, "addressOrSymbol");
 
-            // Get the length from the request
-            int length = getOptionalInt(request, "length", 16);
-            if (length <= 0) {
-                return createErrorResult("Invalid length: " + length);
-            }
-            if (length > 8192) {
-                return createErrorResult("Maximum read length is 8192 bytes. Use multiple reads for larger regions.");
-            }
-
             // Navigate to the read address so the viewer sees what ReVa is studying.
             followRead(program, address);
-
-            // Get the format from the request
-            String format = getOptionalString(request, "format", "hex");
 
             // Read the memory
             byte[] bytes = MemoryUtil.readMemoryBytes(program, address, length);
@@ -157,12 +167,15 @@ public class MemoryToolProvider extends AbstractToolProvider {
             result.put("length", bytes.length);
             result.put("programPath", program.getDomainFile().getPathname());
 
-            if ("hex".equals(format) || "both".equals(format)) {
-                result.put("hex", MemoryUtil.formatHexString(bytes));
-            }
-
-            if ("bytes".equals(format) || "both".equals(format)) {
-                result.put("bytes", MemoryUtil.byteArrayToIntList(bytes));
+            switch (format) {
+                case "bytes" -> result.put("bytes", MemoryUtil.byteArrayToIntList(bytes));
+                case "both" -> {
+                    result.put("hex", MemoryUtil.formatHexString(bytes));
+                    result.put("bytes", MemoryUtil.byteArrayToIntList(bytes));
+                }
+                case "ascii" -> result.put("text", MemoryUtil.formatAscii(bytes));
+                case "utf16" -> result.put("text", MemoryUtil.formatUtf16(bytes));
+                default -> result.put("hex", MemoryUtil.formatHexString(bytes));
             }
 
             return createJsonResult(result);

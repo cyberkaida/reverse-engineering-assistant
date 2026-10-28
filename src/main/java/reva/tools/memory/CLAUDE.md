@@ -130,22 +130,37 @@ List<Integer> byteValues = MemoryUtil.byteArrayToIntList(bytes);
 ```
 
 ### Flexible Output Formats
-Support multiple output formats in memory reading tools:
+`read-memory` accepts `format`: `hex` (default), `bytes`, `both`, `ascii`, or
+`utf16` (little-endian). Unknown values are rejected naming the five formats:
 ```java
 String format = getOptionalString(request, "format", "hex");
+if (!READ_FORMATS.contains(format)) {
+    return createErrorResult("Unknown format: " + format
+        + " (must be 'hex', 'bytes', 'both', 'ascii', or 'utf16')");
+}
 
 Map<String, Object> result = new HashMap<>();
 result.put("address", address.toString());
 result.put("length", bytes.length);
 
-if ("hex".equals(format) || "both".equals(format)) {
-    result.put("hex", MemoryUtil.formatHexString(bytes));
-}
-
-if ("bytes".equals(format) || "both".equals(format)) {
-    result.put("bytes", MemoryUtil.byteArrayToIntList(bytes));
+switch (format) {
+    case "bytes" -> result.put("bytes", MemoryUtil.byteArrayToIntList(bytes));
+    case "both" -> {
+        result.put("hex", MemoryUtil.formatHexString(bytes));
+        result.put("bytes", MemoryUtil.byteArrayToIntList(bytes));
+    }
+    case "ascii" -> result.put("text", MemoryUtil.formatAscii(bytes));
+    case "utf16" -> result.put("text", MemoryUtil.formatUtf16(bytes));
+    default -> result.put("hex", MemoryUtil.formatHexString(bytes));
 }
 ```
+
+### Text Formatting
+`formatAscii(byte[])` renders printable bytes (0x20-0x7E) as-is, `\n` and
+`\t` as escapes, and everything else as `\xNN`. `formatUtf16(byte[])` reads
+little-endian pairs, renders printable BMP code units as-is (with the same
+`\n`/`\t` rule), other code units as `\uNNNN`, and a lone trailing byte as
+`\xNN`.
 
 ## Memory Analysis Best Practices
 
@@ -153,8 +168,9 @@ if ("bytes".equals(format) || "both".equals(format)) {
 Always validate memory read lengths:
 ```java
 int length = getOptionalInt(request, "length", 16);
-if (length <= 0) {
-    return createErrorResult("Invalid length: " + length);
+if (length < 1 || length > 8192) {
+    return createErrorResult("Invalid length: " + length
+        + " (must be 1-8192; omit for the default 16)");
 }
 ```
 

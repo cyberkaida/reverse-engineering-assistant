@@ -6,8 +6,16 @@ import static org.mockito.Mockito.*;
 import java.util.List;
 
 import org.junit.Test;
+import org.mockito.MockedStatic;
 
+import ghidra.app.services.ProgramManager;
+import ghidra.framework.main.AppInfo;
 import ghidra.framework.model.DomainFile;
+import ghidra.framework.model.DomainFolder;
+import ghidra.framework.model.Project;
+import ghidra.framework.model.ProjectData;
+import ghidra.framework.model.ToolManager;
+import ghidra.framework.plugintool.PluginTool;
 import ghidra.program.model.listing.Program;
 import reva.tools.ProgramValidationException;
 
@@ -95,6 +103,119 @@ public class ProgramLookupUtilTest {
             fail("expected ProgramValidationException");
         } catch (ProgramValidationException e) {
             assertEquals("No program is open. Import one with import-file.", e.getMessage());
+        }
+    }
+
+    @Test
+    public void blankSnapshotConfigLeavesBaselinePathsOrdinary() throws Exception {
+        Program snapshot = program("/baselines/baseline-target.exe", false);
+        reva.plugin.RevaProgramManager.registerProgram(snapshot);
+        try {
+            assertSame("default-off ReVa treats a user folder as ordinary",
+                snapshot, ProgramLookupUtil.getValidatedProgram(
+                    "/baselines/baseline-target.exe"));
+            assertSame(snapshot, reva.plugin.RevaProgramManager.getProgramByPath(
+                "/baselines/baseline-target.exe"));
+            assertSame(snapshot, ProgramLookupUtil.resolveSoleOpenProgram(List.of(snapshot)));
+        } finally {
+            reva.plugin.RevaProgramManager.unregisterProgram(snapshot);
+        }
+    }
+
+    @Test
+    public void configuredSnapshotFolderIsNotAddressable() throws Exception {
+        useSnapshotFolder("snapshots");
+        Program snapshot = program("/snapshots/snapshot-target.exe", false);
+        Program baseline = program("/baselines/baseline-target.exe", false);
+        reva.plugin.RevaProgramManager.registerProgram(snapshot);
+        reva.plugin.RevaProgramManager.registerProgram(baseline);
+        try {
+            try {
+                ProgramLookupUtil.getValidatedProgram("/snapshots/snapshot-target.exe");
+                fail("expected ProgramValidationException");
+            } catch (ProgramValidationException e) {
+                assertTrue(e.getMessage(),
+                    e.getMessage().contains("configured analysis snapshots are not addressable"));
+            }
+            assertNull("the manager refuses the configured path even when it is registered",
+                reva.plugin.RevaProgramManager.getProgramByPath(
+                    "/snapshots/snapshot-target.exe"));
+            assertSame("an unrelated folder stays ordinary",
+                baseline, ProgramLookupUtil.getValidatedProgram(
+                    "/baselines/baseline-target.exe"));
+            assertSame("a configured snapshot is never the sole program",
+                baseline, ProgramLookupUtil.resolveSoleOpenProgram(List.of(snapshot, baseline)));
+            try {
+                ProgramLookupUtil.resolveSoleOpenProgram(List.of(snapshot));
+                fail("a configured snapshot is never the sole program");
+            } catch (ProgramValidationException e) {
+                assertEquals("No program is open. Import one with import-file.",
+                    e.getMessage());
+            }
+        } finally {
+            reva.plugin.RevaProgramManager.unregisterProgram(snapshot);
+            reva.plugin.RevaProgramManager.unregisterProgram(baseline);
+            clearSnapshotConfig();
+        }
+    }
+
+    @Test
+    public void configuredSnapshotAliasesAreNotResolved() throws Exception {
+        useSnapshotFolder("snapshots");
+        try {
+            Program snapshot = program("/snapshots/snapshot-target.exe", false);
+            when(snapshot.getName()).thenReturn("snapshot-target.exe");
+            when(snapshot.getExecutablePath()).thenReturn("/tmp/snapshot-target.exe");
+
+            DomainFolder root = mock(DomainFolder.class);
+            when(root.getFile(anyString())).thenReturn(null);
+            ProjectData data = mock(ProjectData.class);
+            when(data.getRootFolder()).thenReturn(root);
+            when(data.getFolder(anyString())).thenReturn(null);
+            ProgramManager programManager = mock(ProgramManager.class);
+            when(programManager.getAllOpenPrograms())
+                .thenReturn(new Program[] { snapshot });
+            PluginTool tool = mock(PluginTool.class);
+            when(tool.getService(ProgramManager.class)).thenReturn(programManager);
+            ToolManager toolManager = mock(ToolManager.class);
+            when(toolManager.getRunningTools()).thenReturn(new PluginTool[] { tool });
+            Project project = mock(Project.class);
+            when(project.getProjectData()).thenReturn(data);
+            when(project.getToolManager()).thenReturn(toolManager);
+
+            try (MockedStatic<AppInfo> appInfo = mockStatic(AppInfo.class)) {
+                appInfo.when(AppInfo::getActiveProject).thenReturn(project);
+
+                assertNull("a program name must not alias a configured snapshot",
+                    reva.plugin.RevaProgramManager.getProgramByPath(
+                        "snapshot-target.exe"));
+                assertNull("an executable path must not alias a configured snapshot",
+                    reva.plugin.RevaProgramManager.getProgramByPath(
+                        "/tmp/snapshot-target.exe"));
+            }
+        } finally {
+            clearSnapshotConfig();
+        }
+    }
+
+    private static void useSnapshotFolder(String folder) {
+        reva.plugin.ConfigManager config = mock(reva.plugin.ConfigManager.class);
+        when(config.getSnapshotFolder()).thenReturn(folder);
+        RevaInternalServiceRegistry.registerService(reva.plugin.ConfigManager.class, config);
+    }
+
+    private static void clearSnapshotConfig() {
+        RevaInternalServiceRegistry.unregisterService(reva.plugin.ConfigManager.class);
+    }
+
+    @Test
+    public void normalExplicitPathStillResolves() throws Exception {
+        Program target = program("/target.exe", false);
+        reva.plugin.RevaProgramManager.registerProgram(target);
+        try {
+            assertSame(target, ProgramLookupUtil.getValidatedProgram("/target.exe"));
+        } finally {
+            reva.plugin.RevaProgramManager.unregisterProgram(target);
         }
     }
 

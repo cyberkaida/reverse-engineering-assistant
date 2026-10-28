@@ -186,8 +186,14 @@ public class ProjectToolProviderTest {
     }
 
     private static DomainFolder folderOf(String name, DomainFile[] files, DomainFolder[] folders) {
+        return folderOf(name, name.isEmpty() ? "/" : "/" + name, files, folders);
+    }
+
+    private static DomainFolder folderOf(String name, String pathname, DomainFile[] files,
+            DomainFolder[] folders) {
         DomainFolder folder = mock(DomainFolder.class);
         when(folder.getName()).thenReturn(name);
+        when(folder.getPathname()).thenReturn(pathname);
         when(folder.getFiles()).thenReturn(files);
         when(folder.getFolders()).thenReturn(folders);
         return folder;
@@ -297,19 +303,98 @@ public class ProjectToolProviderTest {
     }
 
     @Test
-    public void baselineSnapshotsAreNotReused() throws Exception {
-        Program baseline = mock(Program.class);
-        when(baseline.getExecutableSHA256()).thenReturn(ABC_SHA256);
-        DomainFile snapshot = programFile("sample.exe", baseline);
-        DomainFolder baselines = folderOf("baselines", new DomainFile[] { snapshot }, new DomainFolder[0]);
+    public void blankConfigReusesAProgramInASnapshotNamedFolder() throws Exception {
+        Program stored = mock(Program.class);
+        when(stored.getExecutableSHA256()).thenReturn(ABC_SHA256);
+        DomainFile snapshot = programFile("sample.exe", stored);
+        DomainFolder snapshots = folderOf("snapshots", new DomainFile[] { snapshot },
+            new DomainFolder[0]);
         Project project = projectWithRoot(
-            folderOf("", new DomainFile[0], new DomainFolder[] { baselines }));
+            folderOf("", new DomainFile[0], new DomainFolder[] { snapshots }));
 
         DomainFile reused = provider().findAlreadyImportedProgram(project, providerOf("abc"),
             TaskMonitor.DUMMY, "sample.exe");
 
-        assertNull("snapshots under baselines/ are tool bookkeeping, never the model's program", reused);
-        verify(snapshot, never()).getReadOnlyDomainObject(any(), anyInt(), any());
+        assertSame("default-off ReVa leaves every project folder ordinary", snapshot, reused);
+    }
+
+    @Test
+    public void configuredSnapshotsNeverStandInForTheImportedTarget() throws Exception {
+        useSnapshotFolder("snapshots");
+        try {
+            Program stored = mock(Program.class);
+            when(stored.getExecutableSHA256()).thenReturn(ABC_SHA256);
+            DomainFile target = programFile("sample.exe", stored);
+            DomainFile snapshot = programFile("snapshot-sample.exe", mock(Program.class));
+            DomainFolder snapshots = folderOf("snapshots", new DomainFile[] { snapshot },
+                new DomainFolder[0]);
+            Project project = projectWithRoot(
+                folderOf("", new DomainFile[] { target },
+                    new DomainFolder[] { snapshots }));
+
+            DomainFile reused = provider().findAlreadyImportedProgram(project,
+                providerOf("abc"), TaskMonitor.DUMMY, "sample.exe", "snapshot-sample.exe");
+
+            assertSame("the analyzed target is reused, never the configured snapshot",
+                target, reused);
+            verify(snapshot, never()).getReadOnlyDomainObject(any(), anyInt(), any());
+        } finally {
+            clearSnapshotConfig();
+        }
+    }
+
+    @Test
+    public void configuredSnapshotsOnlyLeaveTheImportToProceed() throws Exception {
+        useSnapshotFolder("snapshots");
+        try {
+            Program stored = mock(Program.class);
+            when(stored.getExecutableSHA256()).thenReturn(ABC_SHA256);
+            DomainFile snapshot = programFile("sample.exe", stored);
+            DomainFolder snapshots = folderOf("snapshots", new DomainFile[] { snapshot },
+                new DomainFolder[0]);
+            Project project = projectWithRoot(
+                folderOf("", new DomainFile[0], new DomainFolder[] { snapshots }));
+
+            assertNull("a configured snapshot never stands in for the target",
+                provider().findAlreadyImportedProgram(project, providerOf("abc"),
+                    TaskMonitor.DUMMY, "sample.exe"));
+            verify(snapshot, never()).getReadOnlyDomainObject(any(), anyInt(), any());
+        } finally {
+            clearSnapshotConfig();
+        }
+    }
+
+    @Test
+    public void configuredSnapshotFolderLeavesOtherFoldersOrdinary() throws Exception {
+        useSnapshotFolder("snapshots");
+        try {
+            Program stored = mock(Program.class);
+            when(stored.getExecutableSHA256()).thenReturn(ABC_SHA256);
+            DomainFile baseline = programFile("baseline-sample.exe", stored);
+            DomainFolder baselines = folderOf("baselines", new DomainFile[] { baseline },
+                new DomainFolder[0]);
+            Project project = projectWithRoot(
+                folderOf("", new DomainFile[0], new DomainFolder[] { baselines }));
+
+            DomainFile reused = provider().findAlreadyImportedProgram(project,
+                providerOf("abc"), TaskMonitor.DUMMY, "baseline-sample.exe");
+
+            assertSame("only the configured folder is policy", baseline, reused);
+        } finally {
+            clearSnapshotConfig();
+        }
+    }
+
+    private static void useSnapshotFolder(String folder) {
+        reva.plugin.ConfigManager config = mock(reva.plugin.ConfigManager.class);
+        when(config.getSnapshotFolder()).thenReturn(folder);
+        reva.util.RevaInternalServiceRegistry.registerService(
+            reva.plugin.ConfigManager.class, config);
+    }
+
+    private static void clearSnapshotConfig() {
+        reva.util.RevaInternalServiceRegistry.unregisterService(
+            reva.plugin.ConfigManager.class);
     }
 
     @Test
@@ -438,5 +523,220 @@ public class ProjectToolProviderTest {
         assertEquals(Boolean.TRUE, entry.get("analyzed"));
         assertFalse(entry.containsKey("alreadyImported"));
         assertFalse(entry.containsKey("note"));
+    }
+
+    /** Calls the real handler of a registered tool and returns its result. */
+    private CallToolResult callTool(String toolName, Map<String, Object> args) {
+        McpSyncServer server = mock(McpSyncServer.class);
+        new ProjectToolProvider(server, true).registerTools();
+        ArgumentCaptor<io.modelcontextprotocol.server.McpServerFeatures.SyncToolSpecification> cap =
+            ArgumentCaptor.forClass(io.modelcontextprotocol.server.McpServerFeatures.SyncToolSpecification.class);
+        verify(server, atLeastOnce()).addTool(cap.capture());
+        for (var spec : cap.getAllValues()) {
+            if (spec.tool().name().equals(toolName)) {
+                return spec.callHandler().apply(null,
+                    new io.modelcontextprotocol.spec.McpSchema.CallToolRequest(toolName, args));
+            }
+        }
+        throw new AssertionError(toolName + " not registered");
+    }
+
+    @Test
+    public void blankConfigListsTheBaselinesFolderNormally() {
+        DomainFile target = listingFile("target.exe", "/target.exe");
+        DomainFile snapshot = listingFile("baseline-target.exe",
+            "/baselines/baseline-target.exe");
+        DomainFolder baselines = folderOf("baselines", new DomainFile[] { snapshot },
+            new DomainFolder[0]);
+        DomainFolder root = folderOf("", new DomainFile[] { target },
+            new DomainFolder[] { baselines });
+        Project project = projectWithRoot(root);
+
+        try (MockedStatic<AppInfo> appInfo = mockStatic(AppInfo.class)) {
+            appInfo.when(AppInfo::getActiveProject).thenReturn(project);
+
+            String recursive = text(callTool("list-project-files",
+                Map.of("folderPath", "/", "recursive", true)));
+            assertTrue(recursive, recursive.contains("\"/target.exe\""));
+            assertTrue("default-off ReVa lists user folders as ordinary",
+                recursive.contains("\"/baselines/baseline-target.exe\""));
+            assertFalse("no folder is reserved while snapshots are disabled",
+                recursive.contains("/snapshots"));
+
+            String flat = text(callTool("list-project-files",
+                Map.of("folderPath", "/", "recursive", false)));
+            assertTrue(flat, flat.contains("\"/target.exe\""));
+            assertTrue("the baselines folder is an ordinary folder", flat.contains("baselines"));
+        }
+    }
+
+    @Test
+    public void configuredSnapshotsAreHiddenFromListings() {
+        useSnapshotFolder("snapshots");
+        try {
+            DomainFile target = listingFile("target.exe", "/target.exe");
+            DomainFile snapshot = listingFile("snapshot-target.exe",
+                "/snapshots/snapshot-target.exe");
+            DomainFile baseline = listingFile("baseline-target.exe",
+                "/baselines/baseline-target.exe");
+            DomainFolder snapshots = folderOf("snapshots", new DomainFile[] { snapshot },
+                new DomainFolder[0]);
+            DomainFolder baselines = folderOf("baselines", new DomainFile[] { baseline },
+                new DomainFolder[0]);
+            DomainFolder root = folderOf("", new DomainFile[] { target },
+                new DomainFolder[] { snapshots, baselines });
+            Project project = projectWithRoot(root);
+
+            try (MockedStatic<AppInfo> appInfo = mockStatic(AppInfo.class)) {
+                appInfo.when(AppInfo::getActiveProject).thenReturn(project);
+
+                String recursive = text(callTool("list-project-files",
+                    Map.of("folderPath", "/", "recursive", true)));
+                assertTrue(recursive, recursive.contains("\"/target.exe\""));
+                assertTrue(recursive,
+                    recursive.contains("\"/baselines/baseline-target.exe\""));
+                assertFalse("configured snapshots never leak into a recursive listing",
+                    recursive.contains("/snapshots"));
+
+                String flat = text(callTool("list-project-files",
+                    Map.of("folderPath", "/", "recursive", false)));
+                assertTrue(flat, flat.contains("\"/target.exe\""));
+                assertTrue("only the configured folder is hidden", flat.contains("baselines"));
+                assertFalse("the configured folder itself is not listed",
+                    flat.contains("snapshots"));
+            }
+        } finally {
+            clearSnapshotConfig();
+        }
+    }
+
+    @Test
+    public void configuredSnapshotsOnlyHideTheRootFolderFromListings() {
+        useSnapshotFolder("snapshots");
+        try {
+            DomainFile target = listingFile("target.exe", "/target.exe");
+            DomainFile rootSnapshot = listingFile("snapshot-target.exe",
+                "/snapshots/snapshot-target.exe");
+            DomainFile nestedSnapshot = listingFile("archived-target.exe",
+                "/archive/snapshots/archived-target.exe");
+            DomainFolder rootSnapshots = folderOf("snapshots", "/snapshots",
+                new DomainFile[] { rootSnapshot }, new DomainFolder[0]);
+            DomainFolder nestedSnapshots = folderOf("snapshots", "/archive/snapshots",
+                new DomainFile[] { nestedSnapshot }, new DomainFolder[0]);
+            DomainFolder archive = folderOf("archive", "/archive", new DomainFile[0],
+                new DomainFolder[] { nestedSnapshots });
+            DomainFolder root = folderOf("", "/", new DomainFile[] { target },
+                new DomainFolder[] { rootSnapshots, archive });
+            ProjectData data = mock(ProjectData.class);
+            when(data.getRootFolder()).thenReturn(root);
+            when(data.getFolder("/archive")).thenReturn(archive);
+            Project project = mock(Project.class);
+            when(project.getProjectData()).thenReturn(data);
+
+            try (MockedStatic<AppInfo> appInfo = mockStatic(AppInfo.class)) {
+                appInfo.when(AppInfo::getActiveProject).thenReturn(project);
+
+                String recursive = text(callTool("list-project-files",
+                    Map.of("folderPath", "/", "recursive", true)));
+                assertTrue(recursive, recursive.contains("\"/target.exe\""));
+                assertTrue("a nested same-name folder stays ordinary", recursive.contains(
+                    "\"/archive/snapshots/archived-target.exe\""));
+                assertFalse("only the configured root folder is hidden",
+                    recursive.contains("/snapshots/snapshot-target.exe"));
+
+                String rootFlat = text(callTool("list-project-files",
+                    Map.of("folderPath", "/", "recursive", false)));
+                assertTrue(rootFlat, rootFlat.contains("\"folderPath\":\"archive\""));
+                assertFalse(rootFlat, rootFlat.contains("\"folderPath\":\"snapshots\""));
+
+                String archiveFlat = text(callTool("list-project-files",
+                    Map.of("folderPath", "/archive", "recursive", false)));
+                assertTrue("a nested same-name folder is listed at its real depth",
+                    archiveFlat.contains("\"folderPath\":\"snapshots\""));
+            }
+        } finally {
+            clearSnapshotConfig();
+        }
+    }
+
+    @Test
+    public void configuredSnapshotsOnlySkipTheRootFolderForImportDedupe() throws Exception {
+        useSnapshotFolder("snapshots");
+        try {
+            Program stored = mock(Program.class);
+            when(stored.getExecutableSHA256()).thenReturn(ABC_SHA256);
+            DomainFile rootSnapshot = programFile("root-sample.exe", stored);
+            DomainFile nestedSnapshot = programFile("archived-sample.exe", stored);
+            DomainFolder rootSnapshots = folderOf("snapshots", "/snapshots",
+                new DomainFile[] { rootSnapshot }, new DomainFolder[0]);
+            DomainFolder nestedSnapshots = folderOf("snapshots", "/archive/snapshots",
+                new DomainFile[] { nestedSnapshot }, new DomainFolder[0]);
+            DomainFolder archive = folderOf("archive", "/archive", new DomainFile[0],
+                new DomainFolder[] { nestedSnapshots });
+            DomainFolder root = folderOf("", "/", new DomainFile[0],
+                new DomainFolder[] { rootSnapshots, archive });
+            Project project = projectWithRoot(root);
+
+            assertNull("a configured root snapshot never stands in for the target",
+                provider().findAlreadyImportedProgram(project, providerOf("abc"),
+                    TaskMonitor.DUMMY, "root-sample.exe"));
+            DomainFile reused = provider().findAlreadyImportedProgram(project,
+                providerOf("abc"), TaskMonitor.DUMMY, "archived-sample.exe");
+            assertSame("a nested same-name folder stays an ordinary import candidate",
+                nestedSnapshot, reused);
+        } finally {
+            clearSnapshotConfig();
+        }
+    }
+
+    @Test
+    public void configuredSnapshotFolderIsRefusedWhileOtherFoldersStayAddressable() {
+        useSnapshotFolder("snapshots");
+        try {
+            DomainFolder snapshots = folderOf("snapshots", new DomainFile[0],
+                new DomainFolder[0]);
+            DomainFolder baselines = folderOf("baselines", new DomainFile[0],
+                new DomainFolder[0]);
+            DomainFolder root = folderOf("", new DomainFile[0],
+                new DomainFolder[] { snapshots, baselines });
+            ProjectData data = mock(ProjectData.class);
+            when(data.getRootFolder()).thenReturn(root);
+            when(data.getFolder("/baselines")).thenReturn(baselines);
+            Project project = mock(Project.class);
+            when(project.getProjectData()).thenReturn(data);
+
+            try (MockedStatic<AppInfo> appInfo = mockStatic(AppInfo.class)) {
+                appInfo.when(AppInfo::getActiveProject).thenReturn(project);
+
+                CallToolResult refused = callTool("list-project-files",
+                    Map.of("folderPath", "/snapshots"));
+                assertTrue("an explicit configured snapshot listing must be an error",
+                    refused.isError());
+                assertTrue(text(refused), text(refused).contains(
+                    "configured analysis snapshots are not addressable"));
+
+                CallToolResult ordinary = callTool("list-project-files",
+                    Map.of("folderPath", "/baselines"));
+                assertFalse("only the configured folder is refused", ordinary.isError());
+            }
+        } finally {
+            clearSnapshotConfig();
+        }
+    }
+
+    private static DomainFile listingFile(String name, String pathname) {
+        DomainFile file = mock(DomainFile.class);
+        when(file.getName()).thenReturn(name);
+        when(file.getPathname()).thenReturn(pathname);
+        when(file.getContentType()).thenReturn("Program");
+        when(file.getLastModifiedTime()).thenReturn(0L);
+        when(file.isReadOnly()).thenReturn(false);
+        when(file.isVersioned()).thenReturn(false);
+        when(file.isCheckedOut()).thenReturn(false);
+        return file;
+    }
+
+    private static String text(CallToolResult result) {
+        return ((TextContent) result.content().get(0)).text();
     }
 }

@@ -28,7 +28,7 @@ The `reva.util` package contains these critical utility classes (among others) t
 | **ProgramLookupUtil** | `getValidatedProgram()`, `resolveSoleOpenProgram()` | Program validation with helpful error messages; a null/blank path resolves to the only program |
 | **DataTypeParserUtil** | `parseDataTypeObjectFromString()`, `parseDataTypeFromString()`, `createDataTypeInfo()` | Parse data types from strings like "char*" or "int[10]" |
 | **DecompilationContextUtil** | `getLineNumberForAddress()`, `getDecompilationContext()`, `getEnhancedIncomingReferences()`, `getEnhancedReferencesTo()` | Map addresses to line numbers with context |
-| **MemoryUtil** | `readMemoryBytes()`, `formatHexString()`, `byteArrayToIntList()`, `processMemoryInChunks()` | Safe memory access and formatting |
+| **MemoryUtil** | `readMemoryBytes()`, `formatHexString()`, `byteArrayToIntList()`, `formatAscii()`, `formatUtf16()`, `processMemoryInChunks()` | Safe memory access and formatting (hex, int list, escaped ascii/utf16 text) |
 | **SymbolUtil** | `isDefaultSymbolName()` | Filter Ghidra default names (FUN_*, LAB_*, etc.) |
 | **RevaInternalServiceRegistry** | `registerService()`, `getService()`, `unregisterService()` | Service dependency injection |
 | **SchemaUtil** | `builder()`, `stringProperty()`, `booleanProperty()`, `integerProperty()`, `createSchema()` | MCP schema creation with builder pattern |
@@ -36,6 +36,9 @@ The `reva.util` package contains these critical utility classes (among others) t
 | **DecompilationDiffUtil** | `createDiff()`, `toMap()` | Compare decompilation before/after with snippets |
 | **SimilarityComparator** | `SimilarityComparator(searchString, extractor)`, `calculateLcsSimilarity()` | Sort by string similarity using LCS algorithm |
 | **TypeArchives** | `forProgram()`, `defaults()` | Win32 (Windows compiler spec only, by pointer size) and C library archives to resolve HANDLE, DWORD, size_t when parsing C |
+| **ProgramPersistenceUtil** | `persist()`, `awaitNoTransaction()` | Save/checkin that waits up to 10 s for an open transaction, then SKIPs with an error instead of failing on the lock |
+| **TransactionCleanup** | `snapshot()`, `closeLeaked()` | Closes transaction entries a failed script left open, after the run-script parent entry ends |
+| **ProjectSnapshots** | `createIfConfigured()`, `isSnapshotPath()`, `isSnapshotFolder()`, `configuredFolder()` | Opt-in copy of an analyzed program into a caller-configured root project folder; an empty configuration creates nothing and hides/refuses nothing |
 
 ## Core Utility Classes
 
@@ -575,6 +578,15 @@ public Map<String, Object> searchFunctions(Map<String, Object> arguments) {
     return formatFunctionResults(topResults);
 }
 ```
+
+### ProgramPersistenceUtil, TransactionCleanup, ProjectSnapshots - Transaction and Persistence Semantics
+
+The utilities that decide how program changes commit, roll back, and snapshot:
+
+- **`run-script` wraps every execution in a parent transaction** (`PythonScriptExecutor`): a clean exit commits once — one undo entry; an exception, a timeout, or the script's own `endTransaction(tx, false)` rolls the whole run back. Scripts may omit their own transactions entirely; entries a failed script leaves open are closed by `TransactionCleanup.closeLeaked` after the parent entry ends. The result reports `transaction: committed | rolled back | open`.
+- **`ProgramPersistenceUtil.persist` waits for open transactions**: `awaitNoTransaction(program, TRANSACTION_WAIT_MS = 10_000, TRANSACTION_POLL_MS = 100)` polls before any save; a transaction still open after the wait returns SKIP with a "a transaction is still open after waiting ..." error, which `checkin-program` surfaces as an error, never as "saved".
+- **`ProjectSnapshots.createIfConfigured(program, folderName, filePrefix, monitor)`** copies the program to `<folderName>/<filePrefix><program name>` after a successful analysis, only when `!program.isChanged()` (memory == disk), and only once — an existing snapshot is never duplicated. Snapshots are opt-in: `Snapshot Folder` (headless `reva.server.options.snapshot.folder`) defaults to empty, which creates nothing and applies no visibility filter; `Snapshot Prefix` (headless `reva.server.options.snapshot.prefix`) defaults to `snapshot-`. Only a single root-level folder name enables the feature; blank, path-like, dot-valued, or nested names stay disabled. While a folder is configured, that root-level folder alone is hidden from program listings and refused as a programPath ("configured analysis snapshots are not addressable") — a nested folder with the same name stays ordinary because matching uses each folder's full project path, a snapshot is never offered as the sole open program, and import dedupe never reuses a snapshot. The snapshot is bookkeeping, never a tool result: the result map carries no path and the job log says only "Analysis snapshot created" or "Analysis snapshot skipped: program has unsaved changes".
+- **`import-file` is idempotent**: importing a file whose name and sha256 match a program already in the project reuses that program and reports `alreadyImported: true` instead of creating a `.N` duplicate.
 
 ## Common Utility Patterns
 

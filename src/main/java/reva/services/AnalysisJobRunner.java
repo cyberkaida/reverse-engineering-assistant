@@ -31,9 +31,12 @@ import ghidra.util.task.DummyCancellableTaskMonitor;
 import ghidra.util.task.TaskMonitor;
 import ghidra.util.task.TimeoutTaskMonitor;
 import ghidra.util.task.WrappingTaskMonitor;
+import reva.plugin.ConfigManager;
 import reva.util.ProgramPersistenceUtil;
 import reva.util.ProgramPersistenceUtil.PersistMode;
 import reva.util.ProgramPersistenceUtil.PersistResult;
+import reva.util.ProjectSnapshots;
+import reva.util.RevaInternalServiceRegistry;
 
 /**
  * Runs one auto-analysis on a background worker thread, capturing live log output into the
@@ -216,6 +219,29 @@ public class AnalysisJobRunner implements Runnable {
             }
         } else {
             result.put("persisted", "skipped");
+        }
+
+        // Optional analysis snapshot: a caller-configured copy of the analysed
+        // program, created only after a clean persist. copyTo copies the stored
+        // database, so a program still carrying unsaved changes (persist
+        // none/failed) is left without a snapshot: an absent snapshot is
+        // checkable, a stale-yet-plausible one would misattribute analysis
+        // output. The snapshot is bookkeeping, never a tool result: its path
+        // stays out of the result map (and even the job log) so the model can
+        // neither see nor address it. An absent ConfigManager or a blank
+        // folder disables the feature entirely.
+        ConfigManager config = RevaInternalServiceRegistry.getService(ConfigManager.class);
+        String snapshotFolder = config == null ? "" : config.getSnapshotFolder();
+        if (!cancelled && snapshotFolder != null && !snapshotFolder.isBlank()) {
+            if (program.isChanged()) {
+                job.appendLog("Analysis snapshot skipped: program has unsaved changes");
+            } else {
+                String snapshotPrefix = config.getSnapshotPrefix();
+                if (ProjectSnapshots.createIfConfigured(program, snapshotFolder,
+                        snapshotPrefix, TaskMonitor.DUMMY) != null) {
+                    job.appendLog("Analysis snapshot created");
+                }
+            }
         }
 
         job.setResult(result);

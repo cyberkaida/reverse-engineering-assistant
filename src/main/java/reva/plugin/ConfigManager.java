@@ -64,6 +64,8 @@ public class ConfigManager implements ConfigurationBackendListener {
     public static final String FOLLOW_WRITES = "Follow Writes";
     public static final String SCRIPT_TIMEOUT_SECONDS = "Script Timeout Seconds";
     public static final String SCRIPT_OUTPUT_CHAR_LIMIT = "Script Output Char Limit";
+    public static final String SNAPSHOT_FOLDER = "Snapshot Folder";
+    public static final String SNAPSHOT_PREFIX = "Snapshot Prefix";
 
     // Default values
     private static final int DEFAULT_PORT = 8080;
@@ -86,6 +88,8 @@ public class ConfigManager implements ConfigurationBackendListener {
     private static final boolean DEFAULT_FOLLOW_WRITES = true;
     private static final int DEFAULT_SCRIPT_TIMEOUT_SECONDS = 60;
     private static final int DEFAULT_SCRIPT_OUTPUT_CHAR_LIMIT = 65536;
+    private static final String DEFAULT_SNAPSHOT_FOLDER = "";
+    private static final String DEFAULT_SNAPSHOT_PREFIX = "snapshot-";
 
     private final ConfigurationBackend backend;
     private final Map<String, Object> cachedOptions = new ConcurrentHashMap<>();
@@ -216,6 +220,10 @@ public class ConfigManager implements ConfigurationBackendListener {
             "Default timeout in seconds for the run-script tool (per-call override available)");
         toolOptions.registerOption(SCRIPT_OUTPUT_CHAR_LIMIT, DEFAULT_SCRIPT_OUTPUT_CHAR_LIMIT, help,
             "Maximum characters captured per stdout/stderr stream from a script run (default 65536)");
+        toolOptions.registerOption(SNAPSHOT_FOLDER, DEFAULT_SNAPSHOT_FOLDER, help,
+            "Single root-level project folder that receives one copy of each program after a clean analysis; empty, path-like, or dot-valued names disable analysis snapshots");
+        toolOptions.registerOption(SNAPSHOT_PREFIX, DEFAULT_SNAPSHOT_PREFIX, help,
+            "File-name prefix for analysis snapshots (default: snapshot-)");
 
         toolOptions.registerOption(ALLOW_PUBLIC_BINDING_NO_API_KEY, DEFAULT_ALLOW_PUBLIC_BINDING_NO_API_KEY, help,
             "Allow the server to bind to a non-localhost interface without API key authentication. " +
@@ -270,6 +278,14 @@ public class ConfigManager implements ConfigurationBackendListener {
             backend.getInt(SERVER_OPTIONS, SCRIPT_TIMEOUT_SECONDS, DEFAULT_SCRIPT_TIMEOUT_SECONDS));
         cachedOptions.put(SCRIPT_OUTPUT_CHAR_LIMIT,
             backend.getInt(SERVER_OPTIONS, SCRIPT_OUTPUT_CHAR_LIMIT, DEFAULT_SCRIPT_OUTPUT_CHAR_LIMIT));
+        String snapshotFolder = backend.getString(
+            SERVER_OPTIONS, SNAPSHOT_FOLDER, DEFAULT_SNAPSHOT_FOLDER);
+        cachedOptions.put(SNAPSHOT_FOLDER,
+            snapshotFolder == null ? DEFAULT_SNAPSHOT_FOLDER : snapshotFolder);
+        String snapshotPrefix = backend.getString(
+            SERVER_OPTIONS, SNAPSHOT_PREFIX, DEFAULT_SNAPSHOT_PREFIX);
+        cachedOptions.put(SNAPSHOT_PREFIX,
+            snapshotPrefix == null ? DEFAULT_SNAPSHOT_PREFIX : snapshotPrefix);
 
         cachedOptions.put(ALLOW_PUBLIC_BINDING_NO_API_KEY,
             backend.getBoolean(SERVER_OPTIONS, ALLOW_PUBLIC_BINDING_NO_API_KEY, DEFAULT_ALLOW_PUBLIC_BINDING_NO_API_KEY));
@@ -657,6 +673,24 @@ public class ConfigManager implements ConfigurationBackendListener {
      */
     public void setScriptOutputCharLimit(int chars) {
         backend.setInt(SERVER_OPTIONS, SCRIPT_OUTPUT_CHAR_LIMIT, chars);
+    }
+
+    /**
+     * @return the single root-level project folder that receives post-analysis
+     *         snapshot copies; empty, path-like, or dot-valued names mean
+     *         analysis snapshots are disabled
+     */
+    public String getSnapshotFolder() {
+        String folder = (String) cachedOptions.get(SNAPSHOT_FOLDER);
+        return folder == null ? DEFAULT_SNAPSHOT_FOLDER : folder;
+    }
+
+    /**
+     * @return file-name prefix for analysis snapshots
+     */
+    public String getSnapshotPrefix() {
+        String prefix = (String) cachedOptions.get(SNAPSHOT_PREFIX);
+        return prefix == null ? DEFAULT_SNAPSHOT_PREFIX : prefix;
     }
 
     /**

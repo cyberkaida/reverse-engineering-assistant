@@ -32,6 +32,7 @@ import ghidra.framework.plugintool.PluginTool;
 import ghidra.program.model.listing.Program;
 import ghidra.util.Msg;
 import ghidra.util.task.TaskMonitor;
+import reva.util.ProjectSnapshots;
 import reva.util.RevaInternalServiceRegistry;
 
 /**
@@ -286,6 +287,16 @@ public class RevaProgramManager {
             return null;
         }
 
+        // Configured analysis snapshots are tool bookkeeping: never resolve one
+        // as a program, even if its DomainFile is cached or registered.
+        String snapshotFolder = ProjectSnapshots.configuredFolder();
+        if (!snapshotFolder.isEmpty()
+                && ProjectSnapshots.isSnapshotPath(programPath, snapshotFolder)) {
+            Msg.warn(RevaProgramManager.class,
+                "Refusing to resolve configured analysis snapshot path: " + programPath);
+            return null;
+        }
+
         Msg.debug(RevaProgramManager.class, "Looking for program with path: " + programPath);
 
         // Check registered programs first (for test environments)
@@ -339,6 +350,15 @@ public class RevaProgramManager {
             String programName = program.getName();
             Msg.debug(RevaProgramManager.class, "Also checking executable path '" + executablePath + "' and name '" + programName + "'");
             if (executablePath.equals(programPath) || programName.equals(programPath)) {
+                // A configured analysis snapshot is never addressable, including
+                // through its name or executable-path aliases.
+                if (!snapshotFolder.isEmpty()
+                        && ProjectSnapshots.isSnapshotPath(
+                            getCanonicalProgramPath(program), snapshotFolder)) {
+                    Msg.debug(RevaProgramManager.class,
+                        "Skipping configured analysis snapshot alias: " + programPath);
+                    continue;
+                }
                 // Use canonical domain path as cache key for consistency
                 String canonicalPath = getCanonicalProgramPath(program);
                 programCache.put(canonicalPath, program);

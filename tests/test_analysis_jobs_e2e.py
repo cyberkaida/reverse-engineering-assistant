@@ -105,6 +105,34 @@ async def _poll_analysis_until_terminal(client, job_id: str) -> dict:
     )
 
 
+async def _poll_analysis_with_log(client, job_id: str) -> tuple[dict, list[str]]:
+    """Poll to a terminal state, returning the payload and every job log line."""
+    deadline = time.monotonic() + POLL_DEADLINE_SECONDS
+    since = 0
+    messages: list[str] = []
+    last = None
+    while time.monotonic() < deadline:
+        result = await client.call_tool(
+            "analysis-status",
+            arguments={
+                "jobId": job_id,
+                "waitSeconds": 5,
+                "sinceLogSeq": since,
+                "maxLogEntries": 500,
+            },
+        )
+        last = _parse(result, "analysis-status")
+        for entry in last.get("log", []):
+            messages.append(entry.get("message", ""))
+        since = last.get("logCursor", since)
+        if last.get("status") in TERMINAL_STATUSES and not last.get("truncated"):
+            return last, messages
+    pytest.fail(
+        f"Analysis job {job_id} did not reach a terminal state within "
+        f"{POLL_DEADLINE_SECONDS}s; last status payload: {last!r}"
+    )
+
+
 class TestAnalysisJobLifecycle:
     """Submit, poll to completion, then exercise cancel's terminal no-op."""
 
@@ -241,3 +269,128 @@ class TestAnalysisJobErrorPaths:
             assert data.get("success") is True and data.get("programPath"), (
                 f"sole-program resolution should return that program's job: {data!r}"
             )
+
+
+class TestDefaultSnapshotConfiguration:
+    """Default ReVa must not create, hide, or refuse any snapshot folder."""
+
+    async def test_default_config_creates_no_snapshot_and_user_baselines_is_ordinary(
+        self, mcp_stdio_client_isolated, isolated_workspace
+    ):
+        client = mcp_stdio_client_isolated
+        program_path = await _import_unanalyzed(client)
+
+        start = await client.call_tool(
+            "analyze-program",
+            arguments={
+                "programPath": program_path,
+                "forceFullAnalysis": True,
+                "waitSeconds": 0,
+            },
+        )
+        start_data = _parse(start, "analyze-program")
+        job_id = start_data.get("jobId")
+        assert job_id, f"analyze-program must return a jobId: {start_data!r}"
+
+        final, log_messages = await _poll_analysis_with_log(client, job_id)
+        assert final.get("status") == "completed", (
+            f"analysis should complete; final payload: {final!r}"
+        )
+        assert not any("Analysis snapshot" in line for line in log_messages), (
+            f"default-off analysis must not log snapshot activity: {log_messages!r}"
+        )
+        assert "snapshot" not in (final.get("result") or {}), (
+            f"the analysis result leaked a snapshot: {final!r}"
+        )
+
+        root = _parse(
+            await client.call_tool(
+                "list-project-files",
+                arguments={"folderPath": "/", "recursive": False},
+            ),
+            "list-project-files (default root)",
+        )
+        root_items = root.get("items", [])
+        folders = [item for item in root_items if item.get("type") == "folder"]
+        assert folders == [], (
+            f"default analysis must not create or hide a snapshot folder; got {folders!r}"
+        )
+        assert not any(
+            "snapshot-" in (item.get("programPath") or item.get("folderPath") or "")
+            for item in root_items
+        ), f"default analysis must not create a snapshot file: {root_items!r}"
+
+        # A user folder named /baselines is ordinary project state: nothing is
+        # reserved, hidden, or refused when no snapshot folder is configured.
+        create = await client.call_tool(
+            "run-script",
+            arguments={
+                "programPath": program_path,
+                "code": (
+                    "from ghidra.util.task import TaskMonitor\n"
+                    "root = currentProgram.getDomainFile().getParent()"
+                    ".getProjectData().getRootFolder()\n"
+                    "folder = root.getFolder('baselines')\n"
+                    "if folder is None:\n"
+                    "    folder = root.createFolder('baselines')\n"
+                    "copy = currentProgram.getDomainFile().copyTo("
+                    "folder, TaskMonitor.DUMMY)\n"
+                    "print('COPY_PATH=' + copy.getPathname())\n"
+                ),
+                "timeoutSeconds": 30,
+            },
+        )
+        create_data = _parse(create, "run-script create user baselines")
+        assert create_data.get("success") is True, (
+            f"creating a user /baselines folder must succeed: {create_data!r}"
+        )
+        assert "COPY_PATH=" in create_data.get("stdout", ""), (
+            f"the copy's path should be reported: {create_data!r}"
+        )
+        copy_path = create_data["stdout"].split("COPY_PATH=", 1)[1].split()[0]
+        assert copy_path.startswith("/baselines/"), copy_path
+
+        root = _parse(
+            await client.call_tool(
+                "list-project-files",
+                arguments={"folderPath": "/", "recursive": False},
+            ),
+            "list-project-files (user baselines present)",
+        )
+        assert any(
+            item.get("type") == "folder"
+            and (item.get("folderPath") or "").strip("/") == "baselines"
+            for item in root.get("items", [])
+        ), f"a user /baselines folder must be listed ordinarily: {root!r}"
+
+        recursive = _parse(
+            await client.call_tool(
+                "list-project-files",
+                arguments={"folderPath": "/", "recursive": True},
+            ),
+            "list-project-files (recursive)",
+        )
+        listed_paths = [
+            item.get("programPath") for item in recursive.get("items", [])
+        ]
+        assert copy_path in listed_paths, (
+            f"the user file under /baselines must be listed: {listed_paths!r}"
+        )
+
+        explicit = await client.call_tool(
+            "list-project-files", arguments={"folderPath": "/baselines"}
+        )
+        assert not getattr(explicit, "is_error", False), (
+            f"explicitly listing a user /baselines folder must succeed: "
+            f"{_result_text(explicit)}"
+        )
+        explicit_data = _parse(explicit, "list-project-files /baselines")
+        assert explicit_data.get("itemCount", 0) >= 1, explicit_data
+
+        count = await client.call_tool(
+            "get-function-count", arguments={"programPath": copy_path}
+        )
+        count_data = _parse(count, f"get-function-count {copy_path}")
+        assert count_data.get("count", 0) >= 1, (
+            f"a user file under /baselines must be addressable: {count_data!r}"
+        )

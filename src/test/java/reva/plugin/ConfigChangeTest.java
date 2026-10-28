@@ -180,6 +180,16 @@ public class ConfigChangeTest {
     }
 
     @Test
+    public void snapshotOptionsAreRegisteredWithGenericDefaults() {
+        verify(mockToolOptions).registerOption(eq(ConfigManager.SNAPSHOT_FOLDER), eq(""),
+            any(HelpLocation.class), anyString());
+        verify(mockToolOptions).registerOption(eq(ConfigManager.SNAPSHOT_PREFIX), eq("snapshot-"),
+            any(HelpLocation.class), anyString());
+        assertEquals("snapshots are disabled by default", "", configManager.getSnapshotFolder());
+        assertEquals("snapshot-", configManager.getSnapshotPrefix());
+    }
+
+    @Test
     public void testRemoveConfigChangeListener() throws Exception {
         // Create a test listener
         ConfigChangeListener testListener = mock(ConfigChangeListener.class);

@@ -80,6 +80,7 @@ import reva.tools.ProgramValidationException;
 import reva.util.ProgramLookupUtil;
 import reva.util.ProgramPersistenceUtil;
 import reva.util.ProgramPersistenceUtil.PersistMode;
+import reva.util.ProjectSnapshots;
 import reva.util.SchemaUtil;
 import reva.util.RevaInternalServiceRegistry;
 
@@ -205,6 +206,16 @@ public class ProjectToolProvider extends AbstractToolProvider {
                 return createErrorResult("No active project found");
             }
 
+            // A configured analysis snapshot folder is bookkeeping: an
+            // explicit request for it is refused instead of enumerated.
+            String snapshotFolder = ProjectSnapshots.configuredFolder();
+            if (!snapshotFolder.isEmpty()
+                    && ProjectSnapshots.isSnapshotPath(folderPath, snapshotFolder)) {
+                return createErrorResult(
+                    "Invalid folderPath: configured analysis snapshots are not addressable ("
+                        + folderPath + ").");
+            }
+
             // Get the folder from the path
             DomainFolder folder;
             if (folderPath.equals("/")) {
@@ -228,9 +239,9 @@ public class ProjectToolProvider extends AbstractToolProvider {
 
             // Get the files and folders
             if (recursive) {
-                collectFilesRecursive(folder, filesList, "");
+                collectFilesRecursive(folder, filesList, "", snapshotFolder);
             } else {
-                collectFilesInFolder(folder, filesList, "");
+                collectFilesInFolder(folder, filesList, "", snapshotFolder);
             }
 
             metadataInfo.put("itemCount", filesList.size());
@@ -595,10 +606,16 @@ public class ProjectToolProvider extends AbstractToolProvider {
      * @param folder The folder to collect from
      * @param filesList The list to add files to
      * @param pathPrefix The path prefix for subfolder names
+     * @param snapshotFolder configured snapshot folder to skip, or {@code ""}
      */
-    private void collectFilesInFolder(DomainFolder folder, List<Map<String, Object>> filesList, String pathPrefix) {
-        // Add subfolders first
+    private void collectFilesInFolder(DomainFolder folder, List<Map<String, Object>> filesList,
+            String pathPrefix, String snapshotFolder) {
+        // Add subfolders first, keeping configured analysis snapshots invisible.
         for (DomainFolder subfolder : folder.getFolders()) {
+            if (!snapshotFolder.isEmpty()
+                    && ProjectSnapshots.isSnapshotPath(subfolder.getPathname(), snapshotFolder)) {
+                continue;
+            }
             Map<String, Object> folderInfo = new HashMap<>();
             folderInfo.put("folderPath", pathPrefix + subfolder.getName());
             folderInfo.put("type", "folder");
@@ -644,15 +661,21 @@ public class ProjectToolProvider extends AbstractToolProvider {
      * @param folder The folder to collect from
      * @param filesList The list to add files to
      * @param pathPrefix The path prefix for subfolder names
+     * @param snapshotFolder configured snapshot folder to skip, or {@code ""}
      */
-    private void collectFilesRecursive(DomainFolder folder, List<Map<String, Object>> filesList, String pathPrefix) {
+    private void collectFilesRecursive(DomainFolder folder, List<Map<String, Object>> filesList,
+            String pathPrefix, String snapshotFolder) {
         // Collect files in current folder
-        collectFilesInFolder(folder, filesList, pathPrefix);
+        collectFilesInFolder(folder, filesList, pathPrefix, snapshotFolder);
 
         // Recursively collect files in subfolders
         for (DomainFolder subfolder : folder.getFolders()) {
+            if (!snapshotFolder.isEmpty()
+                    && ProjectSnapshots.isSnapshotPath(subfolder.getPathname(), snapshotFolder)) {
+                continue;
+            }
             String newPrefix = pathPrefix + subfolder.getName() + "/";
-            collectFilesRecursive(subfolder, filesList, newPrefix);
+            collectFilesRecursive(subfolder, filesList, newPrefix, snapshotFolder);
         }
     }
 
@@ -1667,7 +1690,7 @@ public class ProjectToolProvider extends AbstractToolProvider {
                             // Reuse a program that is already in the project. Agents re-import
                             // the same sample after transient read failures, and a second import
                             // of it would silently create a "<name>.N" duplicate that confuses
-                            // later tool calls and grading. The existing program is already
+                            // later tool calls. The existing program is already
                             // saved, so it stays out of importedDomainFiles and is neither
                             // re-analyzed nor re-added to version control.
                             DomainFile existingProgram = findAlreadyImportedProgram(project,
@@ -1974,9 +1997,6 @@ public class ProjectToolProvider extends AbstractToolProvider {
     static final String ALREADY_IMPORTED_NOTE =
         "program already in the project; reusing it instead of creating a duplicate";
 
-    /** Project folder for tool-created snapshots; never a source of reused programs. */
-    private static final String BASELINE_FOLDER_NAME = "baselines";
-
     /**
      * Executable SHA-256 of the given bytes, in the same lowercase hex form Ghidra
      * records in Program Info ({@code AbstractProgramLoader.setProgramProperties}), so
@@ -1995,8 +2015,7 @@ public class ProjectToolProvider extends AbstractToolProvider {
     /**
      * Find a program already in the project that holds exactly the bytes about to be
      * imported, so it can be reused instead of importing a duplicate. Ghidra's importer
-     * silently names a re-imported file "&lt;name&gt;.N", which confuses later tool calls
-     * and grading.
+     * silently names a re-imported file "&lt;name&gt;.N", which confuses later tool calls.
      *
      * <p>The file name and the executable SHA-256 must both match: a same-named file with
      * different bytes is a different program and is imported normally. Candidates that
@@ -2021,7 +2040,8 @@ public class ProjectToolProvider extends AbstractToolProvider {
         }
         List<DomainFile> candidates = new ArrayList<>();
         try {
-            collectProgramFilesNamed(project.getProjectData().getRootFolder(), names, candidates);
+            collectProgramFilesNamed(project.getProjectData().getRootFolder(), names, candidates,
+                ProjectSnapshots.configuredFolder());
         } catch (Exception e) {
             Msg.debug(this, "Could not scan the project for " + names + ": " + e.getMessage());
             return null;
@@ -2044,19 +2064,20 @@ public class ProjectToolProvider extends AbstractToolProvider {
         return null;
     }
 
-    /** Collect program files named one of {@code names}, skipping baseline snapshots. */
+    /** Collect program files named one of {@code names}, skipping configured snapshots. */
     private void collectProgramFilesNamed(DomainFolder folder, Set<String> names,
-            List<DomainFile> matches) {
+            List<DomainFile> matches, String snapshotFolder) {
         for (DomainFile file : folder.getFiles()) {
             if (names.contains(file.getName()) && "Program".equals(file.getContentType())) {
                 matches.add(file);
             }
         }
         for (DomainFolder subfolder : folder.getFolders()) {
-            if (BASELINE_FOLDER_NAME.equals(subfolder.getName())) {
+            if (!snapshotFolder.isEmpty()
+                    && ProjectSnapshots.isSnapshotPath(subfolder.getPathname(), snapshotFolder)) {
                 continue;
             }
-            collectProgramFilesNamed(subfolder, names, matches);
+            collectProgramFilesNamed(subfolder, names, matches, snapshotFolder);
         }
     }
 

@@ -16,6 +16,7 @@
 package reva.util;
 
 import static org.junit.Assert.*;
+import static org.mockito.Mockito.*;
 
 import java.io.File;
 import java.nio.file.Files;
@@ -27,6 +28,7 @@ import org.junit.Test;
 
 import ghidra.base.project.GhidraProject;
 import ghidra.framework.main.AppInfo;
+import ghidra.framework.model.DomainFolder;
 import ghidra.program.database.ProgramDB;
 import ghidra.program.model.lang.Language;
 import ghidra.program.model.lang.LanguageID;
@@ -79,10 +81,25 @@ public class ProgramLookupUtilProjectTest extends AbstractGhidraHeadlessIntegrat
 
     /** Saves a new program to the project root and releases it, as import-file leaves it. */
     private void saveToProject(String name) throws Exception {
+        saveToFolder(null, name);
+    }
+
+    /** Saves a new program into a project folder (root when {@code folder} is null). */
+    private void saveToFolder(String folder, String name) throws Exception {
         Language language = getLanguageService().getLanguage(new LanguageID("x86:LE:32:default"));
         ProgramDB p = new ProgramDB(name, language, language.getDefaultCompilerSpec(), this);
         try {
-            project.getProjectData().getRootFolder().createFile(name, p, TaskMonitor.DUMMY);
+            DomainFolder parent = project.getProjectData().getRootFolder();
+            if (folder != null) {
+                for (String part : folder.split("/")) {
+                    DomainFolder next = parent.getFolder(part);
+                    if (next == null) {
+                        next = parent.createFolder(part);
+                    }
+                    parent = next;
+                }
+            }
+            parent.createFile(name, p, TaskMonitor.DUMMY);
         } finally {
             p.release(this);
         }
@@ -126,6 +143,117 @@ public class ProgramLookupUtilProjectTest extends AbstractGhidraHeadlessIntegrat
                 e.getMessage());
         }
         assertTrue("nothing is opened to build the listing", RevaProgramManager.getAllKnownPrograms().isEmpty());
+    }
+
+    @Test
+    public void blankConfigListsAndResolvesTheBaselinesFolderNormally() throws Exception {
+        saveToProject("target.exe");
+        saveToProject("other.exe");
+        saveToFolder("baselines", "baseline-target.exe");
+        try {
+            ProgramLookupUtil.getValidatedProgram(null);
+            fail("expected ProgramValidationException");
+        } catch (ProgramValidationException e) {
+            assertEquals("programPath is required when several programs are open:\n"
+                + "  - /baselines/baseline-target.exe\n  - /other.exe\n  - /target.exe",
+                e.getMessage());
+        }
+        Program baseline =
+            ProgramLookupUtil.getValidatedProgram("/baselines/baseline-target.exe");
+        assertEquals("/baselines/baseline-target.exe",
+            baseline.getDomainFile().getPathname());
+    }
+
+    @Test
+    public void configuredSnapshotFolderIsHiddenAndRefused() throws Exception {
+        useSnapshotFolder("snapshots");
+        saveToProject("target.exe");
+        saveToFolder("snapshots", "snapshot-target.exe");
+        saveToFolder("baselines", "baseline-target.exe");
+        try {
+            try {
+                ProgramLookupUtil.getValidatedProgram(null);
+                fail("expected ProgramValidationException");
+            } catch (ProgramValidationException e) {
+                assertEquals("programPath is required when several programs are open:\n"
+                    + "  - /baselines/baseline-target.exe\n  - /target.exe",
+                    e.getMessage());
+            }
+            try {
+                ProgramLookupUtil.getValidatedProgram("/snapshots/snapshot-target.exe");
+                fail("expected ProgramValidationException");
+            } catch (ProgramValidationException e) {
+                assertTrue(e.getMessage(),
+                    e.getMessage().contains("configured analysis snapshots are not addressable"));
+            }
+            Program baseline =
+                ProgramLookupUtil.getValidatedProgram("/baselines/baseline-target.exe");
+            assertEquals("only the configured folder is policy",
+                "/baselines/baseline-target.exe", baseline.getDomainFile().getPathname());
+        } finally {
+            clearSnapshotConfig();
+        }
+    }
+
+    @Test
+    public void configuredSnapshotsOnlyHideTheRootFolderFromLookup() throws Exception {
+        useSnapshotFolder("snapshots");
+        saveToProject("target.exe");
+        saveToFolder("snapshots", "snapshot-target.exe");
+        saveToFolder("archive/snapshots", "archived-target.exe");
+        try {
+            try {
+                ProgramLookupUtil.getValidatedProgram(null);
+                fail("expected ProgramValidationException");
+            } catch (ProgramValidationException e) {
+                assertEquals("only the configured root folder is hidden from resolution",
+                    "programPath is required when several programs are open:\n"
+                        + "  - /archive/snapshots/archived-target.exe\n"
+                        + "  - /target.exe",
+                    e.getMessage());
+            }
+            try {
+                ProgramLookupUtil.getValidatedProgram("/missing.exe");
+                fail("expected ProgramValidationException");
+            } catch (ProgramValidationException e) {
+                assertTrue("a nested same-name folder stays in suggestions",
+                    e.getMessage().contains("  - /archive/snapshots/archived-target.exe"));
+                assertTrue(e.getMessage(), e.getMessage().contains("  - /target.exe"));
+                assertFalse("only the configured root folder is hidden from suggestions",
+                    e.getMessage().contains("/snapshots/snapshot-target.exe"));
+            }
+            Program nested =
+                ProgramLookupUtil.getValidatedProgram("/archive/snapshots/archived-target.exe");
+            assertEquals("/archive/snapshots/archived-target.exe",
+                nested.getDomainFile().getPathname());
+        } finally {
+            clearSnapshotConfig();
+        }
+    }
+
+    @Test
+    public void configuredSnapshotFolderAloneOffersNoProgram() throws Exception {
+        useSnapshotFolder("snapshots");
+        saveToFolder("snapshots", "snapshot-target.exe");
+        try {
+            ProgramLookupUtil.getValidatedProgram(null);
+            fail("expected ProgramValidationException");
+        } catch (ProgramValidationException e) {
+            assertEquals("No program is open. Import one with import-file.",
+                e.getMessage());
+        } finally {
+            clearSnapshotConfig();
+        }
+    }
+
+    private static void useSnapshotFolder(String folder) {
+        reva.plugin.ConfigManager config = mock(reva.plugin.ConfigManager.class);
+        when(config.getSnapshotFolder()).thenReturn(folder);
+        RevaInternalServiceRegistry.registerService(reva.plugin.ConfigManager.class, config);
+    }
+
+    private static void clearSnapshotConfig() {
+        RevaInternalServiceRegistry.unregisterService(reva.plugin.ConfigManager.class);
     }
 
     @Test

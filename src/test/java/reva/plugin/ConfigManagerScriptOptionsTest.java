@@ -17,6 +17,9 @@ package reva.plugin;
 
 import static org.junit.Assert.*;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
+
 import org.junit.Test;
 
 /**
@@ -50,5 +53,32 @@ public class ConfigManagerScriptOptionsTest {
         ConfigManager config = new ConfigManager();
         config.setScriptOutputCharLimit(131072);
         assertEquals(131072, config.getScriptOutputCharLimit());
+    }
+
+    @Test
+    public void snapshotFolderDefaultsToDisabled() {
+        ConfigManager config = new ConfigManager();
+        assertEquals("", config.getSnapshotFolder());
+    }
+
+    @Test
+    public void snapshotPrefixDefaultsToSnapshotDash() {
+        ConfigManager config = new ConfigManager();
+        assertEquals("snapshot-", config.getSnapshotPrefix());
+    }
+
+    @Test
+    public void snapshotOptionsLoadFromHeadlessProperties() throws Exception {
+        Path file = Files.createTempFile("reva-snapshot-options", ".properties");
+        try {
+            Files.writeString(file,
+                "reva.server.options.snapshot.folder=analysis-snapshots\n"
+                    + "reva.server.options.snapshot.prefix=snap-\n");
+            ConfigManager config = new ConfigManager(file.toFile());
+            assertEquals("analysis-snapshots", config.getSnapshotFolder());
+            assertEquals("snap-", config.getSnapshotPrefix());
+        } finally {
+            Files.deleteIfExists(file);
+        }
     }
 }

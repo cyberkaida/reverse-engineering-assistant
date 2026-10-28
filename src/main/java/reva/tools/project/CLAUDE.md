@@ -158,6 +158,25 @@ The result map produced by `AnalysisJobRunner` (returned either inline by `analy
 analysis" (`!program.isChanged()`). A persist failure is reported (`persisted:"failed"` +
 `persistError`) but is **not** fatal — analysis success is independent of persistence.
 
+The first successful analysis can also file a copy of the program under a configured
+root-level snapshot folder (`reva.util.ProjectSnapshots`, after the persist step so the
+copy holds the analyzed database). Snapshots are opt-in: `Snapshot Folder` (headless
+`reva.server.options.snapshot.folder`) defaults to empty, which creates nothing and
+filters nothing; `Snapshot Prefix` (headless `reva.server.options.snapshot.prefix`)
+defaults to `snapshot-`. Only a single root-level folder name enables the feature; blank,
+path-like, dot-valued, or nested names stay disabled. The copy is only made when the
+program is unchanged after persist (memory == disk); with unsaved changes
+(`persist:"none"`, refused or failed save) the job log says the snapshot was skipped — a
+stale copy would misrepresent the analyzed state. The snapshot is bookkeeping, never a
+tool result: the result map carries no snapshot path (the job log only says
+"Analysis snapshot created"), and while a folder is configured, `ProgramLookupUtil` and
+`list-project-files` (recursive and not) skip that root-level folder (matching each
+folder's full project path, so a nested same-name folder stays ordinary),
+`ProgramLookupUtil.getValidatedProgram` / `RevaProgramManager.getProgramByPath` refuse a
+path into it ("configured analysis snapshots are not addressable"), and import dedupe
+never reuses a snapshot. Empty configuration leaves every user folder ordinary and
+addressable.
+
 ### Persist semantics (`persist` param: `auto` | `save` | `none`)
 
 Backed by `reva.util.ProgramPersistenceUtil` (the shared save-or-checkin helper, also used by

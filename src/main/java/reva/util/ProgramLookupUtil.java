@@ -51,6 +51,17 @@ public class ProgramLookupUtil {
             return resolveSoleOpenProgram();
         }
 
+        // A configured analysis snapshot is bookkeeping, never a program the
+        // model may address; say so before the generic not-found suggestions,
+        // which would only repeat the snapshot's own path.
+        String snapshotFolder = ProjectSnapshots.configuredFolder();
+        if (!snapshotFolder.isEmpty()
+                && ProjectSnapshots.isSnapshotPath(programPath, snapshotFolder)) {
+            throw new ProgramValidationException(
+                "Invalid programPath: configured analysis snapshots are not addressable ("
+                    + programPath + "). Use the program itself.");
+        }
+
         // First try the standard lookup
         Program program = RevaProgramManager.getProgramByPath(programPath);
         if (program != null && !program.isClosed()) {
@@ -121,13 +132,21 @@ public class ProgramLookupUtil {
     }
 
     private static List<Program> openOnly(List<Program> programs) {
+        String snapshotFolder = ProjectSnapshots.configuredFolder();
         List<Program> open = new ArrayList<>();
         for (Program p : programs) {
-            if (p != null && !p.isClosed()) {
+            if (p != null && !p.isClosed() && isAddressable(p, snapshotFolder)) {
                 open.add(p);
             }
         }
         return open;
+    }
+
+    /** A configured analysis snapshot is never a program the model may resolve or be offered. */
+    private static boolean isAddressable(Program program, String snapshotFolder) {
+        return snapshotFolder.isEmpty()
+            || !ProjectSnapshots.isSnapshotPath(
+                RevaProgramManager.getCanonicalProgramPath(program), snapshotFolder);
     }
 
     private static ProgramValidationException severalPrograms(List<String> paths) {
@@ -148,7 +167,8 @@ public class ProgramLookupUtil {
             return paths;
         }
         try {
-            collectProgramPaths(project.getProjectData().getRootFolder(), paths);
+            collectProgramPaths(project.getProjectData().getRootFolder(), paths,
+                ProjectSnapshots.configuredFolder());
         } catch (Exception e) {
             Msg.debug(ProgramLookupUtil.class, "Error collecting project programs: " + e.getMessage());
         }
@@ -197,11 +217,12 @@ public class ProgramLookupUtil {
      */
     private static List<String> getAvailableProgramPaths() {
         List<String> paths = new ArrayList<>();
+        String snapshotFolder = ProjectSnapshots.configuredFolder();
 
         // First add all open programs
         List<Program> openPrograms = RevaProgramManager.getOpenPrograms();
         for (Program prog : openPrograms) {
-            if (prog != null && !prog.isClosed()) {
+            if (prog != null && !prog.isClosed() && isAddressable(prog, snapshotFolder)) {
                 paths.add(prog.getDomainFile().getPathname());
             }
         }
@@ -211,7 +232,7 @@ public class ProgramLookupUtil {
         if (project != null) {
             try {
                 DomainFolder rootFolder = project.getProjectData().getRootFolder();
-                collectProgramPaths(rootFolder, paths);
+                collectProgramPaths(rootFolder, paths, snapshotFolder);
             } catch (Exception e) {
                 Msg.debug(ProgramLookupUtil.class, "Error collecting project programs: " + e.getMessage());
             }
@@ -229,8 +250,10 @@ public class ProgramLookupUtil {
      * 
      * @param folder The folder to search
      * @param paths The list to add paths to
+     * @param snapshotFolder configured snapshot folder to skip, or {@code ""}
      */
-    private static void collectProgramPaths(DomainFolder folder, List<String> paths) {
+    private static void collectProgramPaths(DomainFolder folder, List<String> paths,
+            String snapshotFolder) {
         // Add programs in this folder
         for (DomainFile file : folder.getFiles()) {
             if ("Program".equals(file.getContentType())) {
@@ -240,7 +263,11 @@ public class ProgramLookupUtil {
 
         // Recurse into subfolders
         for (DomainFolder subfolder : folder.getFolders()) {
-            collectProgramPaths(subfolder, paths);
+            if (!snapshotFolder.isEmpty()
+                    && ProjectSnapshots.isSnapshotPath(subfolder.getPathname(), snapshotFolder)) {
+                continue;
+            }
+            collectProgramPaths(subfolder, paths, snapshotFolder);
         }
     }
 

@@ -165,9 +165,17 @@ for (int type : commentTypes) {
 
 All comment modifications must occur within Ghidra transactions:
 
+**Busy program**: write tools wait up to 30 s for an in-flight operation; a still-busy
+result carries `busy: true` — wait for that operation to finish and retry
+(`beginTransaction`/`createBusyResult` in `AbstractToolProvider`).
+
 ### Standard Transaction Pattern
 ```java
-int transactionId = program.startTransaction("Operation Description");
+TransactionStart start = beginTransaction(program, "Operation Description");
+if (!start.started()) {
+    return createBusyResult(start.reason());
+}
+int transactionId = start.id();
 try {
     // Perform comment operations
     listing.setComment(address, commentType, comment);

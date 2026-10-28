@@ -98,7 +98,11 @@ public class CommentToolProvider extends AbstractToolProvider {
             followWrite(program, address);
 
             try {
-                int transactionId = program.startTransaction("Set Comment");
+                TransactionStart start = beginTransaction(program, "Set Comment");
+                if (!start.started()) {
+                    return createBusyResult(start.reason());
+                }
+                int transactionId = start.id();
                 try {
                     Listing listing = program.getListing();
                     listing.setComment(address, commentType, comment);
@@ -256,7 +260,11 @@ public class CommentToolProvider extends AbstractToolProvider {
             followWrite(program, address);
 
             try {
-                int transactionId = program.startTransaction("Remove Comment");
+                TransactionStart start = beginTransaction(program, "Remove Comment");
+                if (!start.started()) {
+                    return createBusyResult(start.reason());
+                }
+                int transactionId = start.id();
                 try {
                     Listing listing = program.getListing();
                     listing.setComment(address, commentType, null);

@@ -136,7 +136,11 @@ public class DataToolProvider extends AbstractToolProvider {
                 }
 
                 // Start a transaction to apply the data type
-                int transactionID = program.startTransaction("Apply Data Type");
+                TransactionStart start = beginTransaction(program, "Apply Data Type");
+                if (!start.started()) {
+                    return createBusyResult(start.reason());
+                }
+                int transactionID = start.id();
                 boolean success = false;
 
                 try {
@@ -221,7 +225,11 @@ public class DataToolProvider extends AbstractToolProvider {
             followWrite(program, address);
 
             // Start a transaction to create the label
-            int transactionID = program.startTransaction("Create Label");
+            TransactionStart start = beginTransaction(program, "Create Label");
+            if (!start.started()) {
+                return createBusyResult(start.reason());
+            }
+            int transactionID = start.id();
             boolean success = false;
 
             try {

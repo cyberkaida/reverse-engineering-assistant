@@ -480,6 +480,9 @@ public class ProjectToolProvider extends AbstractToolProvider {
                 ". Ghidra is in an unexpected state — analysis cannot proceed.");
         }
         mgr.initializeOptions();
+        // Not beginTransaction: this call triggers the post-import analysis itself, and
+        // right after an import the program can legitimately be mid-analysis or
+        // transactional. Gating it on the model-writer wait would skip the analysis.
         int tx = program.startTransaction("ReVa: Auto Analysis (post-import)");
         try {
             if (!GhidraProgramUtilities.isAnalyzed(program)) {
@@ -1392,7 +1395,11 @@ public class ProjectToolProvider extends AbstractToolProvider {
                 String oldLanguageId = program.getLanguage().getLanguageID().getIdAsString();
 
                 // Change the processor
-                int transactionID = program.startTransaction("Change processor architecture");
+                TransactionStart start = beginTransaction(program, "Change processor architecture");
+                if (!start.started()) {
+                    return createBusyResult(start.reason());
+                }
+                int transactionID = start.id();
                 try {
                     program.setLanguage(lcsPair.getLanguage(), lcsPair.getCompilerSpecID(), false, TaskMonitor.DUMMY);
                     program.endTransaction(transactionID, true);

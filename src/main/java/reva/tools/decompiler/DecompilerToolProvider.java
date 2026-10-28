@@ -1144,7 +1144,11 @@ public class DecompilerToolProvider extends AbstractToolProvider {
                 beforeDecompilation = attempt.results().getDecompiledFunction().getC();
 
                 // Process variable mappings
-                int transactionId = program.startTransaction("Rename Variables");
+                TransactionStart start = beginTransaction(program, "Rename Variables");
+                if (!start.started()) {
+                    return createBusyResult(start.reason());
+                }
+                int transactionId = start.id();
                 try {
                     HighFunction highFunction = attempt.results().getHighFunction();
 
@@ -1286,7 +1290,11 @@ public class DecompilerToolProvider extends AbstractToolProvider {
                 beforeDecompilation = attempt.results().getDecompiledFunction().getC();
 
                 // Process variable mappings
-                int transactionId = program.startTransaction("Change Variable Data Types");
+                TransactionStart start = beginTransaction(program, "Change Variable Data Types");
+                if (!start.started()) {
+                    return createBusyResult(start.reason());
+                }
+                int transactionId = start.id();
                 boolean transactionSuccess = false;
                 try {
                     HighFunction highFunction = attempt.results().getHighFunction();
@@ -1933,7 +1941,12 @@ public class DecompilerToolProvider extends AbstractToolProvider {
                 followWrite(program, targetAddress);
 
                 // Set the comment
-                int transactionId = program.startTransaction("Set Decompilation Comment");
+                TransactionStart start =
+                    beginTransaction(program, "Set Decompilation Comment");
+                if (!start.started()) {
+                    return createBusyResult(start.reason());
+                }
+                int transactionId = start.id();
                 try {
                     Listing listing = program.getListing();
                     listing.setComment(targetAddress, commentType, comment);

@@ -89,7 +89,11 @@ public class StructureToolProvider extends AbstractToolProvider {
                 DataTypeManager dtm = program.getDataTypeManager();
                 CParser cparser = newParser(program);
 
-                int txId = program.startTransaction("Parse C Structure");
+                TransactionStart start = beginTransaction(program, "Parse C Structure");
+                if (!start.started()) {
+                    return createBusyResult(start.reason());
+                }
+                int txId = start.id();
                 try {
                     DataType dt = cparser.parse(cDefinition);
                     if (dt == null) {
@@ -414,7 +418,11 @@ public class StructureToolProvider extends AbstractToolProvider {
                     return createErrorResult("Address is not in valid memory: " + AddressUtil.formatAddress(address));
                 }
 
-                int txId = program.startTransaction("Apply Structure");
+                TransactionStart start = beginTransaction(program, "Apply Structure");
+                if (!start.started()) {
+                    return createBusyResult(start.reason());
+                }
+                int txId = start.id();
                 try {
                     Listing listing = program.getListing();
 
@@ -543,7 +551,11 @@ public class StructureToolProvider extends AbstractToolProvider {
                 }
 
                 // Proceed with deletion
-                int txId = program.startTransaction("Delete Structure");
+                TransactionStart start = beginTransaction(program, "Delete Structure");
+                if (!start.started()) {
+                    return createBusyResult(start.reason());
+                }
+                int txId = start.id();
                 try {
                     boolean removed = dtm.remove(dt);
 
@@ -596,7 +608,11 @@ public class StructureToolProvider extends AbstractToolProvider {
                 DataTypeManager dtm = program.getDataTypeManager();
                 CParser parser = newParser(program);
 
-                int txId = program.startTransaction("Parse C Header");
+                TransactionStart start = beginTransaction(program, "Parse C Header");
+                if (!start.started()) {
+                    return createBusyResult(start.reason());
+                }
+                int txId = start.id();
                 List<Map<String, Object>> createdTypes = new ArrayList<>();
 
                 try {

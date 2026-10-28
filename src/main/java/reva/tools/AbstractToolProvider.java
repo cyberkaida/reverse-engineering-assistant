@@ -15,6 +15,8 @@
  */
 package reva.tools;
 
+import java.util.ConcurrentModificationException;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.BooleanSupplier;
@@ -23,6 +25,7 @@ import java.util.function.Supplier;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import ghidra.framework.model.DomainObjectLockedException;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.FunctionIterator;
@@ -130,6 +133,101 @@ public abstract class AbstractToolProvider implements ToolProvider {
                 .build();
         } catch (JsonProcessingException e) {
             return createErrorResult("Error serializing result to JSON: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Message of a busy result: names the operation that holds the program and
+     * tells the caller to wait rather than retry blindly.
+     * @param reason why the program cannot take a transaction right now
+     * @return the human-readable busy message
+     */
+    protected String busyMessage(String reason) {
+        return "Program is busy: " + reason
+            + ". Wait for the in-flight operation to finish, then call this tool again.";
+    }
+
+    /**
+     * JSON body of a busy result, for callers that report through a result map
+     * (background jobs) instead of an MCP result.
+     * @param reason why the program cannot take a transaction right now
+     * @return an ordered map with {@code busy: true} and the busy message
+     */
+    protected Map<String, Object> createBusyPayload(String reason) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("busy", true);
+        payload.put("error", busyMessage(reason));
+        return payload;
+    }
+
+    /**
+     * Create an error result for a write call that found the program busy after
+     * waiting. Error results here are plain text, so the JSON object is the text
+     * itself: a caller can detect {@code "busy": true} and wait instead of
+     * treating it as an unrecoverable tool failure.
+     * @param reason why the program cannot take a transaction right now
+     * @return CallToolResult with error flag set and the busy JSON as its text
+     */
+    protected McpSchema.CallToolResult createBusyResult(String reason) {
+        try {
+            return createErrorResult(JSON.writeValueAsString(createBusyPayload(reason)));
+        }
+        catch (JsonProcessingException e) {
+            return createErrorResult(busyMessage(reason));
+        }
+    }
+
+    /**
+     * Wait up to the default deadline (30 s) for the program to accept a
+     * database modification. {@link #beginTransaction} uses this; a call site
+     * that manages its own transaction without one uses it directly.
+     * @param program the program to modify
+     * @return the last availability outcome: modifiable, or still busy
+     */
+    protected DatabaseAvailability.WaitOutcome awaitModifiable(Program program) {
+        return DatabaseAvailability.awaitModifiable(program);
+    }
+
+    /**
+     * Wait for the program to become modifiable, then open a transaction.
+     * <p>Two write races survive the wait and are reported as busy as well: a
+     * save operation holding the program lock ({@link DomainObjectLockedException}
+     * is only observable by attempting the transaction) and another writer
+     * opening a transaction between the wait and the call. Never call this from
+     * inside an open transaction — entries do not nest, they join one unit.
+     * @param program the program to modify
+     * @param description transaction description, shown in the undo stack
+     * @return the open transaction id, or the reason the program is busy
+     */
+    protected TransactionStart beginTransaction(Program program, String description) {
+        DatabaseAvailability.WaitOutcome outcome = awaitModifiable(program);
+        if (!outcome.modifiable()) {
+            return new TransactionStart(-1, outcome.reason());
+        }
+        try {
+            return new TransactionStart(program.startTransaction(description), null);
+        }
+        catch (DomainObjectLockedException e) {
+            return new TransactionStart(-1, "a save operation holds the program lock");
+        }
+        catch (ConcurrentModificationException e) {
+            return new TransactionStart(-1, "another writer opened a transaction concurrently");
+        }
+    }
+
+    /**
+     * Outcome of {@link #beginTransaction}: either an open transaction id or the
+     * reason the program is busy.
+     * @param id the id to pass to {@code endTransaction}; -1 when busy
+     * @param reason why the program is busy, or null when the transaction opened
+     */
+    protected record TransactionStart(int id, String reason) {
+        /**
+         * Whether a transaction was opened.
+         * @return true if {@link #id} is usable
+         */
+        public boolean started() {
+            return reason == null;
         }
     }
 

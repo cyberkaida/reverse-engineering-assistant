@@ -1146,7 +1146,11 @@ public class FunctionToolProvider extends AbstractToolProvider {
                     return createErrorResult("Function signature parsing was cancelled");
                 }
 
-                int txId = program.startTransaction("Set Function Prototype");
+                TransactionStart start = beginTransaction(program, "Set Function Prototype");
+                if (!start.started()) {
+                    return createBusyResult(start.reason());
+                }
+                int txId = start.id();
                 try {
                     Function function = existingFunction;
 
@@ -1548,7 +1552,11 @@ public class FunctionToolProvider extends AbstractToolProvider {
             followWrite(program, address);
 
             // Create the function using CreateFunctionCmd
-            int txId = program.startTransaction("Create Function");
+            TransactionStart start = beginTransaction(program, "Create Function");
+            if (!start.started()) {
+                return createBusyResult(start.reason());
+            }
+            int txId = start.id();
             try {
                 // Seed disassembly if the address has not been disassembled yet.
                 // Some imports (e.g. stripped relocatable objects) never auto-disassemble
@@ -1728,7 +1736,11 @@ public class FunctionToolProvider extends AbstractToolProvider {
             }
 
             // Modify tags within a transaction
-            int txId = program.startTransaction("Update function tags");
+            TransactionStart start = beginTransaction(program, "Update function tags");
+            if (!start.started()) {
+                return createBusyResult(start.reason());
+            }
+            int txId = start.id();
             boolean committed = false;
             try {
                 if ("set".equals(mode)) {

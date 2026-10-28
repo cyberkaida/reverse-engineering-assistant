@@ -755,8 +755,17 @@ public class DiffToolProvider extends AbstractToolProvider {
         List<Map<String, Object>> skipped = new ArrayList<>();
         List<Map<String, Object>> proposed = new ArrayList<>();
         Program dest = ds.destinationProgram;
+        // Only the destination program's transaction waits for the database: the
+        // VersionTracking session is its own domain object, not the program.
+        TransactionStart destTx = beginTransaction(dest, "ReVa diff transfer markup");
+        if (!destTx.started()) {
+            Map<String, Object> busy = new LinkedHashMap<>();
+            busy.put("success", false);
+            busy.putAll(createBusyPayload(destTx.reason()));
+            return busy;
+        }
         int sTx = ds.vtSession.startTransaction("ReVa diff transfer markup");
-        int pTx = dest.startTransaction("ReVa diff transfer markup");
+        int pTx = destTx.id();
         boolean ok = false;
         try {
             for (ghidra.feature.vt.api.main.VTMatch m : best.values()) {
@@ -905,8 +914,12 @@ public class DiffToolProvider extends AbstractToolProvider {
             }
 
             Program dest = ds.destinationProgram;
+            TransactionStart destTx = beginTransaction(dest, "ReVa diff apply single match");
+            if (!destTx.started()) {
+                return createBusyResult(destTx.reason());
+            }
             int sTx = ds.vtSession.startTransaction("ReVa diff apply single match");
-            int pTx = dest.startTransaction("ReVa diff apply single match");
+            int pTx = destTx.id();
             boolean applied = false;
             boolean ok = false;
             try {

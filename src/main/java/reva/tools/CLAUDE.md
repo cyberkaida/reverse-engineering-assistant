@@ -262,9 +262,13 @@ int timeout = configManager.getDecompilerTimeoutSeconds();
 
 ### Transaction Management
 
-**Use transactions for all program modifications**:
+**Write tools wait for the program, then open a transaction** — use `beginTransaction`, never `program.startTransaction` directly:
 ```java
-int transactionID = program.startTransaction("Tool operation description");
+TransactionStart start = beginTransaction(program, "Tool operation description");
+if (!start.started()) {
+    return createBusyResult(start.reason());
+}
+int transactionID = start.id();
 try {
     // Perform modifications
     program.endTransaction(transactionID, true);
@@ -273,6 +277,19 @@ try {
     throw e;
 }
 ```
+
+**Busy program: wait, then report** — `beginTransaction` waits up to 30 s
+(`DatabaseAvailability.DEFAULT_DEADLINE_MS`) for an in-flight writer (another tool's
+transaction, a background `analyze-program` job, auto-analysis) and maps the two races the
+wait cannot see — the save lock (`DomainObjectLockedException`) and a writer that starts
+between the wait and the call (`ConcurrentModificationException`) — to the same outcome.
+A still-busy outcome becomes `createBusyResult(reason)`: an error result whose text is
+`{"busy": true, "error": "Program is busy: <reason>. Wait for the in-flight operation to
+finish, then call this tool again."}`. Callers treat `busy: true` as "wait and retry", not
+as a failure of the request. Helpers that report through a result map (background jobs) use
+`createBusyPayload(reason)` for the same fields, and `awaitModifiable(program)` when they
+manage their own transaction. The helpers live in `AbstractToolProvider`; never call
+`program.startTransaction` directly in a provider.
 
 ### Decompiler Tool Patterns
 

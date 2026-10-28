@@ -253,9 +253,18 @@ for (int i = 0; i < paramDefs.length; i++) {
 If true, custom storage must be enabled before modification.
 
 ### Transaction-Safe Prototype Updates
+
+**Busy program**: write tools wait up to 30 s for an in-flight operation; a still-busy
+result carries `busy: true` — wait for that operation to finish and retry
+(`beginTransaction`/`createBusyResult` in `AbstractToolProvider`).
+
 **Always wrap function modifications in transactions**:
 ```java
-int txId = program.startTransaction("Set function prototype");
+TransactionStart start = beginTransaction(program, "Set function prototype");
+if (!start.started()) {
+    return createBusyResult(start.reason());
+}
+int txId = start.id();
 try {
     // Update function name if different
     if (!function.getName().equals(functionDef.getName())) {

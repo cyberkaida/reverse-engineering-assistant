@@ -16,9 +16,11 @@
 package reva.util;
 
 import java.io.IOException;
+import java.util.concurrent.TimeUnit;
 
 import ghidra.framework.data.DefaultCheckinHandler;
 import ghidra.framework.model.DomainFile;
+import ghidra.framework.model.TransactionInfo;
 import ghidra.program.model.listing.Program;
 import ghidra.util.exception.CancelledException;
 import ghidra.util.task.TaskMonitor;
@@ -29,6 +31,11 @@ public final class ProgramPersistenceUtil {
 
     public enum PersistMode { AUTO, SAVE, NONE }
     public enum PersistAction { CHECKIN, ADD_TO_VC, SAVE, SKIP }
+
+    /** How long {@link #persist} waits for an open transaction to end before giving up. */
+    public static final long TRANSACTION_WAIT_MS = 10_000;
+    /** How often {@link #awaitNoTransaction} rechecks for an open transaction. */
+    public static final long TRANSACTION_POLL_MS = 100;
 
     public static final class PersistResult {
         public final PersistAction action;   // strongest step that SUCCEEDED
@@ -65,15 +72,61 @@ public final class ProgramPersistenceUtil {
         return PersistAction.SAVE;
     }
 
+    /** Wait for any open transaction on the program to end, polling every {@code pollMs}.
+     *  Returns true as soon as no transaction is open, false when one is still open after
+     *  {@code timeoutMs}. An interrupt restores the interrupt flag and reports the current
+     *  state instead of waiting further. */
+    public static boolean awaitNoTransaction(Program program, long timeoutMs, long pollMs) {
+        long deadlineNanos = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs);
+        while (true) {
+            if (program.getCurrentTransactionInfo() == null) {
+                return true;
+            }
+            long remainingNanos = deadlineNanos - System.nanoTime();
+            if (remainingNanos <= 0) {
+                return false;
+            }
+            long sleepMs = Math.min(pollMs, TimeUnit.NANOSECONDS.toMillis(remainingNanos));
+            try {
+                Thread.sleep(Math.max(1, sleepMs));
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return program.getCurrentTransactionInfo() == null;
+            }
+        }
+    }
+
+    /** Return a SKIP result when a transaction stays open past the wait, else null.
+     *  Package-visible so tests can exercise the refusal without the production wait. */
+    static PersistResult refuseIfTransactionOpen(Program program, long timeoutMs, long pollMs) {
+        if (awaitNoTransaction(program, timeoutMs, pollMs)) {
+            return null;
+        }
+        TransactionInfo tx = program.getCurrentTransactionInfo();
+        String description = tx != null ? tx.getDescription() : null;
+        String name = description != null ? description : "unnamed";
+        return new PersistResult(PersistAction.SKIP, false,
+            "a transaction is still open after waiting " + timeoutMs + " ms (" + name
+                + "): a script or another tool call is still writing; retry when it finishes");
+    }
+
     /** Save the program, then checkin/addToVC when AUTO and the file is versioned.
-     *  Save runs first and is reported even if a subsequent checkin fails. Caller must
-     *  ensure NO transaction is open and run this OFF the Swing thread. */
+     *  Save runs first and is reported even if a subsequent checkin fails. Before
+     *  saving, waits up to {@link #TRANSACTION_WAIT_MS} for an open transaction to
+     *  end; if one is still open, nothing is saved and the result is SKIP with an
+     *  error. Run this OFF the Swing thread. */
     public static PersistResult persist(Program program, PersistMode mode, String message,
             boolean keepCheckedOut, TaskMonitor monitor) throws IOException, CancelledException {
         DomainFile file = program.getDomainFile();
         PersistAction planned = selectAction(file, mode);
         if (planned == PersistAction.SKIP) {
             return new PersistResult(PersistAction.SKIP, false, null);
+        }
+
+        PersistResult transactionOpen =
+            refuseIfTransactionOpen(program, TRANSACTION_WAIT_MS, TRANSACTION_POLL_MS);
+        if (transactionOpen != null) {
+            return transactionOpen;
         }
 
         program.save(message, monitor);   // always save first → local durability

@@ -18,9 +18,17 @@ The `reva.tools.bookmarks` package provides MCP tools for bookmark management in
 
 ### Bookmark Creation and Updates
 
+**Busy program**: write tools wait up to 30 s for an in-flight operation, then return a
+result carrying `busy: true` — wait for that operation to finish and retry
+(`beginTransaction`/`createBusyResult` in `AbstractToolProvider`).
+
 **Always use transactions for bookmark modifications**:
 ```java
-int transactionId = program.startTransaction("Set Bookmark");
+TransactionStart start = beginTransaction(program, "Set Bookmark");
+if (!start.started()) {
+    return createBusyResult(start.reason());
+}
+int transactionId = start.id();
 try {
     BookmarkManager bookmarkMgr = program.getBookmarkManager();
     

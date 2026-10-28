@@ -166,6 +166,9 @@ args.put("force", true);  // Override safety check
 
 ### Memory Safety
 - Always use transactions for structure modifications
+- **Busy program**: write tools wait up to 30 s for an in-flight operation; a still-busy
+  result carries `busy: true` — wait for that operation to finish and retry
+  (`beginTransaction`/`createBusyResult` in `AbstractToolProvider`)
 - Validate memory addresses before applying structures
 - Use `DataTypeConflictHandler.REPLACE_HANDLER` for consistent updates
 

@@ -224,9 +224,17 @@ if (newDataType == null) {
 
 ## Transaction Management
 
+**Busy program**: variable and comment writes wait up to 30 s for an in-flight operation; a
+still-busy result carries `busy: true` — wait for that operation to finish and retry
+(`beginTransaction`/`createBusyResult` in `AbstractToolProvider`).
+
 **All variable modifications require transactions**:
 ```java
-int transactionId = program.startTransaction("Rename Variables");
+TransactionStart start = beginTransaction(program, "Rename Variables");
+if (!start.started()) {
+    return createBusyResult(start.reason());
+}
+int transactionId = start.id();
 try {
     // Perform variable modifications
     int renamedCount = processAllVariables(highFunction, processor, toolName);

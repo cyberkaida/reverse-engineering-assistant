@@ -148,9 +148,17 @@ try {
 
 ## Transaction Management for Data Modifications
 
+**Busy program**: write tools wait up to 30 s for an in-flight operation; a still-busy
+result carries `busy: true` — wait for that operation to finish and retry
+(`beginTransaction`/`createBusyResult` in `AbstractToolProvider`).
+
 ### Safe Data Modification Pattern
 ```java
-int transactionID = program.startTransaction("Operation Description");
+TransactionStart start = beginTransaction(program, "Operation Description");
+if (!start.started()) {
+    return createBusyResult(start.reason());
+}
+int transactionID = start.id();
 boolean success = false;
 
 try {
@@ -181,7 +189,11 @@ try {
 
 ### Label Creation Pattern
 ```java
-int transactionID = program.startTransaction("Create Label");
+TransactionStart start = beginTransaction(program, "Create Label");
+if (!start.started()) {
+    return createBusyResult(start.reason());
+}
+int transactionID = start.id();
 boolean success = false;
 
 try {

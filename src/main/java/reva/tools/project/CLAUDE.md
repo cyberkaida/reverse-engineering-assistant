@@ -152,7 +152,7 @@ The result map produced by `AnalysisJobRunner` (returned either inline by `analy
 | `messages`       | Analyzer message-log lines (present only when non-empty). |
 | `persisted`      | `checkin` \| `add_to_vc` \| `save` \| `skipped` \| `failed`. |
 | `saved`          | Whether a local save occurred. |
-| `persistError`   | Present only when checkin/add-to-VC failed after a successful local save. |
+| `persistError`   | Present when the save was refused (an open transaction) or checkin/add-to-VC failed after a successful local save. |
 
 `persisted:"skipped"` covers **both** `persist:"none"` **and** "program had no changes since the
 analysis" (`!program.isChanged()`). A persist failure is reported (`persisted:"failed"` +
@@ -162,6 +162,10 @@ analysis" (`!program.isChanged()`). A persist failure is reported (`persisted:"f
 
 Backed by `reva.util.ProgramPersistenceUtil` (the shared save-or-checkin helper, also used by
 `checkin-program`):
+
+Before saving, both callers wait up to 10 s for an open transaction (e.g. a concurrent
+`run-script`) to end; on timeout they skip the save and report an error naming the blocking
+transaction instead of throwing.
 
 | Mode            | Behavior |
 |-----------------|----------|
@@ -206,6 +210,14 @@ already-finished job is a no-op (`alreadyTerminal:true`).
 - **`AnalyzeRequest`** — the immutable parameter bundle (program, enable/disable analyzers, `forceFullAnalysis`, `timeoutSeconds`, `persistMode`).
 
 ## Critical Implementation Patterns
+
+### Write Tools Wait for the Program
+
+`change-processor` and the post-import auto-analysis open their transaction with
+`AbstractToolProvider.beginTransaction`: write tools wait up to 30 s for an in-flight
+operation, and a still-busy `change-processor` returns a result carrying `busy: true` —
+wait for that operation to finish and retry. `import-file` has no single busy result, so a
+still-busy program is reported per file in its `errors` list.
 
 ### Project Access Pattern
 

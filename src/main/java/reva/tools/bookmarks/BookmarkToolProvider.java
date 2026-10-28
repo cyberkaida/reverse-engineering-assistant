@@ -85,7 +85,11 @@ public class BookmarkToolProvider extends AbstractToolProvider {
             followWrite(program, address);
 
             try {
-                int transactionId = program.startTransaction("Set Bookmark");
+                TransactionStart start = beginTransaction(program, "Set Bookmark");
+                if (!start.started()) {
+                    return createBusyResult(start.reason());
+                }
+                int transactionId = start.id();
                 try {
                     BookmarkManager bookmarkMgr = program.getBookmarkManager();
 
@@ -261,7 +265,11 @@ public class BookmarkToolProvider extends AbstractToolProvider {
             followWrite(program, address);
 
             try {
-                int transactionId = program.startTransaction("Remove Bookmark");
+                TransactionStart start = beginTransaction(program, "Remove Bookmark");
+                if (!start.started()) {
+                    return createBusyResult(start.reason());
+                }
+                int transactionId = start.id();
                 try {
                     BookmarkManager bookmarkMgr = program.getBookmarkManager();
                     Bookmark bookmark = bookmarkMgr.getBookmark(address, type, category);

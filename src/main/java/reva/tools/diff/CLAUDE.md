@@ -83,7 +83,7 @@ Key behavioral notes:
 
 ## Read / Write Split
 
-The read tools (`summary`, `list-functions`, `function`, `strings`, `data`, `list-sessions`) never mutate program state. The write tools (`transfer-markup`, `apply-match`, and `delete-session` for the session store) do. Both write tools open **two** transactions — one on the `VTSession` and one on the destination `Program` — and end both together in a `finally`, committing only when the work completed without error. `VersionTrackingUtil.acceptAndApplyMarkup()` accepts the association and runs an `ApplyMarkupItemTask`; the caller must already hold those transactions.
+The read tools (`summary`, `list-functions`, `function`, `strings`, `data`, `list-sessions`) never mutate program state. The write tools (`transfer-markup`, `apply-match`, and `delete-session` for the session store) do. Both write tools open **two** transactions — one on the `VTSession` and one on the destination `Program` — and end both together in a `finally`, committing only when the work completed without error. `VersionTrackingUtil.acceptAndApplyMarkup()` accepts the association and runs an `ApplyMarkupItemTask`; the caller must already hold those transactions. Only the destination `Program` transaction waits: write tools wait up to 30 s for an in-flight operation, and a still-busy `apply-match` returns a result carrying `busy: true` while `transfer-markup`'s background job reports the same fields (`success: false`, `busy: true`) — wait for that operation to finish and retry.
 
 ## Typed Change Profile (how changed/identical is decided)
 

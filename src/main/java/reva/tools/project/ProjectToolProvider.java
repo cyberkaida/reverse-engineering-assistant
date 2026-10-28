@@ -16,12 +16,17 @@
 package reva.tools.project;
 
 import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
+import generic.hash.HashUtilities;
 import ghidra.app.plugin.core.analysis.AutoAnalysisManager;
 import ghidra.app.services.Analyzer;
 import ghidra.framework.model.DomainObject;
@@ -1503,7 +1508,13 @@ public class ProjectToolProvider extends AbstractToolProvider {
                 + "By default this does NOT run auto-analysis; the response flags imported programs "
                 + "with analyzed=false and analysisRecommended=true so callers know to follow up with "
                 + "the analyze-program tool. Set analyzeAfterImport=true to bundle analysis into "
-                + "the import call (slower, no per-analyzer progress).")
+                + "the import call (slower, no per-analyzer progress). "
+                + "Importing a file whose exact bytes are already in the project under the same "
+                + "name reuses that program instead of creating a duplicate copy: its result entry "
+                + "has alreadyImported=true and the existing programPath, and analyzed=false because "
+                + "reuse neither re-analyzes nor applies analyzeAfterImport or enableVersionControl "
+                + "— check that field and run analyze-program only if the program has not been "
+                + "analyzed yet. A same-named file with different bytes is imported as a new program.")
             .inputSchema(createSchema(properties, required))
             .build();
 
@@ -1579,6 +1590,7 @@ public class ProjectToolProvider extends AbstractToolProvider {
                 // Track imported files with accurate DomainFile references
                 List<DomainFile> importedDomainFiles = new ArrayList<>();
                 List<String> importedProgramPaths = new ArrayList<>();
+                List<String> alreadyImportedPaths = new ArrayList<>();
                 List<Map<String, Object>> detailedErrors = new ArrayList<>();
 
                 // Progress tracking
@@ -1652,6 +1664,31 @@ public class ProjectToolProvider extends AbstractToolProvider {
                             // Sanitize the filename to replace invalid characters with underscores
                             String sanitizedPath = fixupProjectFilename(pathStr);
 
+                            // Reuse a program that is already in the project. Agents re-import
+                            // the same sample after transient read failures, and a second import
+                            // of it would silently create a "<name>.N" duplicate that confuses
+                            // later tool calls and grading. The existing program is already
+                            // saved, so it stays out of importedDomainFiles and is neither
+                            // re-analyzed nor re-added to version control.
+                            DomainFile existingProgram = findAlreadyImportedProgram(project,
+                                byteProvider, importMonitor,
+                                config.getPreferredFileName(), lastPathElement(sanitizedPath));
+                            if (existingProgram != null) {
+                                String existingPath = existingProgram.getPathname();
+                                alreadyImportedPaths.add(existingPath);
+                                importedProgramPaths.add(existingPath);
+                                Msg.info(this, "Already imported, reusing: " + existingPath);
+                                processedFiles++;
+                                if (exchange != null) {
+                                    exchange.progressNotification(new McpSchema.ProgressNotification(
+                                        progressToken, (double) processedFiles, (double) totalFiles,
+                                        String.format("Processed %d/%d sources (%d files imported, %d already imported): %s",
+                                            processedFiles, totalFiles, importedDomainFiles.size(),
+                                            alreadyImportedPaths.size(), config.getPreferredFileName())));
+                                }
+                                continue;
+                            }
+
                             // Create settings record for Ghidra 12.0+ API
                             MessageLog log = new MessageLog();
                             Loader.ImporterSettings settings = new Loader.ImporterSettings(
@@ -1718,7 +1755,8 @@ public class ProjectToolProvider extends AbstractToolProvider {
                 }
 
                 // Check for timeout
-                if (importMonitor.isCancelled() && importedDomainFiles.isEmpty()) {
+                if (importMonitor.isCancelled() && importedDomainFiles.isEmpty()
+                        && alreadyImportedPaths.isEmpty()) {
                     return createErrorResult("Import timed out after " + importTimeoutSeconds + " seconds. " +
                         "Try importing fewer files or increase timeout in ReVa configuration.");
                 }
@@ -1838,12 +1876,17 @@ public class ProjectToolProvider extends AbstractToolProvider {
 
                 // Create result data (omit echo-back of input config to keep response concise)
                 Map<String, Object> result = new HashMap<>();
-                result.put("success", !importedDomainFiles.isEmpty());
+                result.put("success", !importedDomainFiles.isEmpty() || !alreadyImportedPaths.isEmpty());
                 result.put("importedFrom", path);
                 result.put("destinationFolder", destinationFolder);
                 result.put("filesDiscovered", batchInfo.getTotalCount());
                 result.put("filesImported", importedDomainFiles.size());
                 result.put("importedPrograms", importedProgramPaths);
+
+                if (!alreadyImportedPaths.isEmpty()) {
+                    result.put("filesAlreadyImported", alreadyImportedPaths.size());
+                    result.put("alreadyImportedPrograms", alreadyImportedPaths);
+                }
 
                 if (enableVersionControl && !versionedFiles.isEmpty()) {
                     result.put("filesAddedToVersionControl", versionedFiles.size());
@@ -1859,17 +1902,9 @@ public class ProjectToolProvider extends AbstractToolProvider {
                 if (!importedProgramPaths.isEmpty()) {
                     List<Map<String, Object>> programs = new ArrayList<>();
                     for (String importedPath : importedProgramPaths) {
-                        Map<String, Object> entry = new LinkedHashMap<>();
-                        entry.put("programPath", importedPath);
-                        boolean wasAnalyzed = analyzedFiles.contains(importedPath);
-                        entry.put("analyzed", wasAnalyzed);
-                        if (!wasAnalyzed) {
-                            entry.put("analysisRecommended", true);
-                            entry.put("nextSteps",
-                                "Call analyze-program with programPath '" + importedPath
-                                + "' to populate functions, strings, and references.");
-                        }
-                        programs.add(entry);
+                        programs.add(importedProgramEntry(importedPath,
+                            analyzedFiles.contains(importedPath),
+                            alreadyImportedPaths.contains(importedPath)));
                     }
                     result.put("programs", programs);
                 }
@@ -1899,6 +1934,9 @@ public class ProjectToolProvider extends AbstractToolProvider {
                 // Build completion message
                 String message = "Import completed. " + importedDomainFiles.size() + " of " +
                     batchInfo.getTotalCount() + " files imported";
+                if (!alreadyImportedPaths.isEmpty()) {
+                    message += ", " + alreadyImportedPaths.size() + " already in the project (reused)";
+                }
                 if (analyzeAfterImport && analyzedFiles.size() > 0) {
                     message += ", " + analyzedFiles.size() + " analyzed";
                 }
@@ -1930,6 +1968,160 @@ public class ProjectToolProvider extends AbstractToolProvider {
                 return createErrorResult("Import failed: " + e.getMessage());
             }
         });
+    }
+
+    /** Note on the result entry of a source file whose program was already in the project. */
+    static final String ALREADY_IMPORTED_NOTE =
+        "program already in the project; reusing it instead of creating a duplicate";
+
+    /** Project folder for tool-created snapshots; never a source of reused programs. */
+    private static final String BASELINE_FOLDER_NAME = "baselines";
+
+    /**
+     * Executable SHA-256 of the given bytes, in the same lowercase hex form Ghidra
+     * records in Program Info ({@code AbstractProgramLoader.setProgramProperties}), so
+     * a {@code Program.getExecutableSHA256()} can be compared against it directly.
+     *
+     * @param byteProvider the bytes about to be imported
+     * @return the SHA-256 of the provider's full contents
+     * @throws IOException if the provider cannot be read
+     */
+    static String executableSha256(ByteProvider byteProvider) throws IOException {
+        try (InputStream in = byteProvider.getInputStream(0)) {
+            return HashUtilities.getHash(HashUtilities.SHA256_ALGORITHM, in);
+        }
+    }
+
+    /**
+     * Find a program already in the project that holds exactly the bytes about to be
+     * imported, so it can be reused instead of importing a duplicate. Ghidra's importer
+     * silently names a re-imported file "&lt;name&gt;.N", which confuses later tool calls
+     * and grading.
+     *
+     * <p>The file name and the executable SHA-256 must both match: a same-named file with
+     * different bytes is a different program and is imported normally. Candidates that
+     * cannot be opened are ignored, so a lookup problem never blocks an import.
+     *
+     * @param project the active project
+     * @param byteProvider the bytes about to be imported
+     * @param monitor monitor for opening the candidate read-only
+     * @param candidateFileNames the file names the loader would save this source under
+     * @return the existing program file, or null when the import should proceed
+     */
+    DomainFile findAlreadyImportedProgram(Project project, ByteProvider byteProvider,
+            TaskMonitor monitor, String... candidateFileNames) {
+        Set<String> names = new LinkedHashSet<>();
+        for (String name : candidateFileNames) {
+            if (name != null && !name.isEmpty()) {
+                names.add(name);
+            }
+        }
+        if (project == null || names.isEmpty()) {
+            return null;
+        }
+        List<DomainFile> candidates = new ArrayList<>();
+        try {
+            collectProgramFilesNamed(project.getProjectData().getRootFolder(), names, candidates);
+        } catch (Exception e) {
+            Msg.debug(this, "Could not scan the project for " + names + ": " + e.getMessage());
+            return null;
+        }
+        if (candidates.isEmpty()) {
+            return null; // Only pay for hashing the source when a name matches.
+        }
+        String sourceSha256;
+        try {
+            sourceSha256 = executableSha256(byteProvider);
+        } catch (Exception e) {
+            Msg.debug(this, "Could not hash " + names + ": " + e.getMessage());
+            return null;
+        }
+        for (DomainFile candidate : candidates) {
+            if (hasExecutableSha256(candidate, sourceSha256, monitor)) {
+                return candidate;
+            }
+        }
+        return null;
+    }
+
+    /** Collect program files named one of {@code names}, skipping baseline snapshots. */
+    private void collectProgramFilesNamed(DomainFolder folder, Set<String> names,
+            List<DomainFile> matches) {
+        for (DomainFile file : folder.getFiles()) {
+            if (names.contains(file.getName()) && "Program".equals(file.getContentType())) {
+                matches.add(file);
+            }
+        }
+        for (DomainFolder subfolder : folder.getFolders()) {
+            if (BASELINE_FOLDER_NAME.equals(subfolder.getName())) {
+                continue;
+            }
+            collectProgramFilesNamed(subfolder, names, matches);
+        }
+    }
+
+    /** True when the program stored in {@code file} has the given executable SHA-256. */
+    private boolean hasExecutableSha256(DomainFile file, String sha256, TaskMonitor monitor) {
+        DomainObject readOnly = null;
+        try {
+            readOnly = file.getReadOnlyDomainObject(this, DomainFile.DEFAULT_VERSION, monitor);
+            if (readOnly instanceof Program program) {
+                String stored = program.getExecutableSHA256();
+                return stored != null && stored.equalsIgnoreCase(sha256);
+            }
+            return false;
+        } catch (Exception e) {
+            Msg.debug(this, "Could not read " + file.getPathname() + ": " + e.getMessage());
+            return false;
+        } finally {
+            if (readOnly != null) {
+                try {
+                    readOnly.release(this);
+                } catch (Exception e) {
+                    Msg.debug(this, "Could not release " + file.getPathname() + ": " + e.getMessage());
+                }
+            }
+        }
+    }
+
+    /** Last element of a project-relative import path: the name the loader will save under. */
+    private static String lastPathElement(String importPath) {
+        int separator = importPath.lastIndexOf('/');
+        return separator < 0 ? importPath : importPath.substring(separator + 1);
+    }
+
+    /**
+     * One entry of the import result's "programs" list.
+     *
+     * @param programPath the program's project path
+     * @param analyzed whether analysis ran on it during this call
+     * @param alreadyImported whether the project already held this program
+     * @return the result entry
+     */
+    Map<String, Object> importedProgramEntry(String programPath, boolean analyzed,
+            boolean alreadyImported) {
+        Map<String, Object> entry = new LinkedHashMap<>();
+        entry.put("programPath", programPath);
+        entry.put("analyzed", analyzed);
+        if (alreadyImported) {
+            entry.put("alreadyImported", true);
+            entry.put("note", ALREADY_IMPORTED_NOTE);
+            if (!analyzed) {
+                // Reuse never analyzes, so this must not read like a fresh
+                // import that simply skipped analysis: the program may well
+                // have been analyzed in an earlier session.
+                entry.put("nextSteps",
+                    "Already in the project; analyze it only if it has not been "
+                    + "analyzed yet (call analyze-program with programPath '"
+                    + programPath + "').");
+            }
+        } else if (!analyzed) {
+            entry.put("analysisRecommended", true);
+            entry.put("nextSteps",
+                "Call analyze-program with programPath '" + programPath
+                + "' to populate functions, strings, and references.");
+        }
+        return entry;
     }
 
     /**

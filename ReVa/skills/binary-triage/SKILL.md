@@ -1,155 +1,116 @@
 ---
 name: binary-triage
-description: Performs initial binary triage by surveying memory layout, strings, imports/exports, and functions to quickly understand what a binary does and identify suspicious behavior. Use when first examining a binary, when user asks to triage/survey/analyze a program, or wants an overview before deeper reverse engineering.
+description: Use when surveying any program, firmware image, shellcode or bytecode in Ghidra before a request is scoped; asked to triage, survey, give an overview or say "what is this"; or sent here by `reverse-engineering`.
 ---
 
 # Binary Triage
 
-## Instructions
-We are triaging a binary to quickly understand what it does. This is an initial survey, not deep analysis. Our goal is to:
-1. Identify key components and behaviors
-2. Flag suspicious or interesting areas
-3. Create a task list of next steps for deeper investigation
+Run the eight steps in order, then hand off. Pass the `programPath` from step 1 to every call. Batch independent calls. Empty result: write "none".
 
-## Binary triage with ReVa
+### 1. Identify
 
-Follow this systematic workflow using ReVa's MCP tools:
+1. Call `list-project-files` with `folderPath` `/` and `recursive` true. The file entry is the program path.
+   - No program listed and the user named a file: call `import-file` with that path, then `analyze-program`; status `running`: call `analysis-status` with its `jobId` until terminal.
+   - Several programs: write each under Leads.
+2. Call `get-memory-blocks`. Format from block names: `Headers` and `.rdata` is Windows PE; `.rodata` and `.plt` is Linux ELF; `__TEXT` and `__LINKEDIT` is macOS Mach-O; one block with no header is firmware, a raw image or shellcode.
 
-### 1. Identify the Program
-- Use `get-current-program` to see the active program
-- Or use `list-project-files` to see available programs in the project
-- Note the `programPath` (e.g., "/Hatchery.exe") for use in subsequent tools
+   Architecture: the processor any tool result names, else the address width (8 hex digits 32-bit, 16 64-bit).
+3. Call `list-imports` with `groupByLibrary` true, then `list-exports`. The entry point is the export `entry`, `start` or `_start`; with none, the start of the first executable block. List all exports.
+4. Runtime signatures. Call `get-strings` with `regexPattern` `Go build ID|panicked at|Ljava/`, then match:
+   - .NET: `mscoree.dll`, `_CorExeMain`.
+   - Go: `runtime.` symbols, `Go build ID:`, `.gopclntab`.
+   - Rust: `core::` symbols, `panicked at`, `.rs` paths.
+   - Java or Dalvik: `classes.dex`, `Ljava/` strings, `JNI_OnLoad`.
+   - Script in a dropper: PowerShell, VBScript, JavaScript or shell text.
+   - None of these: native.
+5. Packing. Count the signs:
+   - Entry point outside the first executable block, or in a writable one.
+   - Packer block names: `UPX0`, `.aspack`, `.MPRESS1`, `.themida`, `.vmp0`.
+   - Under ten imports for a program over 100 KB, or only loaders (`GetProcAddress`, `dlsym`).
+   - One large block with few strings and no text from `read-memory` with `length` 64, `format` `ascii`.
+   - An executable block of a few KB beside a large data block.
 
-### 2. Survey Memory Layout
-- Use `get-memory-blocks` to understand the binary structure
-- Examine key sections:
-  - `.text` - executable code
-  - `.data` - initialized data
-  - `.rodata` - read-only data (strings, constants)
-  - `.bss` - uninitialized data
-- Flag unusual characteristics:
-  - Unusually large sections
-  - Packed/encrypted sections
-  - Executable data sections
-  - Writable code sections
+   Two or more signs: record "packing: likely" with the signs; unpacking is candidate thread 1. One sign: write it under Leads. Else: "packing: no".
+6. Call `set-bookmark` with `addressOrSymbol` the entry point, `type` `Note`, `category` `Survey`, `comment` the facts so far: format, architecture, runtime, packing.
 
-### 3. Survey Strings
-- Use `get-strings-count` to see total string count
-- Use `get-strings` with pagination (100-200 strings at a time)
-- Look for indicators of functionality or malicious behavior:
-  - **Network**: URLs, IP addresses, domain names, API endpoints
-  - **File System**: File paths, registry keys, configuration files
-  - **APIs**: Function names, library references
-  - **Messages**: Error messages, debug strings, log messages
-  - **Suspicious Keywords**: admin, password, credential, token, crypto, encrypt, decrypt, download, execute, inject, shellcode, payload
+### 2. Memory layout
 
-### 4. Survey Symbols and Imports
-- Use `get-symbols-count` with `includeExternal=true` to count imports
-- Use `get-symbols` with `includeExternal=true` and `filterDefaultNames=true`
-- Focus on external symbols (imports from libraries)
-- Flag interesting/suspicious imports by category:
-  - **Network APIs**: connect, send, recv, WSAStartup, getaddrinfo, curl_*, socket
-  - **File I/O**: CreateFile, WriteFile, ReadFile, fopen, fwrite, fread
-  - **Process Manipulation**: CreateProcess, exec, fork, system, WinExec, ShellExecute
-  - **Memory Operations**: VirtualAlloc, VirtualProtect, mmap, mprotect
-  - **Crypto**: CryptEncrypt, CryptDecrypt, EVP_*, AES_*, bcrypt, RC4
-  - **Anti-Analysis**: IsDebuggerPresent, CheckRemoteDebuggerPresent, ptrace
-  - **Registry**: RegOpenKey, RegSetValue, RegQueryValue
-- Note the ratio of imports to total symbols (heavy import usage may indicate reliance on libraries)
+Write under Leads, with address: a block both writable and executable; one block far larger than the rest.
 
-### 5. Survey Functions
-- Use `get-function-count` with `filterDefaultNames=true` to count named functions
-- Use `get-function-count` with `filterDefaultNames=false` to count all functions
-- Calculate ratio of named vs unnamed functions (high unnamed ratio = stripped binary)
-- Use `get-functions` with `filterDefaultNames=true` to list named functions
-- Identify key functions:
-  - **Entry points**: `entry`, `start`, `_start`
-  - **Main functions**: `main`, `WinMain`, `DllMain`, `_main`
-  - **Suspicious names**: If not stripped, look for revealing function names
+### 3. Strings
 
-### 6. Cross-Reference Analysis for Key Findings
-- For interesting strings found in Step 3:
-  - Use `find-cross-references` with `direction="to"` and `includeContext=true`
-  - Identify which functions reference suspicious strings
-- For suspicious imports found in Step 4:
-  - Use `find-cross-references` with `direction="to"` and `includeContext=true`
-  - Identify which functions call suspicious APIs
-- This helps prioritize which functions need detailed examination
+Call `get-strings-count`, then `get-strings` in pages. Sort, with addresses:
+- Network: URLs, IPs, domains, user agents.
+- Files and settings: paths, registry keys, `.plist`, `.ini`.
+- Commands: `cmd.exe /c`, `/bin/sh -c`, `schtasks`, `launchctl`.
+- Crypto: Base64 alphabets, key-like hex.
+- Banners: library versions.
 
-### 7. Selective Initial Decompilation
-- Use `get-decompilation` on entry point or main function
-  - Set `limit=30` to get ~30 lines initially
-  - Set `includeIncomingReferences=true` to see callers
-  - Set `includeReferenceContext=true` for context snippets
-- Use `get-decompilation` on 1-2 suspicious functions identified in Step 6
-  - Set `limit=20-30` for quick overview
-- Look for high-level patterns:
-  - Loops (encryption/decryption routines)
-  - Network operations
-  - File operations
-  - Process creation
-  - Suspicious control flow (obfuscation indicators)
-- **Do not do deep analysis yet** - this is just to understand general behavior
+### 4. Imports by capability
 
-### 8. Document Findings and Create Task List
-- Use the `TodoWrite` tool to create an actionable task list with items like:
-  - "Investigate string 'http://malicious-c2.com' (referenced at 0x00401234)"
-  - "Decompile function sub_401000 (calls VirtualAlloc + memcpy + CreateThread)"
-  - "Analyze crypto usage in function encrypt_payload (uses CryptEncrypt)"
-  - "Trace anti-debugging checks (IsDebuggerPresent at 0x00402000)"
-  - "Examine packed section .UPX0 for unpacking routine"
-- Each todo should be:
-  - Specific (include addresses, function names, strings)
-  - Actionable (what needs to be investigated)
-  - Prioritized (most suspicious first)
+Group the step 1 imports. Each line gives Windows; POSIX; macOS names:
+- Network: `WinHttpSendRequest`; `socket`; `NSURLSession`.
+- Execution: `CreateProcessW`; `execve`; `posix_spawn`, `NSTask`.
+- Memory: `VirtualAlloc`, `WriteProcessMemory`; `mmap`; `mach_vm_allocate`.
+- Crypto: `CryptEncrypt`; `EVP_EncryptInit_ex`; `CCCrypt`.
+- Persistence: `RegSetValueExW`, `CreateServiceW`, `CoCreateInstance`; cron or systemd paths; `SMJobBless`, `LaunchAgents` paths.
+- Anti-analysis: `IsDebuggerPresent`; `ptrace`; `sysctl`.
 
-## Output Format
+### 5. Functions
 
-Present triage findings to the user in this structured format:
+1. Call `get-function-count` with `filterDefaultNames` false, then true. Mostly `FUN_` names: stripped.
+2. Call `get-functions` with `filterDefaultNames` true, in pages.
+3. Find main: `main`, `WinMain`, `DllMain`, `ServiceMain`, `main.main`, `JNI_OnLoad`.
+4. Library versus own code: runtime or library names (`std::`, `runtime.`, `EVP_`) are library; the rest is own.
 
-### Program Overview
-- **Name**: [Program name from programPath]
-- **Type**: [Executable type - PE, ELF, Mach-O, etc.]
-- **Platform**: [Windows, Linux, macOS, etc.]
+### 6. Cross-references for leads
 
-### Memory Layout
-- **Total Size**: [Size in bytes/KB/MB]
-- **Key Sections**: [List main sections with sizes and permissions]
-- **Unusual Characteristics**: [Any packed/encrypted/suspicious sections]
+1. Pick five leads: network and execution strings and imports first.
+2. String: `find-cross-references` with `location` its address, `direction` `to`, `includeContext` true. Import: `find-import-references` with `importName`.
+3. Record the calling function and address. A function in two or more groups is a strong lead.
+4. Write the other strings and imports under Leads, unchecked.
 
-### String Analysis
-- **Total Strings**: [Count from get-strings-count]
-- **Notable Findings**: [Bullet list of interesting strings with context]
-- **Suspicious Indicators**: [URLs, IPs, suspicious keywords found]
+### 7. First look at code
 
-### Import Analysis
-- **Total Symbols**: [Count from get-symbols-count]
-- **External Imports**: [Count of external symbols]
-- **Key Libraries**: [Main libraries imported]
-- **Suspicious APIs**: [Categorized list of concerning imports]
+Decompile four functions at most:
+1. The entry point.
+2. Up to three leads: main if the entry point only calls it, then step 6's strongest.
 
-### Function Analysis
-- **Total Functions**: [Count with filterDefaultNames=false]
-- **Named Functions**: [Count with filterDefaultNames=true]
-- **Stripped Status**: [Yes/No based on ratio]
-- **Entry Point**: [Address and name]
-- **Main Function**: [Address and name]
-- **Key Functions**: [List of important functions identified]
+Step 7 is one reply: its `get-decompilation` calls, `limit` 30. The next reply calls step 8.1's `set-bookmark`; any other function goes, undecompiled, into `## Candidate threads`. Each decompiled function gets a line there too.
 
-### Suspicious Indicators
-[Bulleted list of red flags discovered, prioritized by severity]
+### 8. Record and hand off
 
-### Recommended Next Steps
-[Present the task list created in Step 8]
-- Each item should be specific and actionable
-- Prioritize by severity/importance
-- Include addresses, function names, and context
+1. Call `set-bookmark` at the entry point, same `type` and `category`; it replaces the step 1 text. `comment`: a one-paragraph summary adding apparent purpose and top leads.
+2. Write these sections in your reply:
 
-## Important Notes
+```
+## Survey
+- Format:
+- Architecture:
+- Runtime:
+- Packing:
+- Entry points and exports:
+- Library versus own code:
+- Strings and imports landscape:
+- Leads:
+- Size: <single question | few threads | verdict or deliverable> — <why>
 
-- **Speed over depth**: This is triage, not full analysis. Move quickly through steps.
-- **Use pagination**: Don't request thousands of strings/functions at once. Use chunks of 100-200.
-- **Focus on anomalies**: Flag things that are unusual, suspicious, or interesting.
-- **Context is key**: When using cross-references, enable `includeContext=true` for code snippets.
-- **Create actionable todos**: Each next step should be specific enough for another agent to execute.
-- **Be systematic**: Follow all 8 steps in order for comprehensive coverage.
+## Candidate threads
+1. <question> — start at <address> — <what it seems to do> — <why it matters>
+```
+3. In that reply, with no other tool call, Size picks:
+   - Single question: read `deep-analysis`.
+   - Any other size: read `scoping-analysis`.
+   - A flag challenge: read the matching `ctf-*` skill.
+   - A script request: read `pyghidra-scripting`.
+Never answer or finish here.
+
+## Notes
+
+- **Pagination.** Call the count tool first. Fetch pages of 100 (`maxCount` or `maxResults`), with `startIndex`.
+- **Anomalies.** Anything no rule above fits goes under Leads with its address.
+
+| Thought | Reality |
+|---|---|
+| "The answer is already clear." | Write it as candidate thread 1. Finish step 8; read the next skill. |
+| "One more function settles it." | A lead is written down, not followed, here. |

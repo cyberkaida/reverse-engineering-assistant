@@ -183,9 +183,15 @@ claude plugin marketplace add cyberkaida/reverse-engineering-assistant
 
 This will add the [ReVa skills](/ReVa/skills/) to your Claude Code installation.
 
-- Binary Triage
-- Deep Analysis
-- Cryptography Analysis
+- `reverse-engineering` — read first, on any request about a program in Ghidra
+- `binary-triage` — when a program needs its survey, before the request is scoped
+- `scoping-analysis` — when the request needs more than one question answered
+- `planning-analysis` — when the brief is written and the work needs an ordered list of threads
+- `working-threads` — when the plan is written and its threads need working, or to resume a ledger
+- `verifying-findings` — when the threads are closed and not yet checked against the database
+- `finishing-analysis` — when the findings are verified and the answer is not yet sent
+- `deep-analysis` — when one question needs answering, alone or once per thread
+- `pyghidra-scripting` — when Python needs to run inside the Ghidra session
 - CTF guides
 
 I will be adding more skills over time to help with reverse engineering tasks.

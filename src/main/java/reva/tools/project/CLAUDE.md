@@ -371,6 +371,22 @@ else if (domainFile.canCheckin()) {
 }
 ```
 
+### Checkin Cache Retention
+
+`checkin-program` keeps the cached program (`RevaProgramManager` program cache) open after
+both a successful checkin and a post-save checkin error. It no longer closes or reopens the
+program as part of checkin: a concurrent mutation committed after the save (or during the
+checkin) must stay in the same in-memory database, and releasing the last headless consumer
+would close the program and discard that work. Retention lasts until normal
+`RevaProgramManager.cleanup()` at shutdown; tests release their own cache entries in teardown.
+`PersistResult` and the result JSON are unchanged (`SKIP/saved=false` when a transaction is
+still open before any save; `SAVE/saved=true` plus the error when checkin fails after a
+successful local save).
+
+Persistence verification must inspect the saved database — a read-back `DomainObject`, an
+exported dump/GZF, or a real repository read. A tool result reporting `saved` or `checked_in`
+is not proof that the bytes reached disk.
+
 ### Version Control Status Validation
 
 **Provide specific error messages for different version control states**:

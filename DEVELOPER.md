@@ -131,6 +131,14 @@ ReVa is designed to handle the Ghidra lifecycle correctly:
 3. **Program Lifecycle** - Both plugins coordinate to handle program open/close events, with the application plugin maintaining the program registry.
 4. **Server Lifecycle** - The MCP server starts with Ghidra and stops when Ghidra shuts down, surviving individual tool closures.
 
+### Transaction and Persistence Rules
+
+- **Missing bookmark removals roll back.** `remove-bookmark` ends its `Remove Bookmark` transaction with `commit=false` before returning "No bookmark found". Leaving it open blocks every later writer and every checkin.
+- **Checkin keeps the program open.** `checkin-program` never releases the cached program: not after a successful checkin, not when `ProgramPersistenceUtil.persist()` returns `SKIP` because a transaction is still open after `TRANSACTION_WAIT_MS` (10 s), and not when version control fails after the save. Closing the last headless `ProgramDB` consumer would discard work committed after the save. `RevaProgramManager.cleanup()` releases it at shutdown.
+- **Blocked and failed checkins are retryable.** The `SKIP` error names the open transaction; retry once that writer finishes. A checkin that fails after the save keeps the later changes in memory, so a retry saves them.
+- **Verify persistence by reading the saved state.** A `success` response is not proof. Reopen the program (or open a `getReadOnlyDomainObject` copy / packed GZF) and assert the bookmarks and comments are present. `tests/test_e2e_workflow.py::test_blocked_checkin_recovery_preserves_annotations` does this, including an unsaved sentinel that must not appear in the saved read-back.
+- **Persistence regressions compare against a baseline.** Do not rely on `_dump_saved_annotations` alone: compare the final target program against a freshly created baseline, so intended removals are shown to survive and unintended ones to be absent. `testPostSaveCheckinFailureRetainsRemoval` and `test_blocked_checkin_post_save_removal_retention` do this.
+
 ## Development Environment
 
 ### Prerequisites

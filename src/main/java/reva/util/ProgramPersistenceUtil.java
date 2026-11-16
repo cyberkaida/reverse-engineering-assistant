@@ -17,6 +17,9 @@ package reva.util;
 
 import java.io.IOException;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
+
+import com.google.common.annotations.VisibleForTesting;
 
 import ghidra.framework.data.DefaultCheckinHandler;
 import ghidra.framework.model.DomainFile;
@@ -44,6 +47,14 @@ public final class ProgramPersistenceUtil {
         PersistResult(PersistAction action, boolean saved, String error) {
             this.action = action; this.saved = saved; this.error = error;
         }
+    }
+
+    private static volatile Consumer<Program> postSaveHook = p -> { };
+
+    /** Visible for testing: force a mutation between save and checkin. */
+    @VisibleForTesting
+    public static void setPostSaveHookForTesting(Consumer<Program> hook) {
+        postSaveHook = hook == null ? p -> { } : hook;
     }
 
     private ProgramPersistenceUtil() {}
@@ -135,6 +146,8 @@ public final class ProgramPersistenceUtil {
         if (planned == PersistAction.SAVE) {
             return new PersistResult(PersistAction.SAVE, true, null);
         }
+
+        postSaveHook.accept(program);
 
         try {
             if (planned == PersistAction.CHECKIN) {

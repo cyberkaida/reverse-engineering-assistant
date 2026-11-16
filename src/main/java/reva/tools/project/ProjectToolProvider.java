@@ -391,33 +391,16 @@ public class ProjectToolProvider extends AbstractToolProvider {
                 // persist() saves while the program is still open (the program object held here
                 // is the cache's consumer; releasing it before save would close it). checkin/
                 // addToVersionControl tolerate an open program (Ghidra forces keepCheckedOut=true
-                // when the file is in use), so the cache release happens afterward as pure
-                // cache hygiene.
+                // when the file is in use).
                 ProgramPersistenceUtil.PersistResult pr = ProgramPersistenceUtil.persist(
                     program, ProgramPersistenceUtil.PersistMode.AUTO, message, keepCheckedOut,
                     TaskMonitor.DUMMY);
 
-                // Release program from cache after version control operations.
-                boolean wasCached = RevaProgramManager.releaseProgramFromCache(program);
-                if (wasCached) {
-                    Msg.debug(this, "Released program from cache after version control: " + programPath);
-                }
-
-                // A checkin/addToVC failure after a successful save surfaces as an error,
-                // matching the prior "Checkin failed: ..." behavior. Skip the reopen, as the
-                // prior flow also errored out before reopening.
+                // Keep the cached program open after checkin. A concurrent mutation may commit after save or
+                // checkin; closing the last headless consumer would discard it. RevaProgramManager.cleanup()
+                // releases retained programs at shutdown.
                 if (pr.error != null) {
                     return createErrorResult("Checkin failed: " + pr.error);
-                }
-
-                // Re-open program to cache if it was cached and we're keeping it checked out.
-                boolean didVersionControl = pr.action == ProgramPersistenceUtil.PersistAction.CHECKIN
-                    || pr.action == ProgramPersistenceUtil.PersistAction.ADD_TO_VC;
-                if (didVersionControl && wasCached && keepCheckedOut) {
-                    Program reopenedProgram = RevaProgramManager.reopenProgramToCache(programPath);
-                    if (reopenedProgram != null) {
-                        Msg.debug(this, "Re-opened program to cache after version control: " + programPath);
-                    }
                 }
 
                 Map<String, Object> result = new HashMap<>();

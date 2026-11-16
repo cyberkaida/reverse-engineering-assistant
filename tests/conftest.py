@@ -283,9 +283,17 @@ async def _stdio_mcp_session(workspace, init_timeout: float = 120.0):
     from mcp import ClientSession
     import asyncio
 
+    # REVA_CONFIG_PATH lets a test inject a config file (e.g. to enable
+    # snapshots for a baseline). It is read here because the subprocess is
+    # spawned before the test body runs.
+    config_path = os.environ.get("REVA_CONFIG_PATH")
+    args = ["run", "mcp-reva"]
+    if config_path:
+        args.extend(["--config", config_path])
+
     server_params = StdioServerParameters(
         command="uv",
-        args=["run", "mcp-reva"],
+        args=args,
         cwd=str(workspace),
         env=os.environ.copy()
     )

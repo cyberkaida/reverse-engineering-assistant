@@ -14,6 +14,7 @@ import org.mockito.Mockito;
 import ghidra.framework.model.DomainFile;
 import ghidra.framework.model.TransactionInfo;
 import ghidra.program.model.listing.Program;
+import ghidra.util.task.TaskMonitor;
 import reva.util.ProgramPersistenceUtil.PersistAction;
 import reva.util.ProgramPersistenceUtil.PersistMode;
 import reva.util.ProgramPersistenceUtil.PersistResult;
@@ -138,5 +139,21 @@ public class ProgramPersistenceUtilTest {
             r.error.contains("transaction is still open"));
         assertTrue("error must name the open transaction: " + r.error,
             r.error.contains("run-script"));
+    }
+
+    /** A failed checkin after a successful save keeps SAVE/saved=true and carries the error. */
+    @Test public void persistReportsSaveWhenCheckinFailsAfterSave() throws Exception {
+        DomainFile f = file(true, false, false);
+        Mockito.doThrow(new java.io.IOException("checkin refused"))
+            .when(f).checkin(Mockito.any(), Mockito.any());
+        Program program = Mockito.mock(Program.class);
+        when(program.getDomainFile()).thenReturn(f);
+
+        PersistResult result = ProgramPersistenceUtil.persist(
+            program, PersistMode.AUTO, "test", true, TaskMonitor.DUMMY);
+
+        assertEquals(PersistAction.SAVE, result.action);
+        assertTrue(result.saved);
+        assertEquals("checkin failed after save: checkin refused", result.error);
     }
 }

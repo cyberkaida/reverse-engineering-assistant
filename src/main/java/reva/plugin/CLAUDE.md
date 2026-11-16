@@ -151,12 +151,14 @@ public class RevaProgramManager {
     // Every open program ReVa can see: tool-open, then the program cache (ReVa-opened;
     // all there is headless), then registered programs. Deduplicated by canonical path.
     // Used by sole-program resolution (a call without programPath). Does not include
-    // project files that are not open: headless import-file saves without opening, and
-    // checkin-program (keepCheckedOut false) releases the cached program;
-    // ProgramLookupUtil.resolveSoleOpenProgram falls back to the project for those.
+    // project files that are not open: headless import-file saves without opening.
+    // checkin-program retains its cached program, so a checked-in program normally stays
+    // in tier 2 until cleanup; ProgramLookupUtil.resolveSoleOpenProgram falls back to the
+    // project only for files nobody holds open.
     public static synchronized List<Program> getAllKnownPrograms()
 
-    // Release / restore the cache's consumer (around version control operations)
+    // Release / restore the cache's consumer. checkin-program no longer calls these; they
+    // remain for test teardown and other callers that must drop a consumer.
     public static boolean releaseProgramFromCache(Program program)
     public static Program reopenProgramToCache(String programPath)
 
@@ -179,6 +181,17 @@ public class RevaProgramManager {
 | 4 | Domain file opening | Open from project files on demand |
 
 `programCache` and `registeredPrograms` are `ConcurrentHashMap`s: every call without `programPath` iterates them (via `getAllKnownPrograms`) while other request threads add and remove entries. Look entries up with a single `get()` and a null check, not `containsKey()` then `get()`. Values are never null (a `ConcurrentHashMap` refuses them).
+
+### Cache Retention Contract
+
+`checkin-program` retains the cached program after both a successful checkin and a
+post-save checkin error. It does not release the cache entry or reopen the program:
+closing the last headless consumer would discard a mutation that committed after the save
+or during the checkin. Retained programs stay open until normal
+`RevaProgramManager.cleanup()` at shutdown; tool teardown and tests call
+`releaseProgramFromCache` themselves. Persistence checks must read the saved database
+(read-back `DomainObject`, exported dump/GZF, or repository read), never trust the
+`saved`/`checked_in` result fields alone.
 
 ### Program Path Resolution
 

@@ -261,6 +261,8 @@ try {
 ```java
 Bookmark bookmark = bookmarkMgr.getBookmark(address, type, category);
 if (bookmark == null) {
+    // The lookup runs inside the removal transaction: roll it back before returning
+    program.endTransaction(transactionId, false);
     return createErrorResult("No bookmark found at address " + address +
         " with type " + type + " and category " + category);
 }

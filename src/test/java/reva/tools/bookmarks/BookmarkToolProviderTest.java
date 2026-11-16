@@ -20,6 +20,8 @@ import static org.mockito.Mockito.*;
 
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.After;
 import org.junit.Before;
@@ -44,9 +46,10 @@ import reva.plugin.RevaProgramManager;
 import reva.tools.DatabaseAvailability;
 
 /**
- * Busy-program behaviour of set-bookmark and remove-bookmark: a writer waits
- * for an in-flight operation instead of failing at once, and a program that
- * stays busy yields the machine-detectable busy result.
+ * Transaction behaviour of set-bookmark and remove-bookmark: a writer waits
+ * for an in-flight operation instead of failing at once, a program that
+ * stays busy yields the machine-detectable busy result, and a removal that
+ * finds no bookmark rolls its transaction back so the next write can commit.
  */
 public class BookmarkToolProviderTest {
 
@@ -182,5 +185,58 @@ public class BookmarkToolProviderTest {
 		verify(program, atLeast(2)).getCurrentTransactionInfo();
 		verify(program).startTransaction("Set Bookmark");
 		verify(program).endTransaction(11, true);
+	}
+
+	@Test
+	public void removeBookmarkWithNoBookmarkEndsItsTransaction() {
+		BookmarkManager mgr = mock(BookmarkManager.class);
+		when(program.getBookmarkManager()).thenReturn(mgr);
+		when(mgr.getBookmark(address, "Note", "")).thenReturn(null);
+		when(program.startTransaction("Remove Bookmark")).thenReturn(11);
+
+		CallToolResult result = call("remove-bookmark", Map.of(
+			"programPath", PROGRAM_PATH, "addressOrSymbol", "0x1000", "type", "Note"), 150);
+
+		assertTrue(text(result).contains("No bookmark found"));
+		verify(program).endTransaction(11, false);
+		verify(program, never()).endTransaction(11, true);
+	}
+
+	@Test
+	public void missingRemovalRollsBackSoTheNextWriteCommits() {
+		// A missing removal must not leave its transaction open: the next
+		// bookmark write has to open and commit a transaction of its own
+		// instead of reporting the program busy.
+		AtomicBoolean open = new AtomicBoolean();
+		AtomicInteger nextId = new AtomicInteger(10);
+		when(program.getCurrentTransactionInfo())
+			.thenAnswer(invocation -> open.get() ? openTransaction : null);
+		when(program.startTransaction(anyString())).thenAnswer(invocation -> {
+			open.set(true);
+			return nextId.incrementAndGet();
+		});
+		doAnswer(invocation -> {
+			open.set(false);
+			return null;
+		}).when(program).endTransaction(anyInt(), anyBoolean());
+
+		BookmarkManager mgr = mock(BookmarkManager.class);
+		Bookmark created = mock(Bookmark.class);
+		when(created.getId()).thenReturn(7L);
+		when(program.getBookmarkManager()).thenReturn(mgr);
+		when(mgr.getBookmark(address, "Note", "")).thenReturn(null);
+		when(mgr.setBookmark(address, "Note", "", "entry point")).thenReturn(created);
+
+		CallToolResult missing = call("remove-bookmark", Map.of(
+			"programPath", PROGRAM_PATH, "addressOrSymbol", "0x1000", "type", "Note"), 150);
+		assertTrue(text(missing).contains("No bookmark found"));
+
+		CallToolResult set = call("set-bookmark", setBookmarkArgs(), 150);
+
+		String json = contentText(set);
+		assertFalse(json, set.isError());
+		assertTrue(json, json.contains("\"success\":true"));
+		verify(program).endTransaction(11, false);
+		verify(program).endTransaction(12, true);
 	}
 }

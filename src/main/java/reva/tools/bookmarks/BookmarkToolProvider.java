@@ -275,6 +275,7 @@ public class BookmarkToolProvider extends AbstractToolProvider {
                     Bookmark bookmark = bookmarkMgr.getBookmark(address, type, category);
 
                     if (bookmark == null) {
+                        program.endTransaction(transactionId, false);
                         return createErrorResult("No bookmark found at address " + address +
                             " with type " + type + " and category " + category);
                     }

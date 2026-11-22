@@ -904,4 +904,161 @@ public class DecompilerToolProviderIntegrationTest extends RevaIntegrationTestBa
         }
     }
 
+
+    /**
+     * Builds a function whose statements sit at known addresses:
+     * <pre>
+     *   0x01000500  PUSH EBP ; MOV EBP,ESP
+     *   0x01000503  MOV dword ptr [0x01000900],1
+     *   0x0100050d  CALL lineMapCalleeA
+     *   0x01000512  MOV dword ptr [0x01000904],2
+     *   0x0100051c  CALL lineMapCalleeB
+     *   0x01000521  MOV dword ptr [0x01000908],3
+     *   0x0100052b  POP EBP ; RET
+     * </pre>
+     */
+    private void createLineMapFunctions() throws Exception {
+        ghidra.program.model.address.AddressSpace space =
+            program.getAddressFactory().getDefaultAddressSpace();
+        Address fn = space.getAddress(0x01000500);
+        Address calleeA = space.getAddress(0x01000600);
+        Address calleeB = space.getAddress(0x01000620);
+        byte[] body = {
+            (byte) 0x55, (byte) 0x89, (byte) 0xe5,
+            (byte) 0xc7, 0x05, 0x00, 0x09, 0x00, 0x01, 0x01, 0x00, 0x00, 0x00,
+            (byte) 0xe8, (byte) 0xee, 0x00, 0x00, 0x00,
+            (byte) 0xc7, 0x05, 0x04, 0x09, 0x00, 0x01, 0x02, 0x00, 0x00, 0x00,
+            (byte) 0xe8, (byte) 0xff, 0x00, 0x00, 0x00,
+            (byte) 0xc7, 0x05, 0x08, 0x09, 0x00, 0x01, 0x03, 0x00, 0x00, 0x00,
+            (byte) 0x5d, (byte) 0xc3};
+        int txId = program.startTransaction("Create line-map functions");
+        try {
+            program.getMemory().setBytes(fn, body);
+            program.getMemory().setBytes(calleeA, new byte[] {(byte) 0xc3});
+            program.getMemory().setBytes(calleeB, new byte[] {(byte) 0xc3});
+            for (Address start : List.of(calleeA, calleeB, fn)) {
+                new ghidra.app.cmd.disassemble.DisassembleCommand(start, null, true)
+                    .applyTo(program, ghidra.util.task.TaskMonitor.DUMMY);
+            }
+            FunctionManager fm = program.getFunctionManager();
+            fm.createFunction("lineMapCalleeA", calleeA,
+                new ghidra.program.model.address.AddressSet(calleeA, calleeA), SourceType.USER_DEFINED);
+            fm.createFunction("lineMapCalleeB", calleeB,
+                new ghidra.program.model.address.AddressSet(calleeB, calleeB), SourceType.USER_DEFINED);
+            fm.createFunction("lineMapFn", fn,
+                new ghidra.program.model.address.AddressSet(fn, fn.add(body.length - 1)),
+                SourceType.USER_DEFINED);
+        } finally {
+            program.endTransaction(txId, true);
+        }
+    }
+
+    /** Returns the synchronizedContent entry whose decompiled text contains {@code needle}. */
+    private JsonNode syncLineContaining(JsonNode json, String needle) {
+        JsonNode match = null;
+        for (JsonNode line : json.get("synchronizedContent")) {
+            if (line.get("decompilation").asText().contains(needle)) {
+                assertNull("Expected exactly one line containing " + needle, match);
+                match = line;
+            }
+        }
+        assertNotNull("No decompiled line contains " + needle + ": " + json.get("synchronizedContent"), match);
+        return match;
+    }
+
+    private JsonNode callJson(io.modelcontextprotocol.client.McpSyncClient client, String tool,
+            Map<String, Object> args) {
+        try {
+            CallToolResult result = client.callTool(new CallToolRequest(tool, args));
+            assertMcpResultNotError(result, tool + " should succeed");
+            return parseJsonContent(((TextContent) result.content().get(0)).text());
+        } catch (Exception e) {
+            throw new AssertionError(tool + " failed: " + e.getMessage(), e);
+        }
+    }
+
+    private JsonNode readLineMapFn(io.modelcontextprotocol.client.McpSyncClient client) {
+        Map<String, Object> args = new HashMap<>();
+        args.put("programPath", programPath);
+        args.put("functionNameOrAddress", "lineMapFn");
+        args.put("includeDisassembly", true);
+        args.put("includeIncomingReferences", false);
+        args.put("limit", 200);
+        return callJson(client, "get-decompilation", args);
+    }
+
+    /**
+     * A displayed line must carry the assembly of its own statement. Traces on Ghidra 12.2
+     * showed the CALL instruction attached to the line after the call.
+     */
+    @Test
+    public void testDisassemblySyncAttachesAssemblyToItsOwnLine() throws Exception {
+        createLineMapFunctions();
+        withMcpClient(createMcpTransport(), client -> {
+            client.initialize();
+            JsonNode json = readLineMapFn(client);
+
+            String callA = syncLineContaining(json, "lineMapCalleeA(").get("assembly").toString();
+            assertTrue("The call line should carry its CALL instruction, got " + callA,
+                callA.contains("0x0100050d: CALL"));
+
+            String store2 = syncLineContaining(json, "= 2;").get("assembly").toString();
+            assertTrue("The store line should carry its MOV, got " + store2,
+                store2.contains("0x01000512: MOV"));
+            assertFalse("The store line should not carry a CALL, got " + store2,
+                store2.contains("CALL"));
+
+            String callB = syncLineContaining(json, "lineMapCalleeB(").get("assembly").toString();
+            assertTrue("The second call line should carry its CALL instruction, got " + callB,
+                callB.contains("0x0100051c: CALL"));
+        });
+    }
+
+    /** A comment set on a displayed line must land on that line's address. */
+    @Test
+    public void testSetDecompilationCommentAnchorsToTheDisplayedLine() throws Exception {
+        createLineMapFunctions();
+        withMcpClient(createMcpTransport(), client -> {
+            client.initialize();
+            JsonNode json = readLineMapFn(client);
+            int callBLine = syncLineContaining(json, "lineMapCalleeB(").get("lineNumber").asInt();
+
+            Map<String, Object> args = new HashMap<>();
+            args.put("programPath", programPath);
+            args.put("functionNameOrAddress", "lineMapFn");
+            args.put("lineNumber", callBLine);
+            args.put("commentType", "eol");
+            args.put("comment", "second call");
+            JsonNode set = callJson(client, "set-decompilation-comment", args);
+            assertEquals("Comment should land on the CALL at the requested line",
+                "0x0100051c", set.get("address").asText());
+            assertEquals(callBLine, set.get("lineNumber").asInt());
+        });
+    }
+
+    /** The fromLine in caller context must name the displayed line that holds the call. */
+    @Test
+    public void testCallerContextLineMatchesDisplayedLine() throws Exception {
+        createLineMapFunctions();
+        withMcpClient(createMcpTransport(), client -> {
+            client.initialize();
+            JsonNode caller = readLineMapFn(client);
+            int callALine = syncLineContaining(caller, "lineMapCalleeA(").get("lineNumber").asInt();
+
+            Map<String, Object> args = new HashMap<>();
+            args.put("programPath", programPath);
+            args.put("functionNameOrAddress", "lineMapCalleeA");
+            JsonNode json = callJson(client, "get-decompilation", args);
+            JsonNode ref = null;
+            for (JsonNode candidate : json.get("incomingReferences")) {
+                if ("lineMapFn".equals(candidate.path("fromFunction").asText())) {
+                    ref = candidate;
+                }
+            }
+            assertNotNull("Expected a reference from lineMapFn: " + json.get("incomingReferences"), ref);
+            assertEquals("fromLine should be the displayed line of the call", callALine, ref.get("fromLine").asInt());
+            assertTrue("Context should show the call, got " + ref.get("context"),
+                ref.get("context").asText().contains("lineMapCalleeA("));
+        });
+    }
 }

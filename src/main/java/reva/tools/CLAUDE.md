@@ -223,7 +223,7 @@ String formattedAddress = AddressUtil.formatAddress(address); // Returns "0x" + 
 
 **Analysis and Comparison Utilities**:
 - `SimilarityComparator` - Compare functions and strings by similarity scoring (LCS-based)
-- `DecompilationContextUtil.buildContext(program, function)` - Build rich context for decompilation responses
+- `DecompilationContextUtil` - Line numbers and context snippets for addresses, read from `DecompilationCache`
 - `DecompilationDiffUtil` - Compare decompilations before/after changes
 
 **Support Utilities**:
@@ -295,19 +295,27 @@ manage their own transaction. The helpers live in `AbstractToolProvider`; never 
 
 When working with decompilation (especially in DecompilerToolProvider):
 
-1. **Handle decompilation failures gracefully**:
+1. **Read decompiled text from `DecompilationCache`** (`reva.decompiler`), never from a per-call `new DecompInterface()`:
    ```java
-   DecompInterface decompiler = new DecompInterface();
-   try {
-       decompiler.openProgram(program);
-       DecompileResults results = decompiler.decompileFunction(function, 30, null);
-       if (!results.decompileCompleted()) {
-           return createErrorResult("Decompilation failed: " + results.getErrorMessage());
-       }
-   } finally {
-       decompiler.dispose();
+   // Fetch at each use; never store the cache in a field
+   DecompilationCache cache = RevaInternalServiceRegistry.getService(DecompilationCache.class);
+   DecompilationResult decompilation = cache.get(program, function);
+   if (!decompilation.success()) {
+       return createErrorResult(decompilation.errorMessage());
    }
+   DecompilationSnapshot snapshot = decompilation.snapshot(); // code(), lines(), lineForAddress(), ...
    ```
+   - Map failures on `failureKind()` (`INIT_FAILED`, `DECOMPILE_FAILED`, `TIMED_OUT`, `EXCEPTION`) and `cause()`, never on message text.
+   - Bulk tools pass their one open decompiler as `borrowed`: `cache.get(program, function, decompiler)`. It must come
+     from `ConfiguredDecompiler.open` for the same program; a differently configured one would store a different rendering.
+   - Invalidation is solely `Program.getModificationNumber()`: a newer number drops the program's entries. There is no
+     list of tools or edit sources; do not add one.
+   - Release: a close listener the cache registers on each program (GUI and headless), `dropProgram` (also called from
+     `programClosed`), and the `maxChars` bound. Weak holding is best-effort only: overlay-space addresses pin their program.
+   - A tool that needs a live `HighFunction` opens a decompiler with `ConfiguredDecompiler.open(program)` (null on failure)
+     and disposes it in `finally`. An edit tool that already decompiles the post-edit state may `cache.put` it with the
+     modification number read before that decompile; null-check the cache and catch exceptions so the fill never fails
+     the edit.
 
 2. **Use HighFunctionDBUtil for persistent changes**:
    ```java
@@ -355,7 +363,7 @@ java.util.function.BiFunction<..., McpSchema.CallToolResult> safeHandler =
 **Only use explicit try-catch for**:
 - Custom error messages or recovery logic
 - Transaction rollback on specific errors
-- Resource cleanup (e.g., DecompInterface disposal with finally)
+- Resource cleanup (e.g., disposal of a `ConfiguredDecompiler.open` decompiler with finally)
 - Domain-specific exception types (DuplicateNameException, InvalidInputException, etc.)
 
 ### Error Response Guidelines
@@ -513,5 +521,5 @@ if (monitor.isCancelled()) {
 - **Service access**: Use RevaInternalServiceRegistry to get services like ConfigManager
 - **Error messages**: Be helpful and specific
 - **JSON responses**: Follow consistent structure patterns
-- **Decompiler lifecycle**: Always dispose of DecompInterface instances
+- **Decompiler lifecycle**: Text comes from `DecompilationCache`; any `DecompInterface` you open (`ConfiguredDecompiler.open`, only for a live `HighFunction`) must be disposed
 - **Timeout management**: Use createTimeoutMonitor() for long-running operations

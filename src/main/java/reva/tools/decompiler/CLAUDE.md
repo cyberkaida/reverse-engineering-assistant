@@ -21,27 +21,61 @@ The `reva.tools.decompiler` package provides MCP tools for function decompilatio
 
 ## Critical Implementation Patterns
 
-### Decompiler Interface Management
+### Decompilation Cache and Decompiler Lifecycle
 
-**Use helper methods for consistent decompiler lifecycle**:
+**Text consumers read from `DecompilationCache`** (`reva.decompiler`). It returns a `DecompilationResult` holding a
+`DecompilationSnapshot` (`code()`, `signature()`, per-line token addresses, `lineForAddress`, `linesForAddresses`,
+`context`). Fetch the cache from `RevaInternalServiceRegistry` at each use; never keep it in a field (tests swap the
+registered instance):
 ```java
-// Create and configure decompiler (returns null on failure)
+DecompilationCache cache = RevaInternalServiceRegistry.getService(DecompilationCache.class);
+DecompilationResult decompilation = cache.get(program, function);
+if (!decompilation.success()) {
+    return createErrorResult(decompilation.errorMessage());
+}
+DecompilationSnapshot snapshot = decompilation.snapshot();
+```
+
+**Map failures on `failureKind()` and `cause()`, never on message text**: `INIT_FAILED`, `DECOMPILE_FAILED`,
+`TIMED_OUT`, `EXCEPTION` (`cause()` is the caught exception). `search-decompilation` skips `TIMED_OUT` and `EXCEPTION`
+functions this way.
+
+**Bulk tools pass their one open decompiler as `borrowed`** (`cache.get(program, function, decompiler)`): the cache
+uses it only for a miss, and the tool still disposes it in `finally`. `search-decompilation`,
+`get-callers-decompiled` and `get-referencers-decompiled` work this way. A borrowed decompiler must come from
+`ConfiguredDecompiler.open` for the same program: its result is stored for every caller, so a differently
+configured decompiler would store a different rendering.
+
+**Invalidation is solely `Program.getModificationNumber()`.** An entry is valid only for the number it was decompiled
+at; a request that reads a newer number drops the program's entries. There is no list of tools or edit sources, and
+none may be added: an edit from any source (ReVa tools, `run-script`, GUI, undo/redo, rolled-back transactions)
+moves the number. If some change does not move it, stop and report it; do not add a special case.
+
+**Release**: the cache registers a close listener on each program it holds, so closing a program drops its entries
+in GUI and headless mode alike; `dropProgram` (also called from `programClosed`) drops them explicitly, and the
+`maxChars` bound limits the total. Programs are also held weakly, but only best-effort: an `Address` in an overlay
+space strongly reaches its program, so do not rely on garbage collection to release entries.
+
+**Only tools that need a live `HighFunction`** (`rename-variables`, `change-variable-datatypes`, data-flow) open a
+decompiler, through `ConfiguredDecompiler.open` (the one configuration; returns null on failure), and dispose it:
+```java
+// Returns null on failure (helper wraps ConfiguredDecompiler.open and logs)
 DecompInterface decompiler = createConfiguredDecompiler(program, "tool-name");
 if (decompiler == null) {
     return createErrorResult("Failed to initialize decompiler");
 }
 
 try {
-    // Use decompiler
     DecompilationAttempt attempt = decompileFunctionSafely(decompiler, function, "tool-name");
     if (!attempt.success()) {
         return createErrorResult(attempt.errorMessage());
     }
-    // Process results...
+    // Use attempt.results().getHighFunction()...
 } finally {
     decompiler.dispose(); // CRITICAL - prevents memory leaks
 }
 ```
+Do not `new DecompInterface()` to get text.
 
 ### Timeout Management
 Use configured timeouts via helper methods:
@@ -320,7 +354,7 @@ resultData.putAll(getDecompilationDiff(program, function, beforeDecompilation, t
 return createJsonResult(resultData);
 ```
 
-**getDecompilationDiff() helper method**:
+**getDecompilationDiff() helper method** (re-decompiles the post-edit state, so it may `put` it into the cache):
 ```java
 private Map<String, Object> getDecompilationDiff(
     Program program,
@@ -330,12 +364,21 @@ private Map<String, Object> getDecompilationDiff(
     Map<String, Object> result = new HashMap<>();
 
     DecompInterface newDecompiler = createConfiguredDecompiler(program, toolName + "-diff");
+    if (newDecompiler == null) {
+        result.put("decompilationError", "Failed to initialize decompiler for diff");
+        return result;
+    }
     try {
+        // Read the modification number BEFORE the decompile
+        long modificationNumberBefore = program.getModificationNumber();
         DecompilationAttempt attempt = decompileFunctionSafely(newDecompiler, function, toolName);
         if (attempt.success()) {
-            String afterDecompilation = attempt.results().getDecompiledFunction().getC();
+            DecompilationSnapshot after = DecompilationSnapshot.from(program, attempt.results());
+            // fillCache: null-checks the cache and logs any exception, so the fill never fails the edit.
+            // put is ignored unless the program still has that modification number.
+            fillCache(program, function, after, modificationNumberBefore, toolName);
             DecompilationDiffUtil.DiffResult diff =
-                DecompilationDiffUtil.createDiff(beforeDecompilation, afterDecompilation);
+                DecompilationDiffUtil.createDiff(beforeDecompilation, after.code());
             result.put("changes", DecompilationDiffUtil.toMap(diff));
         } else {
             result.put("decompilationError", attempt.errorMessage());
@@ -411,8 +454,7 @@ private CallCountResult countCallsWithTimeout(
 ```java
 private Map<String, Object> getSynchronizedContent(
     Program program,
-    ClangTokenGroup markup,
-    String fullDecompCode,
+    DecompilationSnapshot snapshot,   // from DecompilationCache
     int offset,
     Integer limit,
     boolean includeDisassembly,
@@ -420,13 +462,11 @@ private Map<String, Object> getSynchronizedContent(
     boolean includeIncomingReferences,
     boolean includeReferenceContext,
     Function function) {
-    // Convert decompiler markup to lines
-    List<ClangLine> clangLines = DecompilerUtils.toLines(markup);
+    String fullDecompCode = snapshot.code();
 
-    // Map decompilation lines to assembly addresses
-    for (ClangLine line : clangLines) {
-        List<ClangToken> tokens = line.getAllTokens();
-        // Extract addresses from tokens
+    // Map decompilation lines to assembly addresses from the snapshot's lines
+    for (DecompilationSnapshot.Line line : snapshot.lines()) {
+        List<Address> addresses = line.tokenAddresses();
         // Get assembly at those addresses
     }
 
@@ -440,30 +480,12 @@ private Map<String, Object> getSynchronizedContent(
 ```
 
 ### Finding Call Line Numbers
-**Map addresses to decompilation line numbers**:
+**Map addresses to decompilation line numbers with the snapshot** (displayed line N is `ClangLine` N):
 ```java
-private List<Integer> findCallLineNumbers(
-    DecompileResults results,
-    List<Address> addresses) {
-    List<Integer> lineNumbers = new ArrayList<>();
-
-    ClangTokenGroup markup = results.getCCodeMarkup();
-    Set<Address> addressSet = new HashSet<>(addresses);
-    List<ClangLine> lines = DecompilerUtils.toLines(markup);
-
-    for (ClangLine line : lines) {
-        for (ClangToken token : line.getAllTokens()) {
-            Address tokenAddr = token.getMinAddress();
-            if (tokenAddr != null && addressSet.contains(tokenAddr)) {
-                lineNumbers.add(line.getLineNumber());
-                break; // Only add line once
-            }
-        }
-    }
-
-    return lineNumbers;
-}
+List<Integer> lineNumbers = decompilation.snapshot().linesForAddresses(callSiteAddresses);
 ```
+Also `lineForAddress`, `addressForLine`, `addressesForLine` and `context(displayLine, contextLines)`. Do not walk
+`DecompileResults` markup for display lines.
 
 ### Undefined Function Handling
 **Support decompiling undefined functions**:
@@ -515,12 +537,10 @@ try {
 
 ### Timeout Handling in Search
 ```java
-// In search-decompilation: continue to next function on timeout
-TaskMonitor functionTimeoutMonitor = createTimeoutMonitor();
-DecompileResults decompileResults = decompiler.decompileFunction(
-    function, 0, functionTimeoutMonitor);
+// In search-decompilation: continue to next function on timeout (the cache applies the configured timeout)
+DecompilationResult decompilation = cache.get(program, function, decompiler);
 
-if (isTimedOut(functionTimeoutMonitor)) {
+if (decompilation.failureKind() == DecompilationResult.FailureKind.TIMED_OUT) {
     Msg.warn(DecompilerToolProvider.class,
         toolName + ": Decompilation timed out for " + function.getName());
     continue; // Skip this function and continue with next
@@ -591,13 +611,15 @@ private static final int MAX_TOTAL_REFERENCERS = 500;
 
 ## Important Notes
 
-- **Memory Management**: Always dispose DecompInterface instances in finally blocks
-- **Timeout Handling**: Use createTimeoutMonitor() with configured timeouts for all operations
+- **Decompiled Text**: Read it from `DecompilationCache` (fetched per use, never a field); do not open a `DecompInterface` for text
+- **Invalidation**: Solely `Program.getModificationNumber()`; never add tool or edit-source lists
+- **Memory Management**: Always dispose DecompInterface instances (live `HighFunction` tools, bulk tools' borrowed decompiler) in finally blocks
+- **Timeout Handling**: Use createTimeoutMonitor() with configured timeouts for direct decompiles; the cache applies it itself
 - **Transaction Safety**: Wrap all modifications in transactions with proper rollback
 - **Read Tracking**: Enforced read-before-modify pattern with 30-minute expiry and program close cleanup
 - **Iterator Handling**: LocalSymbolMap.getSymbols() returns Iterator, not Iterable - use while loops
 - **Data Type Validation**: Use DataTypeParserUtil.parseDataTypeObjectFromString() for parsing
-- **Helper Methods**: Use createConfiguredDecompiler() and decompileFunctionSafely() for consistency
+- **Helper Methods**: For live `HighFunction` work use createConfiguredDecompiler() (wraps `ConfiguredDecompiler.open`) and decompileFunctionSafely()
 - **Undefined Functions**: Support decompilation but block modifications
 - **Bulk Operations**: Include pagination with max 50 per page, max 500 total
 - **Progress Notifications**: Send updates every 10 functions during search

@@ -91,6 +91,34 @@ pytest tests/ -v --tb=line     # One-line tracebacks
 pytest tests/ -v -s            # Show print statements
 ```
 
+### Running the e2e suite against this checkout
+
+`uv run mcp-reva` loads whichever ReVa extension is installed in `GHIDRA_INSTALL_DIR`, not the code in this
+checkout. Tests for behaviour added on a branch (for example `test_decompilation_cache_e2e.py`, which fails
+with "predates the decompilation cache" otherwise) need that branch's extension installed. Install it into a
+scratch copy of Ghidra so your normal install is never modified:
+
+```bash
+# From the repository root. GHIDRA_SRC is your normal install; it is only read.
+GHIDRA_SRC=/path/to/ghidra_12.2_PUBLIC
+SCRATCH=$(mktemp -d)
+
+GHIDRA_INSTALL_DIR="$GHIDRA_SRC" gradle buildExtension          # writes dist/ghidra_<ver>_<date>_<dir>.zip
+cp -a "$GHIDRA_SRC" "$SCRATCH/ghidra"
+# Remove every ReVa build installed in the copy (extension.properties says name=ReVa), then add this one.
+grep -l '^name=ReVa$' "$SCRATCH"/ghidra/Ghidra/Extensions/*/extension.properties \
+    | xargs -r -n1 dirname | xargs -r rm -rf
+unzip -q "$(ls -t dist/*.zip | head -n1)" -d "$SCRATCH/ghidra/Ghidra/Extensions"
+
+GHIDRA_INSTALL_DIR="$SCRATCH/ghidra" uv run pytest tests/test_decompilation_cache_e2e.py -p no:cacheprovider -v
+# or the whole suite: GHIDRA_INSTALL_DIR="$SCRATCH/ghidra" uv run pytest tests -p no:cacheprovider -q -rf
+
+rm -rf "$SCRATCH"
+```
+
+Use the project environment (`uv run`), not `uv run --active`, which would sync into whatever virtualenv is
+active.
+
 ## Test Details
 
 ### test_pyghidra.py

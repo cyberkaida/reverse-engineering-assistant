@@ -20,13 +20,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import ghidra.app.decompiler.ClangLine;
-import ghidra.app.decompiler.ClangToken;
-import ghidra.app.decompiler.ClangTokenGroup;
-import ghidra.app.decompiler.DecompInterface;
-import ghidra.app.decompiler.DecompileResults;
-import ghidra.app.decompiler.DecompiledFunction;
-import ghidra.app.decompiler.component.DecompilerUtils;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.Program;
@@ -34,11 +27,9 @@ import ghidra.program.model.symbol.Reference;
 import ghidra.program.model.symbol.ReferenceIterator;
 import ghidra.program.model.symbol.Symbol;
 import ghidra.util.Msg;
-import ghidra.util.task.TaskMonitor;
-import ghidra.util.task.TimeoutTaskMonitor;
-import java.util.concurrent.TimeUnit;
-import reva.plugin.ConfigManager;
-import reva.util.RevaInternalServiceRegistry;
+import reva.decompiler.DecompilationCache;
+import reva.decompiler.DecompilationResult;
+import reva.decompiler.DecompilationSnapshot;
 
 /**
  * Utility class for working with decompilation context and cross references.
@@ -60,58 +51,22 @@ public class DecompilationContextUtil {
             return -1;
         }
 
-        // Initialize decompiler
-        DecompInterface decompiler = new DecompInterface();
-        decompiler.toggleCCode(true);
-        decompiler.toggleSyntaxTree(true);
-        decompiler.setSimplificationStyle("decompile");
+        DecompilationSnapshot snapshot = snapshotFor(program, function);
+        return snapshot != null ? snapshot.lineForAddress(address) : -1;
+    }
 
-        if (!decompiler.openProgram(program)) {
-            return -1;
+    /** The function's cached decompilation, or null if there is no cache or the decompile failed. */
+    private static DecompilationSnapshot snapshotFor(Program program, Function function) {
+        DecompilationCache cache = RevaInternalServiceRegistry.getService(DecompilationCache.class);
+        if (cache == null) {
+            return null;
         }
-
         try {
-            // Decompile the function with timeout
-            int timeoutSeconds = RevaInternalServiceRegistry.getService(ConfigManager.class).getDecompilerTimeoutSeconds();
-            TaskMonitor timeoutMonitor = TimeoutTaskMonitor.timeoutIn(timeoutSeconds, TimeUnit.SECONDS);
-            DecompileResults decompileResults = decompiler.decompileFunction(function, 0, timeoutMonitor);
-            if (timeoutMonitor.isCancelled()) {
-                Msg.error(DecompilationContextUtil.class, "Decompilation timed out for address " + address + " after " + timeoutSeconds + " seconds");
-                return -1;
-            }
-            if (!decompileResults.decompileCompleted()) {
-                return -1;
-            }
-
-            // Get the markup for line mapping
-            ClangTokenGroup markup = decompileResults.getCCodeMarkup();
-            List<ClangLine> clangLines = DecompilerUtils.toLines(markup);
-
-            // Find the line containing this address
-            for (ClangLine clangLine : clangLines) {
-                List<ClangToken> tokens = clangLine.getAllTokens();
-                for (ClangToken token : tokens) {
-                    Address tokenAddr = token.getMinAddress();
-                    if (tokenAddr != null && tokenAddr.equals(address)) {
-                        return clangLine.getLineNumber();
-                    }
-                }
-
-                // If no exact match, check if address is within the range of this line
-                if (!tokens.isEmpty()) {
-                    Address closestAddr = DecompilerUtils.getClosestAddress(program, tokens.get(0));
-                    if (closestAddr != null && closestAddr.equals(address)) {
-                        return clangLine.getLineNumber();
-                    }
-                }
-            }
-
-            return -1;
+            DecompilationResult result = cache.get(program, function);
+            return result != null && result.success() ? result.snapshot() : null;
         } catch (Exception e) {
-            Msg.error(DecompilationContextUtil.class, "Error getting line number for address " + address, e);
-            return -1;
-        } finally {
-            decompiler.dispose();
+            Msg.error(DecompilationContextUtil.class, "Error reading decompilation for " + function.getName(), e);
+            return null;
         }
     }
 
@@ -129,54 +84,8 @@ public class DecompilationContextUtil {
             return null;
         }
 
-        // Initialize decompiler
-        DecompInterface decompiler = new DecompInterface();
-        decompiler.toggleCCode(true);
-        decompiler.toggleSyntaxTree(true);
-        decompiler.setSimplificationStyle("decompile");
-
-        if (!decompiler.openProgram(program)) {
-            return null;
-        }
-
-        try {
-            // Decompile the function with timeout
-            int timeoutSeconds = RevaInternalServiceRegistry.getService(ConfigManager.class).getDecompilerTimeoutSeconds();
-            TaskMonitor timeoutMonitor = TimeoutTaskMonitor.timeoutIn(timeoutSeconds, TimeUnit.SECONDS);
-            DecompileResults decompileResults = decompiler.decompileFunction(function, 0, timeoutMonitor);
-            if (timeoutMonitor.isCancelled()) {
-                Msg.error(DecompilationContextUtil.class, "Decompilation timed out while getting context after " + timeoutSeconds + " seconds");
-                return null;
-            }
-            if (!decompileResults.decompileCompleted()) {
-                return null;
-            }
-
-            // Get the decompiled code
-            DecompiledFunction decompiledFunction = decompileResults.getDecompiledFunction();
-            String decompCode = decompiledFunction.getC();
-            String[] lines = decompCode.split("\n");
-
-            // Calculate range
-            int startLine = Math.max(0, lineNumber - 1 - contextLines); // Convert to 0-based
-            int endLine = Math.min(lines.length - 1, lineNumber - 1 + contextLines);
-
-            // Build context string
-            StringBuilder context = new StringBuilder();
-            for (int i = startLine; i <= endLine; i++) {
-                if (i > startLine) {
-                    context.append("\n");
-                }
-                context.append(lines[i]);
-            }
-
-            return context.toString();
-        } catch (Exception e) {
-            Msg.error(DecompilationContextUtil.class, "Error getting decompilation context", e);
-            return null;
-        } finally {
-            decompiler.dispose();
-        }
+        DecompilationSnapshot snapshot = snapshotFor(program, function);
+        return snapshot != null ? snapshot.context(lineNumber, contextLines) : null;
     }
 
     /**

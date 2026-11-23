@@ -15,6 +15,7 @@ import ghidra.program.model.listing.Program;
 import ghidra.util.exception.CancelledException;
 import ghidra.util.task.TaskMonitor;
 
+import reva.decompiler.ConfiguredDecompiler;
 import reva.services.DiffJob;
 import reva.services.DiffJobKind;
 import reva.services.DiffJobManager;
@@ -481,29 +482,6 @@ public class DiffToolProvider extends AbstractToolProvider {
 
     // ---- decompile helper -----------------------------------------------
 
-    /**
-     * Build a DecompInterface configured to match ReVa's get-decompilation behavior
-     * (preserves unreachable code; see commit fb15188). Mirrors DecompilerToolProvider's
-     * createConfiguredDecompiler. Returns null if the program fails to open.
-     * Caller must dispose.
-     */
-    private ghidra.app.decompiler.DecompInterface configuredDecompiler(Program program) {
-        ghidra.app.decompiler.DecompInterface decompiler = new ghidra.app.decompiler.DecompInterface();
-        decompiler.toggleCCode(true);
-        decompiler.toggleSyntaxTree(true);
-        decompiler.setSimplificationStyle("decompile");
-
-        ghidra.app.decompiler.DecompileOptions options = new ghidra.app.decompiler.DecompileOptions();
-        options.setEliminateUnreachable(false);
-        decompiler.setOptions(options);
-
-        if (!decompiler.openProgram(program)) {
-            decompiler.dispose();
-            return null;
-        }
-        return decompiler;
-    }
-
     /** Configured decompiler timeout in seconds (falls back to 30 if the service is unavailable). */
     private int decompilerTimeoutSeconds() {
         reva.plugin.ConfigManager config =
@@ -513,7 +491,8 @@ public class DiffToolProvider extends AbstractToolProvider {
 
     /** Decompile a function to C text, or return null on failure. Disposes the interface. */
     private String decompileToText(Program program, ghidra.program.model.listing.Function fn) {
-        ghidra.app.decompiler.DecompInterface decompiler = configuredDecompiler(program);
+        // The shared configuration of get-decompilation (unreachable code kept); null if the program fails to open.
+        ghidra.app.decompiler.DecompInterface decompiler = ConfiguredDecompiler.open(program);
         if (decompiler == null) return null;
         try {
             ghidra.app.decompiler.DecompileResults res =

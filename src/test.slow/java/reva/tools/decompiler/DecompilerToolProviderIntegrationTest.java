@@ -40,6 +40,7 @@ import io.modelcontextprotocol.spec.McpSchema.CallToolRequest;
 import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
 import io.modelcontextprotocol.spec.McpSchema.TextContent;
 import reva.RevaIntegrationTestBase;
+import reva.decompiler.LineMapFixture;
 
 /**
  * Integration tests for DecompilerToolProvider.
@@ -905,52 +906,8 @@ public class DecompilerToolProviderIntegrationTest extends RevaIntegrationTestBa
     }
 
 
-    /**
-     * Builds a function whose statements sit at known addresses:
-     * <pre>
-     *   0x01000500  PUSH EBP ; MOV EBP,ESP
-     *   0x01000503  MOV dword ptr [0x01000900],1
-     *   0x0100050d  CALL lineMapCalleeA
-     *   0x01000512  MOV dword ptr [0x01000904],2
-     *   0x0100051c  CALL lineMapCalleeB
-     *   0x01000521  MOV dword ptr [0x01000908],3
-     *   0x0100052b  POP EBP ; RET
-     * </pre>
-     */
     private void createLineMapFunctions() throws Exception {
-        ghidra.program.model.address.AddressSpace space =
-            program.getAddressFactory().getDefaultAddressSpace();
-        Address fn = space.getAddress(0x01000500);
-        Address calleeA = space.getAddress(0x01000600);
-        Address calleeB = space.getAddress(0x01000620);
-        byte[] body = {
-            (byte) 0x55, (byte) 0x89, (byte) 0xe5,
-            (byte) 0xc7, 0x05, 0x00, 0x09, 0x00, 0x01, 0x01, 0x00, 0x00, 0x00,
-            (byte) 0xe8, (byte) 0xee, 0x00, 0x00, 0x00,
-            (byte) 0xc7, 0x05, 0x04, 0x09, 0x00, 0x01, 0x02, 0x00, 0x00, 0x00,
-            (byte) 0xe8, (byte) 0xff, 0x00, 0x00, 0x00,
-            (byte) 0xc7, 0x05, 0x08, 0x09, 0x00, 0x01, 0x03, 0x00, 0x00, 0x00,
-            (byte) 0x5d, (byte) 0xc3};
-        int txId = program.startTransaction("Create line-map functions");
-        try {
-            program.getMemory().setBytes(fn, body);
-            program.getMemory().setBytes(calleeA, new byte[] {(byte) 0xc3});
-            program.getMemory().setBytes(calleeB, new byte[] {(byte) 0xc3});
-            for (Address start : List.of(calleeA, calleeB, fn)) {
-                new ghidra.app.cmd.disassemble.DisassembleCommand(start, null, true)
-                    .applyTo(program, ghidra.util.task.TaskMonitor.DUMMY);
-            }
-            FunctionManager fm = program.getFunctionManager();
-            fm.createFunction("lineMapCalleeA", calleeA,
-                new ghidra.program.model.address.AddressSet(calleeA, calleeA), SourceType.USER_DEFINED);
-            fm.createFunction("lineMapCalleeB", calleeB,
-                new ghidra.program.model.address.AddressSet(calleeB, calleeB), SourceType.USER_DEFINED);
-            fm.createFunction("lineMapFn", fn,
-                new ghidra.program.model.address.AddressSet(fn, fn.add(body.length - 1)),
-                SourceType.USER_DEFINED);
-        } finally {
-            program.endTransaction(txId, true);
-        }
+        LineMapFixture.createLineMapFunctions(program);
     }
 
     /** Returns the synchronizedContent entry whose decompiled text contains {@code needle}. */
@@ -968,13 +925,7 @@ public class DecompilerToolProviderIntegrationTest extends RevaIntegrationTestBa
 
     private JsonNode callJson(io.modelcontextprotocol.client.McpSyncClient client, String tool,
             Map<String, Object> args) {
-        try {
-            CallToolResult result = client.callTool(new CallToolRequest(tool, args));
-            assertMcpResultNotError(result, tool + " should succeed");
-            return parseJsonContent(((TextContent) result.content().get(0)).text());
-        } catch (Exception e) {
-            throw new AssertionError(tool + " failed: " + e.getMessage(), e);
-        }
+        return LineMapFixture.callJson(client, tool, args);
     }
 
     private JsonNode readLineMapFn(io.modelcontextprotocol.client.McpSyncClient client) {

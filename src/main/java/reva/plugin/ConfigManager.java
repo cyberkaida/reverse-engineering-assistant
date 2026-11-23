@@ -78,7 +78,7 @@ public class ConfigManager implements ConfigurationBackendListener {
     private static final boolean DEFAULT_DEBUG_MODE = false;
     private static final boolean DEFAULT_REQUEST_LOGGING_ENABLED = false;
     private static final int DEFAULT_MAX_DECOMPILER_SEARCH_FUNCTIONS = 1000;
-    private static final int DEFAULT_DECOMPILER_TIMEOUT_SECONDS = 10;
+    public static final int DEFAULT_DECOMPILER_TIMEOUT_SECONDS = 10;
     private static final int DEFAULT_IMPORT_ANALYSIS_TIMEOUT_SECONDS = 600;
     private static final int DEFAULT_IMPORT_TIMEOUT_SECONDS = 120;
     private static final boolean DEFAULT_WAIT_FOR_ANALYSIS_ON_IMPORT = false;

@@ -129,7 +129,9 @@ if (contextFunction != null) {
 ## Decompilation Context Integration
 
 ### Line Number Mapping
-**Use DecompilationContextUtil for address-to-line mapping**:
+**Use DecompilationContextUtil for address-to-line mapping.** It reads the caller's `DecompilationSnapshot` from
+`DecompilationCache` (one decompile per function and modification number, shared across references); do not open a
+`DecompInterface` in xrefs tools:
 ```java
 import reva.util.DecompilationContextUtil;
 
@@ -384,4 +386,4 @@ for (Address addr : functionBody.getAddresses(true)) {
 - **Pagination**: Essential for addresses with many references
 - **Symbol Resolution**: Provide complete symbol and namespace information
 - **Error Resilience**: Continue processing other references if individual reference fails
-- **Memory Management**: DecompilationContextUtil handles decompiler disposal internally
+- **Memory Management**: DecompilationContextUtil reads from `DecompilationCache` and opens no decompiler of its own; there is nothing to dispose

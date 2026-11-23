@@ -267,7 +267,7 @@ List<Map<String, Object>> refs = DecompilationContextUtil.getEnhancedReferencesT
 }
 ```
 
-**Performance Note**: When `includeContext=true`, each reference requires a separate decompilation of the calling function. Use the `maxRefs` parameter to limit the number of references processed for functions with many callers.
+**Performance Note**: When `includeContext=true`, each referencing function is decompiled once per modification number (later references to the same function hit `DecompilationCache`). Use the `maxRefs` parameter to limit the number of references processed for functions with many callers.
 
 #### Usage for Cross-Reference Tools:
 ```java
@@ -865,7 +865,9 @@ public class MyComponent {
 - **Data type parsing MUST use `DataTypeParserUtil`** for consistency
   - Searches built-in types, target program, then other programs/archives
 - **Decompilation context MUST use `DecompilationContextUtil`** for line number mapping
-  - Handles decompiler timeout configuration automatically
+  - Reads snapshots from `DecompilationCache` (fetched from `RevaInternalServiceRegistry` per call, returns -1/null when
+    there is no cache or the decompile failed); the cache applies the configured timeout and is invalidated solely by
+    `Program.getModificationNumber()`
 - **Decompilation diffs MUST use `DecompilationDiffUtil`** for before/after comparison
   - Creates snippets with context around changed lines
 

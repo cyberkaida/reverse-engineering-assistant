@@ -28,13 +28,7 @@ import java.util.regex.PatternSyntaxException;
 import java.util.regex.Matcher;
 
 import ghidra.app.decompiler.DecompInterface;
-import ghidra.app.decompiler.DecompileOptions;
 import ghidra.app.decompiler.DecompileResults;
-import ghidra.app.decompiler.DecompiledFunction;
-import ghidra.app.decompiler.ClangTokenGroup;
-import ghidra.app.decompiler.ClangLine;
-import ghidra.app.decompiler.ClangToken;
-import ghidra.app.decompiler.component.DecompilerUtils;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.address.AddressSetView;
 import ghidra.program.model.listing.CodeUnit;
@@ -49,7 +43,6 @@ import ghidra.program.model.listing.Parameter;
 import ghidra.program.model.listing.Program;
 import ghidra.program.model.mem.MemoryBlock;
 import ghidra.util.UndefinedFunction;
-import ghidra.program.model.address.AddressSet;
 import ghidra.program.model.symbol.Reference;
 import ghidra.program.model.symbol.ReferenceIterator;
 import ghidra.program.model.symbol.ReferenceManager;
@@ -67,6 +60,10 @@ import ghidra.util.exception.InvalidInputException;
 import ghidra.util.Msg;
 import io.modelcontextprotocol.server.McpSyncServer;
 import io.modelcontextprotocol.spec.McpSchema;
+import reva.decompiler.ConfiguredDecompiler;
+import reva.decompiler.DecompilationCache;
+import reva.decompiler.DecompilationResult;
+import reva.decompiler.DecompilationSnapshot;
 import reva.plugin.ConfigManager;
 import reva.tools.AbstractToolProvider;
 import reva.util.AddressUtil;
@@ -98,6 +95,11 @@ public class DecompilerToolProvider extends AbstractToolProvider {
     @Override
     public void programClosed(Program program) {
         super.programClosed(program);
+
+        DecompilationCache cache = RevaInternalServiceRegistry.getService(DecompilationCache.class);
+        if (cache != null) {
+            cache.dropProgram(program);
+        }
 
         String programPath = program.getDomainFile().getPathname();
 
@@ -211,19 +213,9 @@ public class DecompilerToolProvider extends AbstractToolProvider {
      * @return A configured and initialized DecompInterface, or null if initialization failed
      */
     private DecompInterface createConfiguredDecompiler(Program program, String toolName) {
-        DecompInterface decompiler = new DecompInterface();
-        decompiler.toggleCCode(true);
-        decompiler.toggleSyntaxTree(true);
-        decompiler.setSimplificationStyle("decompile");
-
-        DecompileOptions options = new DecompileOptions();
-        options.setEliminateUnreachable(false);
-        decompiler.setOptions(options);
-
-        if (!decompiler.openProgram(program)) {
+        DecompInterface decompiler = ConfiguredDecompiler.open(program);
+        if (decompiler == null) {
             logError(toolName + ": Failed to initialize decompiler for " + program.getName());
-            decompiler.dispose();
-            return null;
         }
         return decompiler;
     }
@@ -259,6 +251,22 @@ public class DecompilerToolProvider extends AbstractToolProvider {
     }
 
     /**
+     * Offer the post-edit decompile to the cache. Never fails the edit: the cache may be unregistered (shutdown
+     * unregisters it before the server stops), and any exception from the fill is logged and dropped.
+     */
+    private void fillCache(Program program, Function function, DecompilationSnapshot snapshot,
+            long modificationNumberBefore, String toolName) {
+        try {
+            DecompilationCache cache = RevaInternalServiceRegistry.getService(DecompilationCache.class);
+            if (cache != null) {
+                cache.put(program, function, snapshot, modificationNumberBefore);
+            }
+        } catch (RuntimeException e) {
+            logError(toolName + "-diff: Could not store the decompilation in the cache", e);
+        }
+    }
+
+    /**
      * Gets updated decompilation after modifications and creates a diff against the original.
      *
      * @param program The program containing the function
@@ -281,13 +289,17 @@ public class DecompilerToolProvider extends AbstractToolProvider {
         }
 
         try {
+            // Read before the decompile: the result is only valid for the state it started from.
+            long modificationNumberBefore = program.getModificationNumber();
             DecompilationAttempt attempt = decompileFunctionSafely(newDecompiler, function, toolName + "-diff");
             if (!attempt.success()) {
                 result.put("decompilationError", attempt.errorMessage());
                 return result;
             }
 
-            String afterDecompilation = attempt.results().getDecompiledFunction().getC();
+            DecompilationSnapshot afterSnapshot = DecompilationSnapshot.from(program, attempt.results());
+            fillCache(program, function, afterSnapshot, modificationNumberBefore, toolName);
+            String afterDecompilation = afterSnapshot.code();
             DecompilationDiffUtil.DiffResult diff =
                 DecompilationDiffUtil.createDiff(beforeDecompilation, afterDecompilation);
 
@@ -360,33 +372,12 @@ public class DecompilerToolProvider extends AbstractToolProvider {
      * testDisassemblySyncAttachesAssemblyToItsOwnLine and
      * testSetDecompilationCommentAnchorsToTheDisplayedLine pin the current behaviour.
      *
-     * @param program The program
-     * @param clangLines The decompiled code lines
+     * @param snapshot The decompilation snapshot
      * @param displayLineNumber The display line number (1-based, from get-decompilation output)
      * @return The address for the line, or null if not found
      */
-    private Address findAddressForLine(Program program, List<ClangLine> clangLines, int displayLineNumber) {
-        int clangLineNumber = displayLineNumber;
-        for (ClangLine clangLine : clangLines) {
-            if (clangLine.getLineNumber() == clangLineNumber) {
-                List<ClangToken> tokens = clangLine.getAllTokens();
-
-                // Find the first address on this line
-                for (ClangToken token : tokens) {
-                    Address tokenAddr = token.getMinAddress();
-                    if (tokenAddr != null) {
-                        return tokenAddr;
-                    }
-                }
-
-                // If no direct address, find closest
-                if (!tokens.isEmpty()) {
-                    return DecompilerUtils.getClosestAddress(program, tokens.get(0));
-                }
-                break;
-            }
-        }
-        return null;
+    private Address findAddressForLine(DecompilationSnapshot snapshot, int displayLineNumber) {
+        return snapshot.addressForLine(displayLineNumber);
     }
 
     /**
@@ -412,18 +403,18 @@ public class DecompilerToolProvider extends AbstractToolProvider {
      *
      * @return the match, or null if no line in the function maps to any address
      */
-    private LineAddressMatch findNearbyAddressForLine(Program program, List<ClangLine> clangLines, int displayLineNumber) {
-        Address direct = findAddressForLine(program, clangLines, displayLineNumber);
+    private LineAddressMatch findNearbyAddressForLine(DecompilationSnapshot snapshot, int displayLineNumber) {
+        Address direct = findAddressForLine(snapshot, displayLineNumber);
         if (direct != null) {
             return new LineAddressMatch(direct, displayLineNumber);
         }
-        int maxRadius = clangLines.size();
+        int maxRadius = snapshot.lines().size();
         for (int radius = 1; radius <= maxRadius; radius++) {
-            Address forward = findAddressForLine(program, clangLines, displayLineNumber + radius);
+            Address forward = findAddressForLine(snapshot, displayLineNumber + radius);
             if (forward != null) {
                 return new LineAddressMatch(forward, displayLineNumber + radius);
             }
-            Address backward = findAddressForLine(program, clangLines, displayLineNumber - radius);
+            Address backward = findAddressForLine(snapshot, displayLineNumber - radius);
             if (backward != null) {
                 return new LineAddressMatch(backward, displayLineNumber - radius);
             }
@@ -919,25 +910,23 @@ public class DecompilerToolProvider extends AbstractToolProvider {
             logInfo(toolName + ": Starting decompilation for function " + function.getName() +
                     " at " + AddressUtil.formatAddress(function.getEntryPoint()) + " in " + program.getName());
 
-            DecompInterface decompiler = createConfiguredDecompiler(program, toolName);
-            if (decompiler == null) {
-                resultData.put("decompilationError", "Failed to initialize decompiler");
-                resultData.put("decompilation", "");
-                return createJsonResult(resultData);
-            }
-
             try {
-                DecompilationAttempt attempt = decompileFunctionSafely(decompiler, function, toolName);
-                if (!attempt.success()) {
-                    return createErrorResult(attempt.errorMessage());
+                DecompilationCache cache = RevaInternalServiceRegistry.getService(DecompilationCache.class);
+                DecompilationResult decompilation = cache.get(program, function);
+                if (!decompilation.success()) {
+                    if (decompilation.failureKind() == DecompilationResult.FailureKind.INIT_FAILED
+                            || decompilation.failureKind() == DecompilationResult.FailureKind.EXCEPTION) {
+                        // Initialisation failure or decompiler exception: reported in the result, as before
+                        resultData.put("decompilationError", decompilation.errorMessage());
+                        resultData.put("decompilation", "");
+                        return createJsonResult(resultData);
+                    }
+                    return createErrorResult(decompilation.errorMessage());
                 }
-
-                // Get the decompiled code and markup
-                DecompiledFunction decompiledFunction = attempt.results().getDecompiledFunction();
-                ClangTokenGroup markup = attempt.results().getCCodeMarkup();
+                DecompilationSnapshot snapshot = decompilation.snapshot();
 
                 // Get synchronized decompilation with optional assembly listing and comments
-                Map<String, Object> syncedContent = getSynchronizedContent(program, markup, decompiledFunction.getC(),
+                Map<String, Object> syncedContent = getSynchronizedContent(program, snapshot,
                     offset, limit, includeDisassembly, includeComments, includeIncomingReferences, includeReferenceContext, function);
 
                 // Add content to results
@@ -948,14 +937,13 @@ public class DecompilerToolProvider extends AbstractToolProvider {
                 // immediate feedback before decompilation; this call retargets to the
                 // line being read. Coalescing in FollowMeService suppresses the no-op
                 // case where the offset resolves back to the entry address.
-                List<ClangLine> followClangLines = DecompilerUtils.toLines(markup);
-                LineAddressMatch lineMatch = findNearbyAddressForLine(program, followClangLines, offset);
+                LineAddressMatch lineMatch = findNearbyAddressForLine(snapshot, offset);
                 if (lineMatch != null) {
                     followRead(program, lineMatch.address());
                 }
 
                 // Get additional details like high-level function signature
-                resultData.put("decompSignature", decompiledFunction.getSignature());
+                resultData.put("decompSignature", snapshot.signature());
 
                 // Track that this function's decompilation has been read
                 String programPath = program.getDomainFile().getPathname();
@@ -968,8 +956,6 @@ public class DecompilerToolProvider extends AbstractToolProvider {
                 logError(toolName + ": Exception during decompilation of " + function.getName(), e);
                 resultData.put("decompilationError", "Exception during decompilation: " + e.getMessage());
                 resultData.put("decompilation", "");
-            } finally {
-                decompiler.dispose();
             }
 
             return createJsonResult(resultData);
@@ -1342,8 +1328,7 @@ public class DecompilerToolProvider extends AbstractToolProvider {
     /**
      * Get synchronized decompilation content with optional assembly listing, comments, and incoming references
      * @param program The program
-     * @param markup The Clang token markup from decompilation
-     * @param fullDecompCode The full decompiled C code
+     * @param snapshot The decompilation snapshot (text and per-line addresses)
      * @param offset Line number to start from (1-based)
      * @param limit Number of lines to return (null for all)
      * @param includeDisassembly Whether to include synchronized assembly
@@ -1353,14 +1338,13 @@ public class DecompilerToolProvider extends AbstractToolProvider {
      * @param function The function being decompiled
      * @return Map containing synchronized content
      */
-    private Map<String, Object> getSynchronizedContent(Program program, ClangTokenGroup markup,
-            String fullDecompCode, int offset, Integer limit, boolean includeDisassembly,
+    private Map<String, Object> getSynchronizedContent(Program program, DecompilationSnapshot snapshot,
+            int offset, Integer limit, boolean includeDisassembly,
             boolean includeComments, boolean includeIncomingReferences, boolean includeReferenceContext, Function function) {
         Map<String, Object> result = new HashMap<>();
+        String fullDecompCode = snapshot.code();
 
         try {
-            // Convert markup to lines
-            List<ClangLine> clangLines = DecompilerUtils.toLines(markup);
             String[] decompLines = fullDecompCode.split("\n");
 
             // Calculate range
@@ -1419,13 +1403,13 @@ public class DecompilerToolProvider extends AbstractToolProvider {
                     lineInfo.put("decompilation", decompLine);
 
                     // Find corresponding assembly instructions
-                    List<String> assemblyLines = getAssemblyForDecompLine(program, clangLines, lineNumber);
+                    List<String> assemblyLines = getAssemblyForDecompLine(program, snapshot, lineNumber);
                     lineInfo.put("assembly", assemblyLines);
 
                     // Include comments if requested
                     if (includeComments) {
                         List<Map<String, Object>> lineComments = getCommentsForDecompLine(
-                            program, clangLines, lineNumber);
+                            program, snapshot, lineNumber);
                         if (!lineComments.isEmpty()) {
                             lineInfo.put("comments", lineComments);
                         }
@@ -1467,54 +1451,42 @@ public class DecompilerToolProvider extends AbstractToolProvider {
         return result;
     }
 
+    /** First snapshot line with the given ClangLine number, or null. */
+    private static DecompilationSnapshot.Line findSnapshotLine(DecompilationSnapshot snapshot, int lineNumber) {
+        for (DecompilationSnapshot.Line line : snapshot.lines()) {
+            if (line.lineNumber() == lineNumber) {
+                return line;
+            }
+        }
+        return null;
+    }
+
+    private static boolean hasLine(DecompilationSnapshot snapshot, int lineNumber) {
+        return findSnapshotLine(snapshot, lineNumber) != null;
+    }
+
     /**
      * Get assembly instructions corresponding to a decompiled line.
      *
      * @param program The program
-     * @param clangLines List of ClangLine objects
+     * @param snapshot The decompilation snapshot
      * @param displayLineNumber The display line number (1-based, from get-decompilation
      *        output; callers pass the same number a user would see in the formatted
      *        decompilation text, see {@link #findAddressForLine}).
      * @return List of assembly instruction strings
      */
-    private List<String> getAssemblyForDecompLine(Program program, List<ClangLine> clangLines, int displayLineNumber) {
+    private List<String> getAssemblyForDecompLine(Program program, DecompilationSnapshot snapshot, int displayLineNumber) {
         List<String> assemblyLines = new ArrayList<>();
         int lineNumber = displayLineNumber;
 
         try {
-            // Find the ClangLine for this line number
-            ClangLine targetLine = null;
-            for (ClangLine clangLine : clangLines) {
-                if (clangLine.getLineNumber() == lineNumber) {
-                    targetLine = clangLine;
-                    break;
-                }
-            }
-
-            if (targetLine != null) {
-                // Get all tokens on this line
-                List<ClangToken> tokens = targetLine.getAllTokens();
-
-                // Find addresses associated with tokens on this line
-                AddressSet lineAddresses = new AddressSet();
-                for (ClangToken token : tokens) {
-                    Address tokenAddr = token.getMinAddress();
-                    if (tokenAddr != null) {
-                        lineAddresses.add(tokenAddr);
-                    }
-                }
-
-                // If no direct addresses, find closest address
-                if (lineAddresses.isEmpty() && !tokens.isEmpty()) {
-                    Address closestAddress = DecompilerUtils.getClosestAddress(program, tokens.get(0));
-                    if (closestAddress != null) {
-                        lineAddresses.add(closestAddress);
-                    }
-                }
+            if (hasLine(snapshot, lineNumber)) {
+                // Sorted distinct token addresses, or the closest address when the line has none
+                List<Address> lineAddresses = snapshot.addressesForLine(lineNumber);
 
                 // Get assembly instructions for these addresses
                 Listing listing = program.getListing();
-                for (Address addr : lineAddresses.getAddresses(true)) {
+                for (Address addr : lineAddresses) {
                     Instruction instruction = listing.getInstructionAt(addr);
                     if (instruction != null) {
                         assemblyLines.add(String.format("%s: %s",
@@ -1571,13 +1543,14 @@ public class DecompilerToolProvider extends AbstractToolProvider {
             int flags = caseSensitive ? 0 : Pattern.CASE_INSENSITIVE;
             Pattern regex = Pattern.compile(pattern, flags);
 
-            // Initialize decompiler using helper
+            // One decompiler per search, lent to the cache for the functions it has to decompile
             DecompInterface decompiler = createConfiguredDecompiler(program, toolName);
             if (decompiler == null) {
                 return results; // Failed to initialize decompiler
             }
 
             try {
+                DecompilationCache cache = RevaInternalServiceRegistry.getService(DecompilationCache.class);
                 // Count total functions for progress tracking
                 int totalFunctions = program.getFunctionManager().getFunctionCount();
                 int processedFunctions = 0;
@@ -1603,20 +1576,23 @@ public class DecompilerToolProvider extends AbstractToolProvider {
                     }
 
                     try {
-                        // Use inline decompilation here instead of decompileFunctionSafely because:
-                        // 1. We want to continue to the next function on timeout (not return an error)
-                        // 2. We don't need the DecompilationAttempt wrapper for this use case
-                        TaskMonitor functionTimeoutMonitor = createTimeoutMonitor();
-                        DecompileResults decompileResults = decompiler.decompileFunction(function, 0, functionTimeoutMonitor);
-                        if (isTimedOut(functionTimeoutMonitor)) {
+                        // A timeout skips the function (no progress update); a failed decompile is
+                        // not searched; an exception is logged and the function skipped.
+                        DecompilationResult decompilation = cache.get(program, function, decompiler);
+                        if (decompilation.failureKind() == DecompilationResult.FailureKind.TIMED_OUT) {
                             Msg.warn(DecompilerToolProvider.class, toolName + ": Decompilation timed out for function " +
                                 function.getName() + " after " + getTimeoutSeconds() + " seconds");
                             continue; // Skip this function and continue with the next one
                         }
+                        if (decompilation.failureKind() == DecompilationResult.FailureKind.EXCEPTION) {
+                            logError(toolName + ": Failed to decompile function: " + function.getName()
+                                + ": " + decompilation.errorMessage());
+                            continue;
+                        }
 
-                        if (decompileResults.decompileCompleted()) {
+                        if (decompilation.success()) {
                             // Search the decompiled code for matches
-                            searchDecompiledCode(function, decompileResults, regex, results, maxResults);
+                            searchDecompiledCode(function, decompilation.snapshot(), regex, results, maxResults);
                         }
                     } catch (Exception e) {
                         // Skip this function if decompilation fails
@@ -1644,10 +1620,9 @@ public class DecompilerToolProvider extends AbstractToolProvider {
     /**
      * Searches decompiled code for regex matches and adds results to the list.
      */
-    private void searchDecompiledCode(Function function, DecompileResults decompileResults,
+    private void searchDecompiledCode(Function function, DecompilationSnapshot snapshot,
             Pattern regex, List<Map<String, Object>> results, int maxResults) {
-        DecompiledFunction decompiledFunction = decompileResults.getDecompiledFunction();
-        String decompCode = decompiledFunction.getC();
+        String decompCode = snapshot.code();
 
         // Search each line
         String[] lines = decompCode.split("\n");
@@ -1725,34 +1700,25 @@ public class DecompilerToolProvider extends AbstractToolProvider {
      * Get comments associated with a specific decompilation line.
      *
      * @param program The program
-     * @param clangLines List of ClangLine objects
+     * @param snapshot The decompilation snapshot
      * @param displayLineNumber The display line number (1-based, from get-decompilation
      *        output; callers pass the same number a user would see in the formatted
      *        decompilation text, see {@link #findAddressForLine}).
      * @return List of comment objects
      */
-    private List<Map<String, Object>> getCommentsForDecompLine(Program program, List<ClangLine> clangLines, int displayLineNumber) {
+    private List<Map<String, Object>> getCommentsForDecompLine(Program program, DecompilationSnapshot snapshot, int displayLineNumber) {
         List<Map<String, Object>> comments = new ArrayList<>();
         int lineNumber = displayLineNumber;
 
         try {
-            // Find the ClangLine for this line number
-            ClangLine targetLine = clangLines.stream()
-                .filter(clangLine -> clangLine.getLineNumber() == lineNumber)
-                .findFirst()
-                .orElse(null);
+            DecompilationSnapshot.Line targetLine = findSnapshotLine(snapshot, lineNumber);
 
             if (targetLine != null) {
-                // Get all tokens on this line
-                List<ClangToken> tokens = targetLine.getAllTokens();
-
-                // Find addresses associated with tokens on this line
+                // Token addresses on this line, in token order (no closest-address fallback here)
+                // Add one by one, as before: HashSet iteration order depends on how it was filled
                 Set<Address> lineAddresses = new HashSet<>();
-                for (ClangToken token : tokens) {
-                    Address tokenAddr = token.getMinAddress();
-                    if (tokenAddr != null) {
-                        lineAddresses.add(tokenAddr);
-                    }
+                for (Address tokenAddr : targetLine.tokenAddresses()) {
+                    lineAddresses.add(tokenAddr);
                 }
 
                 // Get comments at these addresses
@@ -1908,28 +1874,26 @@ public class DecompilerToolProvider extends AbstractToolProvider {
             logInfo(toolName + ": Setting comment for function " + function.getName() +
                     " line " + lineNumber + " in " + program.getName());
 
-            DecompInterface decompiler = createConfiguredDecompiler(program, toolName);
-            if (decompiler == null) {
-                return createErrorResult("Failed to initialize decompiler");
-            }
-
             try {
-                // Decompile the function
-                DecompilationAttempt attempt = decompileFunctionSafely(decompiler, function, toolName);
-                if (!attempt.success()) {
-                    return createErrorResult(attempt.errorMessage());
+                DecompilationResult decompilation =
+                    RevaInternalServiceRegistry.getService(DecompilationCache.class).get(program, function);
+                if (!decompilation.success()) {
+                    if (decompilation.failureKind() == DecompilationResult.FailureKind.EXCEPTION) {
+                        // As the catch below reports an exception thrown by the decompiler: the original message
+                        String message = decompilation.cause() != null
+                            ? decompilation.cause().getMessage() : decompilation.errorMessage();
+                        return createErrorResult("Failed to set comment: " + message);
+                    }
+                    return createErrorResult(decompilation.errorMessage());
                 }
-
-                // Get the decompiled code and markup
-                ClangTokenGroup markup = attempt.results().getCCodeMarkup();
-                List<ClangLine> clangLines = DecompilerUtils.toLines(markup);
+                DecompilationSnapshot snapshot = decompilation.snapshot();
 
                 // Find the address for the specified line, falling back to the
                 // nearest addressable line if the request landed on a brace,
                 // blank, or signature line. This matches ReVa's "be forgiving
                 // to AI callers" stance: the AI guesses a line, we land the
                 // comment on the closest meaningful one and tell it where.
-                LineAddressMatch match = findNearbyAddressForLine(program, clangLines, lineNumber);
+                LineAddressMatch match = findNearbyAddressForLine(snapshot, lineNumber);
 
                 if (match == null) {
                     return createErrorResult("Could not find any addressable line in decompiled " +
@@ -1976,8 +1940,6 @@ public class DecompilerToolProvider extends AbstractToolProvider {
             } catch (Exception e) {
                 logError(toolName + ": Error setting comment for " + function.getName(), e);
                 return createErrorResult("Failed to set comment: " + e.getMessage());
-            } finally {
-                decompiler.dispose();
             }
         });
     }
@@ -2096,6 +2058,7 @@ public class DecompilerToolProvider extends AbstractToolProvider {
             }
 
             try {
+                DecompilationCache cache = RevaInternalServiceRegistry.getService(DecompilationCache.class);
                 for (Function caller : pageCallers) {
                     Map<String, Object> callerResult = new HashMap<>();
                     callerResult.put("functionName", caller.getName());
@@ -2104,16 +2067,17 @@ public class DecompilerToolProvider extends AbstractToolProvider {
                         .map(AddressUtil::formatAddress)
                         .toList());
 
-                    DecompilationAttempt attempt = decompileFunctionSafely(decompiler, caller, toolName);
-                    if (attempt.success()) {
-                        String decompCode = attempt.results().getDecompiledFunction().getC();
+                    DecompilationResult decompilation = cache.get(program, caller, decompiler);
+                    throwIfException(decompilation);
+                    if (decompilation.success()) {
+                        String decompCode = decompilation.snapshot().code();
                         callerResult.put("decompilation", decompCode);
                         callerResult.put("success", true);
 
                         // Find call line numbers if requested
                         if (includeCallContext) {
-                            List<Integer> callLineNumbers = findCallLineNumbers(
-                                attempt.results(), callSites.get(caller));
+                            List<Integer> callLineNumbers =
+                                decompilation.snapshot().linesForAddresses(callSites.get(caller));
                             callerResult.put("callLineNumbers", callLineNumbers);
                         }
 
@@ -2122,7 +2086,7 @@ public class DecompilerToolProvider extends AbstractToolProvider {
                         readDecompilationTracker.put(functionKey, System.currentTimeMillis());
                     } else {
                         callerResult.put("success", false);
-                        callerResult.put("error", attempt.errorMessage());
+                        callerResult.put("error", decompilation.errorMessage());
                     }
 
                     decompilations.add(callerResult);
@@ -2279,15 +2243,17 @@ public class DecompilerToolProvider extends AbstractToolProvider {
             }
 
             try {
+                DecompilationCache cache = RevaInternalServiceRegistry.getService(DecompilationCache.class);
                 for (Function refFunc : pageRefs) {
                     Map<String, Object> funcResult = new HashMap<>();
                     funcResult.put("functionName", refFunc.getName());
                     funcResult.put("address", AddressUtil.formatAddress(refFunc.getEntryPoint()));
                     funcResult.put("references", refDetails.get(refFunc));
 
-                    DecompilationAttempt attempt = decompileFunctionSafely(decompiler, refFunc, toolName);
-                    if (attempt.success()) {
-                        String decompCode = attempt.results().getDecompiledFunction().getC();
+                    DecompilationResult decompilation = cache.get(program, refFunc, decompiler);
+                    throwIfException(decompilation);
+                    if (decompilation.success()) {
+                        String decompCode = decompilation.snapshot().code();
                         funcResult.put("decompilation", decompCode);
                         funcResult.put("success", true);
 
@@ -2295,7 +2261,7 @@ public class DecompilerToolProvider extends AbstractToolProvider {
                         if (includeRefContext) {
                             List<Address> refAddresses = refAddressesMap.get(refFunc);
                             if (refAddresses != null) {
-                                List<Integer> refLineNumbers = findCallLineNumbers(attempt.results(), refAddresses);
+                                List<Integer> refLineNumbers = decompilation.snapshot().linesForAddresses(refAddresses);
                                 funcResult.put("referenceLineNumbers", refLineNumbers);
                             }
                         }
@@ -2305,7 +2271,7 @@ public class DecompilerToolProvider extends AbstractToolProvider {
                         readDecompilationTracker.put(functionKey, System.currentTimeMillis());
                     } else {
                         funcResult.put("success", false);
-                        funcResult.put("error", attempt.errorMessage());
+                        funcResult.put("error", decompilation.errorMessage());
                     }
 
                     decompilations.add(funcResult);
@@ -2332,33 +2298,21 @@ public class DecompilerToolProvider extends AbstractToolProvider {
     }
 
     /**
-     * Find line numbers in decompiled code that correspond to specific addresses.
+     * An exception while decompiling aborts a bulk tool call, as the exception thrown by the decompiler did
+     * before the cache: it is rethrown as it was thrown, so the response text is the old one.
      */
-    private List<Integer> findCallLineNumbers(DecompileResults results, List<Address> addresses) {
-        List<Integer> lineNumbers = new ArrayList<>();
-
-        if (results == null || addresses == null || addresses.isEmpty()) {
-            return lineNumbers;
+    private static void throwIfException(DecompilationResult decompilation) {
+        if (decompilation.failureKind() != DecompilationResult.FailureKind.EXCEPTION) {
+            return;
         }
-
-        ClangTokenGroup markup = results.getCCodeMarkup();
-        if (markup == null) {
-            return lineNumbers;
+        Throwable cause = decompilation.cause();
+        if (cause instanceof RuntimeException runtime) {
+            throw runtime;
         }
-
-        Set<Address> addressSet = new HashSet<>(addresses);
-        List<ClangLine> lines = DecompilerUtils.toLines(markup);
-
-        for (ClangLine line : lines) {
-            for (ClangToken token : line.getAllTokens()) {
-                Address tokenAddr = token.getMinAddress();
-                if (tokenAddr != null && addressSet.contains(tokenAddr)) {
-                    lineNumbers.add(line.getLineNumber());
-                    break; // Only add line once
-                }
-            }
+        if (cause instanceof Error error) {
+            throw error;
         }
-
-        return lineNumbers;
+        // A checked cause cannot be thrown here; no decompiler path threw one before the cache either.
+        throw new IllegalStateException(cause != null ? cause.getMessage() : decompilation.errorMessage(), cause);
     }
 }

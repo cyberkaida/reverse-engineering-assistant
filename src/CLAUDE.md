@@ -92,7 +92,8 @@ String wrong = address.toString(); // May not have "0x" prefix
 |-----|-------|
 | `DataTypeParserUtil.parseDataTypeObjectFromString()` | Parse datatype strings ("char*", "int[10]") |
 | `HighFunctionDBUtil.updateDBVariable()` | Persist variable changes to database |
-| `DecompInterface` | Get decompiled function (ALWAYS dispose!) |
+| `DecompilationCache` | Decompiled text and line mapping; fetch from `RevaInternalServiceRegistry` at each use |
+| `ConfiguredDecompiler.open()` | Live `HighFunction` work only; null on failure; ALWAYS dispose the `DecompInterface` |
 | `LocalSymbolMap.getSymbols()` | Returns Iterator (use while loop, not for-each) |
 
 ### Common Patterns
@@ -108,15 +109,20 @@ try {
     throw e;
 }
 
-// Decompiler disposal pattern
-DecompInterface decompiler = new DecompInterface();
+// Decompiled text: read it from the cache (never open a decompiler for text)
+DecompilationResult decompilation =
+    RevaInternalServiceRegistry.getService(DecompilationCache.class).get(program, function);
+if (!decompilation.success()) {
+    return createErrorResult(decompilation.errorMessage());
+}
+
+// Live HighFunction work only: the shared configuration, then dispose
+DecompInterface decompiler = ConfiguredDecompiler.open(program); // null on failure
+if (decompiler == null) {
+    return createErrorResult("Failed to initialize decompiler");
+}
 try {
-    decompiler.openProgram(program);
-    DecompileResults results = decompiler.decompileFunction(function, 30, null);
-    if (!results.decompileCompleted()) {
-        return createErrorResult("Decompilation failed: " + results.getErrorMessage());
-    }
-    // Process results...
+    // decompileFunction(...), then use results.getHighFunction()...
 } finally {
     decompiler.dispose(); // ALWAYS dispose to prevent memory leaks
 }
@@ -175,7 +181,7 @@ boolean verbose = getOptionalBoolean(request, "verbose", false);
 
 | Problem | Solution |
 |---------|----------|
-| Memory leaks | Always dispose `DecompInterface` instances |
+| Memory leaks | Always dispose `DecompInterface` instances (from `ConfiguredDecompiler.open`) |
 | Program not found | Use `ProgramLookupUtil.getValidatedProgram()` for helpful errors |
 | Transaction errors | Always use try-finally for `startTransaction`/`endTransaction` |
 | Iterator exceptions | Check API - `LocalSymbolMap.getSymbols()` returns Iterator, not Iterable |

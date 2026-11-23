@@ -27,6 +27,7 @@ import ghidra.program.model.listing.Program;
 import ghidra.util.extensions.ExtensionDetails;
 import ghidra.util.extensions.ExtensionUtils;
 
+import reva.decompiler.DecompilationCache;
 import reva.plugin.ConfigManager;
 import reva.plugin.RevaProgramManager;
 import reva.server.McpServerManager;
@@ -124,6 +125,20 @@ public class DebugInfoCollector {
             reva.put("config", configInfo);
         } else {
             reva.put("config", "ConfigManager not available");
+        }
+
+        DecompilationCache cache = RevaInternalServiceRegistry.getService(DecompilationCache.class);
+        if (cache != null) {
+            DecompilationCache.Stats stats = cache.stats();
+            Map<String, Object> cacheInfo = new LinkedHashMap<>();
+            cacheInfo.put("hits", stats.hits());
+            cacheInfo.put("misses", stats.misses());
+            cacheInfo.put("decompiles", stats.decompiles());
+            cacheInfo.put("failures", stats.failures());
+            cacheInfo.put("evictions", stats.evictions());
+            cacheInfo.put("entries", stats.entries());
+            cacheInfo.put("chars", stats.chars());
+            reva.put("decompilationCache", cacheInfo);
         }
 
         return reva;

@@ -215,7 +215,8 @@ When adding new tools to DecompilerToolProvider:
 - `SymbolUtil.isDefaultSymbolName()` - Filter Ghidra-generated names
 
 ### Key APIs
-- `DecompInterface` - Get decompiled function and high-level representation (always dispose!)
+- `DecompilationCache` (`reva.decompiler`) - Decompiled text, signature and line mapping; fetch from `RevaInternalServiceRegistry` at each use
+- `ConfiguredDecompiler.open(program)` - Only for live `HighFunction` work; returns null on failure; always dispose the `DecompInterface`
 - `LocalSymbolMap.getSymbols()` returns Iterator (use while loop, not for-each)
 - `AbstractToolProvider` helper methods - getString, getInt, getOptionalInt, getOptionalBoolean
 
@@ -224,7 +225,7 @@ When adding new tools to DecompilerToolProvider:
 - Handle decompilation failures gracefully with try-catch and timeouts
 - Validate parameters before processing using AbstractToolProvider helpers
 - Return structured JSON with success flags and program metadata
-- Exception handling is automatic: `registerTool()` wraps all handlers to catch `IllegalArgumentException` and `ProgramValidationException` and convert them to error responses. Manual try-catch is only needed for custom error handling or resource cleanup (e.g., DecompInterface disposal).
+- Exception handling is automatic: `registerTool()` wraps all handlers to catch `IllegalArgumentException` and `ProgramValidationException` and convert them to error responses. Manual try-catch is only needed for custom error handling or resource cleanup (e.g., disposing a `DecompInterface` from `ConfiguredDecompiler.open`).
 - Use pagination for large datasets (functions, symbols, strings, etc.)
 - Progress notifications: only emit when client opted in (`request.progressToken() != null` → `exchange.progressNotification(new ProgressNotification(token, progress, total, message))`). Examples: `ProjectToolProvider` import-file, `DecompilerToolProvider` search-decompilation.
 
@@ -311,7 +312,7 @@ Install via: `claude plugin marketplace add cyberkaida/reverse-engineering-assis
 
 ### Critical
 - **NEVER revert to SSE transport** - uses ResilientStreamableServerTransportProvider (forked from MCP SDK to fix session-killing bug)
-- **Memory**: Always dispose DecompInterface instances to prevent leaks
+- **Memory**: Always dispose DecompInterface instances (from `ConfiguredDecompiler.open`, for live `HighFunction` work only; decompiled text comes from `DecompilationCache`)
 - **Testing**: Fork every Java integration test (forkEvery=1) to prevent conflicts
 - **Python Init**: PyGhidra/server must initialize BEFORE asyncio.run() in CLI
 

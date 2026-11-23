@@ -43,6 +43,7 @@ import io.modelcontextprotocol.json.jackson2.JacksonMcpJsonMapper;
 import io.modelcontextprotocol.server.McpServer;
 import io.modelcontextprotocol.server.McpSyncServer;
 import io.modelcontextprotocol.spec.McpSchema;
+import reva.decompiler.DecompilationCache;
 import reva.plugin.ConfigManager;
 import reva.plugin.ConfigChangeListener;
 import reva.plugin.ToolGroup;
@@ -153,6 +154,9 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
         // Initialize thread pool
         threadPool = GThreadPool.getPrivateThreadPool("ReVa");
         RevaInternalServiceRegistry.registerService(GThreadPool.class, threadPool);
+
+        // One decompilation cache shared by every tool; fetched from the registry at each use
+        RevaInternalServiceRegistry.registerService(DecompilationCache.class, new DecompilationCache());
 
         // Initialize MCP transport provider. Created exactly once — the McpServer below
         // wires its session factory into this instance (see createTransportProvider()).
@@ -791,6 +795,8 @@ public class McpServerManager implements RevaMcpService, ConfigChangeListener {
             diffJobManager.dispose();
             RevaInternalServiceRegistry.unregisterService(DiffJobManager.class);
         }
+
+        RevaInternalServiceRegistry.unregisterService(DecompilationCache.class);
 
         // Notify all providers to clean up
         for (ResourceProvider provider : resourceProviders) {

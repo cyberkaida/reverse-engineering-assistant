@@ -18,15 +18,19 @@ package reva.tools.project;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
+import java.security.DigestInputStream;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HexFormat;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
-import generic.hash.HashUtilities;
 import ghidra.app.plugin.core.analysis.AutoAnalysisManager;
 import ghidra.app.services.Analyzer;
 import ghidra.framework.model.DomainObject;
@@ -1985,14 +1989,24 @@ public class ProjectToolProvider extends AbstractToolProvider {
      * records in Program Info ({@code AbstractProgramLoader.setProgramProperties}), so
      * a {@code Program.getExecutableSHA256()} can be compared against it directly.
      *
+     * <p>Uses the JDK directly because Ghidra's {@code HashUtilities} moved from
+     * {@code ghidra.util} to {@code generic.hash} in 12.1.
+     *
      * @param byteProvider the bytes about to be imported
      * @return the SHA-256 of the provider's full contents
      * @throws IOException if the provider cannot be read
      */
     static String executableSha256(ByteProvider byteProvider) throws IOException {
-        try (InputStream in = byteProvider.getInputStream(0)) {
-            return HashUtilities.getHash(HashUtilities.SHA256_ALGORITHM, in);
+        MessageDigest digest;
+        try {
+            digest = MessageDigest.getInstance("SHA-256");
+        } catch (NoSuchAlgorithmException e) {
+            throw new IOException("SHA-256 is not available", e);
         }
+        try (InputStream in = new DigestInputStream(byteProvider.getInputStream(0), digest)) {
+            in.transferTo(OutputStream.nullOutputStream());
+        }
+        return HexFormat.of().formatHex(digest.digest());
     }
 
     /**

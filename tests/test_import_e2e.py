@@ -15,6 +15,8 @@ import json
 import re
 from pathlib import Path
 
+from tests.helpers import fresh_fixture_copy
+
 # Mark all tests in this file
 pytestmark = [
     pytest.mark.e2e,
@@ -50,7 +52,7 @@ def validate_fixture(fixture_name: str):
         except UnicodeDecodeError:
             pass  # Binary file, not a pointer
 
-    return str(fixture_path)
+    return fresh_fixture_copy(fixture_path)
 
 
 class TestArchiveImport:
@@ -620,7 +622,7 @@ class TestImportResponseFields:
         ImportBatchTask):
         - stripLeadingPath=True drops the source file's directory components,
           so project paths start at the archive name; False keeps them, so the
-          source directory (.../tests/fixtures/...) appears in the path.
+          source directory appears in the path.
         - stripAllContainerPath=True flattens interior container paths, so the
           fat binary's slices lose their "test_fat_binary" component.
         Project names are sanitized ('/' becomes '_'), so path components show
@@ -670,8 +672,9 @@ class TestImportResponseFields:
         assert stripped_data.get("success") is True, f"Import should succeed: {stripped_data}"
         stripped_paths = stripped_data.get("importedPrograms", [])
         assert len(stripped_paths) == 4, f"Expected 4 programs, got {stripped_paths}"
-        # Leading path kept: the fixture directory appears in every project path.
-        assert all("fixtures" in p for p in stripped_paths), stripped_paths
+        # Leading path kept: the archive's directory appears in every project path.
+        source_dir = Path(archive_path).parent.name
+        assert all(source_dir in p for p in stripped_paths), stripped_paths
         assert not any(p.startswith("/test_archive.zip") for p in stripped_paths), stripped_paths
         # Interior container path flattened: no slice keeps the fat binary component.
         assert not any("test_fat_binary" in p for p in stripped_paths), stripped_paths

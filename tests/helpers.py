@@ -5,10 +5,17 @@ Provides common functionality used across multiple test modules:
 - MCP request handling
 - Test program creation
 - Response validation
+- Fresh copies of fixture binaries for import
 """
 
+from pathlib import Path
 from typing import Dict, Any, Optional
 import asyncio
+import atexit
+import shutil
+import tempfile
+import uuid
+import zipfile
 
 
 def make_mcp_request(
@@ -263,3 +270,46 @@ def get_response_result(response: Optional[Dict[str, Any]]) -> Any:
 
     assert "content" in response, "Response missing content field"
     return response["content"]
+
+
+_fixture_copies_dir: Optional[Path] = None
+
+
+def fresh_fixture_copy(fixture: Path) -> str:
+    """
+    Copy a fixture binary under a name no other test has imported.
+
+    import-file reuses a program already in the project when the file's name
+    and bytes match, so on the session-shared mcp-reva server a second import
+    of the same fixture returns the program an earlier test changed. A unique
+    name gives each import its own program. A zip archive keeps its own name
+    and gets uniquely named members instead, since its members become the
+    programs.
+
+    Args:
+        fixture: Path to the fixture under tests/fixtures/
+
+    Returns:
+        Path of the copy, as a string ready for import-file
+    """
+    global _fixture_copies_dir
+    if _fixture_copies_dir is None:
+        _fixture_copies_dir = Path(tempfile.mkdtemp(prefix="reva_fixture_copies_"))
+        atexit.register(shutil.rmtree, _fixture_copies_dir, ignore_errors=True)
+
+    fixture = Path(fixture)
+    token = uuid.uuid4().hex[:8]
+    if fixture.suffix == ".zip":
+        copy_dir = _fixture_copies_dir / token
+        copy_dir.mkdir()
+        copy = copy_dir / fixture.name
+        with zipfile.ZipFile(fixture) as src, zipfile.ZipFile(copy, "w") as dst:
+            for info in src.infolist():
+                data = src.read(info)
+                if not info.is_dir():
+                    info.filename = f"{info.filename}_{token}"
+                dst.writestr(info, data)
+    else:
+        copy = _fixture_copies_dir / f"{fixture.stem}_{token}{fixture.suffix}"
+        shutil.copyfile(fixture, copy)
+    return str(copy)

@@ -366,9 +366,10 @@ async def mcp_stdio_client(tmp_path_factory):
     Linux CI, ~40s on macOS CI). Spawning it per test made the macOS e2e job
     exceed its 60-minute step timeout, so one server is shared by the whole
     session (per xdist worker). This is safe because every e2e test imports
-    its own program: Ghidra's Loaded.save() appends a counter to duplicate
-    names, so repeated imports of the same fixture binary yield distinct
-    programPaths and tests only ever touch the path their own import returned.
+    its own program: import-file would reuse a program whose name and bytes
+    match, so tests import a uniquely named copy from
+    tests.helpers.fresh_fixture_copy and only ever touch the path their own
+    import returned.
 
     Use mcp_stdio_client_isolated instead when a test asserts on server
     STARTUP behavior or on project-wide state (file counts, workspace dirs).

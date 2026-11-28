@@ -18,6 +18,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.helpers import fresh_fixture_copy
+
 # Mark all tests in this file
 # E2E tests need longer timeout due to PyGhidra initialization (10-30s) + server startup
 pytestmark = [
@@ -45,14 +47,14 @@ def _require_fixture_binary(name: str) -> Path:
         try:
             head = fixture.read_text()
         except UnicodeDecodeError:
-            return fixture  # actually a small binary; treat as real
+            return Path(fresh_fixture_copy(fixture))  # actually a small binary; treat as real
         if head.startswith("version https://git-lfs.github.com"):
             pytest.fail(
                 f"Test fixture {fixture.name} is a Git LFS pointer, not the "
                 "actual file. Run 'git lfs pull' locally or enable LFS in "
                 "CI checkout."
             )
-    return fixture
+    return Path(fresh_fixture_copy(fixture))
 
 
 class TestCLIStartup:
@@ -289,27 +291,42 @@ class TestErrorHandling:
         assert error_text, "Error result must include human-readable error text"
 
     async def test_handles_invalid_tool_arguments(self, mcp_stdio_client):
-        """Calling get-functions without required programPath surfaces a clear error."""
+        """Calling get-decompilation without a required argument surfaces a clear error."""
         from mcp import MCPError  # canonical import path used elsewhere in repo
+
+        # programPath itself is optional when one program is open, so give one
+        # and leave out functionNameOrAddress, which is always required.
+        import_result = await mcp_stdio_client.call_tool(
+            "import-file",
+            arguments={
+                "path": str(_require_fixture_binary("test_arm64")),
+                "enableVersionControl": False,
+                "analyzeAfterImport": False,
+            },
+        )
+        assert not getattr(import_result, "is_error", False), (
+            f"Import failed: {_result_error_text(import_result)}"
+        )
+        program_path = json.loads(import_result.content[0].text)["importedPrograms"][0]
 
         try:
             result = await mcp_stdio_client.call_tool(
-                "get-functions",
-                arguments={}  # missing required programPath
+                "get-decompilation",
+                arguments={"programPath": program_path}  # missing functionNameOrAddress
             )
         except MCPError as exc:
             # Acceptable: SDK surfaced schema-validation rejection
-            assert "programPath" in str(exc) or "required" in str(exc).lower(), (
+            assert "functionNameOrAddress" in str(exc) or "required" in str(exc).lower(), (
                 f"MCPError must mention the missing argument: {exc}"
             )
             return
 
         assert result is not None
         assert getattr(result, "is_error", False) is True, (
-            f"Missing required programPath must return isError=True, got result={result}"
+            f"Missing required functionNameOrAddress must return isError=True, got result={result}"
         )
         error_text = _result_error_text(result)
         assert error_text, "Validation error must include text content"
-        assert "programPath" in error_text or "required" in error_text.lower(), (
-            f"Validation error should mention programPath or 'required': {error_text}"
+        assert "functionNameOrAddress" in error_text or "required" in error_text.lower(), (
+            f"Validation error should mention functionNameOrAddress or 'required': {error_text}"
         )

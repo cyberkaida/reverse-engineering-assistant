@@ -17,6 +17,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.helpers import fresh_fixture_copy
+
 pytestmark = [
     pytest.mark.e2e,
     pytest.mark.slow,
@@ -35,13 +37,13 @@ def _validate_fixture(name: str) -> str:
         try:
             content = fixture_path.read_text()
         except UnicodeDecodeError:
-            return str(fixture_path)
+            return fresh_fixture_copy(fixture_path)
         if content.startswith("version https://git-lfs.github.com"):
             pytest.fail(
                 f"Test fixture {name} is a Git LFS pointer, not the actual file. "
                 "Run 'git lfs pull' locally or enable LFS in CI checkout."
             )
-    return str(fixture_path)
+    return fresh_fixture_copy(fixture_path)
 
 
 def _result_text(result) -> str:
@@ -3202,11 +3204,11 @@ class TestMultiProgramIsolation:
             f"{rename_r.content[0].text if rename_r.content else 'no content'}"
         )
         msg = (rename_r.content[0].text if rename_r.content else "").lower()
-        # Pin the exact guard phrase (DecompilerToolProvider: "You must read
-        # the decompilation for function ..."). A generic failure like
-        # 'variable not found in decompilation' also mentions
+        # Pin the exact guard phrase (DecompilerToolProvider: "Read the
+        # decompilation first: call get-decompilation ..."). A generic failure
+        # like 'variable not found in decompilation' also mentions
         # 'decompilation' and would false-pass a looser check.
-        assert "must read the decompilation" in msg, (
+        assert "read the decompilation first" in msg, (
             f"Error should be the read-before-modify guard; got {msg!r}"
         )
 

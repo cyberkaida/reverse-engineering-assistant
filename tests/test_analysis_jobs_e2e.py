@@ -15,6 +15,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.helpers import fresh_fixture_copy
+
 pytestmark = [
     pytest.mark.cli,
     pytest.mark.e2e,
@@ -40,13 +42,13 @@ def _validate_fixture(name: str) -> str:
         try:
             content = fixture_path.read_text()
         except UnicodeDecodeError:
-            return str(fixture_path)
+            return fresh_fixture_copy(fixture_path)
         if content.startswith("version https://git-lfs.github.com"):
             pytest.fail(
                 f"Test fixture {name} is a Git LFS pointer, not the actual file. "
                 "Run 'git lfs pull' locally or enable LFS in CI checkout."
             )
-    return str(fixture_path)
+    return fresh_fixture_copy(fixture_path)
 
 
 def _result_text(result) -> str:

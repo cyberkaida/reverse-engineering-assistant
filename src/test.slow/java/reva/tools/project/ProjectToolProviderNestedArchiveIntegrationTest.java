@@ -18,6 +18,8 @@ package reva.tools.project;
 import static org.junit.Assert.*;
 
 import java.io.File;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 
@@ -422,7 +424,16 @@ public class ProjectToolProviderNestedArchiveIntegrationTest extends RevaIntegra
             }
         }
 
-        final String finalPath = testFilePath;
+        // Import a copy under a name no other test in this class uses. The
+        // project is shared across the class, and import-file reuses a program
+        // with the same name and bytes without analyzing it again.
+        Path copyDir = Files.createTempDirectory("reva-import-analysis-");
+        copyDir.toFile().deleteOnExit();
+        Path copy = copyDir.resolve(new File(testFilePath).getName() + "_analyze_after_import");
+        Files.copy(Path.of(testFilePath), copy);
+        copy.toFile().deleteOnExit();
+
+        final String finalPath = copy.toString();
         withMcpClient(createMcpTransport(), client -> {
             try {
                 client.initialize();

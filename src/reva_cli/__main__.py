@@ -6,6 +6,7 @@ Provides stdio MCP transport for ReVa, enabling integration with Claude CLI.
 Usage: claude mcp add ReVa -- mcp-reva [--config PATH] [--verbose]
 """
 
+import os
 import sys
 import uuid
 import signal
@@ -46,12 +47,20 @@ class ReVaCLI:
         self.cleanup_done = False
 
     def setup_signal_handlers(self):
-        """Setup signal handlers for clean shutdown."""
+        """Setup signal handlers for clean shutdown.
+
+        The MCP SDK reads stdin in a non-daemon worker thread, which stays
+        blocked for as long as the client keeps the pipe open. sys.exit() would
+        wait on that thread forever, so after cleanup we end the process with
+        os._exit(). A second signal while cleanup is running exits at once.
+        """
         def signal_handler(sig, frame):
             if not self.cleanup_done:
                 print(f"\nReceived signal {sig}, shutting down gracefully...", file=sys.stderr)
                 self.cleanup()
-            sys.exit(0)
+            sys.stdout.flush()
+            sys.stderr.flush()
+            os._exit(0)
 
         signal.signal(signal.SIGINT, signal_handler)
         signal.signal(signal.SIGTERM, signal_handler)

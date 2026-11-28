@@ -23,6 +23,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.helpers import fresh_fixture_copy
+
 pytestmark = [
     pytest.mark.e2e,
     pytest.mark.slow,
@@ -42,14 +44,14 @@ def _resolve_workflow_fixture():
         try:
             content = fixture_path.read_text()
         except UnicodeDecodeError:
-            return str(fixture_path)
+            return fresh_fixture_copy(fixture_path)
         if content.startswith("version https://git-lfs.github.com"):
             pytest.fail(
                 f"Test fixture {fixture_path.name} is a Git LFS pointer, "
                 "not the actual file. Run 'git lfs pull' locally or enable "
                 "LFS in CI checkout."
             )
-    return str(fixture_path)
+    return fresh_fixture_copy(fixture_path)
 
 
 async def _import_test_program(client, analyze: bool = False) -> str:

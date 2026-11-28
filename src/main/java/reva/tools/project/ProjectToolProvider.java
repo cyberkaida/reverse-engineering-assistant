@@ -282,6 +282,31 @@ public class ProjectToolProvider extends AbstractToolProvider {
     }
 
     /**
+     * Pre-validation for checkin-program (see the comment at the call site). Returns null to
+     * proceed, a success result when there is nothing to check in, or an error result.
+     */
+    McpSchema.CallToolResult checkinPreValidation(DomainFile domainFile, String programPath) {
+        if (!domainFile.canAddToRepository() && !domainFile.canCheckin()
+                && domainFile.isVersioned() && !domainFile.isChanged()) {
+            if (!domainFile.isCheckedOut()) {
+                return createErrorResult("Program is not checked out and cannot be modified: " + programPath);
+            }
+            else if (!domainFile.modifiedSinceCheckout()) {
+                Map<String, Object> result = new HashMap<>();
+                result.put("success", true);
+                result.put("action", "no_changes");
+                result.put("programPath", programPath);
+                result.put("message", "Program has no changes since checkout");
+                return createJsonResult(result);
+            }
+            else {
+                return createErrorResult("Program cannot be checked in for an unknown reason: " + programPath);
+            }
+        }
+        return null;
+    }
+
+    /**
      * Register a tool to checkin (commit) a program to version control
      */
     private void registerCheckinProgramTool() {
@@ -339,17 +364,9 @@ public class ProjectToolProvider extends AbstractToolProvider {
                 // modifications are in memory is exempt: canCheckin()/modifiedSinceCheckout()
                 // only count SAVED changes, and persist()'s save below makes the checkin
                 // legal — rejecting it here would be a catch-22.
-                if (!domainFile.canAddToRepository() && !domainFile.canCheckin()
-                        && domainFile.isVersioned() && !domainFile.isChanged()) {
-                    if (!domainFile.isCheckedOut()) {
-                        return createErrorResult("Program is not checked out and cannot be modified: " + programPath);
-                    }
-                    else if (!domainFile.modifiedSinceCheckout()) {
-                        return createErrorResult("Program has no changes since checkout: " + programPath);
-                    }
-                    else {
-                        return createErrorResult("Program cannot be checked in for an unknown reason: " + programPath);
-                    }
+                McpSchema.CallToolResult preValidation = checkinPreValidation(domainFile, programPath);
+                if (preValidation != null) {
+                    return preValidation;
                 }
 
                 // Save locally, then checkin/addToVC when the file is under version control.

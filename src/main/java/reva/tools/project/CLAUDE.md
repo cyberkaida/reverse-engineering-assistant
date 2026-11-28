@@ -351,7 +351,8 @@ else if (!domainFile.isCheckedOut()) {
     return createErrorResult("Program is not checked out and cannot be modified: " + programPath);
 }
 else if (!domainFile.modifiedSinceCheckout()) {
-    return createErrorResult("Program has no changes since checkout: " + programPath);
+    // Not an error: checkin-program returns success {success:true, action:"no_changes",
+    // programPath, message:"Program has no changes since checkout"} (checkinPreValidation).
 }
 else {
     return createErrorResult("Program cannot be checked in for an unknown reason: " + programPath);
